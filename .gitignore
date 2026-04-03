@@ -64,6 +64,7 @@ web_modules/
 
 # Yarn Integrity file
 .yarn-integrity
+.yarn
 
 # dotenv environment variable files
 .env
@@ -137,3 +138,5 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+src/**/*.js

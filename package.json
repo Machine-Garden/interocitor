@@ -1,5 +1,58 @@
 {
   "name": "interocitor",
-  "version": "0.0.0-beta.1",
-  "packageManager": "yarn@4.6.0"
+  "version": "0.0.0-beta.2",
+  "packageManager": "yarn@4.6.0",
+  "description": "Encrypted local-first CRDT database that syncs over cloud storage. No server required.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./adapters/google-drive": {
+      "import": "./dist/adapters/google-drive.js",
+      "types": "./dist/adapters/google-drive.d.ts"
+    },
+    "./adapters/webdav": {
+      "import": "./dist/adapters/webdav.js",
+      "types": "./dist/adapters/webdav.d.ts"
+    },
+    "./adapters/memory": {
+      "import": "./dist/adapters/memory.js",
+      "types": "./dist/adapters/memory.d.ts"
+    },
+    "./crypto/keys": {
+      "import": "./dist/crypto/keys.js",
+      "types": "./dist/crypto/keys.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "rm -rf ./dist && tsc",
+    "validate": "node ./dist/index.js"
+  },
+  "keywords": [
+    "local-first",
+    "crdt",
+    "sync",
+    "offline-first",
+    "google-drive",
+    "webdav",
+    "encrypted",
+    "mesh",
+    "indexeddb"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^6.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }

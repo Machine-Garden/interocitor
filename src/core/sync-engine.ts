@@ -180,8 +180,18 @@ export class SyncEngine {
     // Read or create manifest
     await this.loadOrCreateManifest();
 
-    // Initial sync
-    await this.pull();
+    // If remote epoch advanced (usually after compaction), local cache/cursors
+    // may be stale and must be rebuilt from snapshot first.
+    const localEpochRaw = await this.local.getMeta('epoch');
+    const localEpoch = typeof localEpochRaw === 'number' ? localEpochRaw : 0;
+    const remoteEpoch = this.manifest?.epoch ?? 0;
+
+    if (localEpoch < remoteEpoch) {
+      await this.rehydrate();
+    } else {
+      // Initial sync
+      await this.pull();
+    }
     await this.flush();
 
     // Start polling

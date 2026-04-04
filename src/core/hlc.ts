@@ -10,6 +10,9 @@
 
 import type { HLC } from './types.ts';
 
+// Guard against poisoned/misconfigured peers that report far-future clocks.
+export const HLC_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
+
 export function hlcInit(nodeId: string): HLC {
   return { ts: Date.now(), counter: 0, nodeId };
 }
@@ -26,14 +29,15 @@ export function hlcNow(local: HLC): HLC {
 /** Merge a remote HLC into the local clock (called on receive). */
 export function hlcReceive(local: HLC, remote: HLC): HLC {
   const wall = Date.now();
-  const maxTs = Math.max(wall, local.ts, remote.ts);
+  const safeRemoteTs = Math.min(remote.ts, wall + HLC_MAX_FUTURE_SKEW_MS);
+  const maxTs = Math.max(wall, local.ts, safeRemoteTs);
 
   let counter: number;
   if (maxTs === local.ts && maxTs === remote.ts) {
     counter = Math.max(local.counter, remote.counter) + 1;
   } else if (maxTs === local.ts) {
     counter = local.counter + 1;
-  } else if (maxTs === remote.ts) {
+  } else if (maxTs === safeRemoteTs) {
     counter = remote.counter + 1;
   } else {
     counter = 0;

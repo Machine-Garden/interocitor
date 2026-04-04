@@ -35,7 +35,12 @@
   ],
   "scripts": {
     "build": "rm -rf ./dist && tsc",
-    "validate": "node ./dist/index.js"
+    "validate": "node ./dist/index.js",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:debug": "playwright test --ui",
+    "test:e2e:install": "playwright install chromium",
+    "test:e2e:server": "node ./tests/e2e/server.mjs"
   },
   "keywords": [
     "local-first",
@@ -50,6 +55,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
+    "@playwright/test": "^1.54.2",
     "typescript": "^6.0.0"
   },
   "engines": {

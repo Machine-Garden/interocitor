@@ -243,6 +243,27 @@ engine.on((event) => {
 - Not for large binary data (designed for structured JSON records)
 - Not multi-tenant (one mesh per folder, everyone sees everything)
 
+## Browser tests (Playwright)
+
+Playwright e2e tests run in a real browser and validate:
+
+- IndexedDB-backed `SyncEngine` behavior
+- `WebDAVAdapter` network flow (`PROPFIND`, `MKCOL`, `GET`, `PUT`, `DELETE`)
+
+Google Drive is intentionally excluded from e2e tests in this phase.
+
+```bash
+yarn test:e2e:install
+yarn test:e2e
+```
+
+Useful variants:
+
+```bash
+yarn test:e2e:headed
+yarn test:e2e:debug
+```
+
 ## License
 
 MIT

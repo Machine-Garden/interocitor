@@ -1,23 +1,28 @@
 # interocitor
 
-> ☢️work in progress ☢️
+> ☢️ work in progress ☢️
 
-Encrypted local-first CRDT database that syncs over cloud storage you already own. Google Drive is the default path; relay-server compaction is optional. No vendor lock-in.
+Sync structured data across devices using a cloud folder you already own. CRDT merge, E2E encryption, no server.
 
-Named after the alien communication device from *This Island Earth* (1955) — assembles itself from parts shipped separately, enables communication across any distance.
+## Why
 
-## What it does
+You want local-first sync. You look at the options.
 
-Each device keeps a full local copy in IndexedDB. Changes sync through a shared folder on Google Drive, WebDAV (Nextcloud/ownCloud), or anything that implements the storage adapter interface.
+[Dexie Cloud](https://dexie.org/cloud/) — great IndexedDB wrapper, mature CRDT sync. But sync goes through their servers. Per-seat pricing. If they shut down, your sync is gone. [Firebase](https://firebase.google.com/), [Supabase](https://supabase.com/), [Convex](https://www.convex.dev/) — same dependency, different logo.
 
-A **mesh** is a group of devices that share data — a family's phones and laptops, a team's browsers, your own devices across platforms.
+The common thread: somebody else moves your bytes, and that somebody wants a subscription and a Terms of Service.
 
-- **Offline-first** — reads and writes are instant, always local
-- **Multi-device** — any number of devices in a mesh
-- **Flexible deployment** — direct cloud sync by default (Google Drive); optional relay-server compaction mode
-- **Encrypted** — AES-256-GCM, key never leaves devices, cloud provider sees ciphertext
-- **Crash-proof** — any device can close/crash/die without corrupting shared state
-- **Zero dependencies** — Web Crypto API, IndexedDB, fetch. That's it.
+But CRDTs don't need a server. They need a *transport* — a place where one device writes and another reads. You already have one. Google Drive gives you 15 GB for free. A Nextcloud on a $5 VPS gives you whatever your disk holds. These aren't databases, they're dumb file stores. That's exactly what a CRDT log needs.
+
+**Interocitor uses a shared cloud folder as the sync transport.** Each device writes changes as JSON files into its own subfolder. Other devices poll the folder, download new files, merge via LWW-per-column CRDTs. All reads hit local IndexedDB — never the cloud. The cloud folder is a mailbox, not a runtime dependency.
+
+What falls out of this design:
+
+- No server process. No WebSocket. No vendor.
+- Swap Google Drive for WebDAV mid-session. Data survives.
+- Optional AES-256-GCM encryption — cloud provider sees ciphertext.
+- Browser clears IndexedDB? App rehydrates from cloud on next open.
+- Zero runtime dependencies — Web Crypto API, IndexedDB, `fetch`.
 
 ## Quick start
 
@@ -26,86 +31,60 @@ import { SyncEngine } from 'interocitor';
 import { GoogleDriveAdapter } from 'interocitor/adapters/google-drive';
 import { generateKey, keyToPassphrase } from 'interocitor/crypto/keys';
 
-// 1. Define your schema (optional but recommended)
 interface AppSchema {
   tasks: { title: string; status: 'open' | 'done'; assignee: string };
   notes: { content: string };
 }
 
-// 2. Pick a storage adapter
-const adapter = new GoogleDriveAdapter({
-  clientId: 'YOUR_GOOGLE_CLIENT_ID',
-});
-
-// 3. Create the engine
-//    dbName isolates this instance's IndexedDB from others on the same origin.
-//    remotePath is the folder in cloud storage where this mesh lives.
+const adapter = new GoogleDriveAdapter({ clientId: 'YOUR_GOOGLE_CLIENT_ID' });
 const engine = new SyncEngine<AppSchema>(adapter, {
   remotePath: '/MyApp',
   dbName: 'myapp',
 });
 
-// 4. Encryption (optional but recommended)
+// encryption is optional — skip these three lines if you don't need it
 const key = await generateKey();
-const passphrase = await keyToPassphrase(key);
-console.log('Share this with your mesh:', passphrase);
+const passphrase = await keyToPassphrase(key); // ~43 char base58, share it
 engine.setEncryptionKey(key);
 
-// 5. Initialize and connect
-await engine.init();    // opens local IndexedDB
-await engine.connect(); // authenticates with cloud, pulls latest, starts polling
+await engine.init();    // open local IndexedDB
+await engine.connect(); // authenticate, pull, start polling
 
-// 6. Get typed table handles
-const tasks = engine.table('tasks'); // Table<{ title, status, assignee }>
-const notes = engine.table('notes'); // Table<{ content }>
+const tasks = engine.table('tasks');
 
-// 7. Write data
 await tasks.put('task_1', {
   title: 'Review PR #42',
   status: 'open',
   assignee: 'marina',
 });
 
-// 8. Read data — all reads are async, go directly to IndexedDB
-const task = await tasks.get('task_1');   // { title, status, assignee } | undefined
-const all  = await tasks.query();          // { title, status, assignee }[]
+const task = await tasks.get('task_1');
+const all  = await tasks.query();
 
-// 9. Listen for changes from other devices
 const unsub = engine.on((event) => {
   if (event.type === 'change') {
     console.log(`Updated: ${event.table}/${event.rowId}`);
   }
 });
 
-// 10. Cleanup
 await engine.disconnect();
 ```
 
-### Untyped usage
-
-Schema typing is optional. You can pass explicit type params per table, or skip types entirely:
+The schema generic is optional. Without it, pass a type param per table or go fully untyped:
 
 ```ts
-// Explicit type per table
-const engine2 = new SyncEngine(adapter, { remotePath: '/App', dbName: 'app' });
-const tasks2 = engine2.table<{ title: string; status: string }>('tasks');
-
-// Fully untyped — works the same, just no type checking
-const tasks3 = engine2.table('tasks');
-await tasks3.put('t1', { title: 'anything goes' });
+const engine = new SyncEngine(adapter, { remotePath: '/App', dbName: 'app' });
+const tasks  = engine.table<{ title: string; status: string }>('tasks');
+const notes  = engine.table('notes'); // untyped, anything goes
 ```
 
-### Swap backends at runtime
+Backends are swappable at runtime — pending writes flush first:
 
 ```ts
-// Switch remote backend — flushes local writes first, then tops up from new source
 await engine.setRemoteStorage(new WebDAVAdapter({ baseUrl: '...', auth: { ... } }));
-
-// Switch local store — closes old IDB, opens new one, syncs both directions
-await engine.setLocalStorage(new LocalStore('myapp-v2'));
 ```
 
-## How it works
+## How sync works
 
 ```
 Device A                    Cloud Folder                   Device B
@@ -122,182 +101,135 @@ write to IDB ──┐
   merge into IDB                                             └── write to IDB
 ```
 
-1. Each device writes one file per change entry under its own date-sharded folder. One device, one folder. No concurrent writes to the same file.
-2. Each device polls for changes from other devices' folders, reads head files to detect new data, then downloads and merges using LWW-per-column CRDTs.
-3. A Hybrid Logical Clock (HLC) provides total ordering without a time server.
-4. If encryption is enabled, each change file is independently encrypted with AES-256-GCM before upload.
-5. **Compaction mode is configurable**: direct-cloud meshes can compact from authorized clients, while relay-server mode centralizes compaction and garbage collection.
+One device, one folder. No concurrent writes to the same file — sidesteps cloud storage's lack of file locking entirely.
 
-IndexedDB is a **cache**, not the source of truth. Browser clears it? The app rehydrates from the manifest-referenced snapshot on next open.
+Each device writes one JSON file per change into a date-sharded subfolder. Others poll `head.json` to detect new data, download change files, and merge with [HLC](https://cse.buffalo.edu/tech-reports/2014-04.pdf)-ordered LWW-per-column CRDTs. With encryption on, each file is independently AES-256-GCM encrypted before upload.
+
+IndexedDB is a cache. The cloud folder is the durable log. IDB gets cleared? The app rebuilds from the manifest-referenced snapshot on next open.
 
 ## Adapters
 
-### WebDAV (Nextcloud, ownCloud, any WebDAV server)
+**Google Drive** — uses `drive.file` scope (app only sees its own files). Mesh members share via Drive's native sharing.
+
+```ts
+import { GoogleDriveAdapter } from 'interocitor/adapters/google-drive';
+const adapter = new GoogleDriveAdapter({ clientId: 'YOUR_CLIENT_ID' });
+```
+
+**WebDAV** — Nextcloud, ownCloud, any WebDAV endpoint. The self-hosted path.
 
 ```ts
 import { WebDAVAdapter } from 'interocitor/adapters/webdav';
-
 const adapter = new WebDAVAdapter({
   baseUrl: 'https://cloud.example.com/remote.php/dav/files/alice',
   auth: { username: 'alice', password: 'APP_PASSWORD' },
 });
 ```
 
-The "my own cloud" option. Runs on a $5 VPS, a Raspberry Pi, or a NAS.
-
-### Google Drive
-
-```ts
-import { GoogleDriveAdapter } from 'interocitor/adapters/google-drive';
-
-const adapter = new GoogleDriveAdapter({
-  clientId: 'YOUR_CLIENT_ID', // from Google Cloud Console
-});
-```
-
-Uses `drive.file` scope — the app can only see files it created. Mesh members share the folder via Google Drive's native sharing.
-
-### Memory (testing)
+**Memory** — for tests.
 
 ```ts
 import { MemoryAdapter } from 'interocitor/adapters/memory';
-
 const adapter = new MemoryAdapter();
-await adapter.authenticate();
 ```
 
-### Full custom adapter
-
-Plug in any backend that implements `StorageAdapter`:
-
-```ts
-import { SyncEngine, type StorageAdapter, type FileEntry } from 'interocitor';
-
-class MyAdapter implements StorageAdapter {
-  readonly name = 'my-adapter';
-  // implement: authenticate, isAuthenticated, ensureFolder,
-  //   listFiles, listFolders, readFile, writeFile, deleteFile, getFileMetadata
-}
-```
+**Custom** — implement `StorageAdapter` (`authenticate`, `ensureFolder`, `listFiles`, `listFolders`, `readFile`, `writeFile`, `deleteFile`, `getFileMetadata`).
 
 ## Encryption
 
-All encryption uses the Web Crypto API (AES-256-GCM). The key is generated on the first device and transferred to other devices via:
-
-- **Passphrase** — ~43 character base58 string (copy-paste, read over phone, write on paper)
-- **URL fragment** — `https://yourapp.com/join#key=...` (fragment never hits the server)
-- **QR code** — encode either of the above
+AES-256-GCM via Web Crypto API. Key is generated on the first device, shared to others as a base58 passphrase (~43 chars), a URL fragment (`#key=…`, never hits the server), or a QR code.
 
 ```ts
 import { generateKey, keyToPassphrase, passphraseToKey } from 'interocitor/crypto/keys';
 
-// First device generates
 const key = await generateKey();
 const passphrase = await keyToPassphrase(key);
 
-// Other devices import
+// on another device
 const sameKey = await passphraseToKey(passphrase);
 engine.setEncryptionKey(sameKey);
 ```
 
-The key never leaves devices. The cloud folder only contains ciphertext.
-
-**Recovery:** If all devices lose the key, cloud data is unrecoverable. This is by design. Print the passphrase and store it somewhere safe.
+Key never leaves devices. Cloud folder only contains ciphertext. All devices lose the key → data is unrecoverable. That's the point. Print it.
 
 ## CRDT strategy
 
-**Last-Writer-Wins per column** (LWW-Register). Each column in each row carries its own HLC timestamp. When merging, the highest HLC wins for that column independently.
+LWW-per-column. Each field carries its own HLC timestamp. On merge, highest HLC wins per field independently.
 
 ```
-Device A sets task.title = "Review PR" at T1
-Device B sets task.status = "done" at T2
+Device A: task.title  = "Review PR"  at T1
+Device B: task.status = "done"       at T2
 
-After merge: { title: "Review PR" (T1), status: "done" (T2) }
-Both changes preserved — different columns.
+→ { title: "Review PR" (T1), status: "done" (T2) }
 ```
 
-Deletes are soft (tombstone). A delete with a lower HLC than a subsequent upsert loses — the row comes back. Tombstones are retained for 90 days (server GC policy).
+Different fields → both preserved. Same field → latest wins. Deletes are tombstones (90-day retention).
 
-Intentionally simple. No ordered list CRDTs, no rich text merging. For tabular data, LWW-per-column is sufficient and trivial to reason about.
+No ordered-list CRDTs, no rich-text merge. For tabular data this is enough, and you can reason about it on a napkin.
 
 ## Events
 
 ```ts
 engine.on((event) => {
   switch (event.type) {
-    case 'change':            // row updated (local or remote)
-    case 'delete':            // row deleted
-    case 'sync:start':        // pull from cloud started
-    case 'sync:complete':     // pull finished, N entries merged
-    case 'sync:error':        // pull failed
-    case 'flush:start':       // push to cloud started
+    case 'change':             // row upserted
+    case 'delete':             // row tombstoned
+    case 'sync:start':         // pull cycle begins
+    case 'sync:complete':      // pull done, N entries merged
+    case 'sync:error':
+    case 'flush:start':        // push cycle begins
     case 'flush:complete':
     case 'flush:error':
-    case 'rehydrate:start':   // rebuilding from snapshot
+    case 'rehydrate:start':    // rebuilding from snapshot
     case 'rehydrate:complete':
-    case 'auth:required':     // cloud auth needed
+    case 'auth:required':      // cloud token expired
     case 'auth:complete':
-    case 'schema:mismatch':   // remote schema is newer
+    case 'schema:mismatch':    // remote schema newer
   }
 });
 ```
 
-## Cloud folder structure
+## Cloud folder layout
 
 ```
 /Interocitor/
-  manifest.json                              ← global pointer
-  manifest-{generation}.json                 ← global manifest
-
+  manifest.json                              ← pointer to current generation
+  manifest-{generation}.json                 ← generation manifest
   devices/
-    dev_a1b2c3.json                          ← per-device metadata
-
-  c1/                                        ← channel (opaque ID)
+    dev_{id}.json                            ← device metadata
+  c1/                                        ← channel
     channel.json                             ← channel pointer
-    channel-manifest-{gen}-{writer}.json     ← channel manifest
+    channel-manifest-{gen}-{writer}.json
     mainline/
-      snapshot-{epoch}-{writer}.json         ← L2 snapshot (written by compactor)
-      delta-{from}-to-{to}-{writer}.json     ← L1 delta (written by compactor)
+      snapshot-{epoch}-{writer}.json         ← compacted snapshot
+      delta-{from}-to-{to}-{writer}.json     ← compacted delta
     clients/
-      dev_a1b2c3/
-        head.json                            ← latest HLC, date, file count
+      dev_{id}/
+        head.json                            ← latest HLC + cursor
         2026-04-05/
-          {hlc}-{changeId}.json              ← L0 change file
-        2026-04-06/
-          {hlc}-{changeId}.json
-      dev_d4e5f6/
-        head.json
+          {hlc}-{changeId}.json              ← change file
         2026-04-06/
           {hlc}-{changeId}.json
 ```
 
-## What this is NOT
+## What this is not
 
-- Not a real-time collaboration tool (30-60s polling, not WebSocket)
-- Not a general-purpose database (no indexes, no queries beyond full-table scan)
-- Not for large binary data (designed for structured JSON records)
-- Not multi-tenant (one mesh per folder, everyone sees everything)
+A sync layer for structured JSON across a small device mesh. Not:
 
-## Browser tests (Playwright)
+- **Real-time** — 30–60 s polling, not WebSocket push
+- **A query engine** — no indexes beyond full-table scan
+- **A blob store** — small JSON records, not images
+- **Multi-tenant** — one mesh, one folder, everyone sees everything
 
-Playwright e2e tests run in a real browser and validate:
+## Tests
 
-- manifest bootstrap and writer-authority enforcement
-- Channelized file-per-change writes and cross-device sync
-- Encrypted round-trip (cloud only has ciphertext)
-- WebDAV adapter contract (`PROPFIND`, `MKCOL`, `GET`, `PUT`, `DELETE`)
-- Multi-context WebDAV sync isolation
+Playwright e2e in a real browser. Covers manifest bootstrap, writer-authority, file-per-change writes, cross-device sync, encrypted round-trips, WebDAV contract, multi-context isolation.
 
 ```bash
-yarn test:e2e:install
-yarn test:e2e
-```
-
-Useful variants:
-
-```bash
-yarn test:e2e:headed
-yarn test:e2e:debug
+yarn test:e2e:install   # Chromium
+yarn test:e2e           # run
+yarn test:e2e:headed    # watch
+yarn test:e2e:debug     # Playwright UI
 ```
 
 ## License

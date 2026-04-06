@@ -13,7 +13,7 @@
  * const adapter = new GoogleDriveAdapter({
  *   clientId: 'YOUR_GOOGLE_CLIENT_ID',
  * });
- * const engine = new SyncEngine(adapter, { rootPath: '/Interocitor' });
+ * const engine = new SyncEngine(adapter, { remotePath: '/Interocitor' });
  *
  * const key = await generateKey();
  * console.log('Share this with your mesh:', await keyToPassphrase(key));
@@ -37,6 +37,8 @@
 // ─── Engine ───────────────────────────────────────────────────────────
 
 export { SyncEngine } from './core/sync-engine.ts';
+export { LocalStore } from './storage/local-store.ts';
+export { Table } from './core/table.ts';
 
 // ─── Row utilities ────────────────────────────────────────────────────
 
@@ -45,9 +47,13 @@ export { readColumn, rowToPlain } from './core/crdt.ts';
 // ─── Types ────────────────────────────────────────────────────────────
 
 export type {
-  // Adapter contract — needed for custom adapter implementations
+  // Remote adapter contract — needed for custom adapter implementations
   StorageAdapter,
   FileEntry,
+
+  // Local adapter contract — implement to plug in a custom local backend
+  LocalStoreAdapter,
+  LocalStoreFactory,
 
   // Engine configuration
   SyncConfig,
@@ -59,7 +65,7 @@ export type {
   // Data model
   Row,
 
-  // protocol types
+  // Protocol types
   Manifest,
   ManifestPointer,
   ChannelManifest,

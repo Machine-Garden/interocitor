@@ -167,11 +167,46 @@ export interface StorageAdapter {
   getFileMetadata(path: string): Promise<FileEntry | null>;
 }
 
+// ─── Local Storage Adapter ───────────────────────────────────────────
+
+/**
+ * Contract every local store implementation must satisfy.
+ * Implement this interface to plug in a custom local backend
+ * (e.g. in-memory for tests, SQLite via OPFS, etc.).
+ */
+export interface LocalStoreAdapter {
+  open(): Promise<void>;
+  close(): void;
+
+  getRow(table: string, rowId: string): Promise<Row | undefined>;
+  putRow(row: Row): Promise<void>;
+  putRows(rows: Row[]): Promise<void>;
+  getTable(table: string): Promise<Row[]>;
+  getAllRows(): Promise<Row[]>;
+  clearRows(): Promise<void>;
+  getTableNames(): Promise<string[]>;
+
+  pushOutbox(entry: ChangeEntry): Promise<void>;
+  drainOutbox(): Promise<ChangeEntry[]>;
+  outboxSize(): Promise<number>;
+
+  getCursor(deviceId: string): Promise<number>;
+  setCursor(deviceId: string, offset: number): Promise<void>;
+  getAllCursors(): Promise<Record<string, number>>;
+
+  getMeta(key: string): Promise<unknown>;
+  setMeta(key: string, value: unknown): Promise<void>;
+  clearAll(): Promise<void>;
+}
+
+/** Factory that creates a local store instance for this engine. */
+export type LocalStoreFactory = () => LocalStoreAdapter;
+
 // ─── Sync Engine Config ──────────────────────────────────────────────
 
 export interface SyncConfig {
   /** Cloud folder path prefix, e.g. "/Interocitor" */
-  rootPath: string;
+  remotePath: string;
   /** Opaque channel id in storage, e.g. "c1" */
   channelId?: string;
   /** If true, only serverId may publish manifests/compaction */
@@ -184,6 +219,18 @@ export interface SyncConfig {
   flushDebounce?: number;
   /** Max pending ops before forced flush (default 50) */
   flushThreshold?: number;
+  /**
+   * IndexedDB database name for this engine's local cache.
+   * Use distinct names to isolate multiple engine instances on the same origin.
+   * Default: "interocitor"
+   */
+  dbName?: string;
+  /**
+   * Factory that produces the local store for this engine.
+   * When provided, dbName is ignored — the factory is fully responsible
+   * for constructing the store.
+   */
+  localStoreFactory?: LocalStoreFactory;
 }
 
 // ─── Events ──────────────────────────────────────────────────────────

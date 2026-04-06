@@ -26,44 +26,83 @@ import { SyncEngine } from 'interocitor';
 import { GoogleDriveAdapter } from 'interocitor/adapters/google-drive';
 import { generateKey, keyToPassphrase } from 'interocitor/crypto/keys';
 
-// 1. Pick a storage adapter
+// 1. Define your schema (optional but recommended)
+interface AppSchema {
+  tasks: { title: string; status: 'open' | 'done'; assignee: string };
+  notes: { content: string };
+}
+
+// 2. Pick a storage adapter
 const adapter = new GoogleDriveAdapter({
   clientId: 'YOUR_GOOGLE_CLIENT_ID',
 });
 
-// 2. Create the engine
-const engine = new SyncEngine(adapter, { rootPath: '/Interocitor' });
+// 3. Create the engine
+//    dbName isolates this instance's IndexedDB from others on the same origin.
+//    remotePath is the folder in cloud storage where this mesh lives.
+const engine = new SyncEngine<AppSchema>(adapter, {
+  remotePath: '/MyApp',
+  dbName: 'myapp',
+});
 
-// 3. Encryption (optional but recommended)
+// 4. Encryption (optional but recommended)
 const key = await generateKey();
 const passphrase = await keyToPassphrase(key);
 console.log('Share this with your mesh:', passphrase);
 engine.setEncryptionKey(key);
 
-// 4. Initialize and connect
-await engine.init();    // opens local DB, loads cached state
-await engine.connect(); // authenticates with cloud, syncs, starts polling
+// 5. Initialize and connect
+await engine.init();    // opens local IndexedDB
+await engine.connect(); // authenticates with cloud, pulls latest, starts polling
 
-// 5. Write data
-await engine.put('tasks', 'task_1', {
+// 6. Get typed table handles
+const tasks = engine.table('tasks'); // Table<{ title, status, assignee }>
+const notes = engine.table('notes'); // Table<{ content }>
+
+// 7. Write data
+await tasks.put('task_1', {
   title: 'Review PR #42',
   status: 'open',
   assignee: 'marina',
 });
 
-// 6. Read data
-const tasks = engine.query('tasks');
-const task = engine.get('tasks', 'task_1');
+// 8. Read data — all reads are async, go directly to IndexedDB
+const task = await tasks.get('task_1');   // { title, status, assignee } | undefined
+const all  = await tasks.query();          // { title, status, assignee }[]
 
-// 7. Listen for changes from other devices
+// 9. Listen for changes from other devices
 const unsub = engine.on((event) => {
   if (event.type === 'change') {
     console.log(`Updated: ${event.table}/${event.rowId}`);
   }
 });
 
-// 8. Cleanup
+// 10. Cleanup
 await engine.disconnect();
+```
+
+### Untyped usage
+
+Schema typing is optional. You can pass explicit type params per table, or skip types entirely:
+
+```ts
+// Explicit type per table
+const engine2 = new SyncEngine(adapter, { remotePath: '/App', dbName: 'app' });
+const tasks2 = engine2.table<{ title: string; status: string }>('tasks');
+
+// Fully untyped — works the same, just no type checking
+const tasks3 = engine2.table('tasks');
+await tasks3.put('t1', { title: 'anything goes' });
+```
+
+### Swap backends at runtime
+
+```ts
+// Switch remote backend — flushes local writes first, then tops up from new source
+await engine.setRemoteStorage(new WebDAVAdapter({ baseUrl: '...', auth: { ... } }));
+
+// Switch local store — closes old IDB, opens new one, syncs both directions
+await engine.setLocalStorage(new LocalStore('myapp-v2'));
 ```
 
 ## How it works

@@ -23,6 +23,10 @@
       "import": "./dist/adapters/memory.js",
       "types": "./dist/adapters/memory.d.ts"
     },
+    "./storage/local-store": {
+      "import": "./dist/storage/local-store.js",
+      "types": "./dist/storage/local-store.d.ts"
+    },
     "./crypto/keys": {
       "import": "./dist/crypto/keys.js",
       "types": "./dist/crypto/keys.d.ts"

@@ -43,7 +43,7 @@ test('two isolated contexts sync via shared WebDAV route mock', async ({ browser
           baseUrl: `${location.origin}/__webdav__`,
           auth: { username: 'u', password: 'p' },
         }),
-        { rootPath: '/Isolated', pollInterval: 60_000, flushDebounce: 5, flushThreshold: 1 },
+        { remotePath: '/Isolated', pollInterval: 60_000, flushDebounce: 5, flushThreshold: 1 },
       );
 
       await engine.init();
@@ -51,7 +51,7 @@ test('two isolated contexts sync via shared WebDAV route mock', async ({ browser
       await engine.put('tasks', 'task_1', { title: 'from context A' });
       await engine.flush();
 
-      const row = engine.get('tasks', 'task_1');
+      const row = await engine.get('tasks', 'task_1');
       await engine.disconnect();
 
       return row ? readColumn(row, 'title') : null;
@@ -70,14 +70,14 @@ test('two isolated contexts sync via shared WebDAV route mock', async ({ browser
           baseUrl: `${location.origin}/__webdav__`,
           auth: { username: 'u', password: 'p' },
         }),
-        { rootPath: '/Isolated', pollInterval: 60_000, flushDebounce: 5, flushThreshold: 1 },
+        { remotePath: '/Isolated', pollInterval: 60_000, flushDebounce: 5, flushThreshold: 1 },
       );
 
       await engine.init();
       await engine.connect();
 
-      const row = engine.get('tasks', 'task_1');
-      const tableCount = engine.query('tasks').length;
+      const row = await engine.get('tasks', 'task_1');
+      const tableCount = (await engine.query('tasks')).length;
       await engine.disconnect();
 
       return {

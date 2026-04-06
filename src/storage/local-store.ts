@@ -11,10 +11,10 @@
  *  - meta: device ID, last snapshot epoch, etc.
  */
 
-import type { Row, ChangeEntry } from '../core/types.ts';
+import type { Row, ChangeEntry, LocalStoreAdapter } from '../core/types.ts';
 
-const DB_NAME = 'interocitor';
-const DB_VERSION = 1;
+const DEFAULT_DB_NAME = 'interocitor';
+const DEFAULT_DB_VERSION = 1;
 
 const STORES = {
   rows: 'rows',         // key: "{table}/{rowId}"
@@ -23,9 +23,9 @@ const STORES = {
   meta: 'meta',         // key: string
 } as const;
 
-function openDB(): Promise<IDBDatabase> {
+function openDB(dbName: string, dbVersion: number): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req = indexedDB.open(dbName, dbVersion);
 
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -73,11 +73,24 @@ function txComplete(transaction: IDBTransaction): Promise<void> {
 
 // ─── Public API ──────────────────────────────────────────────────────
 
-export class LocalStore {
+export class LocalStore implements LocalStoreAdapter {
   private db: IDBDatabase | null = null;
+  private readonly dbName: string;
+  private readonly dbVersion: number;
+
+  /**
+   * @param dbName    IndexedDB database name. Use distinct names to isolate
+   *                  multiple engine instances on the same origin.
+   *                  Default: "interocitor"
+   * @param dbVersion IndexedDB schema version. Default: 1
+   */
+  constructor(dbName?: string, dbVersion?: number) {
+    this.dbName = dbName ?? DEFAULT_DB_NAME;
+    this.dbVersion = dbVersion ?? DEFAULT_DB_VERSION;
+  }
 
   async open(): Promise<void> {
-    this.db = await openDB();
+    this.db = await openDB(this.dbName, this.dbVersion);
   }
 
   close(): void {
@@ -132,6 +145,26 @@ export class LocalStore {
     const index = store.index('by_table');
     const results = await reqToPromise(index.getAll(table));
     return (results as Row[]).filter(r => !r._deleted);
+  }
+
+  async getTableNames(): Promise<string[]> {
+    const db = this.ensureDB();
+    return new Promise((resolve, reject) => {
+      const t = db.transaction(STORES.rows, 'readonly');
+      const index = t.objectStore(STORES.rows).index('by_table');
+      const names: string[] = [];
+      const req = index.openKeyCursor(null, 'nextunique');
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (cursor) {
+          names.push(cursor.key as string);
+          cursor.continue();
+        } else {
+          resolve(names);
+        }
+      };
+      req.onerror = () => reject(req.error);
+    });
   }
 
   async getAllRows(): Promise<Row[]> {

@@ -10,6 +10,7 @@
 import type {
   StorageAdapter,
   SyncConfig,
+  LocalStoreAdapter,
   ChangeEntry,
   Manifest,
   ManifestPointer,
@@ -28,6 +29,7 @@ import type {
 import { hlcInit, hlcNow, hlcSerialize, hlcParse, hlcReceive, hlcCompareStr } from '../core/hlc.ts';
 import { applyOp, applyChangeEntry } from '../core/crdt.ts';
 import { LocalStore } from '../storage/local-store.ts';
+import { Table } from '../core/table.ts';
 import {
   encryptEntry,
   decryptEntry,
@@ -113,21 +115,38 @@ function makeCursorKey(channelId: string, deviceId: string): string {
 
 // ─── Sync Engine ─────────────────────────────────────────────────────
 
-export class SyncEngine {
+/**
+ * Type parameter S maps table names to their plain record types.
+ *
+ * @example
+ * interface AppSchema {
+ *   tasks: { title: string; status: 'open' | 'done' };
+ *   notes: { content: string };
+ * }
+ * const engine = new SyncEngine<AppSchema>(adapter, { remotePath: '/App' });
+ * const tasks = engine.table('tasks'); // Table<{ title: string; status: 'open' | 'done' }>
+ *
+ * Schema is optional — omit it for untyped usage.
+ */
+export class SyncEngine<S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>> {
   private adapter: StorageAdapter;
   private config: Required<SyncConfig>;
   private channelId: string;
   private serverId: string;
-  private local: LocalStore;
+  private local: LocalStoreAdapter;
   private deviceId: string;
   private hlc: HLC;
   private encryptionKey: CryptoKey | null = null;
   private encrypted = false;
 
-  // In-memory state (mirror of local DB for fast access)
+  // In-memory CRDT merge cache — lazily populated on writes and pulls.
+  // NOT a full dataset mirror; reads go to IDB directly.
   private tables: Record<string, Record<string, Row>> = {};
   private manifest: Manifest | null = null;
   private channelManifest: ChannelManifest | null = null;
+
+  // Known table names (populated from IDB index on init, updated on writes)
+  private knownTables: Set<string> = new Set();
 
   // Flush management
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -136,25 +155,75 @@ export class SyncEngine {
   // Poll management
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
+  // Lifecycle state
+  private initialized = false;
+  private connected = false;
+
   // Event listeners
   private listeners: Set<SyncEventListener> = new Set();
 
   constructor(adapter: StorageAdapter, config: SyncConfig) {
     this.adapter = adapter;
     this.config = {
-      rootPath: config.rootPath,
+      remotePath: config.remotePath,
       channelId: config.channelId ?? 'c1',
       serverManaged: config.serverManaged ?? false,
       serverId: config.serverId ?? 'server_relay_1',
       pollInterval: config.pollInterval ?? 30_000,
       flushDebounce: config.flushDebounce ?? 2_000,
       flushThreshold: config.flushThreshold ?? 50,
+      dbName: config.dbName ?? 'interocitor',
+      localStoreFactory: config.localStoreFactory ?? (() => new LocalStore(config.dbName)),
     };
     this.channelId = this.config.channelId;
     this.serverId = this.config.serverId;
-    this.local = new LocalStore();
+    this.local = this.config.localStoreFactory();
     this.deviceId = getDeviceId();
     this.hlc = hlcInit(this.deviceId);
+  }
+
+  // ── Private lifecycle helpers ──────────────────────────────────────
+
+  private stopPolling(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  private startPolling(): void {
+    this.stopPolling();
+    this.pollTimer = setInterval(() => {
+      this.pull().catch(err => this.emit({ type: 'sync:error', error: err }));
+    }, this.config.pollInterval);
+  }
+
+  private async loadLocalState(): Promise<void> {
+    this.tables = {};
+    this.knownTables = new Set();
+    const savedHlc = await this.local.getMeta('hlc') as string | undefined;
+    if (savedHlc) {
+      this.hlc = hlcParse(savedHlc);
+      this.hlc.nodeId = this.deviceId;
+    }
+    for (const name of await this.local.getTableNames()) {
+      this.knownTables.add(name);
+    }
+  }
+
+  /**
+   * Ensure rows referenced by ops are in the CRDT cache before merging.
+   * Reads from IDB only when a row isn't already cached.
+   */
+  private async ensureRowsCached(ops: Op[]): Promise<void> {
+    for (const op of ops) {
+      if (this.tables[op.table]?.[op.rowId] !== undefined) continue;
+      const existing = await this.local.getRow(op.table, op.rowId);
+      if (existing) {
+        if (!this.tables[op.table]) this.tables[op.table] = {};
+        this.tables[op.table][op.rowId] = existing;
+      }
+    }
   }
 
   // ── Events ─────────────────────────────────────────────────────────
@@ -199,20 +268,8 @@ export class SyncEngine {
    */
   async init(): Promise<void> {
     await this.local.open();
-
-    // Load local state into memory
-    const rows = await this.local.getAllRows();
-    for (const row of rows) {
-      if (!this.tables[row._table]) this.tables[row._table] = {};
-      this.tables[row._table][row._rowId] = row;
-    }
-
-    // Restore HLC
-    const savedHlc = await this.local.getMeta('hlc') as string | undefined;
-    if (savedHlc) {
-      this.hlc = hlcParse(savedHlc);
-      this.hlc.nodeId = this.deviceId; // ensure nodeId is current device
-    }
+    await this.loadLocalState();
+    this.initialized = true;
   }
 
   /**
@@ -220,14 +277,18 @@ export class SyncEngine {
    * Call after init() and after setting encryption key if needed.
    */
   async connect(): Promise<void> {
+    if (!this.initialized) {
+      throw new Error('Engine must be initialized via init() before connect()');
+    }
+
     if (!this.adapter.isAuthenticated()) {
       this.emit({ type: 'auth:required' });
       await this.adapter.authenticate();
       this.emit({ type: 'auth:complete' });
     }
 
-    const p = paths(this.config.rootPath, this.channelId);
-    await this.adapter.ensureFolder(this.config.rootPath);
+    const p = paths(this.config.remotePath, this.channelId);
+    await this.adapter.ensureFolder(this.config.remotePath);
     await this.adapter.ensureFolder(p.devicesFolder);
     await this.adapter.ensureFolder(p.channelRoot);
     await this.adapter.ensureFolder(p.mainlineFolder);
@@ -253,9 +314,8 @@ export class SyncEngine {
     await this.flush();
 
     // Start polling
-    this.pollTimer = setInterval(() => {
-      this.pull().catch(err => this.emit({ type: 'sync:error', error: err }));
-    }, this.config.pollInterval);
+    this.startPolling();
+    this.connected = true;
 
     // Flush on page unload
     if (typeof window !== 'undefined') {
@@ -269,16 +329,84 @@ export class SyncEngine {
 
   /** Stop polling, flush remaining changes. */
   async disconnect(): Promise<void> {
-    if (this.pollTimer) {
-      clearInterval(this.pollTimer);
-      this.pollTimer = null;
-    }
+    this.stopPolling();
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
       this.flushTimer = null;
     }
     await this.flush();
     this.local.close();
+    this.connected = false;
+    this.initialized = false;
+  }
+
+  /**
+   * Swap the remote storage backend.
+   *
+   * Flushes any pending local writes to the current remote, then switches
+   * to the new backend. On reconnect the engine pulls all new changes from
+   * the new remote into local and flushes any remaining local writes to it.
+   * The result is a fully converged state against the new source — "top-up"
+   * in both directions.
+   *
+   * If the engine was not connected, only the adapter reference is updated;
+   * call connect() when ready.
+   */
+  async setRemoteStorage(adapter: StorageAdapter): Promise<void> {
+    const wasConnected = this.connected;
+
+    if (wasConnected) {
+      await this.flush();
+    }
+
+    this.stopPolling();
+    this.adapter = adapter;
+    this.manifest = null;
+    this.channelManifest = null;
+    this.connected = false;
+
+    if (wasConnected) {
+      await this.connect();
+    }
+  }
+
+  /**
+   * Swap the local storage backend.
+   *
+   * Flushes any pending outbox to remote, closes the current local store,
+   * opens the new one, then pulls all remote data into it and flushes any
+   * local outbox entries to remote. The result is a fully converged state
+   * in the new local store — "top-up" in both directions.
+   *
+   * Use `new LocalStore({ dbName: 'interocitor-alice' })` to isolate two
+   * engine instances on the same origin.
+   *
+   * If the engine was not connected, only the local store is swapped;
+   * call connect() when ready.
+   */
+  async setLocalStorage(local: LocalStoreAdapter): Promise<void> {
+    const wasConnected = this.connected;
+
+    if (wasConnected) {
+      await this.flush();
+    }
+
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    this.pendingCount = 0;
+
+    this.local.close();
+    this.local = local;
+    await this.local.open();
+    await this.loadLocalState();
+    this.initialized = true;
+
+    if (!wasConnected) return;
+
+    await this.pull();
+    await this.flush();
   }
 
   // ── Manifest ───────────────────────────────────────────────────────
@@ -315,7 +443,7 @@ export class SyncEngine {
   }
 
   private async createBootstrapManifests(): Promise<void> {
-    const p = paths(this.config.rootPath, this.channelId);
+    const p = paths(this.config.remotePath, this.channelId);
     const now = new Date().toISOString();
 
     const globalPayload = {
@@ -377,7 +505,7 @@ export class SyncEngine {
   }
 
   private async loadOrCreateManifests(): Promise<void> {
-    const p = paths(this.config.rootPath, this.channelId);
+    const p = paths(this.config.remotePath, this.channelId);
 
     const globalPointer = await this.readJsonIfExists<ManifestPointer>(p.manifestPointer);
     if (!globalPointer) {
@@ -385,7 +513,7 @@ export class SyncEngine {
     }
 
     const pointer = await this.readJson<ManifestPointer>(p.manifestPointer);
-    const globalManifest = await this.readJson<Manifest>(`${this.config.rootPath}/${pointer.file}`);
+    const globalManifest = await this.readJson<Manifest>(`${this.config.remotePath}/${pointer.file}`);
     await this.validateManifestHash(globalManifest as unknown as { contentHash: string; [key: string]: unknown });
 
     if (globalManifest.version !== 2) {
@@ -408,7 +536,7 @@ export class SyncEngine {
   }
 
   private async upsertDeviceMetadata(): Promise<void> {
-    const p = paths(this.config.rootPath, this.channelId);
+    const p = paths(this.config.remotePath, this.channelId);
     const now = new Date().toISOString();
     const existing = await this.readJsonIfExists<DeviceMetadata>(p.deviceFile(this.deviceId));
     const next: DeviceMetadata = {
@@ -449,8 +577,12 @@ export class SyncEngine {
       columns: columnEntries,
     };
 
-    // Apply to in-memory state
+    // Ensure current row state is in the CRDT cache before merging
+    await this.ensureRowsCached([op]);
+
+    // Apply to in-memory CRDT cache
     const row = applyOp(this.tables, op, this.manifest?.schema ?? 1)!;
+    this.knownTables.add(table);
 
     // Persist locally
     await this.local.putRow(row);
@@ -479,6 +611,7 @@ export class SyncEngine {
     const hlcStr = hlcSerialize(this.hlc);
 
     const op: Op = { type: 'delete', table, rowId, hlc: hlcStr };
+    await this.ensureRowsCached([op]);
     applyOp(this.tables, op, this.manifest?.schema ?? 1);
 
     const row = this.tables[table]?.[rowId];
@@ -501,23 +634,39 @@ export class SyncEngine {
 
   // ── Read ───────────────────────────────────────────────────────────
 
-  /** Get a single row (from memory). */
-  get(table: string, rowId: string): Row | undefined {
-    const row = this.tables[table]?.[rowId];
-    if (row?._deleted) return undefined;
+  /** Get a single row by ID. Returns undefined if not found or deleted. */
+  async get(table: string, rowId: string): Promise<Row | undefined> {
+    const row = await this.local.getRow(table, rowId);
+    if (!row || row._deleted) return undefined;
     return row;
   }
 
-  /** Get all rows in a table (from memory). */
-  query(table: string): Row[] {
-    const t = this.tables[table];
-    if (!t) return [];
-    return Object.values(t).filter(r => !r._deleted);
+  /** Get all live (non-deleted) rows in a table. */
+  async query(table: string): Promise<Row[]> {
+    return this.local.getTable(table);
   }
 
-  /** Get all table names. */
-  tableNames(): string[] {
-    return Object.keys(this.tables);
+  /** Get all known table names. */
+  async tableNames(): Promise<string[]> {
+    return Array.from(this.knownTables);
+  }
+
+  /**
+   * Get a type-safe handle for a named collection.
+   * When the engine is typed with a schema, the table type is inferred automatically.
+   *
+   * @example
+   * // Typed engine — no explicit type param needed on table()
+   * const engine = new SyncEngine<{ tasks: Task }>(adapter, config);
+   * const tasks = engine.table('tasks');         // Table<Task>
+   *
+   * // Untyped engine — provide the type explicitly
+   * const tasks = engine.table<Task>('tasks');   // Table<Task>
+   */
+  table<K extends keyof S & string>(name: K): Table<S[K]>;
+  table<T extends Record<string, unknown>>(name: string): Table<T>;
+  table(name: string): Table<Record<string, unknown>> {
+    return new Table(this, name);
   }
 
   // ── Flush (local → cloud) ──────────────────────────────────────────
@@ -548,7 +697,7 @@ export class SyncEngine {
     }
 
     try {
-      const p = paths(this.config.rootPath, this.channelId);
+      const p = paths(this.config.remotePath, this.channelId);
       await this.adapter.ensureFolder(p.clientRoot(this.deviceId));
 
       let lastWrittenHlc = '';
@@ -600,7 +749,7 @@ export class SyncEngine {
 
     try {
       await this.loadOrCreateManifests();
-      const p = paths(this.config.rootPath, this.channelId);
+      const p = paths(this.config.remotePath, this.channelId);
       const deviceFiles = await this.adapter.listFiles(p.devicesFolder);
       let totalMerged = 0;
 
@@ -647,11 +796,13 @@ export class SyncEngine {
               const remoteHlc = hlcParse(entry.hlc);
               this.hlc = hlcReceive(this.hlc, remoteHlc);
 
+              await this.ensureRowsCached(entry.ops);
               const affected = applyChangeEntry(this.tables, entry, this.manifest?.schema ?? 1);
               if (affected.length > 0) {
                 await this.local.putRows(affected);
                 totalMerged += affected.length;
                 for (const row of affected) {
+                  this.knownTables.add(row._table);
                   if (row._deleted) {
                     this.emit({ type: 'delete', table: row._table, rowId: row._rowId });
                   } else {
@@ -711,13 +862,13 @@ export class SyncEngine {
       // Clear local state
       await this.local.clearAll();
       this.tables = {};
+      this.knownTables = new Set();
 
-      // Load snapshot into memory + local DB
+      // Write snapshot rows to IDB (CRDT cache stays empty — reads go to IDB)
       let rowCount = 0;
       for (const [tableName, rows] of Object.entries(snapshot.tables)) {
-        this.tables[tableName] = {};
-        for (const [rowId, row] of Object.entries(rows)) {
-          this.tables[tableName][rowId] = row;
+        this.knownTables.add(tableName);
+        for (const row of Object.values(rows)) {
           await this.local.putRow(row);
           rowCount++;
         }
@@ -757,11 +908,19 @@ export class SyncEngine {
     // Ensure the compactor has merged latest remote changes before snapshotting.
     await this.pull();
 
-    const p = paths(this.config.rootPath, this.channelId);
+    const p = paths(this.config.remotePath, this.channelId);
     const now = new Date().toISOString();
     const nextEpoch = this.channelManifest.epoch + 1;
     const nextGeneration = this.channelManifest.generation + 1;
     const snapshotPath = `${p.mainlineFolder}/snapshot-${nextEpoch}-${this.serverId}.json`;
+
+    // Build a full snapshot from IDB — the in-memory cache is partial.
+    const allRows = await this.local.getAllRows();
+    const snapshotTables: Record<string, Record<string, Row>> = {};
+    for (const row of allRows) {
+      if (!snapshotTables[row._table]) snapshotTables[row._table] = {};
+      snapshotTables[row._table][row._rowId] = row;
+    }
 
     const snapshot: Snapshot = {
       snapshotId: generateId('snap'),
@@ -769,7 +928,7 @@ export class SyncEngine {
       hlc: hlcSerialize(this.hlc),
       epoch: nextEpoch,
       schemaVersion: this.manifest.schema,
-      tables: this.tables,
+      tables: snapshotTables,
     };
 
     const snapshotJson = JSON.stringify(snapshot);

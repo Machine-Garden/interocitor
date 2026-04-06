@@ -140,26 +140,131 @@ The join-token flow is intentionally simple: create a session, copy token, paste
 
 ## How sync works
 
+```mermaid
+flowchart LR
+    subgraph A [Device A]
+        PUT["put / delete"] -->|immediate| IDBA[(IDB)]
+    end
+
+    IDBA -->|async flush| CLOUD
+
+    subgraph Cloud [c1/changes/]
+        CLOUD["change files\nhead.json"]
+    end
+
+    CLOUD -->|poll + merge| IDBB
+
+    subgraph B [Device B]
+        IDBB[(IDB)] --> QUERY["query / get"]
+    end
 ```
-Device A                    Cloud Folder                   Device B
-─────────                   ────────────                   ─────────
-write to IDB ──┐
-               ├─ flush ──► c1/clients/dev_a/2026-04-06/
-               │              {hlc}-{id}.json
-               │            c1/clients/dev_a/head.json
-               │                                     poll ──► read head
-               │                                            list date folders
-               │                                            merge into IDB
-               │            c1/clients/dev_b/...  ◄── flush ─┤
-  poll ──► read                                              │
-  merge into IDB                                             └── write to IDB
+
+Writes land in local IDB immediately — reads never touch the cloud. Flushing uploads one JSON file per change to the shared `changes/` folder. A single `head.json` carries the latest HLC so readers can skip listing the folder entirely when nothing is new. On pull, each reader downloads files above its local cursor, merges with HLC-ordered LWW-per-column CRDTs, and advances the cursor.
+
+No locks, no coordination. Each device writes only its own files.
+
+## Protocol flows
+
+### Pull — fast-skip and merge
+
+```mermaid
+flowchart TD
+    A([pull]) --> B[loadOrCreateManifests]
+    B --> C[GET c1/changes/head.json]
+    C --> D{head.latestHlc\n≤ cursor?}
+    D -- Yes --> SKIP([sync:complete\nentriesMerged=0])
+    D -- No or no head --> F[PROPFIND c1/changes/]
+    F -- 404 / empty --> SKIP
+    F -- files --> G[sort by filename\nHLC prefix = chronological]
+    G --> H{next file?}
+    H -- done --> I[cursor ← latestMergedHlc\nemit sync:complete]
+    H -- head.json --> H
+    H -- change file --> J{file HLC > cursor?}
+    J -- No → skip --> H
+    J -- Yes --> K[GET + decodeFromCloud + JSON.parse]
+    K --> L[applyChangeEntry\n→ putRows IDB]
+    L --> M[emit change/delete events]
+    M --> H
 ```
 
-One device, one folder. No concurrent writes to the same file — sidesteps cloud storage's lack of file locking entirely.
+### Connect and engine lifecycle
 
-Each device writes one JSON file per change into a date-sharded subfolder. Others poll `head.json` to detect new data, download change files, and merge with [HLC](https://cse.buffalo.edu/tech-reports/2014-04.pdf)-ordered LWW-per-column CRDTs. With encryption on, each file is independently AES-256-GCM encrypted before upload.
+```mermaid
+flowchart TD
+    A([init]) --> B[open IDB\nrestore HLC + table names]
+    B --> C([connect])
+    C --> D{adapter\nauthenticated?}
+    D -- No --> E[adapter.authenticate]
+    E --> D
+    D -- Yes --> F["ensureFolder ×5\nremotePath → devices\n→ c1 → mainline → changes"]
+    F --> G[loadOrCreateManifests]
+    G -- no manifest.json --> H[createBootstrapManifests\nmanifest-1 + channel-manifest-1\nmanifest.json + channel.json]
+    H --> G
+    G -- found --> I[validate content hashes\ncheck schema version\ncheck server auth if managed]
+    I --> J{localEpoch\n< remoteEpoch?}
+    J -- Yes: new snapshot --> K[rehydrate]
+    K --> K1[GET snapshotPath from channel manifest]
+    K1 --> K2[clearAll IDB]
+    K2 --> K3[write snapshot rows to IDB\nrestore HLC]
+    K3 --> L
+    J -- No --> L[pull change files]
+    L --> M[flush outbox]
+    M --> N([startPolling every N ms])
+```
 
-IndexedDB is the local working copy. The cloud folder is the durable log. Writes land in IDB immediately and flush to the cloud asynchronously — so there's a short window where data exists only locally. Once flushed, the cloud is the shared source of truth. IDB gets cleared? App rebuilds from the manifest-referenced snapshot on next open.
+### Compaction
+
+```mermaid
+sequenceDiagram
+    participant E as SyncEngine (compactor)
+    participant C as Cloud
+
+    E->>E: pull() — merge all remote changes first
+    E->>E: getAllRows() — full IDB scan
+
+    E->>C: PUT mainline/snapshot-{epoch}-{writer}.json
+    E->>C: PUT c1/channel-manifest-{gen}-{writer}.json
+    E->>C: PUT c1/channel.json { currentGeneration, file }
+    Note over C: pointer switches — other devices see new epoch on next connect/pull
+
+    E->>E: setMeta epoch:c1 ← nextEpoch
+
+    E->>C: PROPFIND c1/changes/ (list all)
+    loop each change file with HLC ≤ watermarkHlc
+        E->>C: DELETE {hlc}-{changeId}.json
+    end
+    Note over E,C: changes/ now contains only post-watermark files
+```
+
+Other devices detect the epoch advance on the next `connect()` or `pull()` via `loadOrCreateManifests`:
+`remoteEpoch > localEpoch` → `rehydrate()` → load snapshot → pull deltas above watermark.
+
+### Bootstrap (first-ever connect)
+
+```mermaid
+sequenceDiagram
+    participant E as SyncEngine
+    participant C as Cloud
+
+    E->>C: GET {remotePath}/manifest.json
+    C-->>E: 404 (not found)
+
+    Note over E: createBootstrapManifests()
+    E->>C: PUT {remotePath}/manifest-1.json (contentHash included)
+    E->>C: PUT {remotePath}/manifest.json { currentGeneration: 1, file: manifest-1.json }
+    E->>C: PUT c1/channel-manifest-1-{serverId}.json (contentHash included)
+    E->>C: PUT c1/channel.json { currentGeneration: 1, file: ... }
+
+    Note over E: loadOrCreateManifests() — second pass
+    E->>C: GET manifest.json → pointer
+    E->>C: GET manifest-1.json → validate hash
+    E->>C: GET c1/channel.json → pointer
+    E->>C: GET channel-manifest-1-{serverId}.json → validate hash
+    E->>E: channelManifest.epoch = 0, localEpoch = 0 → pull()
+    E->>C: GET c1/changes/head.json
+    C-->>E: 404 (no changes yet)
+    Note over E: sync:complete entriesMerged=0
+```
 
 ## Adapters
 
@@ -248,25 +353,27 @@ engine.on((event) => {
 ## Cloud folder layout
 
 ```
-/Interocitor/
-  manifest.json                              ← pointer to current generation
-  manifest-{generation}.json                 ← generation manifest
+{remotePath}/                                    e.g. /Interocitor/MyApp
+  manifest.json                                  ← pointer: { currentGeneration, file }
+  manifest-{generation}.json                     ← immutable once written; validate contentHash
   devices/
-    dev_{id}.json                            ← device metadata
-  c1/                                        ← channel
-    channel.json                             ← channel pointer
-    channel-manifest-{gen}-{writer}.json
+    {deviceId}.json                              ← heartbeat: lastSeenAt, userId
+  {channelId}/                                   ← default: c1
+    channel.json                                 ← pointer: { currentGeneration, file }
+    channel-manifest-{gen}-{writer}.json         ← epoch + snapshotPath + watermarkHlc
     mainline/
-      snapshot-{epoch}-{writer}.json         ← compacted snapshot
-      delta-{from}-to-{to}-{writer}.json     ← compacted delta
-    clients/
-      dev_{id}/
-        head.json                            ← latest HLC + cursor
-        2026-04-05/
-          {hlc}-{changeId}.json              ← change file
-        2026-04-06/
-          {hlc}-{changeId}.json
+      snapshot-{epoch}-{writer}.json             ← full IDB snapshot at watermarkHlc
+    changes/
+      head.json                                  ← { latestHlc } — fast poll-skip hint
+      {hlc}-{changeId}.json                      ← one file per flush batch (all devices)
 ```
+
+**Write ordering in `compact()`:** snapshot → channel-manifest → channel.json pointer.
+Readers loading `channel.json` always see a consistent pair; the snapshot file exists before any reader is directed to it.
+
+**Retention policy:** only the current generation is needed at runtime.
+Old `channel-manifest-*` and old `snapshot-*` files are safe to delete after the pointer moves.
+Change files `≤ watermarkHlc` are pruned automatically by `compact()`.
 
 ## What this is not
 

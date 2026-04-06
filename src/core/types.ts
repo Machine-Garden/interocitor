@@ -198,6 +198,11 @@ export interface DeviceHead {
   fileCount: number;
 }
 
+/** Global change-folder head — monotonic HLC hint for fast poll skipping. */
+export interface ChangesHead {
+  latestHlc: string;
+}
+
 // ─── Storage Adapter ─────────────────────────────────────────────────
 
 export interface FileEntry {

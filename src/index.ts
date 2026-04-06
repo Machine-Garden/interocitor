@@ -84,4 +84,5 @@ export type {
   DeviceInfo,
   DeviceMetadata,
   DeviceHead,
+  ChangesHead,
 } from './core/types.ts';

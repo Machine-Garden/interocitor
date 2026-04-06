@@ -20,7 +20,7 @@ import type {
   Op,
   UpsertOp,
   ColumnEntry,
-  DeviceHead,
+  ChangesHead,
   DeviceMetadata,
   SyncEvent,
   SyncEventListener,
@@ -48,11 +48,9 @@ interface CloudPaths {
   channelPointer: string;
   channelManifestFile: (generation: number, writerId: string) => string;
   mainlineFolder: string;
-  clientsFolder: string;
-  clientRoot: (deviceId: string) => string;
-  clientHead: (deviceId: string) => string;
-  clientDateFolder: (deviceId: string, date: string) => string;
-  clientChangeFile: (deviceId: string, date: string, fileName: string) => string;
+  changesFolder: string;
+  changesHead: string;
+  changeFile: (fileName: string) => string;
 }
 
 type ResolvedSyncConfig = Omit<Required<SyncConfig>, 'schema'> & {
@@ -61,6 +59,7 @@ type ResolvedSyncConfig = Omit<Required<SyncConfig>, 'schema'> & {
 
 function paths(root: string, channelId: string): CloudPaths {
   const channelRoot = `${root}/${channelId}`;
+  const changesFolder = `${channelRoot}/changes`;
   return {
     manifestPointer: `${root}/manifest.json`,
     manifestFile: (generation: number) => `${root}/manifest-${generation}.json`,
@@ -71,12 +70,9 @@ function paths(root: string, channelId: string): CloudPaths {
     channelManifestFile: (generation: number, writerId: string) =>
       `${channelRoot}/channel-manifest-${generation}-${writerId}.json`,
     mainlineFolder: `${channelRoot}/mainline`,
-    clientsFolder: `${channelRoot}/clients`,
-    clientRoot: (deviceId: string) => `${channelRoot}/clients/${deviceId}`,
-    clientHead: (deviceId: string) => `${channelRoot}/clients/${deviceId}/head.json`,
-    clientDateFolder: (deviceId: string, date: string) => `${channelRoot}/clients/${deviceId}/${date}`,
-    clientChangeFile: (deviceId: string, date: string, fileName: string) =>
-      `${channelRoot}/clients/${deviceId}/${date}/${fileName}`,
+    changesFolder,
+    changesHead: `${changesFolder}/head.json`,
+    changeFile: (fileName: string) => `${changesFolder}/${fileName}`,
   };
 }
 
@@ -110,10 +106,6 @@ function getDeviceId(): string {
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
-function isoDay(ts: number): string {
-  return new Date(ts).toISOString().slice(0, 10);
-}
-
 function hexFromBytes(bytes: Uint8Array): string {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
@@ -124,8 +116,8 @@ async function computeContentHash(payload: unknown): Promise<string> {
   return `sha256:${hexFromBytes(new Uint8Array(digest))}`;
 }
 
-function makeCursorKey(channelId: string, deviceId: string): string {
-  return `cursor:${channelId}:${deviceId}`;
+function makeCursorKey(channelId: string): string {
+  return `cursor:${channelId}`;
 }
 
 // ─── Sync Engine ─────────────────────────────────────────────────────
@@ -334,8 +326,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
       p.devicesFolder,
       p.channelRoot,
       p.mainlineFolder,
-      p.clientsFolder,
-      p.clientRoot(this.deviceId),
+      p.changesFolder,
     ];
     for (const folder of foldersToEnsure) {
       try {
@@ -769,38 +760,31 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
     try {
       const p = paths(this.config.remotePath, this.channelId);
-      await this.adapter.ensureFolder(p.clientRoot(this.deviceId));
+      await this.adapter.ensureFolder(p.changesFolder);
 
       let lastWrittenHlc = '';
-      let lastWrittenDate = '';
 
       for (const entry of entries) {
-        const date = isoDay(entry.ts);
         const fileName = `${entry.hlc}-${entry.id}.json`;
-        const dateFolder = p.clientDateFolder(this.deviceId, date);
-        await this.adapter.ensureFolder(dateFolder);
 
         const raw = JSON.stringify(entry);
         const payload = await this.encodeForCloud(raw);
         await this.adapter.writeFile(
-          p.clientChangeFile(this.deviceId, date, fileName),
+          p.changeFile(fileName),
           textEncoder.encode(payload)
         );
 
         if (!lastWrittenHlc || hlcCompareStr(entry.hlc, lastWrittenHlc) > 0) {
           lastWrittenHlc = entry.hlc;
-          lastWrittenDate = date;
         }
       }
 
-      const priorHead = await this.readJsonIfExists<DeviceHead>(p.clientHead(this.deviceId));
-      const nextHead: DeviceHead = {
-        device: this.deviceId,
-        latestHlc: lastWrittenHlc || priorHead?.latestHlc || '',
-        latestDate: lastWrittenDate || priorHead?.latestDate || isoDay(Date.now()),
-        fileCount: (priorHead?.fileCount ?? 0) + entries.length,
-      };
-      await this.writeJson(p.clientHead(this.deviceId), nextHead);
+      // Update global head — monotonic HLC hint for fast poll skipping.
+      const priorHead = await this.readJsonIfExists<ChangesHead>(p.changesHead);
+      const bestHlc = (priorHead?.latestHlc && hlcCompareStr(priorHead.latestHlc, lastWrittenHlc) > 0)
+        ? priorHead.latestHlc
+        : lastWrittenHlc;
+      await this.writeJson(p.changesHead, { latestHlc: bestHlc } satisfies ChangesHead);
       await this.upsertDeviceMetadata();
 
       log('debug', 'flush() — complete', { entryCount: entries.length });
@@ -824,80 +808,80 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     try {
       await this.loadOrCreateManifests();
       const p = paths(this.config.remotePath, this.channelId);
-      const deviceFiles = await this.adapter.listFiles(p.devicesFolder);
-      log('debug', 'pull() — found device files', deviceFiles.map(f => f.name));
+
+      // Single global cursor for the channel.
+      const cursorKey = makeCursorKey(this.channelId);
+      const cursorRaw = await this.local.getMeta(cursorKey);
+      const cursor = typeof cursorRaw === 'string' ? cursorRaw : '';
+
+      // Fast path: if global head hasn't advanced past cursor, skip listing.
+      const head = await this.readJsonIfExists<ChangesHead>(p.changesHead);
+      if (head?.latestHlc && cursor && hlcCompareStr(head.latestHlc, cursor) <= 0) {
+        log('debug', 'pull() — head unchanged, skipping');
+        this.emit({ type: 'sync:complete', entriesMerged: 0 });
+        return;
+      }
+
+      // List the flat changes folder once.
+      let files;
+      try {
+        files = await this.adapter.listFiles(p.changesFolder);
+      } catch {
+        log('debug', 'pull() — changes folder not found, nothing to merge');
+        this.emit({ type: 'sync:complete', entriesMerged: 0 });
+        return;
+      }
+      // Sort by filename (HLC prefix makes this chronological).
+      files.sort((a, b) => a.name.localeCompare(b.name));
+
       let totalMerged = 0;
+      let latestMergedHlc = cursor;
 
-      for (const deviceFile of deviceFiles) {
-        if (!deviceFile.name.endsWith('.json')) continue;
-        const remoteDeviceId = deviceFile.name.slice(0, -5);
+      for (const file of files) {
+        // Skip head.json — it's metadata, not a change file.
+        if (file.name === 'head.json') continue;
 
-        const cursorKey = makeCursorKey(this.channelId, remoteDeviceId);
-        const cursorRaw = await this.local.getMeta(cursorKey);
-        const cursor = typeof cursorRaw === 'string' ? cursorRaw : '';
+        try {
+          // Extract HLC from filename: {hlc}-{changeId}.json
+          const chgIdx = file.name.lastIndexOf('-chg_');
+          if (chgIdx === -1) continue;
+          const fileHlc = file.name.slice(0, chgIdx);
+          if (cursor && hlcCompareStr(fileHlc, cursor) <= 0) continue;
 
-        const head = await this.readJsonIfExists<DeviceHead>(p.clientHead(remoteDeviceId));
-        if (!head?.latestHlc) continue;
-        if (cursor && hlcCompareStr(head.latestHlc, cursor) <= 0) continue;
+          const raw = textDecoder.decode(await this.adapter.readFile(file.path));
+          const decoded = await this.decodeFromCloud(raw);
+          if (!decoded) continue;
+          const entry = JSON.parse(decoded) as ChangeEntry;
+          if (cursor && hlcCompareStr(entry.hlc, cursor) <= 0) continue;
 
-        // Discover all date-sharded folders under this device's client dir,
-        // then scan from the cursor date forward (inclusive) to cover multi-day gaps.
-        const cursorDate = cursor ? isoDay(hlcParse(cursor).ts) : '';
-        const dateFolders = await this.adapter.listFolders(p.clientRoot(remoteDeviceId));
-        const relevantDates = dateFolders
-          .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d))
-          .filter(d => !cursorDate || d >= cursorDate)
-          .sort();
+          const remoteHlc = hlcParse(entry.hlc);
+          this.hlc = hlcReceive(this.hlc, remoteHlc);
 
-        let latestMergedHlc = cursor;
-
-        for (const date of relevantDates) {
-          let files;
-          try {
-            files = await this.adapter.listFiles(p.clientDateFolder(remoteDeviceId, date));
-          } catch {
-            continue; // Folder may not exist yet (eventual consistency).
-          }
-          files.sort((a, b) => a.name.localeCompare(b.name));
-
-          for (const file of files) {
-            try {
-              const raw = textDecoder.decode(await this.adapter.readFile(file.path));
-              const decoded = await this.decodeFromCloud(raw);
-              if (!decoded) continue;
-              const entry = JSON.parse(decoded) as ChangeEntry;
-              if (cursor && hlcCompareStr(entry.hlc, cursor) <= 0) continue;
-
-              const remoteHlc = hlcParse(entry.hlc);
-              this.hlc = hlcReceive(this.hlc, remoteHlc);
-
-              await this.ensureRowsCached(entry.ops);
-              const affected = applyChangeEntry(this.tables, entry, this.manifest?.schema ?? 1);
-              if (affected.length > 0) {
-                await this.local.putRows(affected);
-                totalMerged += affected.length;
-                for (const row of affected) {
-                  this.knownTables.add(row._table);
-                  if (row._deleted) {
-                    this.emit({ type: 'delete', table: row._table, rowId: row._rowId });
-                  } else {
-                    this.emit({ type: 'change', table: row._table, rowId: row._rowId, row });
-                  }
-                }
+          await this.ensureRowsCached(entry.ops);
+          const affected = applyChangeEntry(this.tables, entry, this.manifest?.schema ?? 1);
+          if (affected.length > 0) {
+            await this.local.putRows(affected);
+            totalMerged += affected.length;
+            for (const row of affected) {
+              this.knownTables.add(row._table);
+              if (row._deleted) {
+                this.emit({ type: 'delete', table: row._table, rowId: row._rowId });
+              } else {
+                this.emit({ type: 'change', table: row._table, rowId: row._rowId, row });
               }
-
-              if (!latestMergedHlc || hlcCompareStr(entry.hlc, latestMergedHlc) > 0) {
-                latestMergedHlc = entry.hlc;
-              }
-            } catch {
-              // Skip corrupt or unreadable entry.
             }
           }
-        }
 
-        if (latestMergedHlc && latestMergedHlc !== cursor) {
-          await this.local.setMeta(cursorKey, latestMergedHlc);
+          if (!latestMergedHlc || hlcCompareStr(entry.hlc, latestMergedHlc) > 0) {
+            latestMergedHlc = entry.hlc;
+          }
+        } catch {
+          // Skip corrupt or unreadable entry.
         }
+      }
+
+      if (latestMergedHlc && latestMergedHlc !== cursor) {
+        await this.local.setMeta(cursorKey, latestMergedHlc);
       }
 
       await this.local.setMeta('hlc', hlcSerialize(this.hlc));
@@ -1047,37 +1031,16 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     // ≤ watermarkHlc. Individual change files at or below that watermark are
     // redundant and can be safely deleted.
     const watermarkHlc = nextChannelManifest.watermarkHlc;
-    log('debug', 'compact() — pruning client change files ≤ watermark', { watermarkHlc });
+    log('debug', 'compact() — pruning change files ≤ watermark', { watermarkHlc });
     try {
-      const deviceFolderNames = await this.adapter.listFolders(p.clientsFolder);
-      for (const deviceFolderName of deviceFolderNames) {
-        const clientRoot = `${p.clientsFolder}/${deviceFolderName}`;
-        const dateFolderNames = await this.adapter.listFolders(clientRoot);
-        for (const date of dateFolderNames) {
-          const dateFolder = `${clientRoot}/${date}`;
-          let files;
-          try {
-            files = await this.adapter.listFiles(dateFolder);
-          } catch {
-            continue;
-          }
-          let allDeleted = true;
-          for (const file of files) {
-            // Filename: {hlc}-chg_{hex}.json  →  split on the last '-chg_' to extract HLC.
-            const chgIdx = file.name.lastIndexOf('-chg_');
-            if (chgIdx === -1) { allDeleted = false; continue; }
-            const fileHlc = file.name.slice(0, chgIdx);
-            if (hlcCompareStr(fileHlc, watermarkHlc) <= 0) {
-              await this.adapter.deleteFile(file.path);
-            } else {
-              allDeleted = false;
-            }
-          }
-          // Best-effort: remove the date folder when all its files were pruned.
-          // WebDAV DELETE works on collections; other adapters may silently ignore.
-          if (allDeleted && files.length > 0) {
-            await this.adapter.deleteFile(dateFolder).catch(() => {});
-          }
+      const files = await this.adapter.listFiles(p.changesFolder);
+      for (const file of files) {
+        if (file.name === 'head.json') continue;
+        const chgIdx = file.name.lastIndexOf('-chg_');
+        if (chgIdx === -1) continue;
+        const fileHlc = file.name.slice(0, chgIdx);
+        if (hlcCompareStr(fileHlc, watermarkHlc) <= 0) {
+          await this.adapter.deleteFile(file.path);
         }
       }
       log('debug', 'compact() — pruning complete');

@@ -108,8 +108,8 @@ test('SyncEngine writes file-per-change paths and syncs rows through WebDAV', as
   expect(result.eventTypes).toContain('a:flush:complete');
   expect(result.eventTypes).toContain('b:sync:complete');
   expect(result.cloudFiles.some(path => path.endsWith('/manifest.json'))).toBe(true);
-  expect(result.cloudFiles.some(path => /\/c1\/clients\/dev_a\/.+\.json$/.test(path))).toBe(true);
-  expect(result.cloudFiles.some(path => path.endsWith('/c1/clients/dev_a/head.json'))).toBe(true);
+  expect(result.cloudFiles.some(path => /\/c1\/changes\/[^/]+-chg_[^/]+\.json$/.test(path))).toBe(true);
+  expect(result.cloudFiles.some(path => path.endsWith('/c1/changes/head.json'))).toBe(true);
 });
 
 test('rejects unauthorized writer manifests over WebDAV', async ({ page }) => {
@@ -216,7 +216,7 @@ test('encrypted sync over WebDAV keeps cloud payload opaque', async ({ page }) =
     await engineA.disconnect();
 
     const cloud = window.__webdavMock.dumpFiles();
-    const payload = Object.entries(cloud).find(([path]) => /\/c1\/clients\/dev_a\/.+\.json$/.test(path));
+    const payload = Object.entries(cloud).find(([path]) => /\/c1\/changes\/[^/]+-chg_[^/]+\.json$/.test(path));
     const cloudContainsPlaintext = payload ? payload[1].includes('top secret') : false;
 
     await window.__webdavMock.resetIndexedDb();

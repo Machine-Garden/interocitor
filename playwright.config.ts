@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const PORT = 4173;
+const PORT = Number(process.env.PLAYWRIGHT_WEBDAV_PORT || '4174');
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -16,9 +16,10 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: 'yarn test:e2e:server',
+    command: `PORT=${PORT} yarn test:e2e:server`,
     url: `http://127.0.0.1:${PORT}`,
-    reuseExistingServer: true,
+    // Always launch the test server so e2e uses in-memory WebDAV storage only.
+    reuseExistingServer: false,
     timeout: 10_000,
   },
   projects: [

@@ -65,14 +65,13 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       const files = Object.keys(dump);
       return {
         files,
-        headPath: files.find(path => path.endsWith('/c1/clients/dev_writer/head.json')),
-        changeFileCount: files.filter(path => /\/c1\/clients\/dev_writer\/\d{4}-\d{2}-\d{2}\/.+\.json$/.test(path)).length,
+        headPath: files.find(path => path.endsWith('/c1/changes/head.json')),
+        changeFileCount: files.filter(path => /\/c1\/changes\/[^/]+-chg_[^/]+\.json$/.test(path)).length,
       };
     });
 
     expect(result.headPath).toBeTruthy();
     expect(result.changeFileCount).toBe(2);
-    expect(result.files.some(path => path.includes('/changes/'))).toBe(false);
   });
 
   test('two devices converge via channelized change files', async ({ page }) => {
@@ -254,7 +253,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       await engine.disconnect();
 
       const dump = adapter.dump();
-      const payload = Object.entries(dump).find(([path]) => /\/c1\/clients\/dev_enc\/.+\.json$/.test(path));
+      const payload = Object.entries(dump).find(([path]) => /\/c1\/changes\/[^/]+-chg_[^/]+\.json$/.test(path));
       return payload ? payload[1] : '';
     });
 

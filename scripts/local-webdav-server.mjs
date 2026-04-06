@@ -1,16 +1,108 @@
+/**
+ * local-webdav-server.mjs
+ *
+ * Single-port dev server serving two concerns:
+ *   1. Static files  — any URL not starting with /__webdav__
+ *   2. WebDAV store  — URLs under /__webdav__
+ *
+ * ─── Request routing ──────────────────────────────────────────────────────────
+ *
+ * ```mermaid
+ * flowchart TD
+ *     REQ[HTTP Request] --> ROUTE{URL starts with\n/__webdav__?}
+ *     ROUTE -- Yes --> DAV[handleWebDav]
+ *     ROUTE -- No  --> STATIC[serve file from project root]
+ *     STATIC -- not found --> HARNESS[fallback: harness.html\n404-as-SPA shim]
+ *
+ *     DAV --> PARSE["parseDavPath(url)\nstrip /__webdav__ prefix\nURL-decode segments"]
+ *     PARSE --> METHOD{HTTP method}
+ *     METHOD -- OPTIONS  --> OPT[200 + Allow + DAV headers]
+ *     METHOD -- PROPFIND --> PF{Depth header}
+ *     PF -- 0 single resource --> META[file or folder metadata]
+ *     PF -- 1 folder listing  --> LIST[folder node + direct children\nfiles via listFiles\nsubfolders via listFolders]
+ *     METHOD -- MKCOL  --> MKDIR[ensureFolder — idempotent\nreturns 201 if already exists]
+ *     METHOD -- PUT    --> PUT[readRequestBody → putFile]
+ *     METHOD -- GET    --> GET[getFile → stream bytes]
+ *     METHOD -- DELETE --> DEL[deleteFile — recursive for collections]
+ *     METHOD -- other  --> M405[405 Method Not Allowed]
+ * ```
+ *
+ * ─── Backend seam ─────────────────────────────────────────────────────────────
+ *
+ * Storage is injected at startup via --mode CLI flag.
+ * Both backends expose the identical async API:
+ *   hasFolder / listFiles / listFolders / getFile / putFile / deleteFile / ensureFolder
+ *
+ * ```mermaid
+ * flowchart LR
+ *     CLI1["--mode=memory\n(default, used by test:e2e:server)"] --> MEM
+ *     CLI2["--mode=file --data-root=PATH\n(used by demo:todo:server)"] --> FILE
+ *
+ *     MEM["makeMemoryBackend()\nMap&lt;path,file&gt; + Set&lt;folder&gt;\nno persistence — wiped on restart"]
+ *     FILE["makeFileBackend(rootDir)\nreal fs under examples/.../webdav-data/\npersists between demo sessions"]
+ *
+ *     MEM --> API[[Backend API]]
+ *     FILE --> API
+ * ```
+ *
+ * ─── Test harness vs real server ──────────────────────────────────────────────
+ *
+ * ```mermaid
+ * flowchart TD
+ *     SPEC[e2e spec file] --> WHICH{which HTML fixture?}
+ *
+ *     WHICH -- "harness.html\n(most specs)" --> MOCK["window.__webdavMock\npatches fetch in-browser\nroutes /__webdav__ to JS MemoryAdapter\nNEVER reaches this server"]
+ *     WHICH -- "examples/todo-webdav/index.html\n(todo-webdav.spec.ts)" --> REAL["real HTTP to this server\n/__webdav__ handled by makeMemoryBackend()\nstate shared across all pages in the test run"]
+ * ```
+ *
+ * ─── Known seams ──────────────────────────────────────────────────────────────
+ *
+ * 1. FIXED remotePath in app.js
+ *    makeRemotePath() always returns '/Interocitor/todo-app'.
+ *    All sessions within a test run share the same WebDAV path.
+ *    The "multiple remote paths" test only appears isolated because
+ *    each session has a different encryption key — cross-reads fail to decrypt
+ *    rather than being blocked by separate folders.
+ *
+ * 2. In-memory state is global within a server process.
+ *    All pages opened against this server share one Map/Set.
+ *    A MKCOL from tabA creates a folder that tabB also sees.
+ *    A PUT from tabA writes a file that tabB can list via PROPFIND.
+ *
+ * 3. Memory backend vs file backend differences
+ *    Memory: listFiles() does NOT require the folder to exist in the Set.
+ *            A file can be written to a path whose parent was never MKCOL'd —
+ *            putFile() stores it in the Map regardless.
+ *    File:   putFile() calls mkdir(dirname, {recursive:true}) — also permissive.
+ *    Both:   ensureFolder() requires parent to exist (returns 409 otherwise).
+ *            The adapter walks path segments sequentially so connect() order matters:
+ *            remotePath → devices → c1 → mainline → changes
+ *
+ * 4. PROPFIND Depth:1 response structure
+ *    Response[0] = the folder itself (skipped by WebDAVAdapter.parsePropfindResponse)
+ *    Response[1..n] = direct file children + direct subfolder children
+ *    The adapter skips isCollection entries — any unexpected subfolder in
+ *    c1/changes/ would be silently ignored during pull().
+ *
+ * 5. ensureFolder idempotency (201 vs 405)
+ *    Both backends return HTTP 201 for already-existing folders (not 405).
+ *    WebDAVAdapter.ensureFolder accepts both 201 and 405 as success.
+ *    Any other 4xx/5xx would throw and abort connect().
+ */
+
 import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { extname, join, normalize, dirname } from 'node:path';
 
-const PORT = 4173;
+const PORT = Number(process.env.PORT || '4173');
 const ROOT = process.cwd();
 const WEBDAV_PREFIX = '/__webdav__';
 
 function parseArgs(argv) {
   const options = {
-    mode: 'memory',
-    dataRoot: './examples/todo-webdav/webdav-data',
+    mode: null,
+    dataRoot: null,
   };
 
   for (const arg of argv) {
@@ -25,7 +117,24 @@ function parseArgs(argv) {
   return options;
 }
 
-const options = parseArgs(process.argv.slice(2));
+function resolveOptions(parsed) {
+  const mode = parsed.mode || (parsed.dataRoot ? 'file' : 'memory');
+
+  if (mode !== 'memory' && mode !== 'file') {
+    throw new Error(`Unsupported --mode value: ${mode}`);
+  }
+
+  if (mode === 'file' && !parsed.dataRoot) {
+    throw new Error('Missing --data-root for file mode');
+  }
+
+  return {
+    mode,
+    dataRoot: parsed.dataRoot,
+  };
+}
+
+const options = resolveOptions(parseArgs(process.argv.slice(2)));
 
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',

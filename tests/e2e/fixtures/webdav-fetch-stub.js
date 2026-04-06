@@ -194,8 +194,10 @@ function createStore() {
       }
 
       if (method === 'MKCOL') {
+        // Return 201 for already-existing folders (idempotent, not 405).
+        // Avoids browser console errors when multiple devices create shared paths.
         if (folders.has(path)) {
-          return new Response('', { status: 405 });
+          return new Response('', { status: 201 });
         }
 
         const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) || '/' : '/';
@@ -238,8 +240,22 @@ function createStore() {
       }
 
       if (method === 'DELETE') {
-        const existed = files.delete(path);
-        return new Response(null, { status: existed ? 204 : 404 });
+        // File deletion
+        if (files.delete(path)) {
+          return new Response(null, { status: 204 });
+        }
+        // Collection (folder) deletion — recursive
+        if (folders.has(path)) {
+          for (const filePath of [...files.keys()]) {
+            if (filePath.startsWith(`${path}/`)) files.delete(filePath);
+          }
+          for (const folder of [...folders]) {
+            if (folder.startsWith(`${path}/`)) folders.delete(folder);
+          }
+          folders.delete(path);
+          return new Response(null, { status: 204 });
+        }
+        return new Response(null, { status: 404 });
       }
 
       return new Response('', { status: 405 });

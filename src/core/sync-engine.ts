@@ -80,6 +80,15 @@ function paths(root: string, channelId: string): CloudPaths {
   };
 }
 
+// ─── Logger ──────────────────────────────────────────────────────────
+
+const LOG_PREFIX = '[interocitor]';
+
+function log(level: 'debug' | 'info' | 'warn' | 'error', ...args: unknown[]): void {
+  // eslint-disable-next-line no-console
+  console[level](LOG_PREFIX, ...args);
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────
 
 function generateId(prefix: string): string {
@@ -276,11 +285,24 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
    * authenticate with cloud, then sync.
    */
   async init(): Promise<void> {
-    await this.local.open();
+    log('debug', 'init() — opening local store', { dbName: this.config.dbName, encrypted: this.encrypted });
+    try {
+      await this.local.open();
+    } catch (err) {
+      log('error', 'init() — local store open failed', err);
+      throw err;
+    }
     if (this.schema) {
       await this.local.setMeta('schema:version', this.schema.version);
     }
-    await this.loadLocalState();
+    log('debug', 'init() — loading local state (table names, HLC)');
+    try {
+      await this.loadLocalState();
+    } catch (err) {
+      log('error', 'init() — loadLocalState failed', err);
+      throw err;
+    }
+    log('debug', 'init() — complete', { knownTables: Array.from(this.knownTables) });
     this.initialized = true;
   }
 
@@ -293,22 +315,46 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
       throw new Error('Engine must be initialized via init() before connect()');
     }
 
+    log('debug', 'connect() — authenticating with adapter', { adapter: this.adapter.name });
     if (!this.adapter.isAuthenticated()) {
       this.emit({ type: 'auth:required' });
-      await this.adapter.authenticate();
+      try {
+        await this.adapter.authenticate();
+      } catch (err) {
+        log('error', 'connect() — authentication failed', err);
+        throw err;
+      }
       this.emit({ type: 'auth:complete' });
     }
 
     const p = paths(this.config.remotePath, this.channelId);
-    await this.adapter.ensureFolder(this.config.remotePath);
-    await this.adapter.ensureFolder(p.devicesFolder);
-    await this.adapter.ensureFolder(p.channelRoot);
-    await this.adapter.ensureFolder(p.mainlineFolder);
-    await this.adapter.ensureFolder(p.clientsFolder);
-    await this.adapter.ensureFolder(p.clientRoot(this.deviceId));
+    log('debug', 'connect() — ensuring remote folders', { remotePath: this.config.remotePath, channelId: this.channelId, deviceId: this.deviceId });
+    const foldersToEnsure = [
+      this.config.remotePath,
+      p.devicesFolder,
+      p.channelRoot,
+      p.mainlineFolder,
+      p.clientsFolder,
+      p.clientRoot(this.deviceId),
+    ];
+    for (const folder of foldersToEnsure) {
+      try {
+        await this.adapter.ensureFolder(folder);
+        log('debug', 'connect() — ensureFolder ok', folder);
+      } catch (err) {
+        log('error', 'connect() — ensureFolder failed', folder, err);
+        throw err;
+      }
+    }
 
-    // Read or create manifests
-    await this.loadOrCreateManifests();
+    log('debug', 'connect() — loading/creating manifests');
+    try {
+      await this.loadOrCreateManifests();
+    } catch (err) {
+      log('error', 'connect() — loadOrCreateManifests failed', err);
+      throw err;
+    }
+
     await this.upsertDeviceMetadata();
 
     // If remote epoch advanced (usually after compaction), local cache
@@ -316,11 +362,13 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     const localEpochRaw = await this.local.getMeta(`epoch:${this.channelId}`);
     const localEpoch = typeof localEpochRaw === 'number' ? localEpochRaw : 0;
     const remoteEpoch = this.channelManifest?.epoch ?? 0;
+    log('debug', 'connect() — epoch check', { localEpoch, remoteEpoch });
 
     if (localEpoch < remoteEpoch) {
+      log('debug', 'connect() — epoch advanced, rehydrating from snapshot');
       await this.rehydrate();
     } else {
-      // Initial sync
+      log('debug', 'connect() — running initial pull');
       await this.pull();
     }
     await this.flush();
@@ -328,6 +376,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     // Start polling
     this.startPolling();
     this.connected = true;
+    log('info', 'connect() — connected', { remotePath: this.config.remotePath, deviceId: this.deviceId, pollInterval: this.config.pollInterval });
 
     // Flush on page unload
     if (typeof window !== 'undefined') {
@@ -710,6 +759,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     const entries = await this.local.drainOutbox();
     if (entries.length === 0) return;
 
+    log('debug', 'flush() — start', { entryCount: entries.length });
     this.emit({ type: 'flush:start', entryCount: entries.length });
     this.pendingCount = 0;
     if (this.flushTimer) {
@@ -753,8 +803,10 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
       await this.writeJson(p.clientHead(this.deviceId), nextHead);
       await this.upsertDeviceMetadata();
 
+      log('debug', 'flush() — complete', { entryCount: entries.length });
       this.emit({ type: 'flush:complete' });
     } catch (err) {
+      log('error', 'flush() — failed, re-queuing entries', err);
       // Put entries back in outbox for retry
       for (const entry of entries) {
         await this.local.pushOutbox(entry);
@@ -766,12 +818,14 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   // ── Pull (cloud → local) ──────────────────────────────────────────
 
   async pull(): Promise<void> {
+    log('debug', 'pull() — start');
     this.emit({ type: 'sync:start' });
 
     try {
       await this.loadOrCreateManifests();
       const p = paths(this.config.remotePath, this.channelId);
       const deviceFiles = await this.adapter.listFiles(p.devicesFolder);
+      log('debug', 'pull() — found device files', deviceFiles.map(f => f.name));
       let totalMerged = 0;
 
       for (const deviceFile of deviceFiles) {
@@ -847,8 +901,10 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
       }
 
       await this.local.setMeta('hlc', hlcSerialize(this.hlc));
+      log('debug', 'pull() — complete', { totalMerged });
       this.emit({ type: 'sync:complete', entriesMerged: totalMerged });
     } catch (err) {
+      log('error', 'pull() — failed', err);
       this.emit({ type: 'sync:error', error: err as Error });
     }
   }
@@ -985,6 +1041,49 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
     this.channelManifest = nextChannelManifest;
     await this.local.setMeta(`epoch:${this.channelId}`, nextEpoch);
+
+    // Prune all change files captured in the snapshot.
+    // After compaction the snapshot is the authoritative source for all data
+    // ≤ watermarkHlc. Individual change files at or below that watermark are
+    // redundant and can be safely deleted.
+    const watermarkHlc = nextChannelManifest.watermarkHlc;
+    log('debug', 'compact() — pruning client change files ≤ watermark', { watermarkHlc });
+    try {
+      const deviceFolderNames = await this.adapter.listFolders(p.clientsFolder);
+      for (const deviceFolderName of deviceFolderNames) {
+        const clientRoot = `${p.clientsFolder}/${deviceFolderName}`;
+        const dateFolderNames = await this.adapter.listFolders(clientRoot);
+        for (const date of dateFolderNames) {
+          const dateFolder = `${clientRoot}/${date}`;
+          let files;
+          try {
+            files = await this.adapter.listFiles(dateFolder);
+          } catch {
+            continue;
+          }
+          let allDeleted = true;
+          for (const file of files) {
+            // Filename: {hlc}-chg_{hex}.json  →  split on the last '-chg_' to extract HLC.
+            const chgIdx = file.name.lastIndexOf('-chg_');
+            if (chgIdx === -1) { allDeleted = false; continue; }
+            const fileHlc = file.name.slice(0, chgIdx);
+            if (hlcCompareStr(fileHlc, watermarkHlc) <= 0) {
+              await this.adapter.deleteFile(file.path);
+            } else {
+              allDeleted = false;
+            }
+          }
+          // Best-effort: remove the date folder when all its files were pruned.
+          // WebDAV DELETE works on collections; other adapters may silently ignore.
+          if (allDeleted && files.length > 0) {
+            await this.adapter.deleteFile(dateFolder).catch(() => {});
+          }
+        }
+      }
+      log('debug', 'compact() — pruning complete');
+    } catch (err) {
+      log('warn', 'compact() — pruning failed (non-fatal, snapshot is still valid)', err);
+    }
   }
 
   // ── Mesh management ───────────────────────────────────────────

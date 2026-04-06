@@ -365,22 +365,17 @@ export class LocalStore implements LocalStoreAdapter {
 
   async getTableNames(): Promise<string[]> {
     const db = this.ensureDB();
-    return new Promise((resolve, reject) => {
-      const t = db.transaction(STORES.rows, 'readonly');
-      const index = t.objectStore(STORES.rows).index('by_table');
-      const names: string[] = [];
-      const req = index.openKeyCursor(null, 'nextunique');
-      req.onsuccess = () => {
-        const cursor = req.result;
-        if (cursor) {
-          names.push(cursor.key as string);
-          cursor.continue();
-        } else {
-          resolve(names);
-        }
-      };
-      req.onerror = () => reject(req.error);
-    });
+    // Intentionally avoids openKeyCursor: Safari rejects null as a key range
+    // argument in some IDB versions. A full-store getAll() is safe everywhere
+    // and acceptable here — called once at init on an otherwise-empty DB.
+    const t = tx(db, STORES.rows, 'readonly');
+    const store = t.objectStore(STORES.rows);
+    const all = await reqToPromise(store.getAll()) as Row[];
+    const names = new Set<string>();
+    for (const row of all) {
+      if (row._table) names.add(row._table);
+    }
+    return Array.from(names);
   }
 
   async getAllRows(): Promise<Row[]> {

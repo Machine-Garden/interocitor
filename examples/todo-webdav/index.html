@@ -95,6 +95,19 @@
       <ul id="tasks"></ul>
     </section>
 
+    <section>
+      <h2>Mainline</h2>
+      <p class="muted">
+        Compact collapses all current changes into a snapshot on the mainline.
+        New devices joining afterwards rehydrate from this snapshot instead of
+        replaying every individual change file. Only one device needs to do it.
+      </p>
+      <div class="row">
+        <button id="compactBtn">Compact (set mainline)</button>
+      </div>
+      <p id="compactStatus" class="muted"></p>
+    </section>
+
     <p id="status">Disconnected.</p>
 
     <script type="module" src="./app.js"></script>

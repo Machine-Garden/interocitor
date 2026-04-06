@@ -185,8 +185,10 @@ async function handleRoute(route: Route, request: Request, state: WebDavRouteSta
   }
 
   if (method === 'MKCOL') {
+    // Return 201 for already-existing folders (idempotent, not 405).
+    // Avoids browser console errors when multiple devices create shared paths.
     if (state.folders.has(path)) {
-      await route.fulfill({ status: 405, body: '' });
+      await route.fulfill({ status: 201, body: '' });
       return;
     }
 
@@ -226,8 +228,24 @@ async function handleRoute(route: Route, request: Request, state: WebDavRouteSta
   }
 
   if (method === 'DELETE') {
-    const existed = state.files.delete(path);
-    await route.fulfill({ status: existed ? 204 : 404, body: '' });
+    // File deletion
+    if (state.files.delete(path)) {
+      await route.fulfill({ status: 204, body: '' });
+      return;
+    }
+    // Collection (folder) deletion — recursive
+    if (state.folders.has(path)) {
+      for (const [filePath] of state.files) {
+        if (filePath.startsWith(`${path}/`)) state.files.delete(filePath);
+      }
+      for (const folder of [...state.folders]) {
+        if (folder.startsWith(`${path}/`)) state.folders.delete(folder);
+      }
+      state.folders.delete(path);
+      await route.fulfill({ status: 204, body: '' });
+      return;
+    }
+    await route.fulfill({ status: 404, body: '' });
     return;
   }
 

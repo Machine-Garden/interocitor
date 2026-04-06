@@ -14,6 +14,8 @@ const els = {
   refreshBtn: document.getElementById('refreshBtn'),
   applyTokenBtn: document.getElementById('applyTokenBtn'),
   copyTokenBtn: document.getElementById('copyTokenBtn'),
+  compactBtn: document.getElementById('compactBtn'),
+  compactStatus: document.getElementById('compactStatus'),
 };
 
 /**
@@ -34,7 +36,7 @@ function randomSuffix() {
 }
 
 function makeRemotePath() {
-  return `/Interocitor/todo-${randomSuffix()}`;
+  return `/Interocitor/todo-app`;
 }
 
 function makeJoinToken(baseUrl, remotePath, keyPassphrase) {
@@ -123,8 +125,8 @@ async function connect() {
   const engine = new SyncEngine(adapter, {
     remotePath: session.remotePath,
     dbName,
-    pollInterval: 1500,
-    flushDebounce: 50,
+    pollInterval: 5000,   // 5 s: reduces head.json 404 spam during idle periods
+    flushDebounce: 200,
     flushThreshold: 1,
   });
 
@@ -241,6 +243,21 @@ async function refreshTasks() {
   return sorted;
 }
 
+async function compact() {
+  if (!runtime.engine) throw new Error('Connect first');
+
+  els.compactStatus.textContent = 'Compacting…';
+  try {
+    await runtime.engine.compact();
+    const manifest = runtime.engine.getManifest();
+    const gen = manifest?.generation ?? '?';
+    els.compactStatus.textContent = `Mainline set at generation ${gen}. New devices will rehydrate from this snapshot.`;
+  } catch (err) {
+    els.compactStatus.textContent = `Compact failed: ${err.message}`;
+    throw err;
+  }
+}
+
 function applyTokenFromInput() {
   const raw = els.joinTokenInput.value.trim();
   const parsed = parseJoinToken(raw);
@@ -307,6 +324,9 @@ els.applyTokenBtn.addEventListener('click', () => {
 els.copyTokenBtn.addEventListener('click', () => {
   void copyToken().catch((error) => setStatus(`Copy failed: ${error.message}`));
 });
+els.compactBtn.addEventListener('click', () => {
+  void compact().catch((error) => setStatus(`Compact failed: ${error.message}`));
+});
 
 window.__todoDemo = {
   createSession,
@@ -319,6 +339,7 @@ window.__todoDemo = {
   disconnect,
   addTask,
   refreshTasks,
+  compact,
   getShareToken() {
     return els.shareToken.value;
   },

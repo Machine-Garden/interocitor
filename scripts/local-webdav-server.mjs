@@ -136,10 +136,25 @@ function makeMemoryBackend() {
       return existed;
     },
     async deleteFile(path) {
-      return files.delete(path);
+      if (files.delete(path)) return true;
+      // Collection (folder) deletion — recursive
+      if (folders.has(path)) {
+        for (const filePath of [...files.keys()]) {
+          if (filePath.startsWith(`${path}/`)) files.delete(filePath);
+        }
+        for (const folder of [...folders]) {
+          if (folder.startsWith(`${path}/`)) folders.delete(folder);
+        }
+        folders.delete(path);
+        return true;
+      }
+      return false;
     },
     async ensureFolder(path) {
-      if (folders.has(path)) return { status: 405 };
+      // Return 201 (not 405) for already-existing folders: idempotent create,
+      // same as S3/Azure semantics. Avoids noisy browser console errors when
+      // a second device connects and tries to create folders the first already made.
+      if (folders.has(path)) return { status: 201 };
       const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) || '/' : '/';
       if (!folders.has(parent)) return { status: 409 };
       folders.add(path);
@@ -242,6 +257,12 @@ function makeFileBackend(rootDir) {
       const absolute = fsPath(path);
       if (!absolute) return false;
       try {
+        const s = await stat(absolute);
+        if (s.isDirectory()) {
+          // Recursive collection delete
+          await rm(absolute, { recursive: true });
+          return true;
+        }
         await unlink(absolute);
         return true;
       } catch {
@@ -251,7 +272,8 @@ function makeFileBackend(rootDir) {
     async ensureFolder(path) {
       if (path === '/') {
         await mkdir(dataRoot, { recursive: true });
-        return { status: 405 };
+        // Idempotent root ensure — return 201, not 405.
+        return { status: 201 };
       }
 
       const absolute = fsPath(path);
@@ -259,7 +281,9 @@ function makeFileBackend(rootDir) {
 
       try {
         if ((await stat(absolute)).isDirectory()) {
-          return { status: 405 };
+          // Idempotent: folder already exists — return 201, not 405.
+          // Avoids browser console errors when multiple devices connect.
+          return { status: 201 };
         }
       } catch {
         // continue

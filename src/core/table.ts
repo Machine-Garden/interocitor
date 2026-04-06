@@ -13,6 +13,7 @@ import type { SyncEngine } from './sync-engine.ts';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyEngine = SyncEngine<any>;
 import type { Row, ColumnEntry } from './types.ts';
+import type { WhereClause, WherePrimitive } from './types.ts';
 
 function rowToTyped<T extends Record<string, unknown>>(row: Row): T {
   const result: Record<string, unknown> = {};
@@ -44,6 +45,11 @@ export class Table<T extends Record<string, unknown>> {
     return rows.map(r => rowToTyped<T>(r));
   }
 
+  /** Build a field-scoped where query (Dexie-style, without string schema syntax). */
+  where<K extends keyof T & string>(field: K): TableWhere<T> {
+    return new TableWhere<T>(this.engine, this.name, field);
+  }
+
   /** Insert or update a record. Returns the merged result. */
   async put(rowId: string, data: Partial<T>, userId?: string): Promise<T> {
     const row = await this.engine.put(
@@ -58,6 +64,64 @@ export class Table<T extends Record<string, unknown>> {
   /** Soft-delete a record. */
   async delete(rowId: string, userId?: string): Promise<void> {
     return this.engine.delete(this.name, rowId, userId);
+  }
+}
+
+class TableWhere<T extends Record<string, unknown>> {
+  constructor(
+    private readonly engine: AnyEngine,
+    private readonly table: string,
+    private readonly field: string,
+  ) {}
+
+  private async run(clause: Omit<WhereClause, 'field'>): Promise<T[]> {
+    const rows = await this.engine.queryWhere(this.table, {
+      field: this.field,
+      ...clause,
+    } as WhereClause);
+    return rows.map(row => rowToTyped<T>(row));
+  }
+
+  equals(value: WherePrimitive): Promise<T[]> {
+    return this.run({ op: 'equals', value });
+  }
+
+  above(value: WherePrimitive): Promise<T[]> {
+    return this.run({ op: 'above', value });
+  }
+
+  aboveOrEqual(value: WherePrimitive): Promise<T[]> {
+    return this.run({ op: 'aboveOrEqual', value });
+  }
+
+  below(value: WherePrimitive): Promise<T[]> {
+    return this.run({ op: 'below', value });
+  }
+
+  belowOrEqual(value: WherePrimitive): Promise<T[]> {
+    return this.run({ op: 'belowOrEqual', value });
+  }
+
+  between(
+    lower: WherePrimitive,
+    upper: WherePrimitive,
+    options?: { lowerOpen?: boolean; upperOpen?: boolean },
+  ): Promise<T[]> {
+    return this.run({
+      op: 'between',
+      lower,
+      upper,
+      lowerOpen: options?.lowerOpen,
+      upperOpen: options?.upperOpen,
+    });
+  }
+
+  startsWith(prefix: string): Promise<T[]> {
+    return this.run({ op: 'startsWith', value: prefix });
+  }
+
+  anyOf(values: WherePrimitive[]): Promise<T[]> {
+    return this.run({ op: 'anyOf', values });
   }
 }
 

@@ -39,6 +39,7 @@
 export { SyncEngine } from './core/sync-engine.ts';
 export { LocalStore } from './storage/local-store.ts';
 export { Table } from './core/table.ts';
+export { types } from './core/schema-types.ts';
 
 // ─── Row utilities ────────────────────────────────────────────────────
 
@@ -57,6 +58,16 @@ export type {
 
   // Engine configuration
   SyncConfig,
+  DatabaseSchemaDefinition,
+  TableSchemaDefinition,
+  TableIndexDefinition,
+  SchemaFieldKind,
+  IndexableSchemaFieldKind,
+  SchemaField,
+  IndexableSchemaField,
+  WhereClause,
+  WherePrimitive,
+  WhereOperator,
 
   // Events
   SyncEvent,

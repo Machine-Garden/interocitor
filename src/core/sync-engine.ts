@@ -24,6 +24,8 @@ import type {
   DeviceMetadata,
   SyncEvent,
   SyncEventListener,
+  DatabaseSchemaDefinition,
+  WhereClause,
 } from '../core/types.ts';
 
 import { hlcInit, hlcNow, hlcSerialize, hlcParse, hlcReceive, hlcCompareStr } from '../core/hlc.ts';
@@ -52,6 +54,10 @@ interface CloudPaths {
   clientDateFolder: (deviceId: string, date: string) => string;
   clientChangeFile: (deviceId: string, date: string, fileName: string) => string;
 }
+
+type ResolvedSyncConfig = Omit<Required<SyncConfig>, 'schema'> & {
+  schema?: DatabaseSchemaDefinition;
+};
 
 function paths(root: string, channelId: string): CloudPaths {
   const channelRoot = `${root}/${channelId}`;
@@ -130,7 +136,7 @@ function makeCursorKey(channelId: string, deviceId: string): string {
  */
 export class SyncEngine<S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>> {
   private adapter: StorageAdapter;
-  private config: Required<SyncConfig>;
+  private config: ResolvedSyncConfig;
   private channelId: string;
   private serverId: string;
   private local: LocalStoreAdapter;
@@ -161,8 +167,10 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
   // Event listeners
   private listeners: Set<SyncEventListener> = new Set();
+  private readonly schema?: DatabaseSchemaDefinition;
 
   constructor(adapter: StorageAdapter, config: SyncConfig) {
+    this.schema = config.schema;
     this.adapter = adapter;
     this.config = {
       remotePath: config.remotePath,
@@ -173,7 +181,8 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
       flushDebounce: config.flushDebounce ?? 2_000,
       flushThreshold: config.flushThreshold ?? 50,
       dbName: config.dbName ?? 'interocitor',
-      localStoreFactory: config.localStoreFactory ?? (() => new LocalStore(config.dbName)),
+      localStoreFactory: config.localStoreFactory ?? (() => new LocalStore(config.dbName, undefined, config.schema)),
+      schema: config.schema,
     };
     this.channelId = this.config.channelId;
     this.serverId = this.config.serverId;
@@ -268,6 +277,9 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
    */
   async init(): Promise<void> {
     await this.local.open();
+    if (this.schema) {
+      await this.local.setMeta('schema:version', this.schema.version);
+    }
     await this.loadLocalState();
     this.initialized = true;
   }
@@ -453,7 +465,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
       writtenAt: now,
       version: 2,
       meshId: generateId('mesh'),
-      schema: 1,
+      schema: this.schema?.version ?? 1,
       lensVersion: 1,
       encrypted: this.encrypted,
       channels: [this.channelId],
@@ -518,6 +530,10 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
     if (globalManifest.version !== 2) {
       throw new Error('Unsupported manifest version for this beta.');
+    }
+    if (this.schema && globalManifest.schema !== this.schema.version) {
+      this.emit({ type: 'schema:mismatch', local: this.schema.version, remote: globalManifest.schema });
+      throw new Error(`Schema version mismatch: local=${this.schema.version}, remote=${globalManifest.schema}`);
     }
     if (globalManifest.server.managed) {
       this.assertServerAuth(globalManifest);
@@ -644,6 +660,11 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   /** Get all live (non-deleted) rows in a table. */
   async query(table: string): Promise<Row[]> {
     return this.local.getTable(table);
+  }
+
+  /** Query live rows using a where-clause predicate (indexed when available). */
+  async queryWhere(table: string, clause: WhereClause): Promise<Row[]> {
+    return this.local.queryWhere(table, clause);
   }
 
   /** Get all known table names. */

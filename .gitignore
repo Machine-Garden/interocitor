@@ -141,3 +141,8 @@ vite.config.ts.timestamp-*
 
 src/**/*.js
 test-results
+
+# Local TODO demo persisted WebDAV data
+examples/todo-webdav/webdav-data/*
+!examples/todo-webdav/webdav-data/.gitkeep
+

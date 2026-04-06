@@ -112,6 +112,124 @@ test.describe('LocalStore — row operations', () => {
     expect(result.rowCount).toBe(0);
     expect(result.metaPreserved).toBe(true);
   });
+
+  test('queryWhere uses schema indexes for equality/range lookups', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const store = new LocalStore('interocitor-indexed', undefined, {
+        version: 1,
+        tables: {
+          tasks: {
+            fields: {
+              status: { type: { kind: 'string' }, index: true },
+              priority: { type: { kind: 'number' }, index: true },
+            },
+          },
+        },
+      });
+      await store.open();
+
+      await store.putRows([
+        {
+          _table: 'tasks', _rowId: 't1', _deleted: false, _schemaVersion: 1,
+          status: { value: 'open', hlc: '0' },
+          priority: { value: 1, hlc: '0' },
+        },
+        {
+          _table: 'tasks', _rowId: 't2', _deleted: false, _schemaVersion: 1,
+          status: { value: 'done', hlc: '0' },
+          priority: { value: 3, hlc: '0' },
+        },
+        {
+          _table: 'tasks', _rowId: 't3', _deleted: false, _schemaVersion: 1,
+          status: { value: 'open', hlc: '0' },
+          priority: { value: 2, hlc: '0' },
+        },
+      ] as any);
+
+      const open = await store.queryWhere('tasks', { field: 'status', op: 'equals', value: 'open' } as any);
+      const range = await store.queryWhere('tasks', {
+        field: 'priority',
+        op: 'between',
+        lower: 2,
+        upper: 3,
+      } as any);
+
+      store.close();
+      return {
+        open: open.map(r => r._rowId).sort(),
+        range: range.map(r => r._rowId).sort(),
+      };
+    });
+
+    expect(result.open).toEqual(['t1', 't3']);
+    expect(result.range).toEqual(['t2', 't3']);
+  });
+
+  test('queryWhere falls back to table scan when field is not indexed', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const store = new LocalStore('interocitor-scan', undefined, {
+        version: 1,
+        tables: {
+          tasks: {
+            fields: {
+              status: { type: { kind: 'string' }, index: true },
+            },
+          },
+        },
+      });
+      await store.open();
+
+      await store.putRows([
+        {
+          _table: 'tasks', _rowId: 't1', _deleted: false, _schemaVersion: 1,
+          title: { value: 'alpha', hlc: '0' },
+        },
+        {
+          _table: 'tasks', _rowId: 't2', _deleted: false, _schemaVersion: 1,
+          title: { value: 'beta', hlc: '0' },
+        },
+      ] as any);
+
+      const startsWithA = await store.queryWhere('tasks', {
+        field: 'title',
+        op: 'startsWith',
+        value: 'a',
+      } as any);
+
+      store.close();
+      return startsWithA.map(r => r._rowId);
+    });
+
+    expect(result).toEqual(['t1']);
+  });
+
+  test('legacy indexes array still works for compatibility', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const store = new LocalStore('interocitor-legacy-indexes', undefined, {
+        version: 1,
+        tables: {
+          tasks: {
+            indexes: [{ name: 'by_status', field: 'status' }],
+          },
+        },
+      });
+      await store.open();
+
+      await store.putRows([
+        { _table: 'tasks', _rowId: 't1', _deleted: false, _schemaVersion: 1, status: { value: 'open', hlc: '0' } },
+        { _table: 'tasks', _rowId: 't2', _deleted: false, _schemaVersion: 1, status: { value: 'done', hlc: '0' } },
+      ] as any);
+
+      const open = await store.queryWhere('tasks', { field: 'status', op: 'equals', value: 'open' } as any);
+      store.close();
+      return open.map(row => row._rowId);
+    });
+
+    expect(result).toEqual(['t1']);
+  });
 });
 
 // ─── Outbox ──────────────────────────────────────────────────────────

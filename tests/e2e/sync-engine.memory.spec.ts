@@ -110,6 +110,54 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
     expect(result).toBe('from a');
   });
 
+  test('supports schema indexes + table.where queries', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { SyncEngine, types } = await import('/dist/index.js');
+      const { MemoryAdapter } = await import('/dist/adapters/memory.js');
+
+      localStorage.setItem('interocitor-device-id', 'dev_where');
+      const adapter = new MemoryAdapter();
+      const engine = new SyncEngine(adapter, {
+        remotePath: '/MeshWhere',
+        pollInterval: 600_000,
+        schema: {
+          version: 2,
+          tables: {
+            tasks: {
+              fields: {
+                status: types.index(types.string),
+                priority: types.index(types.number),
+              },
+            },
+          },
+        },
+      });
+
+      await engine.init();
+      await engine.connect();
+
+      const tasks = engine.table('tasks');
+      await tasks.put('t1', { title: 'A', status: 'open', priority: 1 } as any);
+      await tasks.put('t2', { title: 'B', status: 'done', priority: 3 } as any);
+      await tasks.put('t3', { title: 'C', status: 'open', priority: 2 } as any);
+
+      const open = await tasks.where('status').equals('open' as any);
+      const p2plus = await tasks.where('priority').aboveOrEqual(2 as any);
+      const manifest = engine.getManifest();
+
+      await engine.disconnect();
+      return {
+        openTitles: open.map((row: any) => row.title).sort(),
+        p2plusTitles: p2plus.map((row: any) => row.title).sort(),
+        schemaVersion: manifest?.schema,
+      };
+    });
+
+    expect(result.openTitles).toEqual(['A', 'C']);
+    expect(result.p2plusTitles).toEqual(['B', 'C']);
+    expect(result.schemaVersion).toBe(2);
+  });
+
   test('rejects unauthorized server writer in manifest', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { SyncEngine } = await import('/dist/index.js');

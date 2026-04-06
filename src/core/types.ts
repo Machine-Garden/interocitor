@@ -65,6 +65,69 @@ export interface Row {
   [column: string]: ColumnEntry | string | boolean | number | undefined;
 }
 
+// ─── Schema / Indexes ─────────────────────────────────────────────────
+
+export interface TableIndexDefinition {
+  /** Stable index id used for migration and diagnostics. */
+  name: string;
+  /** Top-level column name to index (plain row field, e.g. "status"). */
+  field: string;
+  unique?: boolean;
+}
+
+export type SchemaFieldKind = 'string' | 'number' | 'boolean' | 'date' | 'json' | 'enum';
+
+export type IndexableSchemaFieldKind = Exclude<SchemaFieldKind, 'json'>;
+
+/** A field descriptor — carries kind, optional index flags, and a phantom TS type. */
+export interface SchemaField<T = unknown, K extends SchemaFieldKind = SchemaFieldKind> {
+  readonly kind: K;
+  readonly index?: boolean;
+  readonly unique?: boolean;
+  /** @internal phantom — never assigned at runtime */
+  readonly _type?: T;
+}
+
+/** Narrows kind to the set that IndexedDB can use as a key. */
+export type IndexableSchemaField<T = unknown> = SchemaField<T, IndexableSchemaFieldKind>;
+
+
+export interface TableSchemaDefinition {
+  /** Production style: define field kind + index intent in one place. */
+  fields?: Record<string, SchemaField>;
+  /** Legacy style: kept for compatibility. */
+  indexes?: TableIndexDefinition[];
+}
+
+export interface DatabaseSchemaDefinition {
+  /** Increment when index/table metadata changes. */
+  version: number;
+  tables: Record<string, TableSchemaDefinition>;
+}
+
+export type WherePrimitive = string | number | boolean | Date;
+
+export type WhereOperator =
+  | 'equals'
+  | 'above'
+  | 'aboveOrEqual'
+  | 'below'
+  | 'belowOrEqual'
+  | 'between'
+  | 'startsWith'
+  | 'anyOf';
+
+export interface WhereClause {
+  field: string;
+  op: WhereOperator;
+  value?: WherePrimitive;
+  values?: WherePrimitive[];
+  lower?: WherePrimitive;
+  upper?: WherePrimitive;
+  lowerOpen?: boolean;
+  upperOpen?: boolean;
+}
+
 // ─── Snapshot ────────────────────────────────────────────────────────
 
 export interface Snapshot {
@@ -182,6 +245,7 @@ export interface LocalStoreAdapter {
   putRow(row: Row): Promise<void>;
   putRows(rows: Row[]): Promise<void>;
   getTable(table: string): Promise<Row[]>;
+  queryWhere(table: string, clause: WhereClause): Promise<Row[]>;
   getAllRows(): Promise<Row[]>;
   clearRows(): Promise<void>;
   getTableNames(): Promise<string[]>;
@@ -231,6 +295,8 @@ export interface SyncConfig {
    * for constructing the store.
    */
   localStoreFactory?: LocalStoreFactory;
+  /** Optional table/index metadata for local query planning and migrations. */
+  schema?: DatabaseSchemaDefinition;
 }
 
 // ─── Events ──────────────────────────────────────────────────────────

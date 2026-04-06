@@ -21,6 +21,7 @@
     "isolatedModules": true,
     "target": "es2020",
     "moduleResolution": "node",
+    "ignoreDeprecations": "6.0",
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
   "include": ["src"],

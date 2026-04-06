@@ -4,8 +4,7 @@
  * Orchestrates:
  *  - Local writes → outbox → flush to cloud
  *  - Cloud poll → download → decrypt → CRDT merge → local DB
- *  - Compaction (with optional migration transform)
- *  - Rehydration from snapshot
+ *  - Rehydration from manifest-authoritative snapshot
  */
 
 import type {
@@ -13,16 +12,20 @@ import type {
   SyncConfig,
   ChangeEntry,
   Manifest,
+  ManifestPointer,
+  ChannelManifest,
   Snapshot,
   Row,
   Op,
   UpsertOp,
   ColumnEntry,
+  DeviceHead,
+  DeviceMetadata,
   SyncEvent,
   SyncEventListener,
 } from '../core/types.ts';
 
-import { hlcInit, hlcNow, hlcSerialize, hlcParse, hlcReceive } from '../core/hlc.ts';
+import { hlcInit, hlcNow, hlcSerialize, hlcParse, hlcReceive, hlcCompareStr } from '../core/hlc.ts';
 import { applyOp, applyChangeEntry } from '../core/crdt.ts';
 import { LocalStore } from '../storage/local-store.ts';
 import {
@@ -32,15 +35,40 @@ import {
 
 import type { HLC } from '../core/types.ts';
 
-// ─── Paths ───────────────────────────────────────────────────────────
+interface CloudPaths {
+  manifestPointer: string;
+  manifestFile: (generation: number) => string;
+  devicesFolder: string;
+  deviceFile: (deviceId: string) => string;
+  channelRoot: string;
+  channelPointer: string;
+  channelManifestFile: (generation: number, writerId: string) => string;
+  mainlineFolder: string;
+  clientsFolder: string;
+  clientRoot: (deviceId: string) => string;
+  clientHead: (deviceId: string) => string;
+  clientDateFolder: (deviceId: string, date: string) => string;
+  clientChangeFile: (deviceId: string, date: string, fileName: string) => string;
+}
 
-function paths(root: string) {
+function paths(root: string, channelId: string): CloudPaths {
+  const channelRoot = `${root}/${channelId}`;
   return {
-    manifest: `${root}/manifest.json`,
-    changes: `${root}/changes`,
-    snapshots: `${root}/snapshots`,
-    snapshotLatest: `${root}/snapshots/latest.json`,
-    changeLog: (deviceId: string) => `${root}/changes/${deviceId}.ndjson`,
+    manifestPointer: `${root}/manifest.json`,
+    manifestFile: (generation: number) => `${root}/manifest-${generation}.json`,
+    devicesFolder: `${root}/devices`,
+    deviceFile: (deviceId: string) => `${root}/devices/${deviceId}.json`,
+    channelRoot,
+    channelPointer: `${channelRoot}/channel.json`,
+    channelManifestFile: (generation: number, writerId: string) =>
+      `${channelRoot}/channel-manifest-${generation}-${writerId}.json`,
+    mainlineFolder: `${channelRoot}/mainline`,
+    clientsFolder: `${channelRoot}/clients`,
+    clientRoot: (deviceId: string) => `${channelRoot}/clients/${deviceId}`,
+    clientHead: (deviceId: string) => `${channelRoot}/clients/${deviceId}/head.json`,
+    clientDateFolder: (deviceId: string, date: string) => `${channelRoot}/clients/${deviceId}/${date}`,
+    clientChangeFile: (deviceId: string, date: string, fileName: string) =>
+      `${channelRoot}/clients/${deviceId}/${date}/${fileName}`,
   };
 }
 
@@ -65,11 +93,31 @@ function getDeviceId(): string {
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
+function isoDay(ts: number): string {
+  return new Date(ts).toISOString().slice(0, 10);
+}
+
+function hexFromBytes(bytes: Uint8Array): string {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function computeContentHash(payload: unknown): Promise<string> {
+  const json = JSON.stringify(payload);
+  const digest = await crypto.subtle.digest('SHA-256', textEncoder.encode(json));
+  return `sha256:${hexFromBytes(new Uint8Array(digest))}`;
+}
+
+function makeCursorKey(channelId: string, deviceId: string): string {
+  return `cursor:${channelId}:${deviceId}`;
+}
+
 // ─── Sync Engine ─────────────────────────────────────────────────────
 
 export class SyncEngine {
   private adapter: StorageAdapter;
   private config: Required<SyncConfig>;
+  private channelId: string;
+  private serverId: string;
   private local: LocalStore;
   private deviceId: string;
   private hlc: HLC;
@@ -79,6 +127,7 @@ export class SyncEngine {
   // In-memory state (mirror of local DB for fast access)
   private tables: Record<string, Record<string, Row>> = {};
   private manifest: Manifest | null = null;
+  private channelManifest: ChannelManifest | null = null;
 
   // Flush management
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -94,11 +143,15 @@ export class SyncEngine {
     this.adapter = adapter;
     this.config = {
       rootPath: config.rootPath,
+      channelId: config.channelId ?? 'c1',
+      serverManaged: config.serverManaged ?? false,
+      serverId: config.serverId ?? 'server_relay_1',
       pollInterval: config.pollInterval ?? 30_000,
       flushDebounce: config.flushDebounce ?? 2_000,
       flushThreshold: config.flushThreshold ?? 50,
-      compactionThreshold: config.compactionThreshold ?? 1_048_576, // 1MB
     };
+    this.channelId = this.config.channelId;
+    this.serverId = this.config.serverId;
     this.local = new LocalStore();
     this.deviceId = getDeviceId();
     this.hlc = hlcInit(this.deviceId);
@@ -173,18 +226,23 @@ export class SyncEngine {
       this.emit({ type: 'auth:complete' });
     }
 
-    const p = paths(this.config.rootPath);
-    await this.adapter.ensureFolder(p.changes);
-    await this.adapter.ensureFolder(p.snapshots);
+    const p = paths(this.config.rootPath, this.channelId);
+    await this.adapter.ensureFolder(this.config.rootPath);
+    await this.adapter.ensureFolder(p.devicesFolder);
+    await this.adapter.ensureFolder(p.channelRoot);
+    await this.adapter.ensureFolder(p.mainlineFolder);
+    await this.adapter.ensureFolder(p.clientsFolder);
+    await this.adapter.ensureFolder(p.clientRoot(this.deviceId));
 
-    // Read or create manifest
-    await this.loadOrCreateManifest();
+    // Read or create manifests
+    await this.loadOrCreateManifests();
+    await this.upsertDeviceMetadata();
 
-    // If remote epoch advanced (usually after compaction), local cache/cursors
+    // If remote epoch advanced (usually after compaction), local cache
     // may be stale and must be rebuilt from snapshot first.
-    const localEpochRaw = await this.local.getMeta('epoch');
+    const localEpochRaw = await this.local.getMeta(`epoch:${this.channelId}`);
     const localEpoch = typeof localEpochRaw === 'number' ? localEpochRaw : 0;
-    const remoteEpoch = this.manifest?.epoch ?? 0;
+    const remoteEpoch = this.channelManifest?.epoch ?? 0;
 
     if (localEpoch < remoteEpoch) {
       await this.rehydrate();
@@ -225,46 +283,143 @@ export class SyncEngine {
 
   // ── Manifest ───────────────────────────────────────────────────────
 
-  private async loadOrCreateManifest(): Promise<void> {
-    const p = paths(this.config.rootPath);
-    try {
-      const meta = await this.adapter.getFileMetadata(p.manifest);
-      if (meta) {
-        const data = await this.adapter.readFile(p.manifest);
-        const json = textDecoder.decode(data);
-        this.manifest = JSON.parse(json) as Manifest;
-        this.encrypted = this.manifest.encrypted;
-
-        // Register this device
-        if (!this.manifest.devices[this.deviceId]) {
-          this.manifest.devices[this.deviceId] = { deviceId: this.deviceId };
-          await this.saveManifest();
-        }
-        return;
-      }
-    } catch {
-      // manifest doesn't exist, create it
-    }
-
-    this.manifest = {
-      version: 1,
-      meshId: generateId('mesh'),
-      schema: 1,
-      encrypted: this.encrypted,
-      epoch: 0,
-      devices: { [this.deviceId]: { deviceId: this.deviceId } },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    await this.saveManifest();
+  private async readJson<T>(path: string): Promise<T> {
+    const data = await this.adapter.readFile(path);
+    return JSON.parse(textDecoder.decode(data)) as T;
   }
 
-  private async saveManifest(): Promise<void> {
-    if (!this.manifest) return;
-    const p = paths(this.config.rootPath);
-    this.manifest.updatedAt = new Date().toISOString();
-    const json = JSON.stringify(this.manifest, null, 2);
-    await this.adapter.writeFile(p.manifest, textEncoder.encode(json));
+  private async readJsonIfExists<T>(path: string): Promise<T | null> {
+    try {
+      return await this.readJson<T>(path);
+    } catch {
+      return null;
+    }
+  }
+
+  private assertServerAuth(manifest: { writtenBy: string }): void {
+    if (manifest.writtenBy !== this.serverId) {
+      throw new Error(`Unauthorized manifest writer: ${manifest.writtenBy}`);
+    }
+  }
+
+  private async validateManifestHash(manifest: { contentHash: string; [key: string]: unknown }): Promise<void> {
+    const { contentHash, ...payload } = manifest;
+    const expected = await computeContentHash(payload);
+    if (contentHash !== expected) {
+      throw new Error('Manifest content hash mismatch');
+    }
+  }
+
+  private async writeJson(path: string, value: unknown): Promise<void> {
+    await this.adapter.writeFile(path, textEncoder.encode(JSON.stringify(value, null, 2)));
+  }
+
+  private async createBootstrapManifests(): Promise<void> {
+    const p = paths(this.config.rootPath, this.channelId);
+    const now = new Date().toISOString();
+
+    const globalPayload = {
+      generation: 1,
+      parentGeneration: 0,
+      writtenBy: this.serverId,
+      writtenAt: now,
+      version: 2,
+      meshId: generateId('mesh'),
+      schema: 1,
+      lensVersion: 1,
+      encrypted: this.encrypted,
+      channels: [this.channelId],
+      channelNames: { [this.channelId]: 'default' },
+      defaultChannel: this.channelId,
+      server: {
+        managed: this.config.serverManaged,
+        relayUrl: null,
+        serverId: this.serverId,
+      },
+      createdAt: now,
+    };
+
+    const globalManifest: Manifest = {
+      ...globalPayload,
+      contentHash: await computeContentHash(globalPayload),
+    };
+
+    const channelPayload = {
+      generation: 1,
+      parentGeneration: 0,
+      writtenBy: this.serverId,
+      writtenAt: now,
+      channelId: this.channelId,
+      epoch: 0,
+      watermarkHlc: '',
+      snapshotPath: null,
+      deltaPath: null,
+    };
+
+    const channelManifest: ChannelManifest = {
+      ...channelPayload,
+      contentHash: await computeContentHash(channelPayload),
+    };
+
+    const globalFile = `manifest-${globalManifest.generation}.json`;
+    const channelFile = `channel-manifest-${channelManifest.generation}-${this.serverId}.json`;
+
+    await this.writeJson(p.manifestFile(globalManifest.generation), globalManifest);
+    await this.writeJson(p.channelManifestFile(channelManifest.generation, this.serverId), channelManifest);
+    await this.writeJson(p.manifestPointer, {
+      currentGeneration: globalManifest.generation,
+      file: globalFile,
+    } satisfies ManifestPointer);
+    await this.writeJson(p.channelPointer, {
+      currentGeneration: channelManifest.generation,
+      file: channelFile,
+    } satisfies ManifestPointer);
+  }
+
+  private async loadOrCreateManifests(): Promise<void> {
+    const p = paths(this.config.rootPath, this.channelId);
+
+    const globalPointer = await this.readJsonIfExists<ManifestPointer>(p.manifestPointer);
+    if (!globalPointer) {
+      await this.createBootstrapManifests();
+    }
+
+    const pointer = await this.readJson<ManifestPointer>(p.manifestPointer);
+    const globalManifest = await this.readJson<Manifest>(`${this.config.rootPath}/${pointer.file}`);
+    await this.validateManifestHash(globalManifest as unknown as { contentHash: string; [key: string]: unknown });
+
+    if (globalManifest.version !== 2) {
+      throw new Error('Unsupported manifest version for this beta.');
+    }
+    if (globalManifest.server.managed) {
+      this.assertServerAuth(globalManifest);
+    }
+
+    const channelPointer = await this.readJson<ManifestPointer>(p.channelPointer);
+    const channelManifest = await this.readJson<ChannelManifest>(`${p.channelRoot}/${channelPointer.file}`);
+    await this.validateManifestHash(channelManifest as unknown as { contentHash: string; [key: string]: unknown });
+    if (globalManifest.server.managed) {
+      this.assertServerAuth(channelManifest);
+    }
+
+    this.manifest = globalManifest;
+    this.channelManifest = channelManifest;
+    this.encrypted = globalManifest.encrypted || this.encrypted;
+  }
+
+  private async upsertDeviceMetadata(): Promise<void> {
+    const p = paths(this.config.rootPath, this.channelId);
+    const now = new Date().toISOString();
+    const existing = await this.readJsonIfExists<DeviceMetadata>(p.deviceFile(this.deviceId));
+    const next: DeviceMetadata = {
+      deviceId: this.deviceId,
+      registeredAt: existing?.registeredAt ?? now,
+      lastSeenAt: now,
+      userId: existing?.userId,
+      name: existing?.name,
+      retired: existing?.retired,
+    };
+    await this.writeJson(p.deviceFile(this.deviceId), next);
   }
 
   // ── Local writes ───────────────────────────────────────────────────
@@ -393,34 +548,40 @@ export class SyncEngine {
     }
 
     try {
-      const p = paths(this.config.rootPath);
-      const logPath = p.changeLog(this.deviceId);
+      const p = paths(this.config.rootPath, this.channelId);
+      await this.adapter.ensureFolder(p.clientRoot(this.deviceId));
 
-      // Serialize entries as NDJSON lines
-      const lines = entries.map(e => JSON.stringify(e));
+      let lastWrittenHlc = '';
+      let lastWrittenDate = '';
 
-      // Encrypt if needed
-      let payload: string;
-      if (this.encrypted && this.encryptionKey) {
-        const encryptedLines = await Promise.all(
-          lines.map(line => encryptEntry(this.encryptionKey!, line))
+      for (const entry of entries) {
+        const date = isoDay(entry.ts);
+        const fileName = `${entry.hlc}-${entry.id}.json`;
+        const dateFolder = p.clientDateFolder(this.deviceId, date);
+        await this.adapter.ensureFolder(dateFolder);
+
+        const raw = JSON.stringify(entry);
+        const payload = await this.encodeForCloud(raw);
+        await this.adapter.writeFile(
+          p.clientChangeFile(this.deviceId, date, fileName),
+          textEncoder.encode(payload)
         );
-        payload = encryptedLines.join('\n') + '\n';
-      } else {
-        payload = lines.join('\n') + '\n';
+
+        if (!lastWrittenHlc || hlcCompareStr(entry.hlc, lastWrittenHlc) > 0) {
+          lastWrittenHlc = entry.hlc;
+          lastWrittenDate = date;
+        }
       }
 
-      // Read-modify-write (no append API on cloud providers)
-      let existing = '';
-      try {
-        const data = await this.adapter.readFile(logPath);
-        existing = textDecoder.decode(data);
-      } catch {
-        // file doesn't exist yet
-      }
-
-      const combined = existing + payload;
-      await this.adapter.writeFile(logPath, textEncoder.encode(combined));
+      const priorHead = await this.readJsonIfExists<DeviceHead>(p.clientHead(this.deviceId));
+      const nextHead: DeviceHead = {
+        device: this.deviceId,
+        latestHlc: lastWrittenHlc || priorHead?.latestHlc || '',
+        latestDate: lastWrittenDate || priorHead?.latestDate || isoDay(Date.now()),
+        fileCount: (priorHead?.fileCount ?? 0) + entries.length,
+      };
+      await this.writeJson(p.clientHead(this.deviceId), nextHead);
+      await this.upsertDeviceMetadata();
 
       this.emit({ type: 'flush:complete' });
     } catch (err) {
@@ -438,78 +599,79 @@ export class SyncEngine {
     this.emit({ type: 'sync:start' });
 
     try {
-      const p = paths(this.config.rootPath);
-      const files = await this.adapter.listFiles(p.changes);
+      await this.loadOrCreateManifests();
+      const p = paths(this.config.rootPath, this.channelId);
+      const deviceFiles = await this.adapter.listFiles(p.devicesFolder);
       let totalMerged = 0;
 
-      for (const file of files) {
-        // Extract device ID from filename
-        const match = file.name.match(/^(.+)\.ndjson$/);
-        if (!match) continue;
-        const remoteDeviceId = match[1];
+      for (const deviceFile of deviceFiles) {
+        if (!deviceFile.name.endsWith('.json')) continue;
+        const remoteDeviceId = deviceFile.name.slice(0, -5);
 
-        // Skip own file
-        if (remoteDeviceId === this.deviceId) continue;
+        const cursorKey = makeCursorKey(this.channelId, remoteDeviceId);
+        const cursorRaw = await this.local.getMeta(cursorKey);
+        const cursor = typeof cursorRaw === 'string' ? cursorRaw : '';
 
-        const cursor = await this.local.getCursor(remoteDeviceId);
+        const head = await this.readJsonIfExists<DeviceHead>(p.clientHead(remoteDeviceId));
+        if (!head?.latestHlc) continue;
+        if (cursor && hlcCompareStr(head.latestHlc, cursor) <= 0) continue;
 
-        // Skip if file hasn't grown
-        if (file.size <= cursor) continue;
+        // Discover all date-sharded folders under this device's client dir,
+        // then scan from the cursor date forward (inclusive) to cover multi-day gaps.
+        const cursorDate = cursor ? isoDay(hlcParse(cursor).ts) : '';
+        const dateFolders = await this.adapter.listFolders(p.clientRoot(remoteDeviceId));
+        const relevantDates = dateFolders
+          .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d))
+          .filter(d => !cursorDate || d >= cursorDate)
+          .sort();
 
-        // Download full file (range reads not universally supported)
-        const data = await this.adapter.readFile(file.path);
-        const content = textDecoder.decode(data);
-        const allLines = content.split('\n').filter(l => l.trim());
+        let latestMergedHlc = cursor;
 
-        // We track cursor as line count (simpler than byte offset for NDJSON)
-        const newLines = allLines.slice(cursor);
-        if (newLines.length === 0) continue;
-
-        // Decrypt + parse
-        for (const line of newLines) {
+        for (const date of relevantDates) {
+          let files;
           try {
-            let json: string;
-            if (this.encrypted && this.encryptionKey) {
-              const decrypted = await this.decodeFromCloud(line);
-              if (!decrypted) continue; // corrupt line
-              json = decrypted;
-            } else {
-              json = line;
-            }
+            files = await this.adapter.listFiles(p.clientDateFolder(remoteDeviceId, date));
+          } catch {
+            continue; // Folder may not exist yet (eventual consistency).
+          }
+          files.sort((a, b) => a.name.localeCompare(b.name));
 
-            const entry = JSON.parse(json) as ChangeEntry;
+          for (const file of files) {
+            try {
+              const raw = textDecoder.decode(await this.adapter.readFile(file.path));
+              const decoded = await this.decodeFromCloud(raw);
+              if (!decoded) continue;
+              const entry = JSON.parse(decoded) as ChangeEntry;
+              if (cursor && hlcCompareStr(entry.hlc, cursor) <= 0) continue;
 
-            // Advance our HLC from the remote entry
-            const remoteHlc = hlcParse(entry.hlc);
-            this.hlc = hlcReceive(this.hlc, remoteHlc);
+              const remoteHlc = hlcParse(entry.hlc);
+              this.hlc = hlcReceive(this.hlc, remoteHlc);
 
-            // CRDT merge
-            const affected = applyChangeEntry(
-              this.tables,
-              entry,
-              this.manifest?.schema ?? 1
-            );
-
-            // Persist affected rows
-            if (affected.length > 0) {
-              await this.local.putRows(affected);
-              totalMerged += affected.length;
-
-              for (const row of affected) {
-                if (row._deleted) {
-                  this.emit({ type: 'delete', table: row._table, rowId: row._rowId });
-                } else {
-                  this.emit({ type: 'change', table: row._table, rowId: row._rowId, row });
+              const affected = applyChangeEntry(this.tables, entry, this.manifest?.schema ?? 1);
+              if (affected.length > 0) {
+                await this.local.putRows(affected);
+                totalMerged += affected.length;
+                for (const row of affected) {
+                  if (row._deleted) {
+                    this.emit({ type: 'delete', table: row._table, rowId: row._rowId });
+                  } else {
+                    this.emit({ type: 'change', table: row._table, rowId: row._rowId, row });
+                  }
                 }
               }
+
+              if (!latestMergedHlc || hlcCompareStr(entry.hlc, latestMergedHlc) > 0) {
+                latestMergedHlc = entry.hlc;
+              }
+            } catch {
+              // Skip corrupt or unreadable entry.
             }
-          } catch {
-            // skip corrupt entry
           }
         }
 
-        // Update cursor
-        await this.local.setCursor(remoteDeviceId, allLines.length);
+        if (latestMergedHlc && latestMergedHlc !== cursor) {
+          await this.local.setMeta(cursorKey, latestMergedHlc);
+        }
       }
 
       await this.local.setMeta('hlc', hlcSerialize(this.hlc));
@@ -524,10 +686,15 @@ export class SyncEngine {
   async rehydrate(): Promise<void> {
     this.emit({ type: 'rehydrate:start' });
 
-    const p = paths(this.config.rootPath);
+    const snapshotPath = this.channelManifest?.snapshotPath;
+    if (!snapshotPath) {
+      this.emit({ type: 'rehydrate:complete', rowCount: 0 });
+      await this.pull();
+      return;
+    }
 
     try {
-      const data = await this.adapter.readFile(p.snapshotLatest);
+      const data = await this.adapter.readFile(snapshotPath);
       let json: string;
 
       if (this.encrypted && this.encryptionKey) {
@@ -556,18 +723,13 @@ export class SyncEngine {
         }
       }
 
-      // Restore cursors
-      for (const [deviceId, offset] of Object.entries(snapshot.cursors)) {
-        await this.local.setCursor(deviceId, offset);
-      }
-
       // Restore HLC
       if (snapshot.hlc) {
         this.hlc = hlcParse(snapshot.hlc);
         this.hlc.nodeId = this.deviceId;
       }
 
-      await this.local.setMeta('epoch', snapshot.epoch);
+      await this.local.setMeta(`epoch:${this.channelId}`, snapshot.epoch);
       this.emit({ type: 'rehydrate:complete', rowCount });
     } catch {
       // No snapshot available — start fresh
@@ -581,89 +743,68 @@ export class SyncEngine {
   // ── Compaction / Migration ─────────────────────────────────────────
 
   /**
-   * Compact: merge all change logs into a snapshot.
-   * Optional transform function for schema migrations.
+   * Compaction publishes a new snapshot and channel manifest generation.
+   * In server-managed mode, only the configured server writer may compact.
    */
-  async compact(
-    transform?: (table: string, row: Row) => Row
-  ): Promise<void> {
-    this.emit({ type: 'compact:start' });
-
-    const p = paths(this.config.rootPath);
-
-    // Build complete state from memory (already merged)
-    const snapshotTables: Record<string, Record<string, Row>> = {};
-    for (const [tableName, rows] of Object.entries(this.tables)) {
-      snapshotTables[tableName] = {};
-      for (const [rowId, row] of Object.entries(rows)) {
-        // Skip old tombstones (30 day TTL)
-        if (row._deleted && row._deletedHlc) {
-          const deleteTime = hlcParse(row._deletedHlc).ts;
-          if (Date.now() - deleteTime > 30 * 24 * 60 * 60 * 1000) continue;
-        }
-
-        // Apply migration transform if provided
-        const finalRow = transform ? transform(tableName, { ...row }) : row;
-        snapshotTables[tableName][rowId] = finalRow;
-      }
+  async compact(): Promise<void> {
+    if (!this.manifest || !this.channelManifest) {
+      throw new Error('Engine is not connected');
+    }
+    if (this.manifest.server.managed && this.deviceId !== this.serverId) {
+      throw new Error('Compaction is allowed only for the authorized server writer');
     }
 
-    // Gather cursors
-    const cursors = await this.local.getAllCursors();
+    // Ensure the compactor has merged latest remote changes before snapshotting.
+    await this.pull();
 
-    const newEpoch = (this.manifest?.epoch ?? 0) + 1;
-    const newSchema = transform
-      ? (this.manifest?.schema ?? 1) + 1
-      : (this.manifest?.schema ?? 1);
+    const p = paths(this.config.rootPath, this.channelId);
+    const now = new Date().toISOString();
+    const nextEpoch = this.channelManifest.epoch + 1;
+    const nextGeneration = this.channelManifest.generation + 1;
+    const snapshotPath = `${p.mainlineFolder}/snapshot-${nextEpoch}-${this.serverId}.json`;
 
     const snapshot: Snapshot = {
       snapshotId: generateId('snap'),
-      timestamp: new Date().toISOString(),
+      timestamp: now,
       hlc: hlcSerialize(this.hlc),
-      epoch: newEpoch,
-      schemaVersion: newSchema,
-      cursors,
-      tables: snapshotTables,
+      epoch: nextEpoch,
+      schemaVersion: this.manifest.schema,
+      tables: this.tables,
     };
 
-    // Write snapshot
-    const json = JSON.stringify(snapshot);
-    let payload: string;
-    if (this.encrypted && this.encryptionKey) {
-      payload = await this.encodeForCloud(json);
-    } else {
-      payload = json;
-    }
-    await this.adapter.writeFile(p.snapshotLatest, textEncoder.encode(payload));
+    const snapshotJson = JSON.stringify(snapshot);
+    const snapshotPayload = await this.encodeForCloud(snapshotJson);
+    await this.adapter.writeFile(snapshotPath, textEncoder.encode(snapshotPayload));
 
-    // Update manifest
-    if (this.manifest) {
-      this.manifest.epoch = newEpoch;
-      this.manifest.schema = newSchema;
-      await this.saveManifest();
-    }
+    const channelPayload = {
+      generation: nextGeneration,
+      parentGeneration: this.channelManifest.generation,
+      writtenBy: this.serverId,
+      writtenAt: now,
+      channelId: this.channelId,
+      epoch: nextEpoch,
+      watermarkHlc: hlcSerialize(this.hlc),
+      snapshotPath,
+      deltaPath: null,
+    };
 
-    // Delete old change logs
-    const files = await this.adapter.listFiles(p.changes);
-    for (const file of files) {
-      try {
-        await this.adapter.deleteFile(file.path);
-      } catch {
-        // best effort
-      }
-    }
+    const nextChannelManifest: ChannelManifest = {
+      ...channelPayload,
+      contentHash: await computeContentHash(channelPayload),
+    };
 
-    // Update local state with transformed rows if migrated
-    if (transform) {
-      this.tables = snapshotTables;
-      await this.local.clearRows();
-      for (const rows of Object.values(snapshotTables)) {
-        await this.local.putRows(Object.values(rows));
-      }
-    }
+    const channelFile = `channel-manifest-${nextGeneration}-${this.serverId}.json`;
+    await this.writeJson(
+      p.channelManifestFile(nextGeneration, this.serverId),
+      nextChannelManifest
+    );
+    await this.writeJson(p.channelPointer, {
+      currentGeneration: nextGeneration,
+      file: channelFile,
+    } satisfies ManifestPointer);
 
-    await this.local.setMeta('epoch', newEpoch);
-    this.emit({ type: 'compact:complete', epoch: newEpoch });
+    this.channelManifest = nextChannelManifest;
+    await this.local.setMeta(`epoch:${this.channelId}`, nextEpoch);
   }
 
   // ── Mesh management ───────────────────────────────────────────
@@ -686,18 +827,10 @@ export class SyncEngine {
 
   /**
    * Enable encryption on an existing unencrypted mesh.
-   * Re-encrypts all cloud data.
+   * Re-encryption is handled during compaction.
    */
   async enableEncryption(key: CryptoKey): Promise<void> {
     this.encryptionKey = key;
     this.encrypted = true;
-
-    if (this.manifest) {
-      this.manifest.encrypted = true;
-      await this.saveManifest();
-    }
-
-    // Re-encrypt: compact writes encrypted snapshot + clears old plaintext logs
-    await this.compact();
   }
 }

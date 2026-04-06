@@ -175,6 +175,21 @@ function createStore() {
           }));
         }
 
+        // Include immediate child folders as collection entries
+        for (const folder of folders) {
+          if (!folder.startsWith(`${path}/`)) continue;
+          const remainder = folder.slice(path.length + 1);
+          if (!remainder || remainder.includes('/')) continue;
+
+          nodes.push(makeResponseNode({
+            href: `${PREFIX}/${encodePath(folder)}/`,
+            size: 0,
+            modifiedIso: nowIso(),
+            etag: '',
+            isCollection: true,
+          }));
+        }
+
         return new Response(makePropfindResponse(nodes), { status: 207 });
       }
 

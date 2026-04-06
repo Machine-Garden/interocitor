@@ -48,6 +48,30 @@ export class MemoryAdapter implements StorageAdapter {
     return entries;
   }
 
+  /** List immediate subfolder names under a path. */
+  async listFolders(folderPath: string): Promise<string[]> {
+    const prefix = folderPath.endsWith('/') ? folderPath : folderPath + '/';
+    const names = new Set<string>();
+    for (const path of this.files.keys()) {
+      if (path.startsWith(prefix)) {
+        const remaining = path.substring(prefix.length);
+        const slash = remaining.indexOf('/');
+        if (slash > 0) {
+          names.add(remaining.substring(0, slash));
+        }
+      }
+    }
+    for (const folder of this.folders) {
+      if (folder.startsWith(prefix)) {
+        const remaining = folder.substring(prefix.length);
+        if (remaining && !remaining.includes('/')) {
+          names.add(remaining);
+        }
+      }
+    }
+    return [...names];
+  }
+
   async readFile(path: string): Promise<Uint8Array> {
     const file = this.files.get(path);
     if (!file) throw new Error(`File not found: ${path}`);

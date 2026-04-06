@@ -164,6 +164,21 @@ async function handleRoute(route: Route, request: Request, state: WebDavRouteSta
       }));
     }
 
+    // Include immediate child folders as collection entries
+    for (const folder of state.folders) {
+      if (!folder.startsWith(`${path}/`)) continue;
+      const remainder = folder.slice(path.length + 1);
+      if (!remainder || remainder.includes('/')) continue;
+
+      nodes.push(makeResponseNode(prefix, {
+        hrefPath: folder,
+        size: 0,
+        modifiedIso: nowIso(),
+        etag: '',
+        isCollection: true,
+      }));
+    }
+
     const body = makePropfindXml(nodes);
     await route.fulfill({ status: 207, body, headers: { 'content-type': 'application/xml' } });
     return;

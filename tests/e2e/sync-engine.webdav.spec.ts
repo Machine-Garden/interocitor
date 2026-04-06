@@ -1,13 +1,5 @@
 import { expect, test } from '@playwright/test';
 
-type ScenarioResult = {
-  plain: Record<string, unknown> | null;
-  title: string | null;
-  rowsFromQuery: number;
-  eventTypes: string[];
-  cloudFiles: string[];
-};
-
 test.beforeEach(async ({ page }) => {
   await page.goto('/tests/e2e/fixtures/harness.html');
   await page.evaluate(async () => {
@@ -27,17 +19,17 @@ test('WebDAV adapter supports authenticate, CRUD, listing, and metadata', async 
     });
 
     await adapter.authenticate();
-    await adapter.ensureFolder('/Interocitor/changes');
+    await adapter.ensureFolder('/Interocitor/test');
 
-    await adapter.writeFile('/Interocitor/changes/device_a.ndjson', 'line_1\nline_2\n');
+    await adapter.writeFile('/Interocitor/test/file.json', '{"ok":true}');
 
-    const list = await adapter.listFiles('/Interocitor/changes');
-    const metadata = await adapter.getFileMetadata('/Interocitor/changes/device_a.ndjson');
-    const bytes = await adapter.readFile('/Interocitor/changes/device_a.ndjson');
+    const list = await adapter.listFiles('/Interocitor/test');
+    const metadata = await adapter.getFileMetadata('/Interocitor/test/file.json');
+    const bytes = await adapter.readFile('/Interocitor/test/file.json');
     const text = new TextDecoder().decode(bytes);
 
-    await adapter.deleteFile('/Interocitor/changes/device_a.ndjson');
-    const afterDelete = await adapter.getFileMetadata('/Interocitor/changes/device_a.ndjson');
+    await adapter.deleteFile('/Interocitor/test/file.json');
+    const afterDelete = await adapter.getFileMetadata('/Interocitor/test/file.json');
 
     return {
       authenticated: adapter.isAuthenticated(),
@@ -49,14 +41,14 @@ test('WebDAV adapter supports authenticate, CRUD, listing, and metadata', async 
   });
 
   expect(result.authenticated).toBe(true);
-  expect(result.listNames).toContain('device_a.ndjson');
+  expect(result.listNames).toContain('file.json');
   expect(result.metadataSize).toBeGreaterThan(0);
-  expect(result.text).toContain('line_1');
+  expect(result.text).toContain('"ok":true');
   expect(result.afterDelete).toBeNull();
 });
 
-test('SyncEngine syncs rows through WebDAV and uses IndexedDB cache', async ({ page }) => {
-  const result = await page.evaluate(async (): Promise<ScenarioResult> => {
+test('SyncEngine writes file-per-change paths and syncs rows through WebDAV', async ({ page }) => {
+  const result = await page.evaluate(async () => {
     const { SyncEngine, rowToPlain, readColumn } = await import('/dist/index.js');
     const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
 
@@ -116,178 +108,89 @@ test('SyncEngine syncs rows through WebDAV and uses IndexedDB cache', async ({ p
   expect(result.eventTypes).toContain('a:flush:complete');
   expect(result.eventTypes).toContain('b:sync:complete');
   expect(result.cloudFiles.some(path => path.endsWith('/manifest.json'))).toBe(true);
-  expect(result.cloudFiles.some(path => path.endsWith('/changes/dev_a.ndjson'))).toBe(true);
+  expect(result.cloudFiles.some(path => /\/c1\/clients\/dev_a\/.+\.json$/.test(path))).toBe(true);
+  expect(result.cloudFiles.some(path => path.endsWith('/c1/clients/dev_a/head.json'))).toBe(true);
 });
 
-test('rehydrate restores snapshot state when logs were compacted', async ({ page }) => {
+test('rejects unauthorized writer manifests over WebDAV', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { SyncEngine, readColumn } = await import('/dist/index.js');
+    const { SyncEngine } = await import('/dist/index.js');
     const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+    const now = new Date().toISOString();
 
-    const makeEngine = (deviceId: string) => {
-      localStorage.setItem('interocitor-device-id', deviceId);
-      const adapter = new WebDAVAdapter({
-        baseUrl: `${location.origin}/__webdav__`,
-        auth: { username: 'u', password: 'p' },
-      });
-      return new SyncEngine(adapter, {
-        rootPath: '/Interocitor',
-        pollInterval: 60_000,
-        flushDebounce: 5,
-        flushThreshold: 1,
-      });
-    };
-
-    const engineA = makeEngine('dev_a');
-    await engineA.init();
-    await engineA.connect();
-    await engineA.put('notes', 'note_1', { text: 'from snapshot' });
-    await engineA.flush();
-    await engineA.compact();
-    await engineA.disconnect();
-
-    await window.__webdavMock.resetIndexedDb();
-
-    const engineB = makeEngine('dev_b');
-    await engineB.init();
-    await engineB.connect();
-
-    const before = engineB.query('notes').length;
-    await engineB.rehydrate();
-    const restored = engineB.get('notes', 'note_1');
-    const text = restored ? readColumn(restored, 'text') : null;
-
-    await engineB.disconnect();
-
-    return {
-      before,
-      after: engineB.query('notes').length,
-      text,
-      hasSnapshot: window.__webdavMock.hasFile('/Interocitor/snapshots/latest.json'),
-      hasChanges: window.__webdavMock.hasFile('/Interocitor/changes/dev_a.ndjson'),
-    };
-  });
-
-  expect(result.before).toBe(1);
-  expect(result.after).toBe(1);
-  expect(result.text).toBe('from snapshot');
-  expect(result.hasSnapshot).toBe(true);
-  expect(result.hasChanges).toBe(false);
-});
-
-test('stale local epoch rehydrates after remote compaction', async ({ page }) => {
-  const result = await page.evaluate(async () => {
-    const { SyncEngine, readColumn } = await import('/dist/index.js');
-    const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
-    const { LocalStore } = await import('/dist/storage/local-store.js');
-
-    const makeEngine = (deviceId: string) => {
-      localStorage.setItem('interocitor-device-id', deviceId);
-      return new SyncEngine(
-        new WebDAVAdapter({ baseUrl: `${location.origin}/__webdav__`, auth: { username: 'u', password: 'p' } }),
-        { rootPath: '/Epoch', pollInterval: 60_000, flushDebounce: 5, flushThreshold: 1 },
-      );
-    };
-
-    // Device A writes old schema row then compacts with migration (epoch + schema bump).
-    const engineA = makeEngine('dev_epoch_a');
-    await engineA.init();
-    await engineA.connect();
-    await engineA.put('tasks', 't1', { status_code: 'open' });
-    await engineA.flush();
-    await engineA.compact((table, row) => {
-      if (table === 'tasks' && row.status_code) {
-        row.status = row.status_code;
-        delete row.status_code;
-      }
-      return row;
+    const adapter = new WebDAVAdapter({
+      baseUrl: `${location.origin}/__webdav__`,
+      auth: { username: 'u', password: 'p' },
     });
-    await engineA.disconnect();
+    await adapter.authenticate();
 
-    // Simulate stale local state on device B (old row + old epoch meta).
-    const staleStore = new LocalStore();
-    await staleStore.open();
-    await staleStore.putRow({
-      _table: 'tasks',
-      _rowId: 't1',
-      _deleted: false,
-      _schemaVersion: 1,
-      status_code: { value: 'stale', hlc: '000001000000000000-0000-dev_epoch_b' },
-    } as any);
-    await staleStore.setMeta('epoch', 0);
-    staleStore.close();
-
-    const engineB = makeEngine('dev_epoch_b');
-    await engineB.init();
-    await engineB.connect();
-    const row = engineB.get('tasks', 't1');
-    const manifestEpoch = engineB.getManifest()?.epoch ?? -1;
-    const manifestSchema = engineB.getManifest()?.schema ?? -1;
-    await engineB.disconnect();
-
-    return {
-      status: row ? readColumn(row, 'status') : null,
-      oldStatusCode: row ? readColumn(row, 'status_code') : null,
-      manifestEpoch,
-      manifestSchema,
+    const hashOf = async (obj: unknown) => {
+      const json = JSON.stringify(obj);
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(json));
+      const hex = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+      return `sha256:${hex}`;
     };
+
+    const globalPayload = {
+      generation: 1,
+      parentGeneration: 0,
+      writtenBy: 'evil_writer',
+      writtenAt: now,
+      version: 2,
+      meshId: 'mesh_bad',
+      schema: 1,
+      lensVersion: 1,
+      encrypted: false,
+      channels: ['c1'],
+      channelNames: { c1: 'default' },
+      defaultChannel: 'c1',
+      server: { managed: true, relayUrl: null, serverId: 'server_relay_1' },
+      createdAt: now,
+    };
+    await adapter.writeFile('/BadWeb/manifest-1.json', JSON.stringify({
+      ...globalPayload,
+      contentHash: await hashOf(globalPayload),
+    }));
+    await adapter.writeFile('/BadWeb/manifest.json', JSON.stringify({ currentGeneration: 1, file: 'manifest-1.json' }));
+    const channelPayload = {
+      generation: 1,
+      parentGeneration: 0,
+      writtenBy: 'evil_writer',
+      writtenAt: now,
+      channelId: 'c1',
+      epoch: 0,
+      watermarkHlc: '',
+      snapshotPath: null,
+      deltaPath: null,
+    };
+    await adapter.writeFile('/BadWeb/c1/channel-manifest-1-server_relay_1.json', JSON.stringify({
+      ...channelPayload,
+      contentHash: await hashOf(channelPayload),
+    }));
+    await adapter.writeFile('/BadWeb/c1/channel.json', JSON.stringify({
+      currentGeneration: 1,
+      file: 'channel-manifest-1-server_relay_1.json',
+    }));
+
+    localStorage.setItem('interocitor-device-id', 'dev_bad');
+    const engine = new SyncEngine(
+      new WebDAVAdapter({ baseUrl: `${location.origin}/__webdav__`, auth: { username: 'u', password: 'p' } }),
+      { rootPath: '/BadWeb', pollInterval: 60_000 }
+    );
+
+    await engine.init();
+    try {
+      await engine.connect();
+      return 'no-error';
+    } catch (error: any) {
+      return String(error?.message ?? error);
+    }
   });
 
-  expect(result.manifestEpoch).toBeGreaterThan(0);
-  expect(result.manifestSchema).toBeGreaterThan(1);
-  expect(result.status).toBe('open');
-  expect(result.oldStatusCode).toBeUndefined();
+  expect(result).toContain('Unauthorized manifest writer');
 });
 
-test('delete on device A is visible to device B after sync', async ({ page }) => {
-  const result = await page.evaluate(async () => {
-    const { SyncEngine, readColumn } = await import('/dist/index.js');
-    const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
-
-    const makeEngine = (deviceId: string) => {
-      localStorage.setItem('interocitor-device-id', deviceId);
-      return new SyncEngine(
-        new WebDAVAdapter({ baseUrl: `${location.origin}/__webdav__`, auth: { username: 'u', password: 'p' } }),
-        { rootPath: '/Interocitor', pollInterval: 60_000, flushDebounce: 5, flushThreshold: 1 },
-      );
-    };
-
-    // A: create + delete
-    const engineA = makeEngine('dev_a');
-    await engineA.init();
-    await engineA.connect();
-    await engineA.put('items', 'i1', { name: 'keep' });
-    await engineA.put('items', 'i2', { name: 'discard' });
-    await engineA.flush();
-    await engineA.delete('items', 'i2');
-    await engineA.flush();
-    await engineA.disconnect();
-
-    await window.__webdavMock.resetIndexedDb();
-
-    // B: pull
-    const engineB = makeEngine('dev_b');
-    await engineB.init();
-    await engineB.connect();
-
-    const kept = engineB.get('items', 'i1');
-    const removed = engineB.get('items', 'i2');
-    const all = engineB.query('items');
-    await engineB.disconnect();
-
-    return {
-      keptName: kept ? readColumn(kept, 'name') : null,
-      removedExists: removed != null,
-      queryCount: all.length,
-    };
-  });
-
-  expect(result.keptName).toBe('keep');
-  expect(result.removedExists).toBe(false);
-  expect(result.queryCount).toBe(1);
-});
-
-test('encrypted sync over WebDAV — cloud only has ciphertext', async ({ page }) => {
+test('encrypted sync over WebDAV keeps cloud payload opaque', async ({ page }) => {
   const result = await page.evaluate(async () => {
     const { SyncEngine, readColumn } = await import('/dist/index.js');
     const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
@@ -305,7 +208,6 @@ test('encrypted sync over WebDAV — cloud only has ciphertext', async ({ page }
       return engine;
     };
 
-    // A writes encrypted data
     const engineA = makeEngine('dev_a');
     await engineA.init();
     await engineA.connect();
@@ -313,14 +215,12 @@ test('encrypted sync over WebDAV — cloud only has ciphertext', async ({ page }
     await engineA.flush();
     await engineA.disconnect();
 
-    // Inspect cloud — should NOT contain plaintext
     const cloud = window.__webdavMock.dumpFiles();
-    const changeEntry = Object.entries(cloud).find(([k]) => k.includes('changes/dev_a'));
-    const cloudContainsPlaintext = changeEntry ? changeEntry[1].includes('top secret') : false;
+    const payload = Object.entries(cloud).find(([path]) => /\/c1\/clients\/dev_a\/.+\.json$/.test(path));
+    const cloudContainsPlaintext = payload ? payload[1].includes('top secret') : false;
 
     await window.__webdavMock.resetIndexedDb();
 
-    // B reads with same key
     const engineB = makeEngine('dev_b');
     await engineB.init();
     await engineB.connect();
@@ -334,40 +234,47 @@ test('encrypted sync over WebDAV — cloud only has ciphertext', async ({ page }
   });
 
   expect(result.content).toBe('top secret');
-  expect(result.cloudContainsPlaintext).toBe(false); // cloud only has ciphertext
+  expect(result.cloudContainsPlaintext).toBe(false);
 });
 
-test('multiple puts batch into a single change log entry', async ({ page }) => {
+test('direct-cloud compaction over WebDAV restores clients from snapshot', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { SyncEngine } = await import('/dist/index.js');
+    const { SyncEngine, readColumn } = await import('/dist/index.js');
     const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
 
-    localStorage.setItem('interocitor-device-id', 'dev_batch');
-    const engine = new SyncEngine(
-      new WebDAVAdapter({ baseUrl: `${location.origin}/__webdav__`, auth: { username: 'u', password: 'p' } }),
-      { rootPath: '/Batch', pollInterval: 60_000, flushDebounce: 100, flushThreshold: 999 },
-    );
-    await engine.init();
-    await engine.connect();
+    const makeEngine = (deviceId: string) => {
+      localStorage.setItem('interocitor-device-id', deviceId);
+      return new SyncEngine(
+        new WebDAVAdapter({ baseUrl: `${location.origin}/__webdav__`, auth: { username: 'u', password: 'p' } }),
+        { rootPath: '/WebCompact', pollInterval: 60_000, flushDebounce: 5, flushThreshold: 1 },
+      );
+    };
 
-    // Write several rows before flush fires
-    await engine.put('t', 'r1', { x: 1 });
-    await engine.put('t', 'r2', { x: 2 });
-    await engine.put('t', 'r3', { x: 3 });
-    await engine.flush();
+    const serverEngine = makeEngine('dev_compactor');
+    await serverEngine.init();
+    await serverEngine.connect();
+    await serverEngine.put('notes', 'n1', { text: 'server snapshot' });
+    await serverEngine.flush();
+    await serverEngine.compact();
+    await serverEngine.disconnect();
 
-    const cloud = window.__webdavMock.dumpFiles();
-    const logEntry = Object.entries(cloud).find(([k]) => k.includes('changes/dev_batch'));
-    const lineCount = logEntry ? logEntry[1].split('\n').filter((l: string) => l.trim()).length : 0;
-    const queryCount = engine.query('t').length;
+    await window.__webdavMock.resetIndexedDb();
 
-    await engine.disconnect();
-    return { lineCount, queryCount };
+    const clientEngine = makeEngine('dev_client');
+    await clientEngine.init();
+    await clientEngine.connect();
+    const row = clientEngine.get('notes', 'n1');
+    await clientEngine.disconnect();
+
+    return {
+      text: row ? readColumn(row, 'text') : null,
+      hasSnapshot: Object.keys(window.__webdavMock.dumpFiles())
+        .some(path => path.includes('/WebCompact/c1/mainline/snapshot-1-')),
+    };
   });
 
-  expect(result.queryCount).toBe(3);
-  // Each put creates its own change entry, so we expect 3 lines
-  expect(result.lineCount).toBe(3);
+  expect(result.text).toBe('server snapshot');
+  expect(result.hasSnapshot).toBe(true);
 });
 
 declare global {
@@ -381,4 +288,3 @@ declare global {
     };
   }
 }
-

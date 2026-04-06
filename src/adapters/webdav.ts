@@ -147,6 +147,41 @@ export class WebDAVAdapter implements StorageAdapter {
     return entries;
   }
 
+  async listFolders(folderPath: string): Promise<string[]> {
+    const res = await fetch(this.url(folderPath), {
+      method: 'PROPFIND',
+      headers: this.headers({
+        Depth: '1',
+        'Content-Type': 'application/xml',
+      }),
+      body: `<?xml version="1.0" encoding="UTF-8"?>
+        <d:propfind xmlns:d="DAV:">
+          <d:prop>
+            <d:resourcetype/>
+          </d:prop>
+        </d:propfind>`,
+    });
+
+    if (res.status !== 207) return [];
+
+    const xml = await res.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xml, 'application/xml');
+    const responses = doc.getElementsByTagNameNS('DAV:', 'response');
+    const folders: string[] = [];
+
+    for (let i = 1; i < responses.length; i++) {
+      const response = responses[i];
+      const isCollection = response.getElementsByTagNameNS('DAV:', 'collection').length > 0;
+      if (!isCollection) continue;
+      const href = response.getElementsByTagNameNS('DAV:', 'href')[0]?.textContent || '';
+      const name = decodeURIComponent(href.split('/').filter(Boolean).pop() || '');
+      if (name) folders.push(name);
+    }
+
+    return folders;
+  }
+
   async readFile(path: string): Promise<Uint8Array> {
     const res = await fetch(this.url(path), {
       method: 'GET',

@@ -2,15 +2,17 @@
  * interocitor
  *
  * Encrypted local-first CRDT database that syncs over cloud storage.
- * No server required. Data stays in storage the mesh already owns.
+ * Google Drive is the default path; server-managed compaction is optional.
  *
  * @example
  * ```ts
- * import { SyncEngine, GoogleDriveAdapter } from 'interocitor';
+ * import { SyncEngine } from 'interocitor';
  * import { GoogleDriveAdapter } from 'interocitor/adapters/google-drive';
  * import { generateKey, keyToPassphrase } from 'interocitor/crypto/keys';
  *
- * const adapter = new GoogleDriveAdapter({ clientId: 'YOUR_CLIENT_ID' });
+ * const adapter = new GoogleDriveAdapter({
+ *   clientId: 'YOUR_GOOGLE_CLIENT_ID',
+ * });
  * const engine = new SyncEngine(adapter, { rootPath: '/Interocitor' });
  *
  * const key = await generateKey();
@@ -57,7 +59,12 @@ export type {
   // Data model
   Row,
 
-  // Mesh metadata — returned by engine.getManifest()
+  // protocol types
   Manifest,
+  ManifestPointer,
+  ChannelManifest,
+  ServerConfig,
   DeviceInfo,
+  DeviceMetadata,
+  DeviceHead,
 } from './core/types.ts';

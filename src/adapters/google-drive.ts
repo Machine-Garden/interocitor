@@ -261,6 +261,20 @@ export class GoogleDriveAdapter implements StorageAdapter {
     });
   }
 
+  async listFolders(folderPath: string): Promise<string[]> {
+    const folderId = await this.resolveFolderId(folderPath);
+    if (!folderId) return [];
+
+    const q = `'${folderId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'`;
+    const fields = 'files(name)';
+    const res = await fetch(
+      `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=${fields}`,
+      { headers: this.headers() }
+    );
+    const data = await res.json();
+    return (data.files || []).map((f: any) => f.name as string);
+  }
+
   async readFile(path: string): Promise<Uint8Array> {
     const fileId = await this.resolveFileId(path);
     if (!fileId) throw new Error(`File not found: ${path}`);

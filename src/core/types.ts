@@ -73,21 +73,66 @@ export interface Snapshot {
   hlc: string;
   epoch: number;
   schemaVersion: number;
-  cursors: Record<string, number>; // deviceId → byte offset
   tables: Record<string, Record<string, Row>>;
 }
 
 // ─── Manifest ────────────────────────────────────────────────────────
 
+export interface ServerConfig {
+  managed: boolean;
+  relayUrl: string | null;
+  serverId: string;
+}
+
+export interface ManifestPointer {
+  currentGeneration: number;
+  file: string;
+}
+
 export interface Manifest {
+  generation: number;
+  parentGeneration: number;
+  writtenBy: string;
+  writtenAt: string;
+  contentHash: string;
+
   version: number;
   meshId: string;
   schema: number;
+  lensVersion: number;
   encrypted: boolean;
-  epoch: number;
-  devices: Record<string, DeviceInfo>;
+  channels: string[];
+  channelNames: Record<string, string>;
+  defaultChannel: string;
+  server: ServerConfig;
   createdAt: string;
-  updatedAt: string;
+}
+
+export interface ChannelManifest {
+  generation: number;
+  parentGeneration: number;
+  writtenBy: string;
+  writtenAt: string;
+  contentHash: string;
+
+  channelId: string;
+  epoch: number;
+  watermarkHlc: string;
+  snapshotPath: string | null;
+  deltaPath: string | null;
+}
+
+export interface DeviceMetadata extends DeviceInfo {
+  registeredAt: string;
+  lastSeenAt: string;
+  retired?: boolean;
+}
+
+export interface DeviceHead {
+  device: string;
+  latestHlc: string;
+  latestDate: string;
+  fileCount: number;
 }
 
 // ─── Storage Adapter ─────────────────────────────────────────────────
@@ -111,6 +156,7 @@ export interface StorageAdapter {
   // Folder
   ensureFolder(path: string): Promise<void>;
   listFiles(path: string): Promise<FileEntry[]>;
+  listFolders(path: string): Promise<string[]>;
 
   // File CRUD
   readFile(path: string): Promise<Uint8Array>;
@@ -126,14 +172,18 @@ export interface StorageAdapter {
 export interface SyncConfig {
   /** Cloud folder path prefix, e.g. "/Interocitor" */
   rootPath: string;
+  /** Opaque channel id in storage, e.g. "c1" */
+  channelId?: string;
+  /** If true, only serverId may publish manifests/compaction */
+  serverManaged?: boolean;
+  /** Authorized writer identity when serverManaged=true */
+  serverId?: string;
   /** Polling interval in ms (default 30000) */
   pollInterval?: number;
   /** Flush debounce in ms (default 2000) */
   flushDebounce?: number;
   /** Max pending ops before forced flush (default 50) */
   flushThreshold?: number;
-  /** Compaction trigger: total change log bytes (default 1MB) */
-  compactionThreshold?: number;
 }
 
 // ─── Events ──────────────────────────────────────────────────────────
@@ -149,8 +199,6 @@ export type SyncEvent =
   | { type: 'delete'; table: string; rowId: string }
   | { type: 'rehydrate:start' }
   | { type: 'rehydrate:complete'; rowCount: number }
-  | { type: 'compact:start' }
-  | { type: 'compact:complete'; epoch: number }
   | { type: 'auth:required' }
   | { type: 'auth:complete' }
   | { type: 'schema:mismatch'; local: number; remote: number };

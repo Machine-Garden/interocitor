@@ -2,19 +2,19 @@
 
 > ☢️work in progress ☢️
 
-Encrypted local-first CRDT database that syncs over cloud storage you already own. No server. No vendor cloud. No subscription.
+Encrypted local-first CRDT database that syncs over cloud storage you already own. Google Drive is the default path; relay-server compaction is optional. No vendor lock-in.
 
 Named after the alien communication device from *This Island Earth* (1955) — assembles itself from parts shipped separately, enables communication across any distance.
 
 ## What it does
 
-Each device keeps a full local copy in IndexedDB. Changes sync through a shared folder on Google Drive, Dropbox, WebDAV (Nextcloud/ownCloud), or anything that implements the storage adapter interface.
+Each device keeps a full local copy in IndexedDB. Changes sync through a shared folder on Google Drive, WebDAV (Nextcloud/ownCloud), or anything that implements the storage adapter interface.
 
 A **mesh** is a group of devices that share data — a family's phones and laptops, a team's browsers, your own devices across platforms.
 
 - **Offline-first** — reads and writes are instant, always local
 - **Multi-device** — any number of devices in a mesh
-- **No server** — cloud storage is a dumb file transport, not a runtime dependency
+- **Flexible deployment** — direct cloud sync by default (Google Drive); optional relay-server compaction mode
 - **Encrypted** — AES-256-GCM, key never leaves devices, cloud provider sees ciphertext
 - **Crash-proof** — any device can close/crash/die without corrupting shared state
 - **Zero dependencies** — Web Crypto API, IndexedDB, fetch. That's it.
@@ -22,10 +22,14 @@ A **mesh** is a group of devices that share data — a family's phones and lapto
 ## Quick start
 
 ```ts
-import { SyncEngine, GoogleDriveAdapter, generateKey, keyToPassphrase } from 'interocitor';
+import { SyncEngine } from 'interocitor';
+import { GoogleDriveAdapter } from 'interocitor/adapters/google-drive';
+import { generateKey, keyToPassphrase } from 'interocitor/crypto/keys';
 
 // 1. Pick a storage adapter
-const adapter = new GoogleDriveAdapter({ clientId: 'YOUR_GOOGLE_CLIENT_ID' });
+const adapter = new GoogleDriveAdapter({
+  clientId: 'YOUR_GOOGLE_CLIENT_ID',
+});
 
 // 2. Create the engine
 const engine = new SyncEngine(adapter, { rootPath: '/Interocitor' });
@@ -34,7 +38,6 @@ const engine = new SyncEngine(adapter, { rootPath: '/Interocitor' });
 const key = await generateKey();
 const passphrase = await keyToPassphrase(key);
 console.log('Share this with your mesh:', passphrase);
-// → something like "5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ"
 engine.setEncryptionKey(key);
 
 // 4. Initialize and connect
@@ -69,27 +72,44 @@ await engine.disconnect();
 Device A                    Cloud Folder                   Device B
 ─────────                   ────────────                   ─────────
 write to IDB ──┐
-               ├─ flush ──► changes/dev_a.ndjson
-               │                                    poll ──► read
-               │                                           merge into IDB
-               │            changes/dev_b.ndjson ◄── flush ─┤
-  poll ──► read                                             │
-  merge into IDB                                            └── write to IDB
+               ├─ flush ──► c1/clients/dev_a/2026-04-06/
+               │              {hlc}-{id}.json
+               │            c1/clients/dev_a/head.json
+               │                                     poll ──► read head
+               │                                            list date folders
+               │                                            merge into IDB
+               │            c1/clients/dev_b/...  ◄── flush ─┤
+  poll ──► read                                              │
+  merge into IDB                                             └── write to IDB
 ```
 
-1. Each device writes to its own NDJSON file in the cloud folder. One device, one file. No concurrent writes to the same file.
-2. Each device polls for changes from other devices' files, downloads new entries, and merges them using LWW-per-column CRDTs.
+1. Each device writes one file per change entry under its own date-sharded folder. One device, one folder. No concurrent writes to the same file.
+2. Each device polls for changes from other devices' folders, reads head files to detect new data, then downloads and merges using LWW-per-column CRDTs.
 3. A Hybrid Logical Clock (HLC) provides total ordering without a time server.
-4. If encryption is enabled, each NDJSON line is independently encrypted with AES-256-GCM before upload.
+4. If encryption is enabled, each change file is independently encrypted with AES-256-GCM before upload.
+5. **Compaction mode is configurable**: direct-cloud meshes can compact from authorized clients, while relay-server mode centralizes compaction and garbage collection.
 
-IndexedDB is a **cache**, not the source of truth. Browser clears it? The app rehydrates from cloud on next open.
+IndexedDB is a **cache**, not the source of truth. Browser clears it? The app rehydrates from the manifest-referenced snapshot on next open.
 
 ## Adapters
+
+### WebDAV (Nextcloud, ownCloud, any WebDAV server)
+
+```ts
+import { WebDAVAdapter } from 'interocitor/adapters/webdav';
+
+const adapter = new WebDAVAdapter({
+  baseUrl: 'https://cloud.example.com/remote.php/dav/files/alice',
+  auth: { username: 'alice', password: 'APP_PASSWORD' },
+});
+```
+
+The "my own cloud" option. Runs on a $5 VPS, a Raspberry Pi, or a NAS.
 
 ### Google Drive
 
 ```ts
-import { GoogleDriveAdapter } from 'interocitor';
+import { GoogleDriveAdapter } from 'interocitor/adapters/google-drive';
 
 const adapter = new GoogleDriveAdapter({
   clientId: 'YOUR_CLIENT_ID', // from Google Cloud Console
@@ -98,47 +118,28 @@ const adapter = new GoogleDriveAdapter({
 
 Uses `drive.file` scope — the app can only see files it created. Mesh members share the folder via Google Drive's native sharing.
 
-### WebDAV (Nextcloud, ownCloud, any WebDAV server)
-
-```ts
-import { WebDAVAdapter } from 'interocitor';
-
-const adapter = new WebDAVAdapter({
-  baseUrl: 'https://cloud.example.com/remote.php/dav/files/username',
-  auth: { username: 'user', password: 'pass' },
-});
-```
-
-The "my own cloud" option. Runs on a $5 VPS, a Raspberry Pi, or a NAS.
-
 ### Memory (testing)
 
 ```ts
-import { MemoryAdapter } from 'interocitor';
+import { MemoryAdapter } from 'interocitor/adapters/memory';
 
 const adapter = new MemoryAdapter();
 await adapter.authenticate();
 ```
 
-### Write your own
+### Full custom adapter
 
-Implement the `StorageAdapter` interface:
+Plug in any backend that implements `StorageAdapter`:
 
 ```ts
-interface StorageAdapter {
-  readonly name: string;
-  authenticate(): Promise<void>;
-  isAuthenticated(): boolean;
-  ensureFolder(path: string): Promise<void>;
-  listFiles(path: string): Promise<FileEntry[]>;
-  readFile(path: string): Promise<Uint8Array>;
-  writeFile(path: string, data: Uint8Array | string): Promise<void>;
-  deleteFile(path: string): Promise<void>;
-  getFileMetadata(path: string): Promise<FileEntry | null>;
+import { SyncEngine, type StorageAdapter, type FileEntry } from 'interocitor';
+
+class MyAdapter implements StorageAdapter {
+  readonly name = 'my-adapter';
+  // implement: authenticate, isAuthenticated, ensureFolder,
+  //   listFiles, listFolders, readFile, writeFile, deleteFile, getFileMetadata
 }
 ```
-
-Dropbox, OneDrive, S3-compatible, or a REST API on your own server — anything that can read/write files.
 
 ## Encryption
 
@@ -149,40 +150,20 @@ All encryption uses the Web Crypto API (AES-256-GCM). The key is generated on th
 - **QR code** — encode either of the above
 
 ```ts
-import { generateKey, keyToPassphrase, passphraseToKey } from 'interocitor';
+import { generateKey, keyToPassphrase, passphraseToKey } from 'interocitor/crypto/keys';
 
 // First device generates
 const key = await generateKey();
 const passphrase = await keyToPassphrase(key);
 
 // Other devices import
-const sameKey = await passphraseToKey('5HueCGU8rMjxEXxi...');
+const sameKey = await passphraseToKey(passphrase);
 engine.setEncryptionKey(sameKey);
 ```
 
-The key never leaves devices. The cloud folder only contains ciphertext. Google/Dropbox/your WebDAV server cannot read your data.
+The key never leaves devices. The cloud folder only contains ciphertext.
 
 **Recovery:** If all devices lose the key, cloud data is unrecoverable. This is by design. Print the passphrase and store it somewhere safe.
-
-## Compaction & Migration
-
-Change logs grow forever. Compaction writes a snapshot and deletes old logs. Migration is compaction with a transform function — same code path:
-
-```ts
-// Simple compaction
-await engine.compact();
-
-// Migration: rename a column
-await engine.compact((table, row) => {
-  if (table === 'tasks' && row['status_code']) {
-    row['status'] = row['status_code'];
-    delete row['status_code'];
-  }
-  return row;
-});
-```
-
-Compaction bumps the epoch. Migration also bumps the schema version. Devices on old app versions see the version mismatch and prompt to update.
 
 ## CRDT strategy
 
@@ -196,7 +177,7 @@ After merge: { title: "Review PR" (T1), status: "done" (T2) }
 Both changes preserved — different columns.
 ```
 
-Deletes are soft (tombstone). A delete with a lower HLC than a subsequent upsert loses — the row comes back. Tombstones are cleaned up during compaction after 30 days.
+Deletes are soft (tombstone). A delete with a lower HLC than a subsequent upsert loses — the row comes back. Tombstones are retained for 90 days (server GC policy).
 
 Intentionally simple. No ordered list CRDTs, no rich text merging. For tabular data, LWW-per-column is sufficient and trivial to reason about.
 
@@ -215,8 +196,6 @@ engine.on((event) => {
     case 'flush:error':
     case 'rehydrate:start':   // rebuilding from snapshot
     case 'rehydrate:complete':
-    case 'compact:start':
-    case 'compact:complete':
     case 'auth:required':     // cloud auth needed
     case 'auth:complete':
     case 'schema:mismatch':   // remote schema is newer
@@ -228,12 +207,29 @@ engine.on((event) => {
 
 ```
 /Interocitor/
-  manifest.json              ← cleartext (schema version, mesh ID, encrypted flag)
-  changes/
-    dev_a1b2c3.ndjson        ← device A's change log (encrypted if enabled)
-    dev_d4e5f6.ndjson        ← device B's change log
-  snapshots/
-    latest.json              ← compacted state (encrypted if enabled)
+  manifest.json                              ← global pointer
+  manifest-{generation}.json                 ← global manifest
+
+  devices/
+    dev_a1b2c3.json                          ← per-device metadata
+
+  c1/                                        ← channel (opaque ID)
+    channel.json                             ← channel pointer
+    channel-manifest-{gen}-{writer}.json     ← channel manifest
+    mainline/
+      snapshot-{epoch}-{writer}.json         ← L2 snapshot (written by compactor)
+      delta-{from}-to-{to}-{writer}.json     ← L1 delta (written by compactor)
+    clients/
+      dev_a1b2c3/
+        head.json                            ← latest HLC, date, file count
+        2026-04-05/
+          {hlc}-{changeId}.json              ← L0 change file
+        2026-04-06/
+          {hlc}-{changeId}.json
+      dev_d4e5f6/
+        head.json
+        2026-04-06/
+          {hlc}-{changeId}.json
 ```
 
 ## What this is NOT
@@ -247,10 +243,11 @@ engine.on((event) => {
 
 Playwright e2e tests run in a real browser and validate:
 
-- IndexedDB-backed `SyncEngine` behavior
-- `WebDAVAdapter` network flow (`PROPFIND`, `MKCOL`, `GET`, `PUT`, `DELETE`)
-
-Google Drive is intentionally excluded from e2e tests in this phase.
+- manifest bootstrap and writer-authority enforcement
+- Channelized file-per-change writes and cross-device sync
+- Encrypted round-trip (cloud only has ciphertext)
+- WebDAV adapter contract (`PROPFIND`, `MKCOL`, `GET`, `PUT`, `DELETE`)
+- Multi-context WebDAV sync isolation
 
 ```bash
 yarn test:e2e:install

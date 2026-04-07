@@ -17,6 +17,17 @@ interface WebDAVConfig {
   auth: { username: string; password: string } | { token: string };
 }
 
+/**
+ * Browser-friendly WebDAV adapter for Nextcloud, ownCloud, and compatible DAV servers.
+ *
+ * @example
+ * ```ts
+ * const adapter = new WebDAVAdapter({
+ *   baseUrl: 'https://cloud.example.com/remote.php/dav/files/alice',
+ *   auth: { username: 'alice', password: 'APP_PASSWORD' },
+ * });
+ * ```
+ */
 export class WebDAVAdapter implements StorageAdapter {
   readonly name = 'webdav';
 

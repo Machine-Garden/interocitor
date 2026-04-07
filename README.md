@@ -4,6 +4,8 @@
 
 Sync structured data across devices using a cloud folder you already own. CRDT merge, E2E encryption, no purpose-built sync backend.
 
+Start fully local in IndexedDB, attach sync later, switch adapters at runtime, or drop back to offline-only mode without losing local state.
+
 ## Why
 
 You want local-first sync. You look at the options.
@@ -126,6 +128,13 @@ await engine.setRemoteStorage(new WebDAVAdapter({ baseUrl: 'https://backup.examp
 await engine.setRemoteStorage(null); // keep working locally in IndexedDB only
 ```
 
+`setRemoteStorage(...)` re-seeds the selected backend from current local IndexedDB state. That means these flows are supported:
+
+- start with no adapter, write locally, then enable sync later
+- switch from adapter A to adapter B at runtime
+- detach from sync completely with `setRemoteStorage(null)`
+- reconnect to an old adapter later and merge remote changes made while this client was offline
+
 ## How sync works
 
 ```mermaid
@@ -152,6 +161,16 @@ Writes land in local IDB immediately — reads never touch the cloud. Flushing u
 No locks, no coordination. Each device writes only its own files.
 
 For detailed protocol sequence diagrams (pull, connect, compaction, bootstrap, rehydration, replica flush), see **[docs/flows.md](docs/flows.md)**.
+
+## Core API at a glance
+
+- `await engine.init()` — open IndexedDB and load local state; no network required
+- `await engine.connect()` — authenticate, bootstrap/pull remote state, and start background sync
+- `await engine.setRemoteStorage(adapterOrNull)` — attach, switch, or remove the remote backend at runtime
+- `await engine.table('tasks').put(id, data)` — write locally first, queue sync for later
+- `await engine.flush()` — push queued local changes to the active remote immediately
+- `await engine.pull()` — merge remote changes into local IndexedDB immediately
+- `await engine.disconnect()` — stop polling and close the local store
 
 ## Offline guarantee
 

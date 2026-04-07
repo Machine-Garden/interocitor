@@ -7,6 +7,18 @@
 
 import type { StorageAdapter, FileEntry } from '../core/types.ts';
 
+/**
+ * In-memory implementation of {@link StorageAdapter}.
+ *
+ * Useful for tests, demos, and local experiments where persistence is not
+ * required.
+ *
+ * @example
+ * ```ts
+ * const adapter = new MemoryAdapter();
+ * const engine = new SyncEngine(adapter, { remotePath: '/Demo' });
+ * ```
+ */
 export class MemoryAdapter implements StorageAdapter {
   readonly name = 'memory';
 

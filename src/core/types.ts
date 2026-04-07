@@ -6,6 +6,9 @@
 
 // ─── Device & Identity ───────────────────────────────────────────────
 
+/**
+ * Stable identity metadata for a client device participating in a mesh.
+ */
 export interface DeviceInfo {
   deviceId: string;
   userId?: string;
@@ -14,6 +17,9 @@ export interface DeviceInfo {
 
 // ─── Hybrid Logical Clock ────────────────────────────────────────────
 
+/**
+ * Hybrid logical clock state used to order CRDT writes across devices.
+ */
 export interface HLC {
   ts: number;
   counter: number;
@@ -24,6 +30,9 @@ export interface HLC {
 
 export type ColumnValue = string | number | boolean | null | object;
 
+/**
+ * CRDT cell value paired with the HLC timestamp that last wrote it.
+ */
 export interface ColumnEntry {
   value: ColumnValue;
   hlc: string; // serialized HLC
@@ -45,6 +54,9 @@ export interface DeleteOp {
 
 export type Op = UpsertOp | DeleteOp;
 
+/**
+ * Serialized batch of CRDT operations written to a device-specific change log.
+ */
 export interface ChangeEntry {
   id: string;
   ts: number;
@@ -56,6 +68,12 @@ export interface ChangeEntry {
 
 // ─── Row (as stored in local DB) ─────────────────────────────────────
 
+/**
+ * Row representation as stored in the local CRDT cache.
+ *
+ * Public table APIs usually return plain objects rather than this internal
+ * metadata-rich shape.
+ */
 export interface Row {
   _table: string;
   _rowId: string;
@@ -92,6 +110,9 @@ export interface SchemaField<T = unknown, K extends SchemaFieldKind = SchemaFiel
 export type IndexableSchemaField<T = unknown> = SchemaField<T, IndexableSchemaFieldKind>;
 
 
+/**
+ * Schema metadata for a single table, including field kinds and local indexes.
+ */
 export interface TableSchemaDefinition {
   /** Production style: define field kind + index intent in one place. */
   fields?: Record<string, SchemaField>;
@@ -99,6 +120,9 @@ export interface TableSchemaDefinition {
   indexes?: TableIndexDefinition[];
 }
 
+/**
+ * Versioned schema definition used for local index planning and migrations.
+ */
 export interface DatabaseSchemaDefinition {
   /** Increment when index/table metadata changes. */
   version: number;
@@ -117,6 +141,10 @@ export type WhereOperator =
   | 'startsWith'
   | 'anyOf';
 
+/**
+ * Dexie-style predicate description used by {@link Table.where} and
+ * {@link SyncEngine.queryWhere}.
+ */
 export interface WhereClause {
   field: string;
   op: WhereOperator;
@@ -130,6 +158,9 @@ export interface WhereClause {
 
 // ─── Snapshot ────────────────────────────────────────────────────────
 
+/**
+ * Compacted mesh snapshot containing the full row set at a given epoch.
+ */
 export interface Snapshot {
   snapshotId: string;
   timestamp: string;
@@ -152,6 +183,9 @@ export interface ManifestPointer {
   file: string;
 }
 
+/**
+ * Authoritative mesh manifest describing the latest generation and snapshot state.
+ */
 export interface Manifest {
   generation: number;
   parentGeneration: number;
@@ -196,6 +230,9 @@ export interface ChangesHead {
 
 // ─── Storage Adapter ─────────────────────────────────────────────────
 
+/**
+ * Normalized remote file metadata returned by a storage adapter.
+ */
 export interface FileEntry {
   name: string;
   path: string;
@@ -205,6 +242,10 @@ export interface FileEntry {
   revision?: string;
 }
 
+/**
+ * Contract implemented by remote backends such as WebDAV, Google Drive,
+ * Cloudflare, or in-memory test adapters.
+ */
 export interface StorageAdapter {
   readonly name: string;
 
@@ -273,6 +314,11 @@ export interface ReplicaConfig {
 
 // ─── Sync Engine Config ──────────────────────────────────────────────
 
+/**
+ * Configuration for a {@link SyncEngine} instance.
+ *
+ * Supports both fully local startup and immediate sync with a remote adapter.
+ */
 export interface SyncConfig {
   /** Cloud folder path prefix, e.g. "/Interocitor" */
   remotePath: string;
@@ -311,6 +357,9 @@ export interface SyncConfig {
 
 // ─── Events ──────────────────────────────────────────────────────────
 
+/**
+ * Union of lifecycle, sync, auth, and replication events emitted by the engine.
+ */
 export type SyncEvent =
   | { type: 'sync:start' }
   | { type: 'sync:complete'; entriesMerged: number }
@@ -327,4 +376,7 @@ export type SyncEvent =
   | { type: 'schema:mismatch'; local: number; remote: number }
   | { type: 'replica:error'; adapter: string; error: Error };
 
+/**
+ * Listener callback registered with {@link SyncEngine.on}.
+ */
 export type SyncEventListener = (event: SyncEvent) => void;

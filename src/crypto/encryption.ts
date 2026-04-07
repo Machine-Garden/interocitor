@@ -192,6 +192,37 @@ export async function decryptEntry(
   return new TextDecoder().decode(decrypted);
 }
 
+/**
+ * Encrypt multiple plaintext lines independently and join them as NDJSON.
+ *
+ * Each line gets its own IV and auth tag, so corruption is isolated to the
+ * affected entry.
+ */
+export async function encryptNdjson(key: CryptoKey, lines: string[]): Promise<string> {
+  const encryptedLines = await Promise.all(lines.map((line) => encryptEntry(key, line)));
+  return encryptedLines.join('\n');
+}
+
+/**
+ * Decrypt newline-delimited encrypted entries.
+ *
+ * Invalid or corrupted lines are returned as `null` instead of throwing so the
+ * caller can recover as much of the stream as possible.
+ */
+export async function decryptNdjson(key: CryptoKey, content: string): Promise<Array<string | null>> {
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  return Promise.all(lines.map(async (line) => {
+    try {
+      return await decryptEntry(key, line);
+    } catch {
+      return null;
+    }
+  }));
+}
 
 /** Quick verification: try decrypting a single line to confirm key is correct. */
 export async function verifyKey(key: CryptoKey, sampleEncrypted: string): Promise<boolean> {

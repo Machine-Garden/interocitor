@@ -26,6 +26,18 @@ function rowToTyped<T extends Record<string, unknown>>(row: Row): T {
   return result as T;
 }
 
+/**
+ * Typed handle for a named collection within a {@link SyncEngine}.
+ *
+ * All reads return plain objects with CRDT metadata stripped away.
+ *
+ * @example
+ * ```ts
+ * const tasks = engine.table<{ title: string; done: boolean }>('tasks');
+ * await tasks.put('task_1', { title: 'Write docs', done: false });
+ * const open = await tasks.where('done').equals(false);
+ * ```
+ */
 export class Table<T extends Record<string, unknown>> {
   constructor(
     private readonly engine: AnyEngine,

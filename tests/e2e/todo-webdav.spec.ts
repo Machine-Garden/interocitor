@@ -33,14 +33,17 @@ test('TODO demo shares join token across tabs and syncs over local WebDAV', asyn
       await window.__todoDemo.addTask('from tab a');
     });
 
-    const titlesOnB = await tabB.evaluate(async () => {
+    await tabB.evaluate(async () => {
       await window.__todoDemo.disconnect();
       await window.__todoDemo.connect();
-      const items = await window.__todoDemo.refreshTasks();
-      return items.map(item => String(item.title));
     });
 
-    expect(titlesOnB).toContain('from tab a');
+    await expect.poll(async () => {
+      return tabB.evaluate(async () => {
+        const items = await window.__todoDemo.refreshTasks();
+        return items.map(item => String(item.title));
+      });
+    }).toContain('from tab a');
   } finally {
     await context.close();
   }

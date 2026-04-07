@@ -20,6 +20,18 @@ interface GoogleDriveConfig {
   redirectUri?: string;
 }
 
+/**
+ * Google Drive adapter using the browser OAuth token flow.
+ *
+ * This is the easiest zero-infrastructure option when your users already live
+ * in Google Workspace or personal Drive.
+ *
+ * @example
+ * ```ts
+ * const adapter = new GoogleDriveAdapter({ clientId: 'YOUR_GOOGLE_CLIENT_ID' });
+ * const engine = new SyncEngine(adapter, { remotePath: '/MyApp' });
+ * ```
+ */
 export class GoogleDriveAdapter implements StorageAdapter {
   readonly name = 'google-drive';
 

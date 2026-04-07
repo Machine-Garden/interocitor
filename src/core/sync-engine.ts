@@ -175,6 +175,20 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   private listeners: Set<SyncEventListener> = new Set();
   private readonly schema?: DatabaseSchemaDefinition;
 
+  /**
+   * Create a sync engine.
+   *
+   * Pass a remote adapter up front for immediate sync support, or pass only
+   * config to start fully local and attach a remote later with
+   * {@link setRemoteStorage}.
+   *
+   * @example
+   * ```ts
+   * const engine = new SyncEngine({ remotePath: '/App', dbName: 'app' });
+   * await engine.init();
+   * await engine.put('tasks', 'task_1', { title: 'offline first' });
+   * ```
+   */
   constructor(config: SyncConfig);
   constructor(adapter: StorageAdapter | null, config: SyncConfig);
   constructor(adapterOrConfig: StorageAdapter | SyncConfig | null, maybeConfig?: SyncConfig) {
@@ -335,6 +349,18 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
   // ── Events ─────────────────────────────────────────────────────────
 
+  /**
+   * Subscribe to engine lifecycle and data-change events.
+   *
+   * Returns an unsubscribe function.
+   *
+   * @example
+   * ```ts
+   * const off = engine.on((event) => {
+   *   if (event.type === 'change') console.log(event.table, event.rowId);
+   * });
+   * ```
+   */
   on(listener: SyncEventListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -348,6 +374,11 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
   // ── Encryption ─────────────────────────────────────────────────────
 
+  /**
+   * Configure the mesh encryption key before connecting to an encrypted mesh.
+   *
+   * Use this for fresh engines or when joining an already-encrypted mesh.
+   */
   setEncryptionKey(key: CryptoKey): void {
     this.encryptionKey = key;
     this.encrypted = true;
@@ -477,7 +508,11 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     }
   }
 
-  /** Stop polling, flush remaining changes. */
+  /**
+   * Stop background sync, attempt a final flush, and close the local store.
+   *
+   * Call {@link init} again before reconnecting the same engine instance.
+   */
   async disconnect(): Promise<void> {
     this.stopPolling();
     this.clearScheduledFlush();
@@ -488,16 +523,25 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   }
 
   /**
-   * Swap the remote storage backend.
+   * Attach, replace, or remove the active remote storage backend.
    *
-   * Flushes any pending local writes to the current remote, then switches
-   * to the new backend. On reconnect the engine pulls all new changes from
-   * the new remote into local and flushes any remaining local writes to it.
-   * The result is a fully converged state against the new source — "top-up"
-   * in both directions.
+   * When switching to a new adapter, the engine preserves current local data,
+   * resets remote sync state, rebuilds its outbox from IndexedDB, and then
+   * resumes syncing against the selected backend. Passing `null` detaches
+   * cloud sync while preserving local state and queued changes.
    *
-   * If the engine was not connected, only the adapter reference is updated;
-   * call connect() when ready.
+   * If the engine was already connected, it reconnects automatically.
+   *
+   * @example
+   * ```ts
+   * await engine.setRemoteStorage(new WebDAVAdapter({
+   *   baseUrl: 'https://cloud.example.com/dav',
+   *   auth: { username: 'alice', password: 'app-password' },
+   * }));
+   * await engine.connect();
+   *
+   * await engine.setRemoteStorage(null); // back to local-only mode
+   * ```
    */
   async setRemoteStorage(adapter: StorageAdapter | null): Promise<void> {
     const wasConnected = this.connected;
@@ -528,15 +572,11 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   }
 
   /**
-   * Swap the local storage backend.
+   * Replace the local persistence backend.
    *
-   * Flushes any pending outbox to remote, closes the current local store,
-   * opens the new one, then pulls all remote data into it and flushes any
-   * local outbox entries to remote. The result is a fully converged state
-   * in the new local store — "top-up" in both directions.
-   *
-   * If the engine was not connected, only the local store is swapped;
-   * call connect() when ready.
+   * This is primarily useful for advanced integrations and tests. When the
+   * engine is already connected, the new local store is topped up from remote
+   * after the swap so it converges to the current mesh state.
    */
   async setLocalStorage(local: LocalStoreAdapter): Promise<void> {
     const wasConnected = this.connected;
@@ -679,9 +719,18 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   // ── Local writes ───────────────────────────────────────────────────
 
   /**
-   * Write a row. This is the main API for mutations.
-   * Applies locally immediately, queues for sync.
-   * No network required.
+   * Insert or update a row.
+   *
+   * Writes are applied to local IndexedDB immediately and then queued for
+   * asynchronous sync. This method never requires network access.
+   *
+   * @example
+   * ```ts
+   * await engine.put('tasks', 'task_1', {
+   *   title: 'Ship docs polish',
+   *   status: 'open',
+   * });
+   * ```
    */
   async put(
     table: string,
@@ -732,7 +781,12 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     return row;
   }
 
-  /** Soft-delete a row. No network required. */
+  /**
+   * Tombstone a row locally and queue that deletion for sync.
+   *
+   * Deletions are CRDT operations, so they can be merged safely across
+   * devices without coordination.
+   */
   async delete(table: string, rowId: string, userId?: string): Promise<void> {
     this.hlc = hlcNow(this.hlc);
     const hlcStr = hlcSerialize(this.hlc);
@@ -761,19 +815,30 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
   // ── Read ───────────────────────────────────────────────────────────
 
-  /** Get a single row by ID. Returns undefined if not found or deleted. No network required. */
+  /**
+   * Read a single live row from local IndexedDB.
+   *
+   * Returns `undefined` when the row does not exist or has been deleted.
+   */
   async get(table: string, rowId: string): Promise<Row | undefined> {
     const row = await this.local.getRow(table, rowId);
     if (!row || row._deleted) return undefined;
     return row;
   }
 
-  /** Get all live (non-deleted) rows in a table. No network required. */
+  /**
+   * Read all live rows in a table from local IndexedDB.
+   */
   async query(table: string): Promise<Row[]> {
     return this.local.getTable(table);
   }
 
-  /** Query live rows using a where-clause predicate (indexed when available). No network required. */
+  /**
+   * Query local rows using an indexed where-clause when available.
+   *
+   * If no matching secondary index exists, the query falls back to a
+   * full-table scan.
+   */
   async queryWhere(table: string, clause: WhereClause): Promise<Row[]> {
     return this.local.queryWhere(table, clause);
   }
@@ -785,7 +850,15 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
   /**
    * Get a type-safe handle for a named collection.
-   * When the engine is typed with a schema, the table type is inferred automatically.
+   *
+   * When the engine itself is typed with a schema, the table value type is
+   * inferred automatically.
+   *
+   * @example
+   * ```ts
+   * const tasks = engine.table('tasks');
+   * await tasks.put('task_1', { title: 'hello' });
+   * ```
    */
   table<K extends keyof S & string>(name: K): Table<S[K]>;
   table<T extends Record<string, unknown>>(name: string): Table<T>;
@@ -809,6 +882,12 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     }, this.config.flushDebounce);
   }
 
+  /**
+   * Immediately push the queued local outbox to the active remote backend.
+   *
+   * If no remote adapter is configured, this becomes a no-op and local changes
+   * remain queued until a backend is attached.
+   */
   async flush(): Promise<void> {
     if (!this.adapter) {
       this.clearScheduledFlush();
@@ -903,6 +982,12 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
   // ── Pull (cloud → local) ──────────────────────────────────────────
 
+  /**
+   * Pull remote changes into local IndexedDB immediately.
+   *
+   * This is useful for manual sync controls, tests, or when you want to force
+   * convergence before reading local state.
+   */
   async pull(): Promise<void> {
     const adapter = this.requireAdapter('pull()');
 
@@ -996,6 +1081,10 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
   // ── Rehydrate (from snapshot) ──────────────────────────────────────
 
+  /**
+   * Rebuild local IndexedDB from the current remote snapshot, then pull newer
+   * change files on top.
+   */
   async rehydrate(): Promise<void> {
     const adapter = this.requireAdapter('rehydrate()');
 
@@ -1155,6 +1244,9 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
   // ── Mesh management ───────────────────────────────────────────
 
+  /**
+   * Return the currently loaded manifest, if the engine has connected to a remote mesh.
+   */
   getManifest(): Manifest | null {
     return this.manifest ? { ...this.manifest } : null;
   }

@@ -28,6 +28,20 @@ interface IoFileMeta {
   etag?: string;
 }
 
+/**
+ * Interocitor-native Cloudflare adapter for Worker + D1 based deployments.
+ *
+ * Use this when you want a purpose-fit backend with optional SSE-driven
+ * invalidation instead of a generic file protocol like WebDAV.
+ *
+ * @example
+ * ```ts
+ * const adapter = new CloudflareAdapter({
+ *   baseUrl: 'https://example.com/io/team-a',
+ *   token: 'optional-bearer-token',
+ * });
+ * ```
+ */
 export class CloudflareAdapter implements StorageAdapter {
   readonly name = 'cloudflare';
 

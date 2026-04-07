@@ -22,7 +22,10 @@ Durable Objects are **not strictly required for plain polling sync**, but they a
 
 - Native IO endpoints over `/io/<prefix>` (`ensure-folder`, `list-files`, `list-folders`, `metadata`, `file`)
 - folder/file metadata + basic ETag generation
-- durable data persisted in D1 (`files` and `folders` tables)
+- durable data persisted in D1 (`files`, `folders`, `mesh_paths`, `maintenance_runs`, `maintenance_actions`)
+- mesh-path activity metrics for retention and auditability
+- configurable per-path write-size limits before D1 BLOB writes
+- scheduled TTL cleanup for inactive mesh roots
 - SSE invalidation endpoint: `/events/<prefix>`
 - CORS enabled for browser demos
 
@@ -72,6 +75,40 @@ Notes:
 
 - It only prunes files named like `<hlc>-chg_*.json` and skips `head.json`.
 - It writes an immutable command receipt to `/.interocitor/commands/` under the same remote path.
+- Automatic compaction is intentionally **not** enabled in this example yet.
+
+### Execute maintenance
+
+The same privileged execute endpoint also exposes product-ish maintenance/admin helpers:
+
+```json
+{ "op": "run-maintenance" }
+```
+
+Runs TTL cleanup immediately for the current prefix using the configured retention window.
+
+```json
+{ "op": "maintenance-status", "remotePath": "/todo-app" }
+```
+
+Returns tracked mesh-path activity and byte counters for the requested mesh root, or all tracked mesh roots for the prefix when `remotePath` is omitted.
+
+## Retention and size limits
+
+The worker tracks activity per `(prefix, remote_root)` mesh path.
+A mesh path becomes TTL-eligible when `last_operation_at` is older than `INTEROCITOR_PATH_TTL_HOURS`.
+Scheduled cleanup runs from the Worker `scheduled()` handler and the example ships with a default cron of every 4 hours.
+
+Configurable guardrails:
+
+- `INTEROCITOR_PATH_TTL_HOURS` — inactivity TTL before deletion
+- `INTEROCITOR_MAINTENANCE_MAX_PATHS_PER_RUN` — throttle TTL sweep size per run
+- `INTEROCITOR_MAX_CONTROL_BYTES` — manifests, head, device heartbeat files
+- `INTEROCITOR_MAX_CHANGE_BYTES` — change-file ceiling
+- `INTEROCITOR_MAX_MAINLINE_BYTES` — mainline snapshot ceiling
+- `INTEROCITOR_MAX_GENERIC_FILE_BYTES` — catch-all file ceiling
+
+This example keeps explicit application-level limits even though D1 stores file content in a `BLOB`, because operationally safe payload sizes matter more than the raw storage type alone.
 
 ## Persistence behavior
 
@@ -153,6 +190,8 @@ Current example coverage includes:
 - access-token protected mode
 - compaction + fresh-tab rehydrate from mainline snapshot
 - SSE reconnect after simulated Durable Object in-memory loss
+- mesh-path activity tracking + TTL cleanup
+- oversized writes rejected before D1 persistence
 
 The reconnect spec simulates DO loss by dropping live SSE clients through the privileged execute endpoint in the **test-only** Wrangler config. This validates the behavior you actually care about: EventSource reconnects automatically and sync resumes without waiting for the long polling interval.
 

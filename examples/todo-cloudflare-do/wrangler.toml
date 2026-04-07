@@ -7,6 +7,15 @@ INTEROCITOR_APPEND_ONLY = "1"
 # Set to "1" to emit per-request traces to worker logs (wrangler tail / dev console).
 # Flip to "0" in production to silence routine traffic.
 INTEROCITOR_VERBOSE = "1"
+INTEROCITOR_PATH_TTL_HOURS = "168"
+INTEROCITOR_MAINTENANCE_MAX_PATHS_PER_RUN = "100"
+INTEROCITOR_MAX_CONTROL_BYTES = "262144"
+INTEROCITOR_MAX_CHANGE_BYTES = "8388608"
+INTEROCITOR_MAX_MAINLINE_BYTES = "16777216"
+INTEROCITOR_MAX_GENERIC_FILE_BYTES = "8388608"
+
+[triggers]
+crons = ["0 */4 * * *"]
 
 [[d1_databases]]
 binding = "TODO_DB"

@@ -34,6 +34,13 @@ const IO_PREFIX = '/io';
 const EVENTS_PREFIX = '/events';
 const EXECUTE_SUFFIX = '/__interocitor__/execute';
 
+const DEFAULT_CONTROL_BYTES = 256 * 1024;
+const DEFAULT_CHANGE_BYTES = 8 * 1024 * 1024;
+const DEFAULT_MAINLINE_BYTES = 16 * 1024 * 1024;
+const DEFAULT_GENERIC_FILE_BYTES = 8 * 1024 * 1024;
+const DEFAULT_PATH_TTL_HOURS = 7 * 24;
+const DEFAULT_MAINTENANCE_MAX_PATHS_PER_RUN = 100;
+
 // ─── CORS ─────────────────────────────────────────────────────────────────────
 
 const CORS_HEADERS = {
@@ -114,6 +121,12 @@ function fileNameFromPath(path) {
   return path.split('/').filter(Boolean).pop() ?? '';
 }
 
+function topLevelRoot(path) {
+  const normalized = normalizePath(path);
+  const seg = normalized.split('/').filter(Boolean)[0] ?? '';
+  return seg ? `/${seg}` : null;
+}
+
 // ─── Path classification ──────────────────────────────────────────────────────
 //
 // Every path falls into exactly one semantic category that determines write policy.
@@ -165,6 +178,27 @@ function classifyPath(path) {
   return PATH_TYPE.OTHER;
 }
 
+function meshRootForPath(path, pathType = classifyPath(path)) {
+  const normalized = normalizePath(path);
+  if (normalized === '/') return null;
+
+  if (pathType === PATH_TYPE.MANIFEST_POINTER || pathType === PATH_TYPE.MANIFEST_SNAPSHOT) {
+    return parentPath(normalized);
+  }
+
+  if (
+    pathType === PATH_TYPE.HEAD ||
+    pathType === PATH_TYPE.CHANGE_FILE ||
+    pathType === PATH_TYPE.MAINLINE_SNAPSHOT ||
+    pathType === PATH_TYPE.DEVICE_HEARTBEAT
+  ) {
+    const parent = parentPath(normalized);
+    return parent ? parentPath(parent) : null;
+  }
+
+  return topLevelRoot(normalized);
+}
+
 function changeHlcFromFileName(name) {
   const idx = name.lastIndexOf('-chg_');
   return idx > 0 ? name.slice(0, idx) : null;
@@ -173,6 +207,74 @@ function changeHlcFromFileName(name) {
 function nowIso() { return new Date().toISOString(); }
 function newEtag() { return `"${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}"`; }
 function encodeSse(type, payload) { return `event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`; }
+function isoDay(value) { return String(value).slice(0, 10); }
+
+function toFiniteNumber(value, fallback = 0) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function clampNonNegativeInteger(value) {
+  return Math.max(0, Math.trunc(toFiniteNumber(value, 0)));
+}
+
+function parseIntegerEnv(env, key, fallback, min = 0) {
+  const value = Number.parseInt(String(env?.[key] ?? ''), 10);
+  return Number.isFinite(value) && value >= min ? value : fallback;
+}
+
+function getWorkerConfig(env) {
+  return {
+    pathTtlHours: parseIntegerEnv(env, 'INTEROCITOR_PATH_TTL_HOURS', DEFAULT_PATH_TTL_HOURS, 0),
+    maintenanceMaxPathsPerRun: parseIntegerEnv(env, 'INTEROCITOR_MAINTENANCE_MAX_PATHS_PER_RUN', DEFAULT_MAINTENANCE_MAX_PATHS_PER_RUN, 1),
+    maxControlBytes: parseIntegerEnv(env, 'INTEROCITOR_MAX_CONTROL_BYTES', DEFAULT_CONTROL_BYTES, 1),
+    maxChangeBytes: parseIntegerEnv(env, 'INTEROCITOR_MAX_CHANGE_BYTES', DEFAULT_CHANGE_BYTES, 1),
+    maxMainlineBytes: parseIntegerEnv(env, 'INTEROCITOR_MAX_MAINLINE_BYTES', DEFAULT_MAINLINE_BYTES, 1),
+    maxGenericFileBytes: parseIntegerEnv(env, 'INTEROCITOR_MAX_GENERIC_FILE_BYTES', DEFAULT_GENERIC_FILE_BYTES, 1),
+  };
+}
+
+function fileMetricsForPath(path, size) {
+  const byteLength = clampNonNegativeInteger(size);
+  const pathType = classifyPath(path);
+  return {
+    fileCount: 1,
+    totalBytes: byteLength,
+    changeBytes: pathType === PATH_TYPE.CHANGE_FILE ? byteLength : 0,
+    mainlineBytes: pathType === PATH_TYPE.MAINLINE_SNAPSHOT ? byteLength : 0,
+  };
+}
+
+function fileMetricsDeltaForChange(path, previousSize, nextSize) {
+  const previous = previousSize == null ? null : fileMetricsForPath(path, previousSize);
+  const next = nextSize == null ? null : fileMetricsForPath(path, nextSize);
+  return {
+    fileCountDelta: (next?.fileCount ?? 0) - (previous?.fileCount ?? 0),
+    totalBytesDelta: (next?.totalBytes ?? 0) - (previous?.totalBytes ?? 0),
+    changeBytesDelta: (next?.changeBytes ?? 0) - (previous?.changeBytes ?? 0),
+    mainlineBytesDelta: (next?.mainlineBytes ?? 0) - (previous?.mainlineBytes ?? 0),
+  };
+}
+
+function fileSizeLimitForPathType(config, pathType) {
+  if (
+    pathType === PATH_TYPE.MANIFEST_POINTER ||
+    pathType === PATH_TYPE.MANIFEST_SNAPSHOT ||
+    pathType === PATH_TYPE.HEAD ||
+    pathType === PATH_TYPE.DEVICE_HEARTBEAT
+  ) {
+    return config.maxControlBytes;
+  }
+  if (pathType === PATH_TYPE.CHANGE_FILE) return config.maxChangeBytes;
+  if (pathType === PATH_TYPE.MAINLINE_SNAPSHOT) return config.maxMainlineBytes;
+  return config.maxGenericFileBytes;
+}
+
+function parseOptionalIso(value) {
+  if (value == null || value === '') return null;
+  const millis = Date.parse(String(value));
+  return Number.isFinite(millis) ? new Date(millis).toISOString() : null;
+}
 
 // ─── Logging ──────────────────────────────────────────────────────────────────
 //
@@ -210,6 +312,291 @@ function toUint8Array(value) {
   return new Uint8Array();
 }
 
+async function dbGetMeshPath(db, prefix, remoteRoot) {
+  return await db.prepare(
+    `SELECT prefix, remote_root, created_at, updated_at, last_operation_at, last_read_at, last_write_at,
+            last_ttl_delete_at, deleted_at, ops_day, ops_count_day, writes_count_day,
+            current_file_count, current_total_bytes, current_change_bytes, current_mainline_bytes
+       FROM mesh_paths
+      WHERE prefix=?1 AND remote_root=?2
+      LIMIT 1`,
+  ).bind(prefix, remoteRoot).first();
+}
+
+async function dbEnsureMeshPath(db, prefix, remoteRoot, now = nowIso()) {
+  if (!remoteRoot) return null;
+  const existing = await dbGetMeshPath(db, prefix, remoteRoot);
+  if (existing) return existing;
+  await db.prepare(
+    `INSERT OR IGNORE INTO mesh_paths (
+       prefix, remote_root, created_at, updated_at, last_operation_at, last_read_at, last_write_at,
+       last_ttl_delete_at, deleted_at, ops_day, ops_count_day, writes_count_day,
+       current_file_count, current_total_bytes, current_change_bytes, current_mainline_bytes
+     ) VALUES (?1, ?2, ?3, ?3, NULL, NULL, NULL, NULL, NULL, ?4, 0, 0, 0, 0, 0, 0)`,
+  ).bind(prefix, remoteRoot, now, isoDay(now)).run();
+  return await dbGetMeshPath(db, prefix, remoteRoot);
+}
+
+async function dbApplyMeshPathDelta(db, prefix, remoteRoot, delta, now = nowIso()) {
+  if (!remoteRoot) return;
+  const row = await dbEnsureMeshPath(db, prefix, remoteRoot, now);
+  const nextFileCount = clampNonNegativeInteger(toFiniteNumber(row?.current_file_count) + toFiniteNumber(delta?.fileCountDelta));
+  const nextTotalBytes = clampNonNegativeInteger(toFiniteNumber(row?.current_total_bytes) + toFiniteNumber(delta?.totalBytesDelta));
+  const nextChangeBytes = clampNonNegativeInteger(toFiniteNumber(row?.current_change_bytes) + toFiniteNumber(delta?.changeBytesDelta));
+  const nextMainlineBytes = clampNonNegativeInteger(toFiniteNumber(row?.current_mainline_bytes) + toFiniteNumber(delta?.mainlineBytesDelta));
+  await db.prepare(
+    `UPDATE mesh_paths
+        SET updated_at=?3,
+            deleted_at=NULL,
+            current_file_count=?4,
+            current_total_bytes=?5,
+            current_change_bytes=?6,
+            current_mainline_bytes=?7
+      WHERE prefix=?1 AND remote_root=?2`,
+  ).bind(prefix, remoteRoot, now, nextFileCount, nextTotalBytes, nextChangeBytes, nextMainlineBytes).run();
+}
+
+async function dbRecordMeshActivity(db, prefix, remoteRoot, kind, now = nowIso()) {
+  if (!remoteRoot) return;
+  const row = await dbEnsureMeshPath(db, prefix, remoteRoot, now);
+  const today = isoDay(now);
+  const sameDay = String(row?.ops_day ?? '') === today;
+  const opsCountDay = sameDay ? clampNonNegativeInteger(toFiniteNumber(row?.ops_count_day) + 1) : 1;
+  const currentWrites = sameDay ? clampNonNegativeInteger(row?.writes_count_day) : 0;
+  const writesCountDay = kind === 'write' ? currentWrites + 1 : currentWrites;
+  const lastReadAt = kind === 'read' ? now : (row?.last_read_at == null ? null : String(row.last_read_at));
+  const lastWriteAt = kind === 'write' ? now : (row?.last_write_at == null ? null : String(row.last_write_at));
+  await db.prepare(
+    `UPDATE mesh_paths
+        SET updated_at=?3,
+            deleted_at=NULL,
+            last_operation_at=?3,
+            last_read_at=?4,
+            last_write_at=?5,
+            ops_day=?6,
+            ops_count_day=?7,
+            writes_count_day=?8
+      WHERE prefix=?1 AND remote_root=?2`,
+  ).bind(prefix, remoteRoot, now, lastReadAt, lastWriteAt, today, opsCountDay, writesCountDay).run();
+}
+
+async function dbMarkMeshPathDeleted(db, prefix, remoteRoot, now = nowIso()) {
+  if (!remoteRoot) return;
+  await dbEnsureMeshPath(db, prefix, remoteRoot, now);
+  await db.prepare(
+    `UPDATE mesh_paths
+        SET updated_at=?3,
+            deleted_at=?3,
+            last_ttl_delete_at=?3,
+            current_file_count=0,
+            current_total_bytes=0,
+            current_change_bytes=0,
+            current_mainline_bytes=0
+      WHERE prefix=?1 AND remote_root=?2`,
+  ).bind(prefix, remoteRoot, now).run();
+}
+
+async function dbInsertMaintenanceRunStart(db, runId, startedAt, scopePrefix) {
+  await db.prepare(
+    `INSERT INTO maintenance_runs (run_id, started_at, scope_prefix, ttl_candidates, ttl_deleted, size_rejections, errors)
+     VALUES (?1, ?2, ?3, 0, 0, 0, 0)`,
+  ).bind(runId, startedAt, scopePrefix ?? null).run();
+}
+
+async function dbFinishMaintenanceRun(db, runId, summary) {
+  await db.prepare(
+    `UPDATE maintenance_runs
+        SET finished_at=?2,
+            ttl_candidates=?3,
+            ttl_deleted=?4,
+            size_rejections=?5,
+            errors=?6,
+            notes=?7
+      WHERE run_id=?1`,
+  ).bind(
+    runId,
+    summary.finishedAt,
+    summary.ttlCandidates,
+    summary.ttlDeleted,
+    summary.sizeRejections,
+    summary.errors,
+    summary.notes ?? null,
+  ).run();
+}
+
+async function dbInsertMaintenanceAction(db, payload) {
+  await db.prepare(
+    `INSERT INTO maintenance_actions (id, run_id, prefix, remote_root, action, details_json, created_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+  ).bind(
+    crypto.randomUUID(),
+    payload.runId ?? null,
+    payload.prefix,
+    payload.remoteRoot,
+    payload.action,
+    JSON.stringify(payload.details ?? {}),
+    payload.createdAt ?? nowIso(),
+  ).run();
+}
+
+async function dbListMeshPathsForPrefix(db, prefix) {
+  const { results = [] } = await db.prepare(
+    `SELECT prefix, remote_root, created_at, updated_at, last_operation_at, last_read_at, last_write_at,
+            last_ttl_delete_at, deleted_at, ops_day, ops_count_day, writes_count_day,
+            current_file_count, current_total_bytes, current_change_bytes, current_mainline_bytes
+       FROM mesh_paths
+      WHERE prefix=?1
+      ORDER BY remote_root ASC`,
+  ).bind(prefix).all();
+  return results;
+}
+
+async function dbMeasurePathMetrics(db, prefix, path) {
+  const normalized = normalizePath(path);
+  const like = normalized === '/' ? '/%' : `${normalized}/%`;
+  const { results = [] } = await db.prepare(
+    'SELECT path,size FROM files WHERE prefix=?1 AND (path=?2 OR path LIKE ?3)',
+  ).bind(prefix, normalized, like).all();
+  const totals = {
+    fileCount: 0,
+    totalBytes: 0,
+    changeBytes: 0,
+    mainlineBytes: 0,
+  };
+  for (const row of results) {
+    const metrics = fileMetricsForPath(String(row.path), Number(row.size ?? 0));
+    totals.fileCount += metrics.fileCount;
+    totals.totalBytes += metrics.totalBytes;
+    totals.changeBytes += metrics.changeBytes;
+    totals.mainlineBytes += metrics.mainlineBytes;
+  }
+  return totals;
+}
+
+async function dbPathExists(db, prefix, path) {
+  const normalized = normalizePath(path);
+  if (normalized === '/') {
+    const file = await db.prepare('SELECT 1 FROM files WHERE prefix=?1 LIMIT 1').bind(prefix).first();
+    if (file) return true;
+    const folder = await db.prepare('SELECT 1 FROM folders WHERE prefix=?1 LIMIT 1').bind(prefix).first();
+    return Boolean(folder);
+  }
+  const like = `${normalized}/%`;
+  const file = await db.prepare(
+    'SELECT 1 FROM files WHERE prefix=?1 AND (path=?2 OR path LIKE ?3) LIMIT 1',
+  ).bind(prefix, normalized, like).first();
+  if (file) return true;
+  const folder = await db.prepare(
+    'SELECT 1 FROM folders WHERE prefix=?1 AND (path=?2 OR path LIKE ?3) LIMIT 1',
+  ).bind(prefix, normalized, like).first();
+  return Boolean(folder);
+}
+
+async function dbListTtlCandidates(db, olderThanIso, limit, scopePrefix = null) {
+  if (scopePrefix) {
+    const { results = [] } = await db.prepare(
+      `SELECT prefix, remote_root, last_operation_at
+         FROM mesh_paths
+        WHERE deleted_at IS NULL
+          AND prefix=?1
+          AND last_operation_at IS NOT NULL
+          AND last_operation_at < ?2
+        ORDER BY last_operation_at ASC
+        LIMIT ?3`,
+    ).bind(scopePrefix, olderThanIso, limit).all();
+    return results;
+  }
+  const { results = [] } = await db.prepare(
+    `SELECT prefix, remote_root, last_operation_at
+       FROM mesh_paths
+      WHERE deleted_at IS NULL
+        AND last_operation_at IS NOT NULL
+        AND last_operation_at < ?1
+      ORDER BY last_operation_at ASC
+      LIMIT ?2`,
+  ).bind(olderThanIso, limit).all();
+  return results;
+}
+
+async function runMaintenance(env, ctx, log, options = {}) {
+  const db = env?.TODO_DB;
+  if (!db) throw new Error('Missing D1 binding TODO_DB');
+  const config = getWorkerConfig(env);
+  const startedAt = options.nowIso ?? nowIso();
+  const ttlCutoff = new Date(Date.parse(startedAt) - (config.pathTtlHours * 60 * 60 * 1000)).toISOString();
+  const runId = crypto.randomUUID();
+  const scopePrefix = options.scopePrefix ?? null;
+  await dbInsertMaintenanceRunStart(db, runId, startedAt, scopePrefix);
+
+  let ttlDeleted = 0;
+  let errors = 0;
+  const ttlCandidates = await dbListTtlCandidates(db, ttlCutoff, config.maintenanceMaxPathsPerRun, scopePrefix);
+
+  for (const candidate of ttlCandidates) {
+    const prefix = String(candidate.prefix);
+    const remoteRoot = normalizePath(String(candidate.remote_root));
+    try {
+      const metrics = await dbMeasurePathMetrics(db, prefix, remoteRoot);
+      const existed = await dbDeletePath(db, prefix, remoteRoot);
+      if (!existed) continue;
+      await dbMarkMeshPathDeleted(db, prefix, remoteRoot, startedAt);
+      await dbInsertMaintenanceAction(db, {
+        runId,
+        prefix,
+        remoteRoot,
+        action: 'ttl-delete',
+        details: {
+          source: options.source ?? 'scheduled',
+          ttlHours: config.pathTtlHours,
+          lastOperationAt: candidate.last_operation_at ?? null,
+          deletedFileCount: metrics.fileCount,
+          deletedTotalBytes: metrics.totalBytes,
+          deletedChangeBytes: metrics.changeBytes,
+          deletedMainlineBytes: metrics.mainlineBytes,
+        },
+        createdAt: startedAt,
+      });
+      ttlDeleted += 1;
+      notifyDo(env, ctx, prefix, { type: 'maintenance-delete', path: remoteRoot, ts: Date.now() });
+    } catch (error) {
+      errors += 1;
+      log.error('maintenance ttl delete failed', {
+        prefix,
+        remoteRoot,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await dbInsertMaintenanceAction(db, {
+        runId,
+        prefix,
+        remoteRoot,
+        action: 'ttl-delete-error',
+        details: {
+          source: options.source ?? 'scheduled',
+          error: error instanceof Error ? error.message : String(error),
+        },
+        createdAt: startedAt,
+      });
+    }
+  }
+
+  const finishedAt = nowIso();
+  const summary = {
+    runId,
+    startedAt,
+    finishedAt,
+    scopePrefix,
+    ttlHours: config.pathTtlHours,
+    ttlCutoff,
+    ttlCandidates: ttlCandidates.length,
+    ttlDeleted,
+    sizeRejections: 0,
+    errors,
+    notes: `source=${options.source ?? 'scheduled'}`,
+  };
+  await dbFinishMaintenanceRun(db, runId, summary);
+  return summary;
+}
+
 // ─── D1 helpers ───────────────────────────────────────────────────────────────
 
 async function dbFolderExists(db, prefix, path) {
@@ -241,41 +628,64 @@ async function dbGetFile(db, prefix, path) {
 }
 
 async function dbPutFile(db, prefix, path, bytes, allowOverwrite) {
-  const existed = Boolean(await db.prepare('SELECT 1 FROM files WHERE prefix=?1 AND path=?2 LIMIT 1').bind(prefix, path).first());
-  if (!allowOverwrite && existed) return 409;
+  const existing = await dbGetFile(db, prefix, path);
+  if (!allowOverwrite && existing) return 409;
+  const now = nowIso();
   await db.prepare(
     `INSERT INTO files (prefix,path,content,size,modified_time,etag) VALUES (?1,?2,?3,?4,?5,?6)
      ON CONFLICT(prefix,path) DO UPDATE SET
        content=excluded.content, size=excluded.size,
        modified_time=excluded.modified_time, etag=excluded.etag`,
-  ).bind(prefix, path, bytes, bytes.byteLength, nowIso(), newEtag()).run();
-  return existed ? 204 : 201;
+  ).bind(prefix, path, bytes, bytes.byteLength, now, newEtag()).run();
+  const delta = fileMetricsDeltaForChange(path, existing ? Number(existing.size ?? 0) : null, bytes.byteLength);
+  await dbApplyMeshPathDelta(db, prefix, meshRootForPath(path), delta, now);
+  return existing ? 204 : 201;
 }
 
 async function dbOverwriteFile(db, prefix, path, bytes) {
+  const existing = await dbGetFile(db, prefix, path);
+  const now = nowIso();
   await db.prepare(
     `INSERT INTO files (prefix,path,content,size,modified_time,etag) VALUES (?1,?2,?3,?4,?5,?6)
      ON CONFLICT(prefix,path) DO UPDATE SET
        content=excluded.content, size=excluded.size,
        modified_time=excluded.modified_time, etag=excluded.etag`,
-  ).bind(prefix, path, bytes, bytes.byteLength, nowIso(), newEtag()).run();
+  ).bind(prefix, path, bytes, bytes.byteLength, now, newEtag()).run();
+  const delta = fileMetricsDeltaForChange(path, existing ? Number(existing.size ?? 0) : null, bytes.byteLength);
+  await dbApplyMeshPathDelta(db, prefix, meshRootForPath(path), delta, now);
 }
 
 async function dbDeletePath(db, prefix, path) {
-  if (path === '/') {
+  const normalized = normalizePath(path);
+  if (!(await dbPathExists(db, prefix, normalized))) return false;
+
+  if (normalized === '/') {
+    const meshPaths = await dbListMeshPathsForPrefix(db, prefix);
     await db.prepare('DELETE FROM files WHERE prefix=?1').bind(prefix).run();
     await db.prepare('DELETE FROM folders WHERE prefix=?1').bind(prefix).run();
+    const now = nowIso();
+    for (const row of meshPaths) {
+      await dbApplyMeshPathDelta(db, prefix, String(row.remote_root), {
+        fileCountDelta: -Number(row.current_file_count ?? 0),
+        totalBytesDelta: -Number(row.current_total_bytes ?? 0),
+        changeBytesDelta: -Number(row.current_change_bytes ?? 0),
+        mainlineBytesDelta: -Number(row.current_mainline_bytes ?? 0),
+      }, now);
+    }
     return true;
   }
-  const file = await dbGetFile(db, prefix, path);
-  if (file) {
-    await db.prepare('DELETE FROM files WHERE prefix=?1 AND path=?2').bind(prefix, path).run();
-    return true;
-  }
-  if (!(await dbFolderExists(db, prefix, path))) return false;
-  const like = `${path}/%`;
-  await db.prepare('DELETE FROM files WHERE prefix=?1 AND (path=?2 OR path LIKE ?3)').bind(prefix, path, like).run();
-  await db.prepare('DELETE FROM folders WHERE prefix=?1 AND (path=?2 OR path LIKE ?3)').bind(prefix, path, like).run();
+
+  const metrics = await dbMeasurePathMetrics(db, prefix, normalized);
+  const like = `${normalized}/%`;
+  await db.prepare('DELETE FROM files WHERE prefix=?1 AND (path=?2 OR path LIKE ?3)').bind(prefix, normalized, like).run();
+  await db.prepare('DELETE FROM folders WHERE prefix=?1 AND (path=?2 OR path LIKE ?3)').bind(prefix, normalized, like).run();
+  const remoteRoot = topLevelRoot(normalized);
+  await dbApplyMeshPathDelta(db, prefix, remoteRoot, {
+    fileCountDelta: -metrics.fileCount,
+    totalBytesDelta: -metrics.totalBytes,
+    changeBytesDelta: -metrics.changeBytes,
+    mainlineBytesDelta: -metrics.mainlineBytes,
+  });
   return true;
 }
 
@@ -316,26 +726,40 @@ async function dbListFolders(db, prefix, path) {
 }
 
 async function dbCompact(db, prefix, remotePath, watermarkHlc) {
-  const root = normalizePath(remotePath) === '/' ? '' : normalizePath(remotePath);
+  const normalizedRoot = normalizePath(remotePath);
+  const root = normalizedRoot === '/' ? '' : normalizedRoot;
   const { results = [] } = await db
-    .prepare('SELECT path FROM files WHERE prefix=?1 AND path LIKE ?2')
+    .prepare('SELECT path,size FROM files WHERE prefix=?1 AND path LIKE ?2')
     .bind(prefix, `${root}/changes/%`).all();
   const toDelete = [];
+  let bytesPruned = 0;
   for (const row of results) {
-    const name = fileNameFromPath(String(row.path));
+    const filePath = String(row.path);
+    const name = fileNameFromPath(filePath);
     if (name === 'head.json') continue;
     const hlc = changeHlcFromFileName(name);
-    if (hlc && hlc <= watermarkHlc) toDelete.push(String(row.path));
+    if (hlc && hlc <= watermarkHlc) {
+      toDelete.push(filePath);
+      bytesPruned += Number(row.size ?? 0);
+    }
   }
   for (const p of toDelete) {
     await db.prepare('DELETE FROM files WHERE prefix=?1 AND path=?2').bind(prefix, p).run();
   }
-  return { remotePath, watermarkHlc, totalCandidates: results.length, pruned: toDelete.length };
+  if (toDelete.length) {
+    await dbApplyMeshPathDelta(db, prefix, normalizedRoot, {
+      fileCountDelta: -toDelete.length,
+      totalBytesDelta: -bytesPruned,
+      changeBytesDelta: -bytesPruned,
+      mainlineBytesDelta: 0,
+    });
+  }
+  return { remotePath: normalizedRoot, watermarkHlc, totalCandidates: results.length, pruned: toDelete.length, bytesPruned };
 }
 
 // ─── Execute ──────────────────────────────────────────────────────────────────
 
-async function handleExecute(db, prefix, request, env, log) {
+async function handleExecute(db, prefix, request, env, ctx, log) {
   const expected = env?.INTEROCITOR_EXEC_TOKEN;
   if (expected && (request.headers.get('x-interocitor-token') || '') !== expected) {
     log.error('execute forbidden — bad x-interocitor-token', { prefix });
@@ -356,15 +780,35 @@ async function handleExecute(db, prefix, request, env, log) {
     const result = await dbCompact(db, prefix, remotePath, watermarkHlc);
     log.info('execute compact done', { prefix, ...result });
 
-    // Write an immutable compact receipt to the audit log.
     const root = normalizePath(remotePath) === '/' ? '' : normalizePath(remotePath);
     const receiptDir = `${root}/.interocitor/commands`;
     const receiptPath = `${receiptDir}/compact-${Date.now().toString(36)}.json`;
+    const ts = nowIso();
     await dbEnsureFolderTree(db, prefix, receiptDir);
     await dbOverwriteFile(db, prefix, receiptPath,
-      textEncoder.encode(JSON.stringify({ op: 'compact', ...result, ts: nowIso() }, null, 2)));
+      textEncoder.encode(JSON.stringify({ op: 'compact', ...result, ts }, null, 2)));
+    await dbRecordMeshActivity(db, prefix, remotePath, 'write', ts);
 
     return jsonResponse({ ok: true, ...result, receiptPath });
+  }
+
+  if (op === 'run-maintenance') {
+    const nowOverride = parseOptionalIso(payload.nowIso);
+    if (payload.nowIso != null && !nowOverride) return new Response('Invalid nowIso', { status: 400 });
+    const result = await runMaintenance(env, ctx, log, {
+      scopePrefix: prefix,
+      nowIso: nowOverride ?? undefined,
+      source: 'execute',
+    });
+    return jsonResponse({ ok: true, ...result });
+  }
+
+  if (op === 'maintenance-status') {
+    const remotePath = payload.remotePath == null ? null : normalizePath(String(payload.remotePath || '/'));
+    const paths = remotePath
+      ? [await dbGetMeshPath(db, prefix, remotePath)].filter(Boolean)
+      : await dbListMeshPathsForPrefix(db, prefix);
+    return jsonResponse({ ok: true, prefix, config: getWorkerConfig(env), paths });
   }
 
   if (op === 'drop-sse-clients') {
@@ -435,9 +879,9 @@ async function handleIoRequest(request, env, ctx, url, log) {
 
   const db = env.TODO_DB;
   const appendOnly = String(env.INTEROCITOR_APPEND_ONLY ?? '1') !== '0';
+  const config = getWorkerConfig(env);
 
   log.info(method, url.pathname + url.search, { prefix, opPath, appendOnly });
-
 
   if (method === 'GET' && opPath === '/health') {
     return withCors(jsonResponse({ ok: true, prefix }));
@@ -447,8 +891,10 @@ async function handleIoRequest(request, env, ctx, url, log) {
     const payload = await readJsonBody(request);
     const path = normalizePath(String(payload?.path || '/'));
     const status = await dbEnsureFolder(db, prefix, path);
-    if (status !== 409) notifyDo(env, ctx, prefix, { type: 'folder', path, ts: Date.now() });
-    // 405 = already exists → idempotent success for the client.
+    if (status !== 409) {
+      notifyDo(env, ctx, prefix, { type: 'folder', path, ts: Date.now() });
+      await dbRecordMeshActivity(db, prefix, topLevelRoot(path), 'write');
+    }
     return withCors(new Response('', { status: status === 405 ? 200 : status }));
   }
 
@@ -456,6 +902,7 @@ async function handleIoRequest(request, env, ctx, url, log) {
     const payload = await readJsonBody(request);
     const path = normalizePath(String(payload?.path || '/'));
     const files = await dbListFiles(db, prefix, path);
+    await dbRecordMeshActivity(db, prefix, topLevelRoot(path), 'read');
     return withCors(jsonResponse({ files }));
   }
 
@@ -465,6 +912,7 @@ async function handleIoRequest(request, env, ctx, url, log) {
     const folders = (await dbListFolders(db, prefix, path))
       .map((p) => p.split('/').filter(Boolean).pop() || '')
       .filter(Boolean);
+    await dbRecordMeshActivity(db, prefix, topLevelRoot(path), 'read');
     return withCors(jsonResponse({ folders }));
   }
 
@@ -473,6 +921,7 @@ async function handleIoRequest(request, env, ctx, url, log) {
     const path = normalizePath(String(payload?.path || '/'));
     const file = await dbGetFile(db, prefix, path);
     if (!file) return withCors(new Response('', { status: 404 }));
+    await dbRecordMeshActivity(db, prefix, meshRootForPath(path), 'read');
     return withCors(jsonResponse({
       file: {
         name: fileNameFromPath(path),
@@ -485,7 +934,7 @@ async function handleIoRequest(request, env, ctx, url, log) {
   }
 
   if (method === 'POST' && opPath === EXECUTE_SUFFIX) {
-    return withCors(await handleExecute(db, prefix, request, env, log));
+    return withCors(await handleExecute(db, prefix, request, env, ctx, log));
   }
 
   if (opPath === '/file') {
@@ -494,6 +943,7 @@ async function handleIoRequest(request, env, ctx, url, log) {
     if (method === 'GET') {
       const file = await dbGetFile(db, prefix, path);
       if (!file) return logged(log, `GET ${path}`, withCors(new Response('', { status: 404 })));
+      await dbRecordMeshActivity(db, prefix, meshRootForPath(path), 'read');
       return logged(log, `GET ${path}`, withCors(new Response(toUint8Array(file.content), {
         status: 200,
         headers: { 'Content-Type': 'application/octet-stream', ETag: String(file.etag) },
@@ -503,13 +953,21 @@ async function handleIoRequest(request, env, ctx, url, log) {
     if (method === 'PUT') {
       const bytes = new Uint8Array(await request.arrayBuffer());
       const pathType = classifyPath(path);
-      log.info(`PUT ${path}`, { pathType, bytes: bytes.byteLength });
+      const remoteRoot = meshRootForPath(path, pathType) ?? topLevelRoot(path) ?? '/';
+      const limit = fileSizeLimitForPathType(config, pathType);
+      log.info(`PUT ${path}`, { pathType, bytes: bytes.byteLength, limit });
 
-      // ── Truly immutable: never overwrite ──────────────────────────────────
-      // A second PUT of the same immutable file is idempotent: the content
-      // cannot have changed, so "already exists" is 200, not 409.
-      // This lets a client recover from a partial bootstrap (manifest-N.json
-      // written, manifest.json pointer not yet written) without getting stuck.
+      if (bytes.byteLength > limit) {
+        log.error(`PUT ${path} — payload too large`, { pathType, bytes: bytes.byteLength, limit });
+        await dbInsertMaintenanceAction(db, {
+          prefix,
+          remoteRoot,
+          action: 'size-reject',
+          details: { path, pathType, bytes: bytes.byteLength, limit },
+        });
+        return logged(log, `PUT ${path}`, withCors(new Response(`Payload too large for ${pathType}: ${bytes.byteLength} > ${limit}`, { status: 413 })));
+      }
+
       if (
         pathType === PATH_TYPE.MANIFEST_SNAPSHOT ||
         pathType === PATH_TYPE.CHANGE_FILE ||
@@ -517,16 +975,11 @@ async function handleIoRequest(request, env, ctx, url, log) {
       ) {
         const status = await dbPutFile(db, prefix, path, bytes, false);
         if (status === 201) notifyDo(env, ctx, prefix, { type: 'file', path, ts: Date.now() });
-        // 409 → 200: already exists is a success for immutable content.
+        if (status === 201 || status === 409) await dbRecordMeshActivity(db, prefix, remoteRoot, 'write');
         return logged(log, `PUT ${path}`, withCors(new Response('', { status: status === 409 ? 200 : status })));
       }
 
-      // ── Semantically validated overwrites ─────────────────────────────────
-      // Serialized through DO when available; inline fallback otherwise.
-      if (
-        pathType === PATH_TYPE.MANIFEST_POINTER ||
-        pathType === PATH_TYPE.HEAD
-      ) {
+      if (pathType === PATH_TYPE.MANIFEST_POINTER || pathType === PATH_TYPE.HEAD) {
         if (env.TODO_DAV) {
           const stub = env.TODO_DAV.get(env.TODO_DAV.idFromName(prefix));
           const req = new Request('https://internal/__write-validated', {
@@ -541,26 +994,33 @@ async function handleIoRequest(request, env, ctx, url, log) {
           });
           const result = await stub.fetch(req);
           if (!result.ok) log.error(`PUT ${path} — DO rejected`, { status: result.status, pathType });
-          if (result.ok) notifyDo(env, ctx, prefix, { type: 'file', path, ts: Date.now() });
+          if (result.ok) {
+            notifyDo(env, ctx, prefix, { type: 'file', path, ts: Date.now() });
+            await dbRecordMeshActivity(db, prefix, remoteRoot, 'write');
+          }
           return logged(log, `PUT ${path} (via DO)`, withCors(result));
         }
-        // No DO: inline semantic validation (single-writer assumption).
         const wrote = await semanticWrite(db, prefix, path, pathType, bytes);
         if (!wrote) log.error(`PUT ${path} — semantic validation rejected`, { pathType });
-        if (wrote) notifyDo(env, ctx, prefix, { type: 'file', path, ts: Date.now() });
+        if (wrote) {
+          notifyDo(env, ctx, prefix, { type: 'file', path, ts: Date.now() });
+          await dbRecordMeshActivity(db, prefix, remoteRoot, 'write');
+        }
         return logged(log, `PUT ${path}`, withCors(new Response(wrote ? null : '', { status: wrote ? 204 : 409 })));
       }
 
-      // ── Device heartbeat: always overwrite ────────────────────────────────
       if (pathType === PATH_TYPE.DEVICE_HEARTBEAT) {
         await dbOverwriteFile(db, prefix, path, bytes);
         notifyDo(env, ctx, prefix, { type: 'file', path, ts: Date.now() });
+        await dbRecordMeshActivity(db, prefix, remoteRoot, 'write');
         return logged(log, `PUT ${path}`, withCors(new Response(null, { status: 204 })));
       }
 
-      // ── Other paths: respect append-only flag ─────────────────────────────
       const status = await dbPutFile(db, prefix, path, bytes, !appendOnly);
-      if (status === 201 || status === 204) notifyDo(env, ctx, prefix, { type: 'file', path, ts: Date.now() });
+      if (status === 201 || status === 204) {
+        notifyDo(env, ctx, prefix, { type: 'file', path, ts: Date.now() });
+        await dbRecordMeshActivity(db, prefix, remoteRoot, 'write');
+      }
       return logged(log, `PUT ${path}`, withCors(new Response('', { status })));
     }
 
@@ -569,7 +1029,10 @@ async function handleIoRequest(request, env, ctx, url, log) {
         return logged(log, `DELETE ${path}`, withCors(new Response('DELETE disabled in append-only mode', { status: 405 })));
       }
       const existed = await dbDeletePath(db, prefix, path);
-      if (existed) notifyDo(env, ctx, prefix, { type: 'delete', path, ts: Date.now() });
+      if (existed) {
+        notifyDo(env, ctx, prefix, { type: 'delete', path, ts: Date.now() });
+        await dbRecordMeshActivity(db, prefix, topLevelRoot(path), 'write');
+      }
       return logged(log, `DELETE ${path}`, withCors(new Response(existed ? null : '', { status: existed ? 204 : 404 })));
     }
   }
@@ -614,7 +1077,6 @@ export default {
       return handleIoRequest(request, env, ctx, url, log);
     }
 
-    // SSE — route to DO broadcaster
     if (url.pathname.startsWith(`${EVENTS_PREFIX}/`)) {
       if (!env.TODO_DAV) {
         return withCors(new Response('SSE not configured (TODO_DAV binding missing)', { status: 501 }));
@@ -628,6 +1090,12 @@ export default {
     }
 
     return withCors(new Response('Not found', { status: 404 }));
+  },
+
+  async scheduled(_event, env, ctx) {
+    const log = makeLogger(env);
+    const result = await runMaintenance(env, ctx, log, { source: 'scheduled' });
+    log.info('scheduled maintenance done', result);
   },
 };
 

@@ -79,10 +79,10 @@ export type {
   // Protocol types
   Manifest,
   ManifestPointer,
-  ChannelManifest,
   ServerConfig,
   DeviceInfo,
   DeviceMetadata,
   DeviceHead,
   ChangesHead,
+  ReplicaConfig,
 } from './core/types.ts';

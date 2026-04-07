@@ -162,26 +162,17 @@ export interface Manifest {
   version: number;
   meshId: string;
   schema: number;
-  lensVersion: number;
   encrypted: boolean;
-  channels: string[];
-  channelNames: Record<string, string>;
-  defaultChannel: string;
   server: ServerConfig;
   createdAt: string;
-}
 
-export interface ChannelManifest {
-  generation: number;
-  parentGeneration: number;
-  writtenBy: string;
-  writtenAt: string;
-  contentHash: string;
-
-  channelId: string;
+  /** Compaction epoch — incremented on each snapshot. */
   epoch: number;
+  /** HLC watermark — all data ≤ this HLC is captured in the snapshot. */
   watermarkHlc: string;
+  /** Cloud path to the latest snapshot file, or null before first compaction. */
   snapshotPath: string | null;
+  /** Reserved for future delta-based catch-up. */
   deltaPath: string | null;
 }
 
@@ -271,13 +262,20 @@ export interface LocalStoreAdapter {
 /** Factory that creates a local store instance for this engine. */
 export type LocalStoreFactory = () => LocalStoreAdapter;
 
+// ─── Replica ─────────────────────────────────────────────────────────
+
+/** Write-only replica adapter for backup. */
+export interface ReplicaConfig {
+  adapter: StorageAdapter;
+  /** Override remotePath for this replica. Defaults to the primary remotePath. */
+  remotePath?: string;
+}
+
 // ─── Sync Engine Config ──────────────────────────────────────────────
 
 export interface SyncConfig {
   /** Cloud folder path prefix, e.g. "/Interocitor" */
   remotePath: string;
-  /** Opaque channel id in storage, e.g. "c1" */
-  channelId?: string;
   /** If true, only serverId may publish manifests/compaction */
   serverManaged?: boolean;
   /** Authorized writer identity when serverManaged=true */
@@ -302,6 +300,13 @@ export interface SyncConfig {
   localStoreFactory?: LocalStoreFactory;
   /** Optional table/index metadata for local query planning and migrations. */
   schema?: DatabaseSchemaDefinition;
+  /**
+   * Write-only replica adapters for backup.
+   * Flush writes to primary + all replicas. Pull reads primary only.
+   * Replica failures are emitted as 'replica:error' events but do not
+   * fail the primary flush.
+   */
+  replicas?: ReplicaConfig[];
 }
 
 // ─── Events ──────────────────────────────────────────────────────────
@@ -319,6 +324,7 @@ export type SyncEvent =
   | { type: 'rehydrate:complete'; rowCount: number }
   | { type: 'auth:required' }
   | { type: 'auth:complete' }
-  | { type: 'schema:mismatch'; local: number; remote: number };
+  | { type: 'schema:mismatch'; local: number; remote: number }
+  | { type: 'replica:error'; adapter: string; error: Error };
 
 export type SyncEventListener = (event: SyncEvent) => void;

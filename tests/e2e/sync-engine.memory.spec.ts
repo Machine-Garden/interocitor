@@ -34,10 +34,9 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       };
     });
 
-    expect(result.manifest?.version).toBe(2);
+    expect(result.manifest?.version).toBe(3);
     expect(result.manifest?.server.managed).toBe(false);
     expect(result.files).toContain('/MeshBoot/manifest.json');
-    expect(result.files).toContain('/MeshBoot/c1/channel.json');
   });
 
   test('flush writes one file per change and updates head', async ({ page }) => {
@@ -65,8 +64,8 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       const files = Object.keys(dump);
       return {
         files,
-        headPath: files.find(path => path.endsWith('/c1/changes/head.json')),
-        changeFileCount: files.filter(path => /\/c1\/changes\/[^/]+-chg_[^/]+\.json$/.test(path)).length,
+        headPath: files.find(path => path.endsWith('/changes/head.json')),
+        changeFileCount: files.filter(path => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(path)).length,
       };
     });
 
@@ -74,7 +73,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
     expect(result.changeFileCount).toBe(2);
   });
 
-  test('two devices converge via channelized change files', async ({ page }) => {
+  test('two devices converge via change files', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { SyncEngine, readColumn } = await import('/dist/index.js');
       const { MemoryAdapter } = await import('/dist/adapters/memory.js');
@@ -120,7 +119,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
         remotePath: '/MeshWhere',
         pollInterval: 600_000,
         schema: {
-          version: 2,
+          version: 1,
           tables: {
             tasks: {
               fields: {
@@ -154,7 +153,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
     expect(result.openTitles).toEqual(['A', 'C']);
     expect(result.p2plusTitles).toEqual(['B', 'C']);
-    expect(result.schemaVersion).toBe(2);
+    expect(result.schemaVersion).toBe(1);
   });
 
   test('rejects unauthorized server writer in manifest', async ({ page }) => {
@@ -177,39 +176,21 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
         parentGeneration: 0,
         writtenBy: 'evil_writer',
         writtenAt: now,
-        version: 2,
+        version: 3,
         meshId: 'mesh_bad',
         schema: 1,
-        lensVersion: 1,
         encrypted: false,
-        channels: ['c1'],
-        channelNames: { c1: 'default' },
-        defaultChannel: 'c1',
         server: { managed: true, relayUrl: null, serverId: 'server_relay_1' },
         createdAt: now,
-      };
-      const globalManifest = { ...globalPayload, contentHash: await hashOf(globalPayload) };
-
-      const channelPayload = {
-        generation: 1,
-        parentGeneration: 0,
-        writtenBy: 'evil_writer',
-        writtenAt: now,
-        channelId: 'c1',
         epoch: 0,
         watermarkHlc: '',
         snapshotPath: null,
         deltaPath: null,
       };
-      const channelManifest = { ...channelPayload, contentHash: await hashOf(channelPayload) };
+      const globalManifest = { ...globalPayload, contentHash: await hashOf(globalPayload) };
 
       await adapter.writeFile('/Bad/manifest-1.json', JSON.stringify(globalManifest));
       await adapter.writeFile('/Bad/manifest.json', JSON.stringify({ currentGeneration: 1, file: 'manifest-1.json' }));
-      await adapter.writeFile('/Bad/c1/channel-manifest-1-server_relay_1.json', JSON.stringify(channelManifest));
-      await adapter.writeFile('/Bad/c1/channel.json', JSON.stringify({
-        currentGeneration: 1,
-        file: 'channel-manifest-1-server_relay_1.json',
-      }));
 
       localStorage.setItem('interocitor-device-id', 'dev_bad');
       const engine = new SyncEngine(adapter, {
@@ -253,7 +234,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       await engine.disconnect();
 
       const dump = adapter.dump();
-      const payload = Object.entries(dump).find(([path]) => /\/c1\/changes\/[^/]+-chg_[^/]+\.json$/.test(path));
+      const payload = Object.entries(dump).find(([path]) => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(path));
       return payload ? payload[1] : '';
     });
 

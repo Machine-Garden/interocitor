@@ -1,6 +1,6 @@
 # interocitor
 
-> ☢️ work in progress ☢️
+> ☢️ work in progress — 0.0.0-beta.2 ☢️
 
 Sync structured data across devices using a cloud folder you already own. CRDT merge, E2E encryption, no purpose-built sync backend.
 
@@ -18,15 +18,16 @@ The strongest use case: syncing your own stuff across your own devices — lapto
 
 You already have one. Google Drive gives you 15 GB for free. A Nextcloud on a $5 VPS gives you whatever your disk holds. These aren't databases, they're dumb file stores. That's exactly what a CRDT log needs.
 
-**Interocitor uses a shared cloud folder as the sync transport.** Each device writes changes as JSON files into its own subfolder. Other devices poll the folder, download new files, merge via LWW-per-column CRDTs. All reads hit local IndexedDB — never the cloud. The cloud folder is a mailbox, not a runtime dependency.
+**Interocitor uses a shared cloud folder as the sync transport.** Each device writes changes as JSON files. Other devices poll the folder, download new files, merge via LWW-per-column CRDTs. All reads hit local IndexedDB — never the cloud. The cloud folder is a mailbox, not a runtime dependency.
 
 What falls out of this design:
 
 - No purpose-built sync backend. No WebSocket. No vendor lock-in.
-  - Swap Google Drive for WebDAV mid-session. Data survives.
-  - Optional AES-256-GCM encryption — cloud provider sees ciphertext.
-  - Browser clears IndexedDB? App rehydrates from cloud on next open.
-  - Zero runtime dependencies — Web Crypto API, IndexedDB, `fetch`.
+- Swap Google Drive for WebDAV mid-session. Data survives.
+- Optional AES-256-GCM encryption — cloud provider sees ciphertext.
+- Browser clears IndexedDB? App rehydrates from cloud on next open.
+- Zero runtime dependencies — Web Crypto API, IndexedDB, `fetch`.
+- Network is never required for reads or writes — they hit local IDB immediately.
 
 To be precise: Google Drive is still an API with auth, rate limits, quotas, and ToS. WebDAV on a VPS is a server you maintain. The claim is **no custom sync server** in your architecture — not "no servers involved."
 
@@ -53,7 +54,7 @@ const key = await generateKey();
 const passphrase = await keyToPassphrase(key); // ~43 char base58, share it
 engine.setEncryptionKey(key);
 
-await engine.init();    // open local IndexedDB
+await engine.init();    // open local IndexedDB — no network
 await engine.connect(); // authenticate, pull, start polling
 
 const tasks = engine.table('tasks');
@@ -101,43 +102,6 @@ Backends are swappable at runtime — pending writes flush first:
 await engine.setRemoteStorage(new WebDAVAdapter({ baseUrl: '...', auth: { ... } }));
 ```
 
-## Local TODO demo (WebDAV)
-
-A user-facing demo app is available at `examples/todo-webdav/index.html`.
-
-It runs against the local e2e WebDAV server (`/__webdav__`) and generates a copy-pastable join token that includes:
-
-- `remotePath`
-  - encryption key passphrase
-  - WebDAV base URL
-
-Use one browser tab to create a session and copy token, then paste that token in another tab and connect both.
-
-This lets you quickly test:
-
-- two tabs syncing in the same mesh (same token)
-  - isolated meshes on one server (different `remotePath` values)
-
-Run locally:
-
-```bash
-yarn demo:todo
-```
-
-The local demo server persists WebDAV files under `examples/todo-webdav/webdav-data/`, so you can inspect sync artifacts directly next to the example app.
-
-Then open:
-
-- `http://127.0.0.1:4173/examples/todo-webdav/index.html`
-
-Optional test-only entrypoint (same app via compatibility shim):
-
-- `http://127.0.0.1:4173/tests/e2e/fixtures/todo-webdav.html`
-
-Playwright e2e still uses in-memory mode (`yarn test:e2e:*`) for deterministic tests. The server code has a storage seam intended for a future SQLite/D1-backed implementation.
-
-The join-token flow is intentionally simple: create a session, copy token, paste in another tab, both contexts converge.
-
 ## How sync works
 
 ```mermaid
@@ -148,7 +112,7 @@ flowchart LR
 
     IDBA -->|async flush| CLOUD
 
-    subgraph Cloud [c1/changes/]
+    subgraph Cloud [changes/]
         CLOUD["change files\nhead.json"]
     end
 
@@ -159,111 +123,43 @@ flowchart LR
     end
 ```
 
-Writes land in local IDB immediately — reads never touch the cloud. Flushing uploads one JSON file per change to the shared `changes/` folder. A single `head.json` carries the latest HLC so readers can skip listing the folder entirely when nothing is new. On pull, each reader downloads files above its local cursor, merges with HLC-ordered LWW-per-column CRDTs, and advances the cursor.
+Writes land in local IDB immediately — reads never touch the cloud. Flushing uploads one JSON file per change entry to the shared `changes/` folder. A single `head.json` carries the latest HLC so readers can skip listing the folder entirely when nothing is new. On pull, each reader downloads files above its local cursor, merges with HLC-ordered LWW-per-column CRDTs, and advances the cursor.
 
 No locks, no coordination. Each device writes only its own files.
 
-## Protocol flows
+For detailed protocol sequence diagrams (pull, connect, compaction, bootstrap, rehydration, replica flush), see **[docs/flows.md](docs/flows.md)**.
 
-### Pull — fast-skip and merge
+## Offline guarantee
 
-```mermaid
-flowchart TD
-    A([pull]) --> B[loadOrCreateManifests]
-    B --> C[GET c1/changes/head.json]
-    C --> D{head.latestHlc\n≤ cursor?}
-    D -- Yes --> SKIP([sync:complete\nentriesMerged=0])
-    D -- No or no head --> F[PROPFIND c1/changes/]
-    F -- 404 / empty --> SKIP
-    F -- files --> G[sort by filename\nHLC prefix = chronological]
-    G --> H{next file?}
-    H -- done --> I[cursor ← latestMergedHlc\nemit sync:complete]
-    H -- head.json --> H
-    H -- change file --> J{file HLC > cursor?}
-    J -- No → skip --> H
-    J -- Yes --> K[GET + decodeFromCloud + JSON.parse]
-    K --> L[applyChangeEntry\n→ putRows IDB]
-    L --> M[emit change/delete events]
-    M --> H
-```
+Network is never required for data operations:
 
-### Connect and engine lifecycle
+| Operation | Network? | Backing store |
+|---|---|---|
+| `init()` | No | IndexedDB open |
+| `put()` / `delete()` | No | IDB write + outbox queue |
+| `get()` / `query()` / `queryWhere()` | No | IDB read |
+| `table()` / `tableNames()` | No | In-memory |
+| `connect()` | **Yes** | Authenticates, pulls, starts poll |
+| `flush()` | **Yes** | Uploads outbox to cloud |
+| `pull()` | **Yes** | Downloads new change files |
+| `compact()` | **Yes** | Snapshot + manifest write |
 
-```mermaid
-flowchart TD
-    A([init]) --> B[open IDB\nrestore HLC + table names]
-    B --> C([connect])
-    C --> D{adapter\nauthenticated?}
-    D -- No --> E[adapter.authenticate]
-    E --> D
-    D -- Yes --> F["ensureFolder ×5\nremotePath → devices\n→ c1 → mainline → changes"]
-    F --> G[loadOrCreateManifests]
-    G -- no manifest.json --> H[createBootstrapManifests\nmanifest-1 + channel-manifest-1\nmanifest.json + channel.json]
-    H --> G
-    G -- found --> I[validate content hashes\ncheck schema version\ncheck server auth if managed]
-    I --> J{localEpoch\n< remoteEpoch?}
-    J -- Yes: new snapshot --> K[rehydrate]
-    K --> K1[GET snapshotPath from channel manifest]
-    K1 --> K2[clearAll IDB]
-    K2 --> K3[write snapshot rows to IDB\nrestore HLC]
-    K3 --> L
-    J -- No --> L[pull change files]
-    L --> M[flush outbox]
-    M --> N([startPolling every N ms])
-```
+If the app loses network after `connect()`, local reads/writes continue. The outbox accumulates. Next `flush()` (automatic or manual) pushes everything.
 
-### Compaction
+## Replica adapters (backup)
 
-```mermaid
-sequenceDiagram
-    participant E as SyncEngine (compactor)
-    participant C as Cloud
+Write to multiple cloud backends simultaneously. Pull reads from the primary adapter only; flush writes to primary + all replicas. Replica failures are best-effort — they emit a `replica:error` event but never fail the primary flush.
 
-    E->>E: pull() — merge all remote changes first
-    E->>E: getAllRows() — full IDB scan
+```ts
+import { WebDAVAdapter } from 'interocitor/adapters/webdav';
 
-    E->>C: PUT mainline/snapshot-{epoch}-{writer}.json
-    E->>C: PUT c1/channel-manifest-{gen}-{writer}.json
-    E->>C: PUT c1/channel.json { currentGeneration, file }
-    Note over C: pointer switches — other devices see new epoch on next connect/pull
+const primary = new WebDAVAdapter({ baseUrl: 'https://main.example.com/dav', auth: { ... } });
+const backup  = new WebDAVAdapter({ baseUrl: 'https://backup.example.com/dav', auth: { ... } });
 
-    E->>E: setMeta epoch:c1 ← nextEpoch
-
-    E->>C: PROPFIND c1/changes/ (list all)
-    loop each change file with HLC ≤ watermarkHlc
-        E->>C: DELETE {hlc}-{changeId}.json
-    end
-    Note over E,C: changes/ now contains only post-watermark files
-```
-
-Other devices detect the epoch advance on the next `connect()` or `pull()` via `loadOrCreateManifests`:
-`remoteEpoch > localEpoch` → `rehydrate()` → load snapshot → pull deltas above watermark.
-
-### Bootstrap (first-ever connect)
-
-```mermaid
-sequenceDiagram
-    participant E as SyncEngine
-    participant C as Cloud
-
-    E->>C: GET {remotePath}/manifest.json
-    C-->>E: 404 (not found)
-
-    Note over E: createBootstrapManifests()
-    E->>C: PUT {remotePath}/manifest-1.json (contentHash included)
-    E->>C: PUT {remotePath}/manifest.json { currentGeneration: 1, file: manifest-1.json }
-    E->>C: PUT c1/channel-manifest-1-{serverId}.json (contentHash included)
-    E->>C: PUT c1/channel.json { currentGeneration: 1, file: ... }
-
-    Note over E: loadOrCreateManifests() — second pass
-    E->>C: GET manifest.json → pointer
-    E->>C: GET manifest-1.json → validate hash
-    E->>C: GET c1/channel.json → pointer
-    E->>C: GET channel-manifest-1-{serverId}.json → validate hash
-    E->>E: channelManifest.epoch = 0, localEpoch = 0 → pull()
-    E->>C: GET c1/changes/head.json
-    C-->>E: 404 (no changes yet)
-    Note over E: sync:complete entriesMerged=0
+const engine = new SyncEngine(primary, {
+  remotePath: '/MyApp',
+  replicas: [{ adapter: backup }],
+});
 ```
 
 ## Adapters
@@ -346,6 +242,7 @@ engine.on((event) => {
     case 'auth:required':      // cloud token expired
     case 'auth:complete':
     case 'schema:mismatch':    // remote schema newer
+    case 'replica:error':      // backup adapter write failed
   }
 });
 ```
@@ -355,34 +252,43 @@ engine.on((event) => {
 ```
 {remotePath}/                                    e.g. /Interocitor/MyApp
   manifest.json                                  ← pointer: { currentGeneration, file }
-  manifest-{generation}.json                     ← immutable once written; validate contentHash
+  manifest-{generation}.json                     ← immutable; epoch, watermark, snapshotPath
   devices/
     {deviceId}.json                              ← heartbeat: lastSeenAt, userId
-  {channelId}/                                   ← default: c1
-    channel.json                                 ← pointer: { currentGeneration, file }
-    channel-manifest-{gen}-{writer}.json         ← epoch + snapshotPath + watermarkHlc
-    mainline/
-      snapshot-{epoch}-{writer}.json             ← full IDB snapshot at watermarkHlc
-    changes/
-      head.json                                  ← { latestHlc } — fast poll-skip hint
-      {hlc}-{changeId}.json                      ← one file per flush batch (all devices)
+  mainline/
+    snapshot-{epoch}-{writer}.json               ← full IDB snapshot at watermarkHlc
+  changes/
+    head.json                                    ← { latestHlc } — fast poll-skip hint
+    {hlc}-{changeId}.json                        ← one file per flush entry (all devices)
 ```
 
-**Write ordering in `compact()`:** snapshot → channel-manifest → channel.json pointer.
-Readers loading `channel.json` always see a consistent pair; the snapshot file exists before any reader is directed to it.
+**Write ordering in `compact()`:** snapshot → manifest file → manifest pointer.
+Readers loading `manifest.json` always see a consistent pair; the snapshot file exists before any reader is directed to it.
 
 **Retention policy:** only the current generation is needed at runtime.
-Old `channel-manifest-*` and old `snapshot-*` files are safe to delete after the pointer moves.
+Old `manifest-*` and old `snapshot-*` files are safe to delete after the pointer moves.
 Change files `≤ watermarkHlc` are pruned automatically by `compact()`.
+
+## Local TODO demo (WebDAV)
+
+A user-facing demo app is available at `examples/todo-webdav/index.html`.
+
+Run locally:
+
+```bash
+yarn demo:todo
+```
+
+Then open `http://127.0.0.1:4173/examples/todo-webdav/index.html`. Create a session in one tab, copy the join token, paste in another tab — both converge.
 
 ## What this is not
 
 A sync layer for structured JSON across a small device mesh. Not:
 
-- **A multiplayer gaming backend** — it synchronizes durable state through files, it is not optimized for ephemeral push updates (e.g. mouse pointers).
-  - **A query engine** — supports simple secondary indexes + where clauses, not SQL joins/aggregations
-  - **A blob store** — small JSON records, not images
-  - **Multi-tenant** — one mesh, one folder, everyone sees everything
+- **A multiplayer gaming backend** — it synchronizes durable state through files, not optimized for ephemeral push updates (e.g. mouse pointers).
+- **A query engine** — supports simple secondary indexes + where clauses, not SQL joins/aggregations.
+- **A blob store** — small JSON records, not images.
+- **Multi-tenant** — one mesh, one folder, everyone sees everything.
 
 ## Tests
 

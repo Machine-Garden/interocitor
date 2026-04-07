@@ -108,8 +108,8 @@ test('SyncEngine writes file-per-change paths and syncs rows through WebDAV', as
   expect(result.eventTypes).toContain('a:flush:complete');
   expect(result.eventTypes).toContain('b:sync:complete');
   expect(result.cloudFiles.some(path => path.endsWith('/manifest.json'))).toBe(true);
-  expect(result.cloudFiles.some(path => /\/c1\/changes\/[^/]+-chg_[^/]+\.json$/.test(path))).toBe(true);
-  expect(result.cloudFiles.some(path => path.endsWith('/c1/changes/head.json'))).toBe(true);
+  expect(result.cloudFiles.some(path => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(path))).toBe(true);
+  expect(result.cloudFiles.some(path => path.endsWith('/changes/head.json'))).toBe(true);
 });
 
 test('rejects unauthorized writer manifests over WebDAV', async ({ page }) => {
@@ -136,41 +136,22 @@ test('rejects unauthorized writer manifests over WebDAV', async ({ page }) => {
       parentGeneration: 0,
       writtenBy: 'evil_writer',
       writtenAt: now,
-      version: 2,
+      version: 3,
       meshId: 'mesh_bad',
       schema: 1,
-      lensVersion: 1,
       encrypted: false,
-      channels: ['c1'],
-      channelNames: { c1: 'default' },
-      defaultChannel: 'c1',
       server: { managed: true, relayUrl: null, serverId: 'server_relay_1' },
       createdAt: now,
+      epoch: 0,
+      watermarkHlc: '',
+      snapshotPath: null,
+      deltaPath: null,
     };
     await adapter.writeFile('/BadWeb/manifest-1.json', JSON.stringify({
       ...globalPayload,
       contentHash: await hashOf(globalPayload),
     }));
     await adapter.writeFile('/BadWeb/manifest.json', JSON.stringify({ currentGeneration: 1, file: 'manifest-1.json' }));
-    const channelPayload = {
-      generation: 1,
-      parentGeneration: 0,
-      writtenBy: 'evil_writer',
-      writtenAt: now,
-      channelId: 'c1',
-      epoch: 0,
-      watermarkHlc: '',
-      snapshotPath: null,
-      deltaPath: null,
-    };
-    await adapter.writeFile('/BadWeb/c1/channel-manifest-1-server_relay_1.json', JSON.stringify({
-      ...channelPayload,
-      contentHash: await hashOf(channelPayload),
-    }));
-    await adapter.writeFile('/BadWeb/c1/channel.json', JSON.stringify({
-      currentGeneration: 1,
-      file: 'channel-manifest-1-server_relay_1.json',
-    }));
 
     localStorage.setItem('interocitor-device-id', 'dev_bad');
     const engine = new SyncEngine(
@@ -216,7 +197,7 @@ test('encrypted sync over WebDAV keeps cloud payload opaque', async ({ page }) =
     await engineA.disconnect();
 
     const cloud = window.__webdavMock.dumpFiles();
-    const payload = Object.entries(cloud).find(([path]) => /\/c1\/changes\/[^/]+-chg_[^/]+\.json$/.test(path));
+    const payload = Object.entries(cloud).find(([path]) => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(path));
     const cloudContainsPlaintext = payload ? payload[1].includes('top secret') : false;
 
     await window.__webdavMock.resetIndexedDb();
@@ -269,7 +250,7 @@ test('direct-cloud compaction over WebDAV restores clients from snapshot', async
     return {
       text: row ? readColumn(row, 'text') : null,
       hasSnapshot: Object.keys(window.__webdavMock.dumpFiles())
-        .some(path => path.includes('/WebCompact/c1/mainline/snapshot-1-')),
+        .some(path => path.includes('/WebCompact/mainline/snapshot-1-')),
     };
   });
 

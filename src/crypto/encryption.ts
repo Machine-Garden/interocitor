@@ -147,7 +147,7 @@ export interface EncryptedEnvelope {
   ct: string;  // base64 (includes GCM auth tag)
 }
 
-/** Encrypt a single plaintext string (one NDJSON line). */
+/** Encrypt a single plaintext string. */
 export async function encryptEntry(
   key: CryptoKey,
   plaintext: string
@@ -192,39 +192,6 @@ export async function decryptEntry(
   return new TextDecoder().decode(decrypted);
 }
 
-/**
- * Encrypt an entire NDJSON file (line by line).
- * Each line is independently encrypted.
- */
-export async function encryptNdjson(
-  key: CryptoKey,
-  lines: string[]
-): Promise<string> {
-  const encrypted = await Promise.all(
-    lines.map(line => encryptEntry(key, line))
-  );
-  return encrypted.join('\n');
-}
-
-/**
- * Decrypt an NDJSON file. Each line is independently decrypted.
- * Corrupt lines are skipped (returns null in that position).
- */
-export async function decryptNdjson(
-  key: CryptoKey,
-  content: string
-): Promise<(string | null)[]> {
-  const lines = content.split('\n').filter(l => l.trim());
-  return Promise.all(
-    lines.map(async (line) => {
-      try {
-        return await decryptEntry(key, line);
-      } catch {
-        return null; // corrupt line, skip
-      }
-    })
-  );
-}
 
 /** Quick verification: try decrypting a single line to confirm key is correct. */
 export async function verifyKey(key: CryptoKey, sampleEncrypted: string): Promise<boolean> {

@@ -2,9 +2,12 @@
  * Sync Engine
  *
  * Orchestrates:
- *  - Local writes → outbox → flush to cloud
+ *  - Local writes → outbox → flush to cloud (primary + replicas)
  *  - Cloud poll → download → decrypt → CRDT merge → local DB
  *  - Rehydration from manifest-authoritative snapshot
+ *
+ * Network is never required for reads or local writes.
+ * All data operations hit IndexedDB first; cloud sync is async.
  */
 
 import type {
@@ -14,7 +17,6 @@ import type {
   ChangeEntry,
   Manifest,
   ManifestPointer,
-  ChannelManifest,
   Snapshot,
   Row,
   Op,
@@ -26,6 +28,7 @@ import type {
   SyncEventListener,
   DatabaseSchemaDefinition,
   WhereClause,
+  ReplicaConfig,
 } from '../core/types.ts';
 
 import { hlcInit, hlcNow, hlcSerialize, hlcParse, hlcReceive, hlcCompareStr } from '../core/hlc.ts';
@@ -39,37 +42,44 @@ import {
 
 import type { HLC } from '../core/types.ts';
 
+// ─── Cloud path layout ──────────────────────────────────────────────
+//
+// {remotePath}/
+//   manifest.json                          ← pointer
+//   manifest-{generation}.json             ← immutable, content-hashed
+//   devices/
+//     {deviceId}.json
+//   mainline/
+//     snapshot-{epoch}-{writer}.json
+//   changes/
+//     head.json                            ← { latestHlc }
+//     {hlc}-{changeId}.json               ← one file per flush entry
+//
+
 interface CloudPaths {
   manifestPointer: string;
   manifestFile: (generation: number) => string;
   devicesFolder: string;
   deviceFile: (deviceId: string) => string;
-  channelRoot: string;
-  channelPointer: string;
-  channelManifestFile: (generation: number, writerId: string) => string;
   mainlineFolder: string;
   changesFolder: string;
   changesHead: string;
   changeFile: (fileName: string) => string;
 }
 
-type ResolvedSyncConfig = Omit<Required<SyncConfig>, 'schema'> & {
+type ResolvedSyncConfig = Omit<Required<SyncConfig>, 'schema' | 'replicas'> & {
   schema?: DatabaseSchemaDefinition;
+  replicas: ReplicaConfig[];
 };
 
-function paths(root: string, channelId: string): CloudPaths {
-  const channelRoot = `${root}/${channelId}`;
-  const changesFolder = `${channelRoot}/changes`;
+function paths(root: string): CloudPaths {
+  const changesFolder = `${root}/changes`;
   return {
     manifestPointer: `${root}/manifest.json`,
     manifestFile: (generation: number) => `${root}/manifest-${generation}.json`,
     devicesFolder: `${root}/devices`,
     deviceFile: (deviceId: string) => `${root}/devices/${deviceId}.json`,
-    channelRoot,
-    channelPointer: `${channelRoot}/channel.json`,
-    channelManifestFile: (generation: number, writerId: string) =>
-      `${channelRoot}/channel-manifest-${generation}-${writerId}.json`,
-    mainlineFolder: `${channelRoot}/mainline`,
+    mainlineFolder: `${root}/mainline`,
     changesFolder,
     changesHead: `${changesFolder}/head.json`,
     changeFile: (fileName: string) => `${changesFolder}/${fileName}`,
@@ -116,10 +126,6 @@ async function computeContentHash(payload: unknown): Promise<string> {
   return `sha256:${hexFromBytes(new Uint8Array(digest))}`;
 }
 
-function makeCursorKey(channelId: string): string {
-  return `cursor:${channelId}`;
-}
-
 // ─── Sync Engine ─────────────────────────────────────────────────────
 
 /**
@@ -138,7 +144,6 @@ function makeCursorKey(channelId: string): string {
 export class SyncEngine<S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>> {
   private adapter: StorageAdapter;
   private config: ResolvedSyncConfig;
-  private channelId: string;
   private serverId: string;
   private local: LocalStoreAdapter;
   private deviceId: string;
@@ -150,7 +155,6 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   // NOT a full dataset mirror; reads go to IDB directly.
   private tables: Record<string, Record<string, Row>> = {};
   private manifest: Manifest | null = null;
-  private channelManifest: ChannelManifest | null = null;
 
   // Known table names (populated from IDB index on init, updated on writes)
   private knownTables: Set<string> = new Set();
@@ -175,7 +179,6 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     this.adapter = adapter;
     this.config = {
       remotePath: config.remotePath,
-      channelId: config.channelId ?? 'c1',
       serverManaged: config.serverManaged ?? false,
       serverId: config.serverId ?? 'server_relay_1',
       pollInterval: config.pollInterval ?? 30_000,
@@ -184,8 +187,8 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
       dbName: config.dbName ?? 'interocitor',
       localStoreFactory: config.localStoreFactory ?? (() => new LocalStore(config.dbName, undefined, config.schema)),
       schema: config.schema,
+      replicas: config.replicas ?? [],
     };
-    this.channelId = this.config.channelId;
     this.serverId = this.config.serverId;
     this.local = this.config.localStoreFactory();
     this.deviceId = getDeviceId();
@@ -273,8 +276,8 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   // ── Lifecycle ──────────────────────────────────────────────────────
 
   /**
-   * Initialize: open local DB, load state into memory,
-   * authenticate with cloud, then sync.
+   * Initialize: open local DB, load state into memory.
+   * No network required — this is a purely local operation.
    */
   async init(): Promise<void> {
     log('debug', 'init() — opening local store', { dbName: this.config.dbName, encrypted: this.encrypted });
@@ -319,12 +322,11 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
       this.emit({ type: 'auth:complete' });
     }
 
-    const p = paths(this.config.remotePath, this.channelId);
-    log('debug', 'connect() — ensuring remote folders', { remotePath: this.config.remotePath, channelId: this.channelId, deviceId: this.deviceId });
+    const p = paths(this.config.remotePath);
+    log('debug', 'connect() — ensuring remote folders', { remotePath: this.config.remotePath, deviceId: this.deviceId });
     const foldersToEnsure = [
       this.config.remotePath,
       p.devicesFolder,
-      p.channelRoot,
       p.mainlineFolder,
       p.changesFolder,
     ];
@@ -338,11 +340,11 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
       }
     }
 
-    log('debug', 'connect() — loading/creating manifests');
+    log('debug', 'connect() — loading/creating manifest');
     try {
-      await this.loadOrCreateManifests();
+      await this.loadOrCreateManifest();
     } catch (err) {
-      log('error', 'connect() — loadOrCreateManifests failed', err);
+      log('error', 'connect() — loadOrCreateManifest failed', err);
       throw err;
     }
 
@@ -350,9 +352,9 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
     // If remote epoch advanced (usually after compaction), local cache
     // may be stale and must be rebuilt from snapshot first.
-    const localEpochRaw = await this.local.getMeta(`epoch:${this.channelId}`);
+    const localEpochRaw = await this.local.getMeta('epoch');
     const localEpoch = typeof localEpochRaw === 'number' ? localEpochRaw : 0;
-    const remoteEpoch = this.channelManifest?.epoch ?? 0;
+    const remoteEpoch = this.manifest?.epoch ?? 0;
     log('debug', 'connect() — epoch check', { localEpoch, remoteEpoch });
 
     if (localEpoch < remoteEpoch) {
@@ -414,7 +416,6 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     this.stopPolling();
     this.adapter = adapter;
     this.manifest = null;
-    this.channelManifest = null;
     this.connected = false;
 
     if (wasConnected) {
@@ -429,9 +430,6 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
    * opens the new one, then pulls all remote data into it and flushes any
    * local outbox entries to remote. The result is a fully converged state
    * in the new local store — "top-up" in both directions.
-   *
-   * Use `new LocalStore({ dbName: 'interocitor-alice' })` to isolate two
-   * engine instances on the same origin.
    *
    * If the engine was not connected, only the local store is swapped;
    * call connect() when ready.
@@ -494,105 +492,74 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     await this.adapter.writeFile(path, textEncoder.encode(JSON.stringify(value, null, 2)));
   }
 
-  private async createBootstrapManifests(): Promise<void> {
-    const p = paths(this.config.remotePath, this.channelId);
+  private async createBootstrapManifest(): Promise<void> {
+    const p = paths(this.config.remotePath);
     const now = new Date().toISOString();
 
-    const globalPayload = {
+    const payload = {
       generation: 1,
       parentGeneration: 0,
       writtenBy: this.serverId,
       writtenAt: now,
-      version: 2,
+      version: 3,
       meshId: generateId('mesh'),
       schema: this.schema?.version ?? 1,
-      lensVersion: 1,
       encrypted: this.encrypted,
-      channels: [this.channelId],
-      channelNames: { [this.channelId]: 'default' },
-      defaultChannel: this.channelId,
       server: {
         managed: this.config.serverManaged,
         relayUrl: null,
         serverId: this.serverId,
       },
       createdAt: now,
-    };
-
-    const globalManifest: Manifest = {
-      ...globalPayload,
-      contentHash: await computeContentHash(globalPayload),
-    };
-
-    const channelPayload = {
-      generation: 1,
-      parentGeneration: 0,
-      writtenBy: this.serverId,
-      writtenAt: now,
-      channelId: this.channelId,
       epoch: 0,
       watermarkHlc: '',
       snapshotPath: null,
       deltaPath: null,
     };
 
-    const channelManifest: ChannelManifest = {
-      ...channelPayload,
-      contentHash: await computeContentHash(channelPayload),
+    const manifest: Manifest = {
+      ...payload,
+      contentHash: await computeContentHash(payload),
     };
 
-    const globalFile = `manifest-${globalManifest.generation}.json`;
-    const channelFile = `channel-manifest-${channelManifest.generation}-${this.serverId}.json`;
+    const manifestFile = `manifest-${manifest.generation}.json`;
 
-    await this.writeJson(p.manifestFile(globalManifest.generation), globalManifest);
-    await this.writeJson(p.channelManifestFile(channelManifest.generation, this.serverId), channelManifest);
+    await this.writeJson(p.manifestFile(manifest.generation), manifest);
     await this.writeJson(p.manifestPointer, {
-      currentGeneration: globalManifest.generation,
-      file: globalFile,
-    } satisfies ManifestPointer);
-    await this.writeJson(p.channelPointer, {
-      currentGeneration: channelManifest.generation,
-      file: channelFile,
+      currentGeneration: manifest.generation,
+      file: manifestFile,
     } satisfies ManifestPointer);
   }
 
-  private async loadOrCreateManifests(): Promise<void> {
-    const p = paths(this.config.remotePath, this.channelId);
+  private async loadOrCreateManifest(): Promise<void> {
+    const p = paths(this.config.remotePath);
 
     const globalPointer = await this.readJsonIfExists<ManifestPointer>(p.manifestPointer);
     if (!globalPointer) {
-      await this.createBootstrapManifests();
+      await this.createBootstrapManifest();
     }
 
     const pointer = await this.readJson<ManifestPointer>(p.manifestPointer);
-    const globalManifest = await this.readJson<Manifest>(`${this.config.remotePath}/${pointer.file}`);
-    await this.validateManifestHash(globalManifest as unknown as { contentHash: string; [key: string]: unknown });
+    const manifest = await this.readJson<Manifest>(`${this.config.remotePath}/${pointer.file}`);
+    await this.validateManifestHash(manifest as unknown as { contentHash: string; [key: string]: unknown });
 
-    if (globalManifest.version !== 2) {
-      throw new Error('Unsupported manifest version for this beta.');
+    if (manifest.version !== 3) {
+      throw new Error(`Unsupported manifest version ${manifest.version} (expected 3).`);
     }
-    if (this.schema && globalManifest.schema !== this.schema.version) {
-      this.emit({ type: 'schema:mismatch', local: this.schema.version, remote: globalManifest.schema });
-      throw new Error(`Schema version mismatch: local=${this.schema.version}, remote=${globalManifest.schema}`);
+    if (this.schema && manifest.schema !== this.schema.version) {
+      this.emit({ type: 'schema:mismatch', local: this.schema.version, remote: manifest.schema });
+      throw new Error(`Schema version mismatch: local=${this.schema.version}, remote=${manifest.schema}`);
     }
-    if (globalManifest.server.managed) {
-      this.assertServerAuth(globalManifest);
-    }
-
-    const channelPointer = await this.readJson<ManifestPointer>(p.channelPointer);
-    const channelManifest = await this.readJson<ChannelManifest>(`${p.channelRoot}/${channelPointer.file}`);
-    await this.validateManifestHash(channelManifest as unknown as { contentHash: string; [key: string]: unknown });
-    if (globalManifest.server.managed) {
-      this.assertServerAuth(channelManifest);
+    if (manifest.server.managed) {
+      this.assertServerAuth(manifest);
     }
 
-    this.manifest = globalManifest;
-    this.channelManifest = channelManifest;
-    this.encrypted = globalManifest.encrypted || this.encrypted;
+    this.manifest = manifest;
+    this.encrypted = manifest.encrypted || this.encrypted;
   }
 
   private async upsertDeviceMetadata(): Promise<void> {
-    const p = paths(this.config.remotePath, this.channelId);
+    const p = paths(this.config.remotePath);
     const now = new Date().toISOString();
     const existing = await this.readJsonIfExists<DeviceMetadata>(p.deviceFile(this.deviceId));
     const next: DeviceMetadata = {
@@ -611,6 +578,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   /**
    * Write a row. This is the main API for mutations.
    * Applies locally immediately, queues for sync.
+   * No network required.
    */
   async put(
     table: string,
@@ -661,7 +629,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     return row;
   }
 
-  /** Soft-delete a row. */
+  /** Soft-delete a row. No network required. */
   async delete(table: string, rowId: string, userId?: string): Promise<void> {
     this.hlc = hlcNow(this.hlc);
     const hlcStr = hlcSerialize(this.hlc);
@@ -690,24 +658,24 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
   // ── Read ───────────────────────────────────────────────────────────
 
-  /** Get a single row by ID. Returns undefined if not found or deleted. */
+  /** Get a single row by ID. Returns undefined if not found or deleted. No network required. */
   async get(table: string, rowId: string): Promise<Row | undefined> {
     const row = await this.local.getRow(table, rowId);
     if (!row || row._deleted) return undefined;
     return row;
   }
 
-  /** Get all live (non-deleted) rows in a table. */
+  /** Get all live (non-deleted) rows in a table. No network required. */
   async query(table: string): Promise<Row[]> {
     return this.local.getTable(table);
   }
 
-  /** Query live rows using a where-clause predicate (indexed when available). */
+  /** Query live rows using a where-clause predicate (indexed when available). No network required. */
   async queryWhere(table: string, clause: WhereClause): Promise<Row[]> {
     return this.local.queryWhere(table, clause);
   }
 
-  /** Get all known table names. */
+  /** Get all known table names. No network required. */
   async tableNames(): Promise<string[]> {
     return Array.from(this.knownTables);
   }
@@ -715,14 +683,6 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   /**
    * Get a type-safe handle for a named collection.
    * When the engine is typed with a schema, the table type is inferred automatically.
-   *
-   * @example
-   * // Typed engine — no explicit type param needed on table()
-   * const engine = new SyncEngine<{ tasks: Task }>(adapter, config);
-   * const tasks = engine.table('tasks');         // Table<Task>
-   *
-   * // Untyped engine — provide the type explicitly
-   * const tasks = engine.table<Task>('tasks');   // Table<Task>
    */
   table<K extends keyof S & string>(name: K): Table<S[K]>;
   table<T extends Record<string, unknown>>(name: string): Table<T>;
@@ -759,43 +719,80 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     }
 
     try {
-      const p = paths(this.config.remotePath, this.channelId);
-      await this.adapter.ensureFolder(p.changesFolder);
+      await this.flushToAdapter(this.adapter, this.config.remotePath, entries, true);
 
-      let lastWrittenHlc = '';
-
-      for (const entry of entries) {
-        const fileName = `${entry.hlc}-${entry.id}.json`;
-
-        const raw = JSON.stringify(entry);
-        const payload = await this.encodeForCloud(raw);
-        await this.adapter.writeFile(
-          p.changeFile(fileName),
-          textEncoder.encode(payload)
-        );
-
-        if (!lastWrittenHlc || hlcCompareStr(entry.hlc, lastWrittenHlc) > 0) {
-          lastWrittenHlc = entry.hlc;
+      // Best-effort replication — failures don't fail the primary flush.
+      for (const replica of this.config.replicas) {
+        try {
+          const replicaRoot = replica.remotePath ?? this.config.remotePath;
+          if (!replica.adapter.isAuthenticated()) {
+            await replica.adapter.authenticate();
+          }
+          await this.flushToAdapter(replica.adapter, replicaRoot, entries, false);
+        } catch (err) {
+          log('warn', 'flush() — replica write failed', { adapter: replica.adapter.name }, err);
+          this.emit({ type: 'replica:error', adapter: replica.adapter.name, error: err as Error });
         }
       }
-
-      // Update global head — monotonic HLC hint for fast poll skipping.
-      const priorHead = await this.readJsonIfExists<ChangesHead>(p.changesHead);
-      const bestHlc = (priorHead?.latestHlc && hlcCompareStr(priorHead.latestHlc, lastWrittenHlc) > 0)
-        ? priorHead.latestHlc
-        : lastWrittenHlc;
-      await this.writeJson(p.changesHead, { latestHlc: bestHlc } satisfies ChangesHead);
-      await this.upsertDeviceMetadata();
 
       log('debug', 'flush() — complete', { entryCount: entries.length });
       this.emit({ type: 'flush:complete' });
     } catch (err) {
       log('error', 'flush() — failed, re-queuing entries', err);
-      // Put entries back in outbox for retry
       for (const entry of entries) {
         await this.local.pushOutbox(entry);
       }
       throw err;
+    }
+  }
+
+  /**
+   * Write a batch of change entries to a single adapter.
+   * Shared by primary flush and replica flush.
+   */
+  private async flushToAdapter(
+    adapter: StorageAdapter,
+    remotePath: string,
+    entries: ChangeEntry[],
+    isPrimary: boolean,
+  ): Promise<void> {
+    const p = paths(remotePath);
+    await adapter.ensureFolder(p.changesFolder);
+
+    let lastWrittenHlc = '';
+
+    for (const entry of entries) {
+      const fileName = `${entry.hlc}-${entry.id}.json`;
+      const raw = JSON.stringify(entry);
+      const payload = await this.encodeForCloud(raw);
+      await adapter.writeFile(p.changeFile(fileName), textEncoder.encode(payload));
+
+      if (!lastWrittenHlc || hlcCompareStr(entry.hlc, lastWrittenHlc) > 0) {
+        lastWrittenHlc = entry.hlc;
+      }
+    }
+
+    // Update global head — monotonic HLC hint for fast poll skipping.
+    const readHeadIfExists = async (): Promise<ChangesHead | null> => {
+      try {
+        const data = await adapter.readFile(p.changesHead);
+        return JSON.parse(textDecoder.decode(data)) as ChangesHead;
+      } catch {
+        return null;
+      }
+    };
+
+    const priorHead = await readHeadIfExists();
+    const bestHlc = (priorHead?.latestHlc && hlcCompareStr(priorHead.latestHlc, lastWrittenHlc) > 0)
+      ? priorHead.latestHlc
+      : lastWrittenHlc;
+    await adapter.writeFile(
+      p.changesHead,
+      textEncoder.encode(JSON.stringify({ latestHlc: bestHlc } satisfies ChangesHead, null, 2)),
+    );
+
+    if (isPrimary) {
+      await this.upsertDeviceMetadata();
     }
   }
 
@@ -806,12 +803,11 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     this.emit({ type: 'sync:start' });
 
     try {
-      await this.loadOrCreateManifests();
-      const p = paths(this.config.remotePath, this.channelId);
+      await this.loadOrCreateManifest();
+      const p = paths(this.config.remotePath);
 
-      // Single global cursor for the channel.
-      const cursorKey = makeCursorKey(this.channelId);
-      const cursorRaw = await this.local.getMeta(cursorKey);
+      // Single global cursor.
+      const cursorRaw = await this.local.getMeta('cursor');
       const cursor = typeof cursorRaw === 'string' ? cursorRaw : '';
 
       // Fast path: if global head hasn't advanced past cursor, skip listing.
@@ -838,11 +834,9 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
       let latestMergedHlc = cursor;
 
       for (const file of files) {
-        // Skip head.json — it's metadata, not a change file.
         if (file.name === 'head.json') continue;
 
         try {
-          // Extract HLC from filename: {hlc}-{changeId}.json
           const chgIdx = file.name.lastIndexOf('-chg_');
           if (chgIdx === -1) continue;
           const fileHlc = file.name.slice(0, chgIdx);
@@ -881,7 +875,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
       }
 
       if (latestMergedHlc && latestMergedHlc !== cursor) {
-        await this.local.setMeta(cursorKey, latestMergedHlc);
+        await this.local.setMeta('cursor', latestMergedHlc);
       }
 
       await this.local.setMeta('hlc', hlcSerialize(this.hlc));
@@ -898,7 +892,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   async rehydrate(): Promise<void> {
     this.emit({ type: 'rehydrate:start' });
 
-    const snapshotPath = this.channelManifest?.snapshotPath;
+    const snapshotPath = this.manifest?.snapshotPath;
     if (!snapshotPath) {
       this.emit({ type: 'rehydrate:complete', rowCount: 0 });
       await this.pull();
@@ -941,7 +935,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
         this.hlc.nodeId = this.deviceId;
       }
 
-      await this.local.setMeta(`epoch:${this.channelId}`, snapshot.epoch);
+      await this.local.setMeta('epoch', snapshot.epoch);
       this.emit({ type: 'rehydrate:complete', rowCount });
     } catch {
       // No snapshot available — start fresh
@@ -955,11 +949,11 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   // ── Compaction / Migration ─────────────────────────────────────────
 
   /**
-   * Compaction publishes a new snapshot and channel manifest generation.
+   * Compaction publishes a new snapshot and manifest generation.
    * In server-managed mode, only the configured server writer may compact.
    */
   async compact(): Promise<void> {
-    if (!this.manifest || !this.channelManifest) {
+    if (!this.manifest) {
       throw new Error('Engine is not connected');
     }
     if (this.manifest.server.managed && this.deviceId !== this.serverId) {
@@ -969,10 +963,10 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     // Ensure the compactor has merged latest remote changes before snapshotting.
     await this.pull();
 
-    const p = paths(this.config.remotePath, this.channelId);
+    const p = paths(this.config.remotePath);
     const now = new Date().toISOString();
-    const nextEpoch = this.channelManifest.epoch + 1;
-    const nextGeneration = this.channelManifest.generation + 1;
+    const nextEpoch = this.manifest.epoch + 1;
+    const nextGeneration = this.manifest.generation + 1;
     const snapshotPath = `${p.mainlineFolder}/snapshot-${nextEpoch}-${this.serverId}.json`;
 
     // Build a full snapshot from IDB — the in-memory cache is partial.
@@ -996,41 +990,40 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     const snapshotPayload = await this.encodeForCloud(snapshotJson);
     await this.adapter.writeFile(snapshotPath, textEncoder.encode(snapshotPayload));
 
-    const channelPayload = {
+    const manifestPayload = {
       generation: nextGeneration,
-      parentGeneration: this.channelManifest.generation,
+      parentGeneration: this.manifest.generation,
       writtenBy: this.serverId,
       writtenAt: now,
-      channelId: this.channelId,
+      version: 3,
+      meshId: this.manifest.meshId,
+      schema: this.manifest.schema,
+      encrypted: this.manifest.encrypted,
+      server: this.manifest.server,
+      createdAt: this.manifest.createdAt,
       epoch: nextEpoch,
       watermarkHlc: hlcSerialize(this.hlc),
       snapshotPath,
       deltaPath: null,
     };
 
-    const nextChannelManifest: ChannelManifest = {
-      ...channelPayload,
-      contentHash: await computeContentHash(channelPayload),
+    const nextManifest: Manifest = {
+      ...manifestPayload,
+      contentHash: await computeContentHash(manifestPayload),
     };
 
-    const channelFile = `channel-manifest-${nextGeneration}-${this.serverId}.json`;
-    await this.writeJson(
-      p.channelManifestFile(nextGeneration, this.serverId),
-      nextChannelManifest
-    );
-    await this.writeJson(p.channelPointer, {
+    const manifestFile = `manifest-${nextGeneration}.json`;
+    await this.writeJson(p.manifestFile(nextGeneration), nextManifest);
+    await this.writeJson(p.manifestPointer, {
       currentGeneration: nextGeneration,
-      file: channelFile,
+      file: manifestFile,
     } satisfies ManifestPointer);
 
-    this.channelManifest = nextChannelManifest;
-    await this.local.setMeta(`epoch:${this.channelId}`, nextEpoch);
+    this.manifest = nextManifest;
+    await this.local.setMeta('epoch', nextEpoch);
 
     // Prune all change files captured in the snapshot.
-    // After compaction the snapshot is the authoritative source for all data
-    // ≤ watermarkHlc. Individual change files at or below that watermark are
-    // redundant and can be safely deleted.
-    const watermarkHlc = nextChannelManifest.watermarkHlc;
+    const watermarkHlc = nextManifest.watermarkHlc;
     log('debug', 'compact() — pruning change files ≤ watermark', { watermarkHlc });
     try {
       const files = await this.adapter.listFiles(p.changesFolder);

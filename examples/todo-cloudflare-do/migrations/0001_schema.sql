@@ -1,3 +1,23 @@
+CREATE TABLE IF NOT EXISTS folders (
+  prefix TEXT NOT NULL,
+  path TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (prefix, path)
+);
+
+CREATE TABLE IF NOT EXISTS files (
+  prefix TEXT NOT NULL,
+  path TEXT NOT NULL,
+  content BLOB NOT NULL,
+  size INTEGER NOT NULL,
+  modified_time TEXT NOT NULL,
+  etag TEXT NOT NULL,
+  PRIMARY KEY (prefix, path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_files_prefix_path ON files(prefix, path);
+CREATE INDEX IF NOT EXISTS idx_folders_prefix_path ON folders(prefix, path);
+
 CREATE TABLE IF NOT EXISTS mesh_paths (
   prefix TEXT NOT NULL,
   remote_root TEXT NOT NULL,
@@ -48,3 +68,4 @@ CREATE TABLE IF NOT EXISTS maintenance_actions (
 
 CREATE INDEX IF NOT EXISTS idx_maintenance_actions_prefix_root_created
   ON maintenance_actions(prefix, remote_root, created_at);
+

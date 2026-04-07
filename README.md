@@ -85,6 +85,26 @@ const tasks  = engine.table<{ title: string; status: string }>('tasks');
 const notes  = engine.table('notes'); // untyped, anything goes
 ```
 
+You can also start local-only with IndexedDB and attach sync later:
+
+```ts
+import { WebDAVAdapter } from 'interocitor/adapters/webdav';
+
+const engine = new SyncEngine<{ tasks: { title: string } }>({
+  remotePath: '/App',
+  dbName: 'app',
+});
+
+await engine.init();
+await engine.table('tasks').put('task_1', { title: 'created before sync' });
+
+await engine.setRemoteStorage(new WebDAVAdapter({
+  baseUrl: 'https://cloud.example.com/remote.php/dav/files/alice',
+  auth: { username: 'alice', password: 'APP_PASSWORD' },
+}));
+await engine.connect();
+```
+
 Indexed querying uses Dexie-like where clauses on `Table`:
 
 ```ts
@@ -96,10 +116,14 @@ const recent    = await engine.table('tasks').where('priority').between(2, 5);
 
 Queries against un-indexed fields fall back to a full-table scan automatically. For schema definition (`types.index`, `types.enum`, migrations), see [interocitor-architecture.md](interocitor-architecture.md).
 
-Backends are swappable at runtime — pending writes flush first:
+Backends are swappable at runtime. You can attach one later, switch to another, or go fully offline again:
 
 ```ts
-await engine.setRemoteStorage(new WebDAVAdapter({ baseUrl: '...', auth: { ... } }));
+await engine.setRemoteStorage(new WebDAVAdapter({ baseUrl: 'https://main.example.com/dav', auth: { ... } }));
+await engine.connect();
+
+await engine.setRemoteStorage(new WebDAVAdapter({ baseUrl: 'https://backup.example.com/dav', auth: { ... } }));
+await engine.setRemoteStorage(null); // keep working locally in IndexedDB only
 ```
 
 ## How sync works

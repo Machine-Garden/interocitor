@@ -115,6 +115,7 @@ function getDeviceId(): string {
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+const ROW_META_KEYS = new Set(['_table', '_rowId', '_deleted', '_deletedHlc', '_schemaVersion']);
 
 function hexFromBytes(bytes: Uint8Array): string {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -142,7 +143,7 @@ async function computeContentHash(payload: unknown): Promise<string> {
  * Schema is optional — omit it for untyped usage.
  */
 export class SyncEngine<S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>> {
-  private adapter: StorageAdapter;
+  private adapter: StorageAdapter | null;
   private config: ResolvedSyncConfig;
   private serverId: string;
   private local: LocalStoreAdapter;
@@ -174,7 +175,12 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   private listeners: Set<SyncEventListener> = new Set();
   private readonly schema?: DatabaseSchemaDefinition;
 
-  constructor(adapter: StorageAdapter, config: SyncConfig) {
+  constructor(config: SyncConfig);
+  constructor(adapter: StorageAdapter | null, config: SyncConfig);
+  constructor(adapterOrConfig: StorageAdapter | SyncConfig | null, maybeConfig?: SyncConfig) {
+    const config = (maybeConfig ?? adapterOrConfig) as SyncConfig;
+    const adapter = (maybeConfig ? adapterOrConfig : null) as StorageAdapter | null;
+
     this.schema = config.schema;
     this.adapter = adapter;
     this.config = {
@@ -193,6 +199,94 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     this.local = this.config.localStoreFactory();
     this.deviceId = getDeviceId();
     this.hlc = hlcInit(this.deviceId);
+  }
+
+  private requireAdapter(operation: string): StorageAdapter {
+    if (!this.adapter) {
+      throw new Error(`No remote storage adapter configured. Call setRemoteStorage() before ${operation}.`);
+    }
+    return this.adapter;
+  }
+
+  private clearScheduledFlush(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+  }
+
+  private async resetRemoteSyncState(): Promise<void> {
+    this.manifest = null;
+    this.connected = false;
+    await this.local.setMeta('cursor', '');
+    await this.local.setMeta('epoch', 0);
+  }
+
+  private getRowHlc(row: Row): string {
+    let latest = row._deletedHlc ?? '';
+
+    for (const [key, value] of Object.entries(row)) {
+      if (ROW_META_KEYS.has(key)) continue;
+      if (!value || typeof value !== 'object' || !('hlc' in value) || !('value' in value)) continue;
+      const entryHlc = (value as ColumnEntry).hlc;
+      if (!latest || hlcCompareStr(entryHlc, latest) > 0) {
+        latest = entryHlc;
+      }
+    }
+
+    return latest;
+  }
+
+  private rowToSyncOp(row: Row): Op | null {
+    if (row._deleted) {
+      const hlc = row._deletedHlc ?? this.getRowHlc(row);
+      if (!hlc) return null;
+      return { type: 'delete', table: row._table, rowId: row._rowId, hlc };
+    }
+
+    const columns: Record<string, ColumnEntry> = {};
+    for (const [key, value] of Object.entries(row)) {
+      if (ROW_META_KEYS.has(key)) continue;
+      if (!value || typeof value !== 'object' || !('hlc' in value) || !('value' in value)) continue;
+      columns[key] = value as ColumnEntry;
+    }
+
+    if (Object.keys(columns).length === 0) return null;
+
+    return {
+      type: 'upsert',
+      table: row._table,
+      rowId: row._rowId,
+      columns,
+    };
+  }
+
+  private buildChangeEntry(op: Op, hlc: string): ChangeEntry {
+    return {
+      id: generateId('chg'),
+      ts: Date.now(),
+      device: this.deviceId,
+      hlc,
+      ops: [op],
+    };
+  }
+
+  private async rebuildOutboxFromLocalState(): Promise<number> {
+    await this.local.drainOutbox();
+
+    const rows = await this.local.getAllRows();
+    let queued = 0;
+
+    for (const row of rows) {
+      const op = this.rowToSyncOp(row);
+      const hlc = this.getRowHlc(row);
+      if (!op || !hlc) continue;
+      await this.local.pushOutbox(this.buildChangeEntry(op, hlc));
+      queued++;
+    }
+
+    this.pendingCount = queued;
+    return queued;
   }
 
   // ── Private lifecycle helpers ──────────────────────────────────────
@@ -310,11 +404,13 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
       throw new Error('Engine must be initialized via init() before connect()');
     }
 
-    log('debug', 'connect() — authenticating with adapter', { adapter: this.adapter.name });
-    if (!this.adapter.isAuthenticated()) {
+    const adapter = this.requireAdapter('connect()');
+
+    log('debug', 'connect() — authenticating with adapter', { adapter: adapter.name });
+    if (!adapter.isAuthenticated()) {
       this.emit({ type: 'auth:required' });
       try {
-        await this.adapter.authenticate();
+        await adapter.authenticate();
       } catch (err) {
         log('error', 'connect() — authentication failed', err);
         throw err;
@@ -332,7 +428,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     ];
     for (const folder of foldersToEnsure) {
       try {
-        await this.adapter.ensureFolder(folder);
+        await adapter.ensureFolder(folder);
         log('debug', 'connect() — ensureFolder ok', folder);
       } catch (err) {
         log('error', 'connect() — ensureFolder failed', folder, err);
@@ -384,10 +480,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   /** Stop polling, flush remaining changes. */
   async disconnect(): Promise<void> {
     this.stopPolling();
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
+    this.clearScheduledFlush();
     await this.flush();
     this.local.close();
     this.connected = false;
@@ -406,19 +499,30 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
    * If the engine was not connected, only the adapter reference is updated;
    * call connect() when ready.
    */
-  async setRemoteStorage(adapter: StorageAdapter): Promise<void> {
+  async setRemoteStorage(adapter: StorageAdapter | null): Promise<void> {
     const wasConnected = this.connected;
+    const hadAdapter = this.adapter !== null;
 
-    if (wasConnected) {
-      await this.flush();
+    if (wasConnected && hadAdapter) {
+      await this.pull();
     }
 
     this.stopPolling();
-    this.adapter = adapter;
-    this.manifest = null;
-    this.connected = false;
+    this.clearScheduledFlush();
 
-    if (wasConnected) {
+    if (this.initialized) {
+      await this.resetRemoteSyncState();
+      if (adapter) {
+        await this.rebuildOutboxFromLocalState();
+      }
+    } else {
+      this.manifest = null;
+      this.connected = false;
+    }
+
+    this.adapter = adapter;
+
+    if (wasConnected && adapter) {
       await this.connect();
     }
   }
@@ -441,10 +545,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
       await this.flush();
     }
 
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
+    this.clearScheduledFlush();
     this.pendingCount = 0;
 
     this.local.close();
@@ -462,7 +563,8 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   // ── Manifest ───────────────────────────────────────────────────────
 
   private async readJson<T>(path: string): Promise<T> {
-    const data = await this.adapter.readFile(path);
+    const adapter = this.requireAdapter(`read ${path}`);
+    const data = await adapter.readFile(path);
     return JSON.parse(textDecoder.decode(data)) as T;
   }
 
@@ -489,7 +591,8 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   }
 
   private async writeJson(path: string, value: unknown): Promise<void> {
-    await this.adapter.writeFile(path, textEncoder.encode(JSON.stringify(value, null, 2)));
+    const adapter = this.requireAdapter(`write ${path}`);
+    await adapter.writeFile(path, textEncoder.encode(JSON.stringify(value, null, 2)));
   }
 
   private async createBootstrapManifest(): Promise<void> {
@@ -707,16 +810,18 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   }
 
   async flush(): Promise<void> {
+    if (!this.adapter) {
+      this.clearScheduledFlush();
+      return;
+    }
+
     const entries = await this.local.drainOutbox();
     if (entries.length === 0) return;
 
     log('debug', 'flush() — start', { entryCount: entries.length });
     this.emit({ type: 'flush:start', entryCount: entries.length });
     this.pendingCount = 0;
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
+    this.clearScheduledFlush();
 
     try {
       await this.flushToAdapter(this.adapter, this.config.remotePath, entries, true);
@@ -799,6 +904,8 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   // ── Pull (cloud → local) ──────────────────────────────────────────
 
   async pull(): Promise<void> {
+    const adapter = this.requireAdapter('pull()');
+
     log('debug', 'pull() — start');
     this.emit({ type: 'sync:start' });
 
@@ -821,7 +928,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
       // List the flat changes folder once.
       let files;
       try {
-        files = await this.adapter.listFiles(p.changesFolder);
+        files = await adapter.listFiles(p.changesFolder);
       } catch {
         log('debug', 'pull() — changes folder not found, nothing to merge');
         this.emit({ type: 'sync:complete', entriesMerged: 0 });
@@ -842,7 +949,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
           const fileHlc = file.name.slice(0, chgIdx);
           if (cursor && hlcCompareStr(fileHlc, cursor) <= 0) continue;
 
-          const raw = textDecoder.decode(await this.adapter.readFile(file.path));
+          const raw = textDecoder.decode(await adapter.readFile(file.path));
           const decoded = await this.decodeFromCloud(raw);
           if (!decoded) continue;
           const entry = JSON.parse(decoded) as ChangeEntry;
@@ -890,6 +997,8 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   // ── Rehydrate (from snapshot) ──────────────────────────────────────
 
   async rehydrate(): Promise<void> {
+    const adapter = this.requireAdapter('rehydrate()');
+
     this.emit({ type: 'rehydrate:start' });
 
     const snapshotPath = this.manifest?.snapshotPath;
@@ -900,7 +1009,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     }
 
     try {
-      const data = await this.adapter.readFile(snapshotPath);
+      const data = await adapter.readFile(snapshotPath);
       let json: string;
 
       if (this.encrypted && this.encryptionKey) {
@@ -953,6 +1062,8 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
    * In server-managed mode, only the configured server writer may compact.
    */
   async compact(): Promise<void> {
+    const adapter = this.requireAdapter('compact()');
+
     if (!this.manifest) {
       throw new Error('Engine is not connected');
     }
@@ -988,7 +1099,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
     const snapshotJson = JSON.stringify(snapshot);
     const snapshotPayload = await this.encodeForCloud(snapshotJson);
-    await this.adapter.writeFile(snapshotPath, textEncoder.encode(snapshotPayload));
+    await adapter.writeFile(snapshotPath, textEncoder.encode(snapshotPayload));
 
     const manifestPayload = {
       generation: nextGeneration,
@@ -1026,14 +1137,14 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     const watermarkHlc = nextManifest.watermarkHlc;
     log('debug', 'compact() — pruning change files ≤ watermark', { watermarkHlc });
     try {
-      const files = await this.adapter.listFiles(p.changesFolder);
+      const files = await adapter.listFiles(p.changesFolder);
       for (const file of files) {
         if (file.name === 'head.json') continue;
         const chgIdx = file.name.lastIndexOf('-chg_');
         if (chgIdx === -1) continue;
         const fileHlc = file.name.slice(0, chgIdx);
         if (hlcCompareStr(fileHlc, watermarkHlc) <= 0) {
-          await this.adapter.deleteFile(file.path);
+          await adapter.deleteFile(file.path);
         }
       }
       log('debug', 'compact() — pruning complete');

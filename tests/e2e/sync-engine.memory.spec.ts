@@ -241,6 +241,232 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
     expect(result.includes('classified')).toBe(false);
   });
 
+  test('can start without a remote adapter and sync later', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { SyncEngine, readColumn } = await import('/dist/index.js');
+      const { MemoryAdapter } = await import('/dist/adapters/memory.js');
+
+      const remote = new MemoryAdapter();
+
+      localStorage.setItem('interocitor-device-id', 'dev_offline');
+      const engine = new SyncEngine({
+        remotePath: '/MeshLateAttach',
+        pollInterval: 600_000,
+        flushDebounce: 60_000,
+        flushThreshold: 999,
+      });
+
+      await engine.init();
+      await engine.put('tasks', 'late_1', { title: 'offline first' });
+      const beforeSync = await engine.get('tasks', 'late_1');
+
+      let connectError = '';
+      try {
+        await engine.connect();
+      } catch (error: any) {
+        connectError = String(error?.message ?? error);
+      }
+
+      await engine.setRemoteStorage(remote);
+      await engine.connect();
+      await engine.flush();
+      await engine.disconnect();
+
+      await new Promise<void>((resolve) => {
+        const req = indexedDB.deleteDatabase('interocitor');
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+        req.onblocked = () => resolve();
+      });
+
+      localStorage.setItem('interocitor-device-id', 'dev_late_reader');
+      const reader = new SyncEngine(remote, {
+        remotePath: '/MeshLateAttach',
+        pollInterval: 600_000,
+      });
+      await reader.init();
+      await reader.connect();
+      const synced = await reader.get('tasks', 'late_1');
+      const dump = remote.dump();
+      await reader.disconnect();
+
+      return {
+        beforeSync: beforeSync ? readColumn(beforeSync, 'title') : null,
+        connectError,
+        synced: synced ? readColumn(synced, 'title') : null,
+        changeFileCount: Object.keys(dump).filter(path => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(path)).length,
+      };
+    });
+
+    expect(result.beforeSync).toBe('offline first');
+    expect(result.connectError).toContain('No remote storage adapter configured');
+    expect(result.synced).toBe('offline first');
+    expect(result.changeFileCount).toBeGreaterThan(0);
+  });
+
+  test('setRemoteStorage migrates full local state to a new backend at runtime', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { SyncEngine, readColumn } = await import('/dist/index.js');
+      const { MemoryAdapter } = await import('/dist/adapters/memory.js');
+
+      const remoteA = new MemoryAdapter();
+      const remoteB = new MemoryAdapter();
+
+      localStorage.setItem('interocitor-device-id', 'dev_primary');
+      const engine = new SyncEngine(remoteA, {
+        remotePath: '/MeshSwap',
+        pollInterval: 600_000,
+        flushDebounce: 5,
+        flushThreshold: 1,
+      });
+      await engine.init();
+      await engine.connect();
+      await engine.put('tasks', 'local_1', { title: 'from primary' });
+      await engine.flush();
+
+      localStorage.setItem('interocitor-device-id', 'dev_peer');
+      const peer = new SyncEngine(remoteA, {
+        remotePath: '/MeshSwap',
+        pollInterval: 600_000,
+        flushDebounce: 5,
+        flushThreshold: 1,
+      });
+      await peer.init();
+      await peer.connect();
+      await peer.put('tasks', 'peer_1', { title: 'from peer' });
+      await peer.flush();
+      await peer.disconnect();
+
+      localStorage.setItem('interocitor-device-id', 'dev_primary');
+      await engine.pull();
+      await engine.setRemoteStorage(remoteB);
+      await engine.put('tasks', 'after_switch', { title: 'after switch' });
+      await engine.flush();
+      await engine.disconnect();
+
+      await new Promise<void>((resolve) => {
+        const req = indexedDB.deleteDatabase('interocitor');
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+        req.onblocked = () => resolve();
+      });
+
+      localStorage.setItem('interocitor-device-id', 'dev_b_reader');
+      const reader = new SyncEngine(remoteB, {
+        remotePath: '/MeshSwap',
+        pollInterval: 600_000,
+      });
+      await reader.init();
+      await reader.connect();
+      const localRow = await reader.get('tasks', 'local_1');
+      const peerRow = await reader.get('tasks', 'peer_1');
+      const switchedRow = await reader.get('tasks', 'after_switch');
+      await reader.disconnect();
+
+      const dumpA = remoteA.dump();
+      const dumpB = remoteB.dump();
+
+      return {
+        localTitle: localRow ? readColumn(localRow, 'title') : null,
+        peerTitle: peerRow ? readColumn(peerRow, 'title') : null,
+        switchedTitle: switchedRow ? readColumn(switchedRow, 'title') : null,
+        remoteAHasSwitchWrite: Object.values(dumpA).some(value => value.includes('after switch')),
+        remoteBChangeFileCount: Object.keys(dumpB).filter(path => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(path)).length,
+      };
+    });
+
+    expect(result.localTitle).toBe('from primary');
+    expect(result.peerTitle).toBe('from peer');
+    expect(result.switchedTitle).toBe('after switch');
+    expect(result.remoteAHasSwitchWrite).toBe(false);
+    expect(result.remoteBChangeFileCount).toBeGreaterThanOrEqual(3);
+  });
+
+  test('can detach from multiple adapters and later rejoin the old adapter with concurrent changes', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { SyncEngine, readColumn } = await import('/dist/index.js');
+      const { MemoryAdapter } = await import('/dist/adapters/memory.js');
+
+      const adapterA = new MemoryAdapter();
+      const adapterB = new MemoryAdapter();
+
+      localStorage.setItem('interocitor-device-id', 'dev_roundtrip_1');
+      const clientOne = new SyncEngine({
+        remotePath: '/MeshRoundTrip',
+        dbName: 'mesh-roundtrip-client-one',
+        pollInterval: 600_000,
+        flushDebounce: 5,
+        flushThreshold: 1,
+      });
+      await clientOne.init();
+      await clientOne.put('tasks', 'seed', { title: 'seed offline' });
+
+      await clientOne.setRemoteStorage(adapterA);
+      await clientOne.connect();
+      await clientOne.flush();
+      await clientOne.setRemoteStorage(null);
+
+      await clientOne.setRemoteStorage(adapterB);
+      await clientOne.connect();
+      await clientOne.flush();
+      const dumpBAfterAttach = adapterB.dump();
+      await clientOne.setRemoteStorage(null);
+
+      localStorage.setItem('interocitor-device-id', 'dev_roundtrip_2');
+      const clientTwo = new SyncEngine(adapterA, {
+        remotePath: '/MeshRoundTrip',
+        dbName: 'mesh-roundtrip-client-two',
+        pollInterval: 600_000,
+        flushDebounce: 5,
+        flushThreshold: 1,
+      });
+      await clientTwo.init();
+      await clientTwo.connect();
+      await clientTwo.put('tasks', 'from_two', { title: 'from old adapter' });
+      await clientTwo.flush();
+
+      localStorage.setItem('interocitor-device-id', 'dev_roundtrip_1');
+      await clientOne.put('tasks', 'from_one_late', { title: 'from first while detached' });
+      const offlineRow = await clientOne.get('tasks', 'from_one_late');
+
+      await clientOne.setRemoteStorage(adapterA);
+      await clientOne.connect();
+      await clientOne.flush();
+      await clientTwo.pull();
+
+      const clientOneRows = await clientOne.query('tasks');
+      const clientTwoRows = await clientTwo.query('tasks');
+      const dumpA = adapterA.dump();
+      const dumpBFinal = adapterB.dump();
+
+      await clientTwo.disconnect();
+      await clientOne.disconnect();
+
+      const titles = (rows: any[]) => rows
+        .map((row) => readColumn(row, 'title'))
+        .filter(Boolean)
+        .sort();
+
+      return {
+        offlineTitle: offlineRow ? readColumn(offlineRow, 'title') : null,
+        clientOneTitles: titles(clientOneRows),
+        clientTwoTitles: titles(clientTwoRows),
+        adapterBHasSeed: Object.values(dumpBAfterAttach).some(value => value.includes('seed offline')),
+        adapterAHasMergedState: Object.values(dumpA).some(value => value.includes('from old adapter'))
+          && Object.values(dumpA).some(value => value.includes('from first while detached')),
+        adapterBStayedDetached: !Object.values(dumpBFinal).some(value => value.includes('from old adapter'))
+          && !Object.values(dumpBFinal).some(value => value.includes('from first while detached')),
+      };
+    });
+
+    expect(result.offlineTitle).toBe('from first while detached');
+    expect(result.clientOneTitles).toEqual(['from first while detached', 'from old adapter', 'seed offline']);
+    expect(result.clientTwoTitles).toEqual(['from first while detached', 'from old adapter', 'seed offline']);
+    expect(result.adapterBHasSeed).toBe(true);
+    expect(result.adapterAHasMergedState).toBe(true);
+    expect(result.adapterBStayedDetached).toBe(true);
+  });
+
   test('direct-cloud compaction works and clients rehydrate from snapshot', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { SyncEngine, readColumn } = await import('/dist/index.js');

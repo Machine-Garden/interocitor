@@ -112,6 +112,8 @@ This example keeps explicit application-level limits even though D1 stores file 
 
 ## Persistence behavior
 
+The example keeps D1 setup intentionally simple: the full schema lives in a single consolidated migration file, `migrations/0001_schema.sql`.
+
 - **Remote (deployed):** D1 persists data by design.
 - **Local dev:** `yarn dev` uses `--persist-to .wrangler/state` so local state survives restarts.
 

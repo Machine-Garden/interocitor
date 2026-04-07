@@ -19,6 +19,10 @@
       "import": "./dist/adapters/webdav.js",
       "types": "./dist/adapters/webdav.d.ts"
     },
+    "./adapters/cloudflare": {
+      "import": "./dist/adapters/cloudflare.js",
+      "types": "./dist/adapters/cloudflare.d.ts"
+    },
     "./adapters/memory": {
       "import": "./dist/adapters/memory.js",
       "types": "./dist/adapters/memory.d.ts"

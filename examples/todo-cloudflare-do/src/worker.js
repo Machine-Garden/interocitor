@@ -1,31 +1,56 @@
-const DAV_PREFIX = '/dav';
+/**
+ * interocitor Cloudflare Worker
+ *
+ * Architecture
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ *   Browser ──► Worker (stateless) ──► D1  (durable file/folder storage)
+ *   Browser ──► Worker ─────────────► DO  (SSE fanout only — optional)
+ *   Worker  ──► DO/__broadcast ──────► SSE clients  (fire-and-forget)
+ *
+ * Why the Durable Object?
+ *   D1 is the durable medium. DO holds ZERO persistent state.
+ *   Its only job is to keep the in-memory map of live SSE connections and
+ *   fan out invalidation messages across multiple Worker invocations.
+ *   Without DO, a write on Worker instance A would never notify SSE clients
+ *   connected to instance B.
+ *   Remove TODO_DAV binding entirely to disable SSE (/events/* → 501);
+ *   everything else keeps working with polling as fallback.
+ *
+ * URL layout
+ *   GET  /health                                     health check
+ *   *    /io/<prefix>/...                            Interocitor-native API (JSON + binary)
+ *   GET  /events/<prefix>                            SSE stream (requires DO)
+ *   POST /io/<prefix>/__interocitor__/execute        privileged compact
+ *
+ * Append-only mode  (INTEROCITOR_APPEND_ONLY=1, default ON)
+ *   DELETE             → 405
+ *   PUT on existing    → 409
+ *   Compact via /execute is the only way to prune.
+ *
+ */
+
+const IO_PREFIX = '/io';
 const EVENTS_PREFIX = '/events';
-const EXECUTE_PATH = '/__interocitor__/execute';
+const EXECUTE_SUFFIX = '/__interocitor__/execute';
+
+// ─── CORS ─────────────────────────────────────────────────────────────────────
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'OPTIONS, PROPFIND, MKCOL, PUT, GET, DELETE, POST',
+  'Access-Control-Allow-Methods': 'OPTIONS, GET, PUT, DELETE, POST',
   'Access-Control-Allow-Headers': '*',
   'Access-Control-Expose-Headers': 'ETag',
 };
 
 function withCors(response) {
   const headers = new Headers(response.headers);
-  for (const [key, value] of Object.entries(CORS_HEADERS)) {
-    headers.set(key, value);
-  }
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+  for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 function preflightResponse() {
-  return new Response('', {
-    status: 200,
-    headers: CORS_HEADERS,
-  });
+  return new Response('', { status: 200, headers: CORS_HEADERS });
 }
 
 function jsonResponse(payload, status = 200) {
@@ -35,88 +60,63 @@ function jsonResponse(payload, status = 200) {
   });
 }
 
-function isAppendOnlyMode(env) {
-  return String(env?.INTEROCITOR_APPEND_ONLY ?? '1') !== '0';
+async function sha256Hex(input) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-function hasExecuteToken(request, env) {
-  const expected = env?.INTEROCITOR_EXEC_TOKEN;
-  if (!expected) return false;
-  const actual = request.headers.get('x-interocitor-token') || '';
-  return actual === expected;
+function extractPrefixFromPath(pathname) {
+  const ioPrefix = `${IO_PREFIX}/`;
+  if (pathname.startsWith(ioPrefix)) {
+    return decodeURIComponent(pathname.slice(ioPrefix.length)).split('/').filter(Boolean)[0] ?? null;
+  }
+  const eventsPrefix = `${EVENTS_PREFIX}/`;
+  if (pathname.startsWith(eventsPrefix)) {
+    return decodeURIComponent(pathname.slice(eventsPrefix.length)).split('/').filter(Boolean)[0] ?? null;
+  }
+  return null;
 }
 
-function requestWithPrefix(url, request, prefix) {
-  const headers = new Headers(request.headers);
-  headers.set('x-dav-prefix', prefix);
-  const init = {
-    method: request.method,
-    headers,
-    body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
-  };
-  return new Request(url, init);
+async function hasAccess(request, env, prefix) {
+  const accessSecret = env?.INTEROCITOR_ACCESS_TOKEN;
+  if (!accessSecret) return true;
+  if (!prefix) return false;
+
+  const auth = request.headers.get('Authorization') || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length).trim() : '';
+  if (!token) return false;
+
+  const expected = await sha256Hex(`${prefix}${accessSecret}`);
+  return token === expected;
 }
 
-function normalizePath(rawPath) {
-  const withLeadingSlash = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
-  const compact = withLeadingSlash.replace(/\/+/g, '/');
-  if (compact === '/') return '/';
-  return compact.endsWith('/') ? compact.slice(0, -1) : compact;
-}
+// ─── Path helpers ─────────────────────────────────────────────────────────────
 
-function normalizeRemoteRoot(path) {
-  const normalized = normalizePath(path || '/');
-  return normalized === '/' ? '' : normalized;
+function normalizePath(raw) {
+  const s = String(raw).startsWith('/') ? raw : `/${raw}`;
+  const c = s.replace(/\/+/g, '/');
+  if (c === '/') return '/';
+  return c.endsWith('/') ? c.slice(0, -1) : c;
 }
 
 function parentPath(path) {
   if (path === '/') return null;
   const idx = path.lastIndexOf('/');
-  if (idx <= 0) return '/';
-  return path.slice(0, idx);
+  return idx <= 0 ? '/' : path.slice(0, idx);
 }
 
-function fileName(path) {
-  const parts = path.split('/').filter(Boolean);
-  return parts[parts.length - 1] || '';
+function fileNameFromPath(path) {
+  return path.split('/').filter(Boolean).pop() ?? '';
 }
 
-function changeHlc(file) {
-  const idx = file.lastIndexOf('-chg_');
-  if (idx <= 0) return null;
-  return file.slice(0, idx);
+function changeHlcFromFileName(name) {
+  const idx = name.lastIndexOf('-chg_');
+  return idx > 0 ? name.slice(0, idx) : null;
 }
 
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function httpDate(iso) {
-  return new Date(iso).toUTCString();
-}
-
-function xmlEscape(value) {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;');
-}
-
-function encodeHref(path, isCollection) {
-  const encoded = path
-    .split('/')
-    .filter(Boolean)
-    .map((segment) => encodeURIComponent(segment))
-    .join('/');
-  if (!encoded) return '/';
-  return isCollection ? `/${encoded}/` : `/${encoded}`;
-}
-
-function etag() {
-  return `"etag-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}"`;
-}
+function nowIso() { return new Date().toISOString(); }
+function newEtag() { return `"${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}"`; }
+function encodeSse(type, payload) { return `event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`; }
 
 function toUint8Array(value) {
   if (value instanceof Uint8Array) return value;
@@ -126,254 +126,336 @@ function toUint8Array(value) {
   return new Uint8Array();
 }
 
-function responseNode({ href, size, modifiedIso, itemEtag, isCollection }) {
-  const resourceType = isCollection ? '<d:collection/>' : '';
-  const contentLength = isCollection ? '' : `<d:getcontentlength>${size}</d:getcontentlength>`;
-  return `<d:response>
-  <d:href>${xmlEscape(href)}</d:href>
-  <d:propstat>
-    <d:prop>
-      ${contentLength}
-      <d:getlastmodified>${xmlEscape(httpDate(modifiedIso))}</d:getlastmodified>
-      <d:resourcetype>${resourceType}</d:resourcetype>
-      <d:getetag>${xmlEscape(itemEtag || '')}</d:getetag>
-    </d:prop>
-    <d:status>HTTP/1.1 200 OK</d:status>
-  </d:propstat>
-</d:response>`;
+// ─── D1 helpers ───────────────────────────────────────────────────────────────
+
+async function dbFolderExists(db, prefix, path) {
+  if (path === '/') return true;
+  return Boolean(await db.prepare('SELECT 1 FROM folders WHERE prefix=?1 AND path=?2 LIMIT 1').bind(prefix, path).first());
 }
 
-function propfindBody(nodes) {
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<d:multistatus xmlns:d="DAV:">\n${nodes.join('\n')}\n</d:multistatus>`;
+async function dbEnsureFolder(db, prefix, path) {
+  if (path === '/') return 201;
+  if (await dbFolderExists(db, prefix, path)) return 405;
+  const parent = parentPath(path);
+  if (!parent || !(await dbFolderExists(db, prefix, parent))) return 409;
+  await db.prepare('INSERT INTO folders (prefix,path,created_at) VALUES (?1,?2,?3)').bind(prefix, path, nowIso()).run();
+  return 201;
 }
 
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
+async function dbEnsureFolderTree(db, prefix, target) {
+  const n = normalizePath(target);
+  if (!n || n === '/') return;
+  let cur = '';
+  for (const seg of n.split('/').filter(Boolean)) {
+    cur += `/${seg}`;
+    await db.prepare('INSERT OR IGNORE INTO folders (prefix,path,created_at) VALUES (?1,?2,?3)').bind(prefix, cur, nowIso()).run();
+  }
+}
 
-    if (request.method === 'OPTIONS') {
-      return preflightResponse();
-    }
+async function dbGetFile(db, prefix, path) {
+  return db.prepare('SELECT content,size,modified_time,etag FROM files WHERE prefix=?1 AND path=?2 LIMIT 1').bind(prefix, path).first();
+}
 
-    if (url.pathname === '/' || url.pathname === '/health') {
-      return withCors(new Response('todo-cloudflare-do worker is running\n', { status: 200 }));
-    }
+async function dbPutFile(db, prefix, path, bytes, allowOverwrite) {
+  const existed = Boolean(await db.prepare('SELECT 1 FROM files WHERE prefix=?1 AND path=?2 LIMIT 1').bind(prefix, path).first());
+  if (!allowOverwrite && existed) return 409;
+  await db.prepare(
+    `INSERT INTO files (prefix,path,content,size,modified_time,etag) VALUES (?1,?2,?3,?4,?5,?6)
+     ON CONFLICT(prefix,path) DO UPDATE SET
+       content=excluded.content, size=excluded.size,
+       modified_time=excluded.modified_time, etag=excluded.etag`,
+  ).bind(prefix, path, bytes, bytes.byteLength, nowIso(), newEtag()).run();
+  return existed ? 204 : 201;
+}
 
-    if (url.pathname.startsWith(`${EVENTS_PREFIX}/`)) {
-      const prefix = decodeURIComponent(url.pathname.slice(`${EVENTS_PREFIX}/`.length));
-      if (!prefix) {
-        return withCors(new Response('Missing durable object prefix', { status: 400 }));
-      }
-      const id = env.TODO_DAV.idFromName(prefix);
-      const stub = env.TODO_DAV.get(id);
-      const eventsRequest = requestWithPrefix('https://session.internal/__events', request, prefix);
-      return withCors(await stub.fetch(eventsRequest));
-    }
+async function dbOverwriteFile(db, prefix, path, bytes) {
+  await db.prepare(
+    `INSERT INTO files (prefix,path,content,size,modified_time,etag) VALUES (?1,?2,?3,?4,?5,?6)
+     ON CONFLICT(prefix,path) DO UPDATE SET
+       content=excluded.content, size=excluded.size,
+       modified_time=excluded.modified_time, etag=excluded.etag`,
+  ).bind(prefix, path, bytes, bytes.byteLength, nowIso(), newEtag()).run();
+}
 
-    if (!url.pathname.startsWith(`${DAV_PREFIX}/`)) {
-      return withCors(new Response('Not found', { status: 404 }));
-    }
+async function dbDeletePath(db, prefix, path) {
+  if (path === '/') {
+    await db.prepare('DELETE FROM files WHERE prefix=?1').bind(prefix).run();
+    await db.prepare('DELETE FROM folders WHERE prefix=?1').bind(prefix).run();
+    return true;
+  }
+  const file = await dbGetFile(db, prefix, path);
+  if (file) {
+    await db.prepare('DELETE FROM files WHERE prefix=?1 AND path=?2').bind(prefix, path).run();
+    return true;
+  }
+  if (!(await dbFolderExists(db, prefix, path))) return false;
+  const like = `${path}/%`;
+  await db.prepare('DELETE FROM files WHERE prefix=?1 AND (path=?2 OR path LIKE ?3)').bind(prefix, path, like).run();
+  await db.prepare('DELETE FROM folders WHERE prefix=?1 AND (path=?2 OR path LIKE ?3)').bind(prefix, path, like).run();
+  return true;
+}
 
-    const decodedPath = decodeURIComponent(url.pathname.slice(`${DAV_PREFIX}/`.length));
-    const [prefix, ...rest] = decodedPath.split('/').filter(Boolean);
-    if (!prefix) {
-      return withCors(new Response('Path must start with /dav/<prefix>', { status: 400 }));
-    }
+async function dbListFiles(db, prefix, path) {
+  const pattern = path === '/' ? '/%' : `${path}/%`;
+  const { results = [] } = await db
+    .prepare('SELECT path,size,modified_time,etag FROM files WHERE prefix=?1 AND path LIKE ?2')
+    .bind(prefix, pattern).all();
+  const files = [];
+  for (const row of results) {
+    const fp = String(row.path);
+    const rem = fp.slice(path === '/' ? 1 : path.length + 1);
+    if (rem.includes('/')) continue;
+    files.push({
+      name: fileNameFromPath(fp),
+      path: fp,
+      size: Number(row.size ?? 0),
+      modifiedTime: String(row.modified_time ?? nowIso()),
+      etag: String(row.etag ?? ''),
+    });
+  }
+  return files;
+}
 
-    const objectPath = rest.length > 0 ? `/${rest.join('/')}` : '/';
-    const id = env.TODO_DAV.idFromName(prefix);
-    const stub = env.TODO_DAV.get(id);
+async function dbListFolders(db, prefix, path) {
+  const pattern = path === '/' ? '/%' : `${path}/%`;
+  const { results = [] } = await db
+    .prepare('SELECT path FROM folders WHERE prefix=?1 AND path LIKE ?2')
+    .bind(prefix, pattern).all();
+  const folders = [];
+  for (const row of results) {
+    const fp = String(row.path);
+    const rem = fp.slice(path === '/' ? 1 : path.length + 1);
+    if (!rem || rem.includes('/')) continue;
+    folders.push(fp);
+  }
+  return folders;
+}
 
-    const forwardRequest = requestWithPrefix(`https://session.internal${objectPath}`, request, prefix);
-    return withCors(await stub.fetch(forwardRequest));
-  },
-};
+async function dbCompact(db, prefix, remotePath, watermarkHlc) {
+  const root = normalizePath(remotePath) === '/' ? '' : normalizePath(remotePath);
+  const { results = [] } = await db
+    .prepare('SELECT path FROM files WHERE prefix=?1 AND path LIKE ?2')
+    .bind(prefix, `${root}/changes/%`).all();
+  const toDelete = [];
+  for (const row of results) {
+    const name = fileNameFromPath(String(row.path));
+    if (name === 'head.json') continue;
+    const hlc = changeHlcFromFileName(name);
+    if (hlc && hlc <= watermarkHlc) toDelete.push(String(row.path));
+  }
+  for (const p of toDelete) {
+    await db.prepare('DELETE FROM files WHERE prefix=?1 AND path=?2').bind(prefix, p).run();
+  }
+  return { remotePath, watermarkHlc, totalCandidates: results.length, pruned: toDelete.length };
+}
 
-export class TodoDavSession {
-  constructor(state) {
-    this.state = state;
-    this.clients = new Map();
+// ─── Execute ──────────────────────────────────────────────────────────────────
+
+async function handleExecute(db, prefix, request, env) {
+  const expected = env?.INTEROCITOR_EXEC_TOKEN;
+  if (expected && (request.headers.get('x-interocitor-token') || '') !== expected) {
+    return new Response('Forbidden', { status: 403 });
   }
 
-  async fetch(request, env) {
-    if (!env?.TODO_DB) {
-      return new Response('Missing D1 binding TODO_DB', { status: 500 });
-    }
+  const payload = await request.json().catch(() => null);
+  if (!payload) return new Response('Invalid JSON body', { status: 400 });
 
-    const url = new URL(request.url);
-    const path = normalizePath(url.pathname);
-    const method = request.method.toUpperCase();
-    const prefix = (request.headers.get('x-dav-prefix') || '').trim();
+  const op = String(payload.op || '');
+  if (op !== 'compact') return new Response(`Unsupported op: ${op}`, { status: 400 });
 
-    if (!prefix) {
-      return new Response('Missing durable object prefix', { status: 400 });
-    }
+  const remotePath = normalizePath(String(payload.remotePath || '/'));
+  const watermarkHlc = String(payload.watermarkHlc || '');
+  if (!watermarkHlc) return new Response('Missing watermarkHlc', { status: 400 });
 
-    if (url.pathname === '/__events') {
-      return this.handleEvents(request);
-    }
+  const result = await dbCompact(db, prefix, remotePath, watermarkHlc);
 
-    if (method === 'OPTIONS') {
-      return new Response('', {
+  // Write an immutable compact receipt to the audit log.
+  const root = normalizePath(remotePath) === '/' ? '' : normalizePath(remotePath);
+  const receiptDir = `${root}/.interocitor/commands`;
+  const receiptPath = `${receiptDir}/compact-${Date.now().toString(36)}.json`;
+  await dbEnsureFolderTree(db, prefix, receiptDir);
+  await dbOverwriteFile(db, prefix, receiptPath,
+    new TextEncoder().encode(JSON.stringify({ op: 'compact', ...result, ts: nowIso() }, null, 2)));
+
+  return jsonResponse({ ok: true, ...result, receiptPath });
+}
+
+async function readJsonBody(request) {
+  return request.json().catch(() => null);
+}
+
+async function handleIoRequest(request, env, ctx, url) {
+  const method = request.method.toUpperCase();
+  const segments = decodeURIComponent(url.pathname.slice(`${IO_PREFIX}/`.length)).split('/').filter(Boolean);
+  const prefix = segments[0] ?? '';
+  const opPath = `/${segments.slice(1).join('/')}`;
+
+  if (!prefix) return withCors(new Response('Path must start with /io/<prefix>', { status: 400 }));
+  if (!env.TODO_DB) return withCors(new Response('Missing D1 binding TODO_DB', { status: 500 }));
+
+  const db = env.TODO_DB;
+  const appendOnly = String(env.INTEROCITOR_APPEND_ONLY ?? '1') !== '0';
+
+  if (method === 'GET' && opPath === '/health') {
+    return withCors(jsonResponse({ ok: true, prefix }));
+  }
+
+  if (method === 'POST' && opPath === '/ensure-folder') {
+    const payload = await readJsonBody(request);
+    const path = normalizePath(String(payload?.path || '/'));
+    const status = await dbEnsureFolder(db, prefix, path);
+    if (status !== 409) notifyDo(env, ctx, prefix, { type: 'folder', path, ts: Date.now() });
+    return withCors(new Response('', { status }));
+  }
+
+  if (method === 'POST' && opPath === '/list-files') {
+    const payload = await readJsonBody(request);
+    const path = normalizePath(String(payload?.path || '/'));
+    const files = await dbListFiles(db, prefix, path);
+    return withCors(jsonResponse({ files }));
+  }
+
+  if (method === 'POST' && opPath === '/list-folders') {
+    const payload = await readJsonBody(request);
+    const path = normalizePath(String(payload?.path || '/'));
+    const folders = (await dbListFolders(db, prefix, path))
+      .map((p) => p.split('/').filter(Boolean).pop() || '')
+      .filter(Boolean);
+    return withCors(jsonResponse({ folders }));
+  }
+
+  if (method === 'POST' && opPath === '/metadata') {
+    const payload = await readJsonBody(request);
+    const path = normalizePath(String(payload?.path || '/'));
+    const file = await dbGetFile(db, prefix, path);
+    if (!file) return withCors(new Response('', { status: 404 }));
+    return withCors(jsonResponse({
+      file: {
+        name: fileNameFromPath(path),
+        path,
+        size: Number(file.size),
+        modifiedTime: String(file.modified_time),
+        etag: String(file.etag),
+      },
+    }));
+  }
+
+  if (method === 'POST' && opPath === EXECUTE_SUFFIX) {
+    return withCors(await handleExecute(db, prefix, request, env));
+  }
+
+  if (opPath === '/file') {
+    const path = normalizePath(url.searchParams.get('path') || '/');
+
+    if (method === 'GET') {
+      const file = await dbGetFile(db, prefix, path);
+      if (!file) return withCors(new Response('', { status: 404 }));
+      return withCors(new Response(toUint8Array(file.content), {
         status: 200,
-        headers: {
-          Allow: 'OPTIONS, PROPFIND, MKCOL, PUT, GET, DELETE, POST',
-          DAV: '1',
-        },
-      });
-    }
-
-    if (method === 'POST' && path === EXECUTE_PATH) {
-      return this.handleExecute(prefix, request, env.TODO_DB, env);
-    }
-
-    if (method === 'PROPFIND') {
-      return this.handlePropfind(prefix, path, request.headers.get('Depth') || '0', env.TODO_DB);
-    }
-
-    if (method === 'MKCOL') {
-      const status = await this.ensureFolder(prefix, path, env.TODO_DB);
-      if (status === 201 || status === 405) {
-        await this.broadcast({ type: 'folder', path, ts: Date.now() });
-      }
-      return new Response('', { status });
+        headers: { 'Content-Type': 'application/octet-stream', ETag: String(file.etag) },
+      }));
     }
 
     if (method === 'PUT') {
       const bytes = new Uint8Array(await request.arrayBuffer());
-      const status = await this.putFile(prefix, path, bytes, env.TODO_DB, env);
-      if (status === 201 || status === 204) {
-        await this.broadcast({ type: 'file', path, ts: Date.now() });
-      }
-      return new Response('', { status });
-    }
-
-    if (method === 'GET') {
-      const file = await this.getFile(prefix, path, env.TODO_DB);
-      if (!file) return new Response('', { status: 404 });
-      return new Response(toUint8Array(file.content), {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          ETag: file.etag,
-        },
-      });
+      const status = await dbPutFile(db, prefix, path, bytes, !appendOnly);
+      if (status === 201 || status === 204) notifyDo(env, ctx, prefix, { type: 'file', path, ts: Date.now() });
+      return withCors(new Response('', { status }));
     }
 
     if (method === 'DELETE') {
-      if (isAppendOnlyMode(env)) {
-        return new Response('DELETE disabled in append-only mode', { status: 405 });
+      if (appendOnly) {
+        return withCors(new Response('DELETE disabled in append-only mode', { status: 405 }));
       }
-      const existed = await this.deletePath(prefix, path, env.TODO_DB);
-      if (existed) {
-        await this.broadcast({ type: 'delete', path, ts: Date.now() });
-      }
-      return new Response('', { status: existed ? 204 : 404 });
+      const existed = await dbDeletePath(db, prefix, path);
+      if (existed) notifyDo(env, ctx, prefix, { type: 'delete', path, ts: Date.now() });
+      return withCors(new Response('', { status: existed ? 204 : 404 }));
     }
-
-    return new Response('Method not allowed', { status: 405 });
   }
 
-  async handleExecute(prefix, request, db, env) {
-    if (!hasExecuteToken(request, env)) {
-      return new Response('Forbidden', { status: 403 });
+  return withCors(new Response('Not found', { status: 404 }));
+}
+
+// ─── DO notifier (fire-and-forget) ───────────────────────────────────────────
+
+function notifyDo(env, ctx, prefix, payload) {
+  if (!env?.TODO_DAV) return;
+  const req = new Request('https://internal/__broadcast', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const p = env.TODO_DAV.get(env.TODO_DAV.idFromName(prefix)).fetch(req).catch(() => {});
+  ctx?.waitUntil?.(p);
+}
+
+// ─── Worker ───────────────────────────────────────────────────────────────────
+
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const method = request.method.toUpperCase();
+
+    if (method === 'OPTIONS') return preflightResponse();
+
+    if (url.pathname === '/' || url.pathname === '/health') {
+      return withCors(new Response('interocitor cloudflare worker\n', { status: 200 }));
     }
 
-    let payload;
-    try {
-      payload = await request.json();
-    } catch {
-      return new Response('Invalid JSON body', { status: 400 });
+    const accessPrefix = extractPrefixFromPath(url.pathname);
+    if (accessPrefix && !(await hasAccess(request, env, accessPrefix))) {
+      return withCors(new Response('Unauthorized', { status: 401 }));
     }
 
-    const op = String(payload?.op || '');
-    if (op !== 'compact') {
-      return new Response('Unsupported execute op', { status: 400 });
+    if (url.pathname.startsWith(`${IO_PREFIX}/`)) {
+      return handleIoRequest(request, env, ctx, url);
     }
 
-    const remotePath = normalizePath(String(payload?.remotePath || '/'));
-    const watermarkHlc = String(payload?.watermarkHlc || '');
-    if (!watermarkHlc) {
-      return new Response('Missing watermarkHlc', { status: 400 });
+    // SSE — route to DO broadcaster
+    if (url.pathname.startsWith(`${EVENTS_PREFIX}/`)) {
+      if (!env.TODO_DAV) {
+        return withCors(new Response('SSE not configured (TODO_DAV binding missing)', { status: 501 }));
+      }
+      const prefix = decodeURIComponent(url.pathname.slice(`${EVENTS_PREFIX}/`.length))
+        .split('/').filter(Boolean)[0] ?? '';
+      if (!prefix) return withCors(new Response('Missing prefix', { status: 400 }));
+      const stub = env.TODO_DAV.get(env.TODO_DAV.idFromName(prefix));
+      return withCors(await stub.fetch(new Request('https://internal/__events', request)));
     }
 
-    const result = await this.compactChanges(prefix, remotePath, watermarkHlc, db);
+    return withCors(new Response('Not found', { status: 404 }));
+  },
+};
 
-    const commandPath = `${normalizeRemoteRoot(remotePath)}/.interocitor/commands/cmd-${Date.now().toString(36)}.json`;
-    await this.ensureFolderTree(prefix, `${normalizeRemoteRoot(remotePath)}/.interocitor/commands`, db);
-    await this.putOrOverwrite(prefix, commandPath, new TextEncoder().encode(JSON.stringify({
-      op: 'compact',
-      remotePath,
-      watermarkHlc,
-      pruned: result.pruned,
-      totalCandidates: result.totalCandidates,
-      ts: nowIso(),
-    }, null, 2)), db);
+// ─── Durable Object: SSE broadcaster (zero persistent state) ─────────────────
+//
+// Only holds the in-memory map of live SSE connections.
+// Receives POST /__broadcast from the Worker after every write and fans out.
+// All durable data is in D1. On restart, EventSource reconnects automatically.
 
-    await this.broadcast({ type: 'compact', path: remotePath, ts: Date.now(), pruned: result.pruned });
-    return jsonResponse({ ok: true, ...result, commandPath });
+export class TodoDavBroadcaster {
+  constructor(_state) {
+    this.clients = new Map();
   }
 
-  async compactChanges(prefix, remotePath, watermarkHlc, db) {
-    const root = normalizeRemoteRoot(remotePath);
-    const changesRoot = `${root}/changes`;
-    const likePattern = `${changesRoot}/%`;
-
-    const list = await db
-      .prepare('SELECT path FROM files WHERE prefix = ?1 AND path LIKE ?2')
-      .bind(prefix, likePattern)
-      .all();
-
-    const rows = list.results || [];
-    const toDelete = [];
-    for (const row of rows) {
-      const path = String(row.path || '');
-      const name = fileName(path);
-      if (name === 'head.json') continue;
-      const hlc = changeHlc(name);
-      if (!hlc) continue;
-      if (hlc <= watermarkHlc) {
-        toDelete.push(path);
-      }
-    }
-
-    for (const path of toDelete) {
-      await db
-        .prepare('DELETE FROM files WHERE prefix = ?1 AND path = ?2')
-        .bind(prefix, path)
-        .run();
-    }
-
-    return {
-      remotePath,
-      watermarkHlc,
-      totalCandidates: rows.length,
-      pruned: toDelete.length,
-    };
+  async fetch(request) {
+    const { pathname } = new URL(request.url);
+    if (pathname === '/__events') return this.handleSubscribe(request);
+    if (pathname === '/__broadcast') return this.handleBroadcast(request);
+    return new Response('Not found', { status: 404 });
   }
 
-  async handleEvents(request) {
-    const stream = new TransformStream();
-    const writer = stream.writable.getWriter();
-    const clientId = crypto.randomUUID();
-
-    this.clients.set(clientId, writer);
-    await writer.write(this.encodeSse('ready', { ts: Date.now() }));
-
-    const closeClient = async () => {
-      this.clients.delete(clientId);
-      try {
-        await writer.close();
-      } catch {
-        // Writer already closed.
-      }
-    };
-
-    request.signal.addEventListener('abort', () => {
-      void closeClient();
+  handleSubscribe(request) {
+    const { readable, writable } = new TransformStream();
+    const writer = writable.getWriter();
+    const id = crypto.randomUUID();
+    this.clients.set(id, writer);
+    writer.write(encodeSse('ready', { ts: Date.now() })).catch(() => {});
+    request.signal.addEventListener('abort', async () => {
+      this.clients.delete(id);
+      try { await writer.close(); } catch { /* already closed */ }
     });
-
-    return new Response(stream.readable, {
+    return new Response(readable, {
       status: 200,
       headers: {
         'Content-Type': 'text/event-stream; charset=utf-8',
@@ -383,295 +465,18 @@ export class TodoDavSession {
     });
   }
 
-  encodeSse(type, payload) {
-    return `event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`;
-  }
-
-  async broadcast(payload) {
+  async handleBroadcast(request) {
+    const payload = await request.json().catch(() => ({}));
+    const message = encodeSse('invalidate', payload);
     const dead = [];
-    const message = this.encodeSse('invalidate', payload);
-
     for (const [id, writer] of this.clients.entries()) {
-      try {
-        await writer.write(message);
-      } catch {
-        dead.push(id);
-      }
+      try { await writer.write(message); } catch { dead.push(id); }
     }
-
     for (const id of dead) {
-      const writer = this.clients.get(id);
+      const w = this.clients.get(id);
       this.clients.delete(id);
-      if (writer) {
-        try {
-          await writer.close();
-        } catch {
-          // Ignore close failures.
-        }
-      }
+      try { await w?.close(); } catch { /* ignore */ }
     }
-  }
-
-  async folderExists(prefix, path, db) {
-    if (path === '/') return true;
-    const row = await db
-      .prepare('SELECT 1 FROM folders WHERE prefix = ?1 AND path = ?2 LIMIT 1')
-      .bind(prefix, path)
-      .first();
-    return Boolean(row);
-  }
-
-  async ensureFolder(prefix, path, db) {
-    if (path === '/') {
-      return 201;
-    }
-
-    if (await this.folderExists(prefix, path, db)) {
-      return 405;
-    }
-
-    const parent = parentPath(path);
-    if (!parent || !(await this.folderExists(prefix, parent, db))) {
-      return 409;
-    }
-
-    await db
-      .prepare('INSERT INTO folders (prefix, path, created_at) VALUES (?1, ?2, ?3)')
-      .bind(prefix, path, nowIso())
-      .run();
-    return 201;
-  }
-
-  async putFile(prefix, path, bytes, db, env) {
-    const parent = parentPath(path);
-    if (!parent || !(await this.folderExists(prefix, parent, db))) {
-      return 409;
-    }
-
-    const existed = Boolean(
-      await db
-        .prepare('SELECT 1 FROM files WHERE prefix = ?1 AND path = ?2 LIMIT 1')
-        .bind(prefix, path)
-        .first(),
-    );
-
-    if (isAppendOnlyMode(env) && existed) {
-      return 409;
-    }
-
-    return this.putOrOverwrite(prefix, path, bytes, db, existed);
-  }
-
-  async putOrOverwrite(prefix, path, bytes, db, existedOverride) {
-    const existed = typeof existedOverride === 'boolean'
-      ? existedOverride
-      : Boolean(
-        await db
-          .prepare('SELECT 1 FROM files WHERE prefix = ?1 AND path = ?2 LIMIT 1')
-          .bind(prefix, path)
-          .first(),
-      );
-
-    await db
-      .prepare(
-        `INSERT INTO files (prefix, path, content, size, modified_time, etag)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(prefix, path) DO UPDATE SET
-           content = excluded.content,
-           size = excluded.size,
-           modified_time = excluded.modified_time,
-           etag = excluded.etag`,
-      )
-      .bind(prefix, path, bytes, bytes.byteLength, nowIso(), etag())
-      .run();
-
-    return existed ? 204 : 201;
-  }
-
-  async ensureFolderTree(prefix, targetPath, db) {
-    const normalized = normalizePath(targetPath);
-    if (normalized === '/' || normalized === '') return;
-    const segments = normalized.split('/').filter(Boolean);
-    let current = '';
-    for (const segment of segments) {
-      current += `/${segment}`;
-      await db
-        .prepare('INSERT OR IGNORE INTO folders (prefix, path, created_at) VALUES (?1, ?2, ?3)')
-        .bind(prefix, current, nowIso())
-        .run();
-    }
-  }
-
-  async getFile(prefix, path, db) {
-    return db
-      .prepare('SELECT content, size, modified_time, etag FROM files WHERE prefix = ?1 AND path = ?2 LIMIT 1')
-      .bind(prefix, path)
-      .first();
-  }
-
-  async deletePath(prefix, path, db) {
-    if (path === '/') {
-      await db.prepare('DELETE FROM files WHERE prefix = ?1').bind(prefix).run();
-      await db.prepare('DELETE FROM folders WHERE prefix = ?1').bind(prefix).run();
-      return true;
-    }
-
-    const file = await this.getFile(prefix, path, db);
-    if (file) {
-      await db
-        .prepare('DELETE FROM files WHERE prefix = ?1 AND path = ?2')
-        .bind(prefix, path)
-        .run();
-      return true;
-    }
-
-    if (!(await this.folderExists(prefix, path, db))) {
-      return false;
-    }
-
-    const descendant = `${path}/%`;
-    await db
-      .prepare('DELETE FROM files WHERE prefix = ?1 AND (path = ?2 OR path LIKE ?3)')
-      .bind(prefix, path, descendant)
-      .run();
-    await db
-      .prepare('DELETE FROM folders WHERE prefix = ?1 AND (path = ?2 OR path LIKE ?3)')
-      .bind(prefix, path, descendant)
-      .run();
-    return true;
-  }
-
-  async listFiles(prefix, path, db) {
-    const pattern = path === '/' ? '/%' : `${path}/%`;
-    const result = await db
-      .prepare('SELECT path, size, modified_time, etag FROM files WHERE prefix = ?1 AND path LIKE ?2')
-      .bind(prefix, pattern)
-      .all();
-
-    const rows = result.results || [];
-    const files = [];
-
-    for (const row of rows) {
-      const filePath = String(row.path || '');
-      const remainder = filePath.slice(path.length + 1);
-      if (remainder.includes('/')) continue;
-      files.push({
-        path: filePath,
-        file: {
-          size: Number(row.size || 0),
-          modified_time: String(row.modified_time || nowIso()),
-          etag: String(row.etag || ''),
-        },
-      });
-    }
-
-    return files;
-  }
-
-  async listFolders(prefix, path, db) {
-    const pattern = path === '/' ? '/%' : `${path}/%`;
-    const result = await db
-      .prepare('SELECT path FROM folders WHERE prefix = ?1 AND path LIKE ?2')
-      .bind(prefix, pattern)
-      .all();
-
-    const rows = result.results || [];
-    const folders = [];
-
-    for (const row of rows) {
-      const folderPath = String(row.path || '');
-      const remainder = folderPath.slice(path.length + 1);
-      if (!remainder || remainder.includes('/')) continue;
-      folders.push(folderPath);
-    }
-
-    return folders;
-  }
-
-  async handlePropfind(prefix, path, depth, db) {
-    if (depth === '0') {
-      if (await this.folderExists(prefix, path, db)) {
-        const body = propfindBody([
-          responseNode({
-            href: encodeHref(path, true),
-            size: 0,
-            modifiedIso: nowIso(),
-            itemEtag: '',
-            isCollection: true,
-          }),
-        ]);
-        return new Response(body, {
-          status: 207,
-          headers: { 'Content-Type': 'application/xml; charset=utf-8' },
-        });
-      }
-
-      const file = await this.getFile(prefix, path, db);
-      if (!file) {
-        return new Response('', { status: 404 });
-      }
-
-      const body = propfindBody([
-        responseNode({
-          href: encodeHref(path, false),
-          size: Number(file.size || 0),
-          modifiedIso: String(file.modified_time || nowIso()),
-          itemEtag: String(file.etag || ''),
-          isCollection: false,
-        }),
-      ]);
-
-      return new Response(body, {
-        status: 207,
-        headers: { 'Content-Type': 'application/xml; charset=utf-8' },
-      });
-    }
-
-    if (!(await this.folderExists(prefix, path, db))) {
-      return new Response('', { status: 404 });
-    }
-
-    const nodes = [
-      responseNode({
-        href: encodeHref(path, true),
-        size: 0,
-        modifiedIso: nowIso(),
-        itemEtag: '',
-        isCollection: true,
-      }),
-    ];
-
-    const [files, folders] = await Promise.all([this.listFiles(prefix, path, db), this.listFolders(prefix, path, db)]);
-
-    for (const { path: filePath, file } of files) {
-      nodes.push(
-        responseNode({
-          href: encodeHref(filePath, false),
-          size: file.size,
-          modifiedIso: file.modified_time,
-          itemEtag: file.etag,
-          isCollection: false,
-        }),
-      );
-    }
-
-    for (const folderPath of folders) {
-      nodes.push(
-        responseNode({
-          href: encodeHref(folderPath, true),
-          size: 0,
-          modifiedIso: nowIso(),
-          itemEtag: '',
-          isCollection: true,
-        }),
-      );
-    }
-
-    return new Response(propfindBody(nodes), {
-      status: 207,
-      headers: { 'Content-Type': 'application/xml; charset=utf-8' },
-    });
+    return new Response('ok');
   }
 }
-
-

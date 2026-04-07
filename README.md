@@ -164,14 +164,18 @@ const engine = new SyncEngine(primary, {
 
 ## Adapters
 
-**Google Drive** — uses `drive.file` scope (app only sees its own files). Mesh members share via Drive's native sharing.
+### Google Drive
+
+Easiest zero-infra start. Uses `drive.file` scope (app sees only files it created/opened). Mesh members can join via Drive native sharing.
 
 ```ts
 import { GoogleDriveAdapter } from 'interocitor/adapters/google-drive';
 const adapter = new GoogleDriveAdapter({ clientId: 'YOUR_CLIENT_ID' });
 ```
 
-**WebDAV** — Nextcloud, ownCloud, any WebDAV endpoint. The self-hosted path.
+### WebDAV
+
+The self-hosted / bring-your-own-cloud path. Works with Nextcloud, ownCloud, and any provider exposing a WebDAV endpoint + app password/basic auth.
 
 ```ts
 import { WebDAVAdapter } from 'interocitor/adapters/webdav';
@@ -181,14 +185,63 @@ const adapter = new WebDAVAdapter({
 });
 ```
 
-**Memory** — for tests.
+What WebDAV gives you in practice:
+
+- You control where the sync mailbox lives (your VPS / NAS / managed WebDAV host).
+- No vendor-specific sync runtime in your app architecture.
+- Straightforward backups/migration because everything is files.
+
+### Cloudflare (Interocitor-native, experimental)
+
+Purpose-fit JSON/binary protocol over Worker + D1, plus SSE push (no DAV layer).
+
+```ts
+import { CloudflareAdapter } from 'interocitor/adapters/cloudflare';
+const adapter = new CloudflareAdapter({
+  baseUrl: 'https://<your-worker>/io/<prefix>',
+  token: 'sha256(<prefix> + INTEROCITOR_ACCESS_TOKEN)',
+});
+```
+
+#### Cloudflare API design
+
+- Adapter endpoint contract: `https://<host>/<optional-prefix>/io/<namespace>`
+- SSE endpoint is derived automatically as `.../events/<namespace>`
+- Namespace isolates one mesh/workspace in the backend
+- Prefix can be worker-owned (resolved from auth/session) or explicit in URL
+
+#### Cloudflare deployment patterns
+
+- **Sub-path deployment**
+  - Example base URL: `https://mysite.com/interocitor/io/team-a`
+- **Dedicated subdomain**
+  - Example base URL: `https://interocitor.mysite.com/io/team-a`
+- **Shared worker via gateway/reroute**
+  - Public URL can stay the same shape (`.../io/team-a`), routed internally to Worker
+  - Gateway must preserve `Authorization`, query string (`/file?path=...`), and SSE streaming
+
+#### Cloudflare token model
+
+- `token` in `CloudflareAdapter` is optional bearer auth for backend cost/abuse protection.
+- Worker validates token as `sha256(prefix + INTEROCITOR_ACCESS_TOKEN)`.
+- This makes tokens prefix-scoped (different namespace/prefix => different token).
+- If the worker secret is unset, backend is public (token not required).
+- This token is **not** your data encryption key; payload confidentiality still comes from Interocitor E2E encryption.
+
+This is under active verification before being finalized as a stable drop-in backend.
+
+### Memory
+
+For tests.
 
 ```ts
 import { MemoryAdapter } from 'interocitor/adapters/memory';
 const adapter = new MemoryAdapter();
 ```
 
-**Custom** — implement `StorageAdapter` (`authenticate`, `ensureFolder`, `listFiles`, `listFolders`, `readFile`, `writeFile`, `deleteFile`, `getFileMetadata`).
+### Custom
+
+Implement `StorageAdapter` (`authenticate`, `ensureFolder`, `listFiles`, `listFolders`, `readFile`, `writeFile`, `deleteFile`, `getFileMetadata`).
 
 ## Encryption
 
@@ -281,6 +334,11 @@ yarn demo:todo
 
 Then open `http://127.0.0.1:4173/examples/todo-webdav/index.html`. Create a session in one tab, copy the join token, paste in another tab — both converge.
 
+Related examples:
+
+- Local custom WebDAV path (self-hosted style): `examples/todo-webdav/`
+- Cloud custom Worker + D1 path: `examples/todo-cloudflare-do/`
+
 ## What this is not
 
 A sync layer for structured JSON across a small device mesh. Not:
@@ -301,9 +359,14 @@ yarn test:e2e:headed    # watch
 yarn test:e2e:debug     # Playwright UI
 ```
 
-## Planned: optional reactive backend
+## Planned: extraction to stable drop-ins
 
-A drop-in Cloudflare Worker / Durable Object backed by D1. You own it, pay almost nothing, and it enables reactive push updates. Google Drive / WebDAV remains the zero-infrastructure path.
+Two custom backend tracks are in active verification and will be extracted into polished drop-in solutions after full validation:
+
+- WebDAV local/self-hosted workflow (`examples/todo-webdav/`)
+- Cloudflare Worker + D1 (+ optional DO for SSE fanout) workflow (`examples/todo-cloudflare-do/`)
+
+Google Drive and standard WebDAV remain the baseline production paths today.
 
 ## License
 

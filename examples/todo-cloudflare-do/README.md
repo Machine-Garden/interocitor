@@ -1,30 +1,42 @@
 # TODO over Cloudflare Worker + Durable Objects
 
-This example provides a WebDAV-compatible endpoint with:
+This example provides an Interocitor-native endpoint with:
 
 - Durable Object for per-prefix request ordering + SSE fanout
 - **D1 as the real persistence medium** for files/folders
 
-- URL shape: `/dav/<prefix>/<remote-path...>`
+- URL shape: `/io/<prefix>/...`
 - `<prefix>` is the Durable Object name (session partition key)
-- all WebDAV files/folders under the same prefix are persisted in D1 rows
+- all files/folders under the same prefix are persisted in D1 rows
 
-## Do we need Durable Objects here?
+## What role DO play here
 
-Short answer: **not strictly required for plain polling sync**, but **recommended** for this shape of WebDAV emulation.
+Durable Objects are **not strictly required for plain polling sync**, but they are **recommended** for this shape of push fanout.
 
-- Without DO, a Worker can still proxy to D1/R2/KV and serve WebDAV methods.
+- Without DO, a Worker can still serve the same Interocitor-native API over D1.
 - With DO, each prefix gets single-writer ordering and consistent fanout for live invalidation.
 - SSE/WebSocket push is much simpler from DO because connections and writes meet in one actor.
 - If you only need eventual consistency + polling, D1/R2 + stateless Worker is viable.
 
 ## What is implemented
 
-- `PROPFIND`, `MKCOL`, `PUT`, `GET`, `DELETE`, `OPTIONS`
+- Native IO endpoints over `/io/<prefix>` (`ensure-folder`, `list-files`, `list-folders`, `metadata`, `file`)
 - folder/file metadata + basic ETag generation
 - durable data persisted in D1 (`files` and `folders` tables)
 - SSE invalidation endpoint: `/events/<prefix>`
 - CORS enabled for browser demos
+
+## API shape
+
+- Adapter-facing base URL: `https://<host>/<optional-prefix>/io/<namespace>`
+- SSE endpoint: `.../events/<namespace>` (derived from base URL)
+- Execute endpoint: `POST .../io/<namespace>/__interocitor__/execute`
+
+Deployment can be:
+
+- sub-path (example: `https://mysite.com/interocitor/io/team-a`)
+- dedicated subdomain (example: `https://interocitor.mysite.com/io/team-a`)
+- shared worker behind gateway/reroute (preserve auth header, query string, SSE streaming)
 
 ## Mutation policy (append-only + execute)
 
@@ -32,8 +44,15 @@ Short answer: **not strictly required for plain polling sync**, but **recommende
 - In append-only mode:
   - `DELETE` returns `405`
   - `PUT` to an existing file returns `409`
-- Privileged operations are done via `POST /dav/<prefix>/__interocitor__/execute`.
+- Privileged operations are done via `POST /io/<prefix>/__interocitor__/execute`.
 - Execute requires `x-interocitor-token` header matching Worker secret `INTEROCITOR_EXEC_TOKEN`.
+
+Access-token model (for normal adapter traffic):
+
+- Optional bearer token in adapter config is sent as `Authorization: Bearer <token>`.
+- Worker validates token as `sha256(prefix + INTEROCITOR_ACCESS_TOKEN)` when secret is set.
+- If `INTEROCITOR_ACCESS_TOKEN` is not set, the backend is public.
+- This access token protects backend usage/cost, not data confidentiality.
 
 ### Execute compact
 
@@ -67,6 +86,7 @@ yarn
 yarn wrangler d1 create todo-cloudflare-do-db
 ## copy returned database_id + preview_database_id into wrangler.toml
 yarn wrangler secret put INTEROCITOR_EXEC_TOKEN
+yarn wrangler secret put INTEROCITOR_ACCESS_TOKEN
 yarn db:migrate:local
 yarn check
 yarn dev
@@ -74,7 +94,7 @@ yarn dev
 
 Worker starts on `http://127.0.0.1:8787`.
 
-## Use with existing TODO demo UI
+## Use with `CloudflareAdapter`
 
 1. Build `interocitor` root once:
 
@@ -83,17 +103,21 @@ cd /Users/akorzunov/dev/github/interocitor
 yarn build
 ```
 
-2. Open the existing UI (`examples/todo-webdav/index.html`) from any static host.
-3. In the UI set WebDAV URL to:
-   - `http://127.0.0.1:8787/dav`
-4. Keep remote path format as `/prefix/whatever`:
-   - first segment (`prefix`) selects the DO instance.
+2. Use adapter setup like this:
 
-### Token example
+```ts
+import { CloudflareAdapter } from 'interocitor/adapters/cloudflare';
 
-```json
-{"v":1,"baseUrl":"http://127.0.0.1:8787/dav","remotePath":"/team-a/todo-app","key":"<passphrase>"}
+const adapter = new CloudflareAdapter({
+  baseUrl: 'http://127.0.0.1:8787/io/team-a',
+});
 ```
+
+3. Keep one prefix per mesh/workspace (`team-a` above).
+
+### Prefix example
+
+- `team-a` and `team-b` are isolated namespaces.
 
 ## SSE client hint
 

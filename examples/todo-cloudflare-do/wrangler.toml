@@ -15,9 +15,9 @@ migrations_dir = "migrations"
 
 [[durable_objects.bindings]]
 name = "TODO_DAV"
-class_name = "TodoDavSession"
+class_name = "TodoDavBroadcaster"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["TodoDavSession"]
+new_classes = ["TodoDavBroadcaster"]
 

@@ -60,6 +60,9 @@ export class CloudflareAdapter implements StorageAdapter {
       throw new Error('CloudflareAdapter baseUrl must include /io/<prefix>');
     }
     u.pathname = u.pathname.replace('/io/', '/events/');
+    if (this.config.token) {
+      u.searchParams.set('access_token', this.config.token);
+    }
     return u.toString().replace(/\/$/, '');
   }
 
@@ -98,6 +101,7 @@ export class CloudflareAdapter implements StorageAdapter {
 
   subscribeToInvalidations(
     onInvalidate: (payload: { type: string; path: string; ts: number }) => void,
+    hooks?: { onReady?: () => void; onError?: () => void },
   ): () => void {
     const source = new EventSource(this.eventsUrl);
 
@@ -108,13 +112,23 @@ export class CloudflareAdapter implements StorageAdapter {
         onInvalidate({ type: 'unknown', path: '/', ts: Date.now() });
       }
     };
+    const readyHandler = () => {
+      hooks?.onReady?.();
+    };
+    const errorHandler = () => {
+      hooks?.onError?.();
+    };
 
+    source.addEventListener('ready', readyHandler);
     source.addEventListener('invalidate', handler);
     source.addEventListener('compact', handler);
+    source.addEventListener('error', errorHandler);
 
     return () => {
+      source.removeEventListener('ready', readyHandler);
       source.removeEventListener('invalidate', handler);
       source.removeEventListener('compact', handler);
+      source.removeEventListener('error', errorHandler);
       source.close();
     };
   }

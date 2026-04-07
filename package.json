@@ -48,6 +48,8 @@
     "demo:todo:server": "node ./scripts/local-webdav-server.mjs --mode=file --data-root=./examples/todo-webdav/webdav-data",
     "test:e2e": "playwright test",
     "test:e2e:todo": "playwright test tests/e2e/todo-webdav.spec.ts",
+    "test:e2e:cloudflare": "playwright test -c examples/todo-cloudflare-do/playwright.config.ts",
+    "test:e2e:cloudflare:run": "RUN_CF_EXAMPLE_TESTS=1 playwright test -c examples/todo-cloudflare-do/playwright.config.ts",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:debug": "playwright test --ui",
     "test:e2e:install": "playwright install chromium",

@@ -5,7 +5,7 @@
   "description": "Cloudflare Worker + Durable Object WebDAV emulation for Interocitor TODO demo",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --port 8787 --persist-to .wrangler/state",
+    "dev": "sh -c 'wrangler dev --port ${PORT:-8787} --persist-to .wrangler/state'",
     "deploy": "wrangler deploy",
     "check": "node --check src/worker.js",
     "db:migrate:local": "wrangler d1 migrations apply TODO_DB --local",
@@ -15,4 +15,3 @@
     "wrangler": "^4.10.0"
   }
 }
-

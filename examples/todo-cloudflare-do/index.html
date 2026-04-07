@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>interocitor TODO over Cloudflare</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        margin: 24px;
+        max-width: 960px;
+      }
+
+      .row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      input[type='text'], textarea {
+        padding: 8px;
+        min-width: 360px;
+      }
+
+      button {
+        padding: 8px 12px;
+      }
+
+      #tasks li {
+        margin-bottom: 6px;
+      }
+
+      #status {
+        margin-top: 10px;
+        color: #555;
+      }
+
+      .muted {
+        color: #666;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>TODO app (Cloudflare adapter)</h1>
+    <p class="muted">
+      Interocitor-native endpoint over Worker + D1. Use two tabs with the same namespace + key to verify sync.
+    </p>
+
+    <section>
+      <h2>Session</h2>
+      <div class="row">
+        <label for="workerBaseUrl">Worker URL</label>
+        <input id="workerBaseUrl" type="text" placeholder="http://127.0.0.1:8787" />
+      </div>
+      <div class="row">
+        <label for="namespace">Namespace</label>
+        <input id="namespace" type="text" placeholder="team-a" />
+      </div>
+      <div class="row">
+        <label for="remotePath">Remote path</label>
+        <input id="remotePath" type="text" placeholder="/todo-app" />
+      </div>
+      <div class="row">
+        <label for="token">Access token (optional)</label>
+        <input id="token" type="text" placeholder="sha256(prefix + INTEROCITOR_ACCESS_TOKEN)" />
+      </div>
+      <div class="row">
+        <label for="key">Key passphrase</label>
+        <input id="key" type="text" placeholder="base58 key" />
+      </div>
+      <div class="row">
+        <button id="newSessionBtn">New session</button>
+        <button id="connectBtn">Connect</button>
+        <button id="disconnectBtn">Disconnect</button>
+      </div>
+
+      <div class="row">
+        <label for="shareToken">Join token</label>
+      </div>
+      <textarea id="shareToken" rows="4" readonly></textarea>
+      <div class="row">
+        <button id="copyTokenBtn">Copy token</button>
+      </div>
+
+      <div class="row">
+        <label for="joinTokenInput">Paste token</label>
+      </div>
+      <textarea id="joinTokenInput" rows="4" placeholder="Paste join token from another tab"></textarea>
+      <div class="row">
+        <button id="applyTokenBtn">Apply token</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Tasks</h2>
+      <div class="row">
+        <input id="taskInput" type="text" placeholder="Write docs" />
+        <button id="addTaskBtn">Add</button>
+        <button id="refreshBtn">Refresh</button>
+      </div>
+      <ul id="tasks"></ul>
+    </section>
+
+    <section>
+      <h2>Mainline</h2>
+      <div class="row">
+        <button id="compactBtn">Compact (set mainline)</button>
+      </div>
+      <p id="compactStatus" class="muted"></p>
+    </section>
+
+    <p id="status">Disconnected.</p>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
+

@@ -130,6 +130,32 @@ source.addEventListener('invalidate', () => {
 });
 ```
 
+## Opt-in Playwright coverage
+
+There is a dedicated Playwright harness for this example that starts:
+
+- the shared static demo server on port `4174`
+- a separate Cloudflare Worker test harness on port `8788`
+- local D1 migrations via `wrangler.playwright.toml`
+
+This is intentionally **opt-in** so normal project test runs do not depend on Wrangler.
+
+From the repo root:
+
+```bash
+yarn test:e2e:cloudflare        # starts harness, specs stay skipped by default
+yarn test:e2e:cloudflare:run    # actually executes the Cloudflare example specs
+```
+
+Current example coverage includes:
+
+- SSE sync landing before long polling can fire
+- access-token protected mode
+- compaction + fresh-tab rehydrate from mainline snapshot
+- SSE reconnect after simulated Durable Object in-memory loss
+
+The reconnect spec simulates DO loss by dropping live SSE clients through the privileged execute endpoint in the **test-only** Wrangler config. This validates the behavior you actually care about: EventSource reconnects automatically and sync resumes without waiting for the long polling interval.
+
 ## Deploy
 
 ```bash

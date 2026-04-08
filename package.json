@@ -1,59 +1,25 @@
 {
-  "name": "interocitor",
+  "name": "interocitor-monorepo",
+  "private": true,
   "version": "0.0.0-beta.2",
   "packageManager": "yarn@4.6.0",
-  "description": "Encrypted local-first CRDT database that syncs over cloud storage. No server required.",
+  "description": "Umbrella monorepo for Interocitor packages, runtimes, examples, and future platform ports.",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    },
-    "./adapters/google-drive": {
-      "import": "./dist/adapters/google-drive.js",
-      "types": "./dist/adapters/google-drive.d.ts"
-    },
-    "./adapters/webdav": {
-      "import": "./dist/adapters/webdav.js",
-      "types": "./dist/adapters/webdav.d.ts"
-    },
-    "./adapters/cloudflare": {
-      "import": "./dist/adapters/cloudflare.js",
-      "types": "./dist/adapters/cloudflare.d.ts"
-    },
-    "./adapters/memory": {
-      "import": "./dist/adapters/memory.js",
-      "types": "./dist/adapters/memory.d.ts"
-    },
-    "./storage/local-store": {
-      "import": "./dist/storage/local-store.js",
-      "types": "./dist/storage/local-store.d.ts"
-    },
-    "./crypto/keys": {
-      "import": "./dist/crypto/keys.js",
-      "types": "./dist/crypto/keys.d.ts"
-    }
-  },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
+  "workspaces": [
+    "packages/*",
+    "examples/*"
   ],
   "scripts": {
-    "build": "rm -rf ./dist && tsc",
-    "validate": "node ./dist/index.js",
-    "demo:todo": "yarn build && yarn demo:todo:server",
-    "demo:todo:server": "node ./scripts/local-webdav-server.mjs --mode=file --data-root=./examples/todo-webdav/webdav-data",
-    "test:e2e": "playwright test",
-    "test:e2e:todo": "playwright test tests/e2e/todo-webdav.spec.ts",
-    "test:e2e:cloudflare": "playwright test -c examples/todo-cloudflare-do/playwright.config.ts",
-    "test:e2e:cloudflare:run": "RUN_CF_EXAMPLE_TESTS=1 playwright test -c examples/todo-cloudflare-do/playwright.config.ts",
-    "test:e2e:headed": "playwright test --headed",
-    "test:e2e:debug": "playwright test --ui",
-    "test:e2e:install": "playwright install chromium",
-    "test:e2e:server": "node ./scripts/local-webdav-server.mjs --mode=memory"
+    "build": "yarn workspace interocitor build",
+    "build:all": "yarn workspace interocitor build && yarn workspace interocitor-webdav check && yarn workspace interocitor-workers check && yarn workspace interocitor-swift check && yarn workspace todo-webdav-example check && yarn workspace todo-cloudflare-do-example check",
+    "validate": "yarn build:all",
+    "demo:todo": "yarn workspace interocitor build && yarn demo:todo:server",
+    "demo:todo:server": "yarn workspace todo-webdav-example server:file",
+    "test:e2e": "yarn workspace interocitor test:e2e",
+    "test:e2e:todo": "yarn workspace interocitor test:e2e:todo",
+    "test:e2e:cloudflare": "yarn workspace interocitor build && playwright test -c examples/todo-cloudflare-do/playwright.config.ts",
+    "test:e2e:cloudflare:run": "yarn workspace interocitor build && RUN_CF_EXAMPLE_TESTS=1 playwright test -c examples/todo-cloudflare-do/playwright.config.ts",
+    "test:e2e:install": "playwright install chromium"
   },
   "keywords": [
     "local-first",
@@ -64,7 +30,8 @@
     "webdav",
     "encrypted",
     "mesh",
-    "indexeddb"
+    "indexeddb",
+    "monorepo"
   ],
   "license": "MIT",
   "devDependencies": {

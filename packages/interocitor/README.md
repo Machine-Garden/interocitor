@@ -16,28 +16,6 @@
 
 Start fully local in IndexedDB, attach sync later, switch adapters at runtime, or drop back to offline-only mode without losing local state.
 
-## Monorepo umbrella
-
-This repository is now the umbrella for the whole Interocitor family:
-
-- `packages/interocitor` — the main JavaScript/TypeScript package
-- `packages/interocitor-webdav` — local WebDAV server for Interocitor
-- `packages/interocitor-workers` — Cloudflare Workers runtime for Interocitor-native sync flows
-- `packages/interocitor-swift` — future Swift runtime that maps IndexedDB-like concepts onto SQLite
-- `examples/todo-webdav` — file-backed WebDAV demo
-- `examples/todo-cloudflare-do` — Cloudflare demo using the generic workers runtime
-
-Package and example entry points:
-
-- JS package: [`packages/interocitor`](https://github.com/TheUiTeam/interocitor/tree/main/packages/interocitor)
-- WebDAV server package: [`packages/interocitor-webdav`](https://github.com/TheUiTeam/interocitor/tree/main/packages/interocitor-webdav)
-- Workers runtime package: [`packages/interocitor-workers`](https://github.com/TheUiTeam/interocitor/tree/main/packages/interocitor-workers)
-- Swift workspace: [`packages/interocitor-swift`](https://github.com/TheUiTeam/interocitor/tree/main/packages/interocitor-swift)
-- WebDAV example: [`examples/todo-webdav`](https://github.com/TheUiTeam/interocitor/tree/main/examples/todo-webdav)
-- Cloudflare example: [`examples/todo-cloudflare-do`](https://github.com/TheUiTeam/interocitor/tree/main/examples/todo-cloudflare-do)
-
-If you only care about the JavaScript package, most of the API documentation below still applies directly to `interocitor`.
-
 ## Why
 
 You want local-first sync. You look at the options.
@@ -148,7 +126,7 @@ const high      = await engine.table('tasks').where('priority').aboveOrEqual(3);
 const recent    = await engine.table('tasks').where('priority').between(2, 5);
 ```
 
-Queries against un-indexed fields fall back to a full-table scan automatically. For schema definition (`types.index`, `types.enum`, migrations), see [interocitor-architecture.md](interocitor-architecture.md).
+Queries against un-indexed fields fall back to a full-table scan automatically. For schema definition (`types.index`, `types.enum`, migrations), see [`interocitor-architecture.md`](https://github.com/TheUiTeam/interocitor/blob/main/interocitor-architecture.md).
 
 Backends are swappable at runtime. You can attach one later, switch to another, or go fully offline again:
 
@@ -184,8 +162,8 @@ flowchart LR
 
     IDBA -->|async flush| CLOUD
 
-    subgraph CLOUD [Cloud folder]
-        CLOUD["manifest / changes / mainline"]
+    subgraph Cloud [changes/]
+        CLOUD["change files\nhead.json"]
     end
 
     CLOUD -->|poll + merge| IDBB
@@ -201,6 +179,8 @@ Writes land in local IDB immediately — reads never touch the cloud. Flushing u
 
 No locks, no coordination. Each device writes only its own files.
 
+For detailed protocol sequence diagrams (pull, connect, compaction, bootstrap, rehydration, replica flush), see **[`docs/flows.md`](https://github.com/TheUiTeam/interocitor/blob/main/docs/flows.md)**.
+
 ## Core API at a glance
 
 - `await engine.init()` — open IndexedDB and load local state; no network required
@@ -213,52 +193,84 @@ No locks, no coordination. Each device writes only its own files.
 
 ## Offline guarantee
 
+Network is never required for data operations:
+
 | Operation | Network? | Backing store |
-| --- | --- | --- |
-| `init()` | no | IndexedDB |
-| `table.put()` | no | IndexedDB |
-| `table.get()/query()` | no | IndexedDB |
-| `connect()` | yes | cloud + IndexedDB |
-| `flush()` | yes | cloud |
-| `pull()` | yes | cloud + IndexedDB |
+|---|---|---|
+| `init()` | No | IndexedDB open |
+| `put()` / `delete()` | No | IDB write + outbox queue |
+| `get()` / `query()` / `queryWhere()` | No | IDB read |
+| `table()` / `tableNames()` | No | In-memory |
+| `connect()` | **Yes** | Authenticates, pulls, starts poll |
+| `flush()` | **Yes** | Uploads outbox to cloud |
+| `pull()` | **Yes** | Downloads new change files |
+| `compact()` | **Yes** | Snapshot + manifest write |
+
+If the app loses network after `connect()`, local reads/writes continue. The outbox accumulates. Next `flush()` (automatic or manual) pushes everything.
 
 ## Replica adapters (backup)
 
-A write can be mirrored to one or more secondary destinations:
+Write to multiple cloud backends simultaneously. Pull reads from the primary adapter only; flush writes to primary + all replicas. Replica failures are best-effort — they emit a `replica:error` event but never fail the primary flush.
 
 ```ts
-await engine.setReplicas([
-  new WebDAVAdapter({ baseUrl: 'https://backup.example.com/dav', auth: { ... } }),
-]);
-```
+import { WebDAVAdapter } from 'interocitor/adapters/webdav';
 
-Replicas receive the same encrypted payloads after the primary write completes. Reads still come from the primary adapter only.
+const primary = new WebDAVAdapter({ baseUrl: 'https://main.example.com/dav', auth: { ... } });
+const backup  = new WebDAVAdapter({ baseUrl: 'https://backup.example.com/dav', auth: { ... } });
+
+const engine = new SyncEngine(primary, {
+  remotePath: '/MyApp',
+  replicas: [{ adapter: backup }],
+});
+```
 
 ## Adapters
 
 ### Google Drive
 
-Uses the browser OAuth flow and a shared Drive folder.
+Easiest zero-infra start. Uses `drive.file` scope (app sees only files it created/opened). Mesh members can join via Drive native sharing.
 
 ```ts
 import { GoogleDriveAdapter } from 'interocitor/adapters/google-drive';
+const adapter = new GoogleDriveAdapter({ clientId: 'YOUR_CLIENT_ID' });
 ```
 
 ### WebDAV
 
-Generic filesystem-like cloud target for Nextcloud, ownCloud, etc.
+The self-hosted / bring-your-own-cloud path. Works with Nextcloud, ownCloud, and any provider exposing a WebDAV endpoint + app password/basic auth.
 
 ```ts
 import { WebDAVAdapter } from 'interocitor/adapters/webdav';
+const adapter = new WebDAVAdapter({
+  baseUrl: 'https://cloud.example.com/remote.php/dav/files/alice',
+  auth: { username: 'alice', password: 'APP_PASSWORD' },
+});
 ```
+
+What WebDAV gives you in practice:
+
+- You control where the sync mailbox lives (your VPS / NAS / managed WebDAV host).
+- No vendor-specific sync runtime in your app architecture.
+- Straightforward backups/migration because everything is files.
 
 ### Cloudflare (Interocitor-native, experimental)
 
-Purpose-built HTTP API for Interocitor flows.
+Purpose-fit JSON/binary protocol over Worker + D1, plus SSE push (no DAV layer).
 
 ```ts
 import { CloudflareAdapter } from 'interocitor/adapters/cloudflare';
+const adapter = new CloudflareAdapter({
+  baseUrl: 'https://<your-worker>/io/<prefix>',
+  token: 'sha256(<prefix> + INTEROCITOR_ACCESS_TOKEN)',
+});
 ```
+
+#### Cloudflare API design
+
+- Adapter endpoint contract: `https://<host>/<optional-prefix>/io/<namespace>`
+- SSE endpoint is derived automatically as `.../events/<namespace>`
+- Namespace isolates one mesh/workspace in the backend
+- Prefix can be worker-owned (resolved from auth/session) or explicit in URL
 
 #### Cloudflare deployment patterns
 
@@ -272,79 +284,97 @@ import { CloudflareAdapter } from 'interocitor/adapters/cloudflare';
 
 #### Cloudflare token model
 
-Interocitor-native endpoints can be protected with a bearer token:
+- `token` in `CloudflareAdapter` is optional bearer auth for backend cost/abuse protection.
+- Worker validates token as `sha256(prefix + INTEROCITOR_ACCESS_TOKEN)`.
+- This makes tokens prefix-scoped (different namespace/prefix => different token).
+- If the worker secret is unset, backend is public (token not required).
+- This token is **not** your data encryption key; payload confidentiality still comes from Interocitor E2E encryption.
 
-```ts
-const adapter = new CloudflareAdapter({
-  baseUrl: 'https://interocitor.mysite.com/io/team-a',
-  accessToken: 'YOUR_SHARED_BEARER_TOKEN',
-});
-```
+This is under active verification before being finalized as a stable drop-in backend.
 
 ### Memory
 
-Useful for tests and same-tab demos.
+For tests.
 
 ```ts
 import { MemoryAdapter } from 'interocitor/adapters/memory';
+const adapter = new MemoryAdapter();
 ```
+
+### Custom
+
+Implement `StorageAdapter` (`authenticate`, `ensureFolder`, `listFiles`, `listFolders`, `readFile`, `writeFile`, `deleteFile`, `getFileMetadata`).
 
 ## Encryption
 
-Optional end-to-end encryption uses AES-256-GCM via Web Crypto.
+AES-256-GCM via Web Crypto API. Key is generated on the first device, shared to others as a base58 passphrase (~43 chars), a URL fragment (`#key=…`, never hits the server), or a QR code.
 
 ```ts
 import { generateKey, keyToPassphrase, passphraseToKey } from 'interocitor/crypto/keys';
+
+const key = await generateKey();
+const passphrase = await keyToPassphrase(key);
+
+// on another device
+const sameKey = await passphraseToKey(passphrase);
+engine.setEncryptionKey(sameKey);
 ```
 
-Share the passphrase out-of-band. The cloud store only sees ciphertext.
+Key never leaves devices. Cloud folder only contains ciphertext. All devices lose the key → data is unrecoverable. That's the point. Print it.
 
 ## CRDT strategy
 
-Per-column Last-Writer-Wins using Hybrid Logical Clocks (HLC).
+LWW-per-column. Each field carries its own HLC timestamp. On merge, highest HLC wins per field independently.
 
-```text
-row = { columns: { field -> { value, hlc, tombstone? } } }
+```
+Device A: task.title  = "Review PR"  at T1
+Device B: task.status = "done"       at T2
+
+→ { title: "Review PR" (T1), status: "done" (T2) }
 ```
 
-Deletes are tombstones. Merge is deterministic and commutative.
+Different fields → both preserved. Same field → latest wins. Deletes are tombstones with a bounded retention window (default 90 days).
+
+Tombstone cleanup happens during compaction. Any device can trigger `engine.compact()` in the default mode; in server-managed mode (`serverManaged: true`), only the configured `serverId` may compact. If two devices compact concurrently, manifest generations determine which snapshot wins.
+
+No ordered-list CRDTs, no rich-text merge. For tabular data this is enough, and you can reason about it on a napkin.
 
 ## Events
 
 ```ts
-const unsub = engine.on((event) => {
+engine.on((event) => {
   switch (event.type) {
-    case 'change':
-    case 'delete':
-    case 'sync:start':
-    case 'sync:complete':
+    case 'change':             // row upserted
+    case 'delete':             // row tombstoned
+    case 'sync:start':         // pull cycle begins
+    case 'sync:complete':      // pull done, N entries merged
     case 'sync:error':
-    case 'flush:start':
+    case 'flush:start':        // push cycle begins
     case 'flush:complete':
     case 'flush:error':
-    case 'rehydrate:start':
+    case 'rehydrate:start':    // rebuilding from snapshot
     case 'rehydrate:complete':
-    case 'auth:required':
+    case 'auth:required':      // cloud token expired
     case 'auth:complete':
-    case 'schema:mismatch':
-    case 'replica:error':
+    case 'schema:mismatch':    // remote schema newer
+    case 'replica:error':      // backup adapter write failed
   }
 });
 ```
 
 ## Cloud folder layout
 
-```text
+```
 {remotePath}/                                    e.g. /Interocitor/MyApp
-  manifest.json
-  manifest-{generation}.json
+  manifest.json                                  ← pointer: { currentGeneration, file }
+  manifest-{generation}.json                     ← immutable; epoch, watermark, snapshotPath
   devices/
-    {deviceId}.json
+    {deviceId}.json                              ← heartbeat: lastSeenAt, userId
   mainline/
-    snapshot-{epoch}-{writer}.json
+    snapshot-{epoch}-{writer}.json               ← full IDB snapshot at watermarkHlc
   changes/
-    head.json
-    {hlc}-{changeId}.json
+    head.json                                    ← { latestHlc } — fast poll-skip hint
+    {hlc}-{changeId}.json                        ← one file per flush entry (all devices)
 ```
 
 **Write ordering in `compact()`:** snapshot → manifest file → manifest pointer.
@@ -384,25 +414,31 @@ A sync layer for structured JSON across a small device mesh. Not:
 
 Playwright e2e in a real browser. Covers manifest bootstrap, writer-authority, file-per-change writes, cross-device sync, encrypted round-trips, WebDAV contract, multi-context isolation.
 
-The JavaScript/browser e2e suite now lives with the package in `packages/interocitor/tests/e2e`, but you can still run the common entry points from the repo root:
+From the monorepo root:
 
 ```bash
 yarn test:e2e:install   # Chromium
-yarn test:e2e           # JS package e2e suite
-yarn test:e2e:todo      # package-owned TODO/WebDAV flow
-yarn test:e2e:cloudflare
+yarn test:e2e           # package-owned JS/browser e2e suite
+yarn test:e2e:todo      # TODO/WebDAV package flow
 ```
 
-## Package map
+From `packages/interocitor` itself:
 
-Interocitor is now split into focused packages inside this monorepo:
+```bash
+yarn test:e2e
+yarn test:e2e:todo
+```
 
-- `packages/interocitor/` — main library
-- `packages/interocitor-webdav/` — local WebDAV server for Interocitor
-- `packages/interocitor-workers/` — reusable Cloudflare Workers runtime
-- `packages/interocitor-swift/` — Swift workspace for a native implementation over SQLite
+## Package context
 
-Examples stay under `examples/`, and example-owned workflows stay with those examples.
+This README documents the JavaScript/TypeScript package in the Interocitor monorepo. Related locations:
+
+- Package home: <https://github.com/TheUiTeam/interocitor/tree/main/packages/interocitor>
+- WebDAV demo: <https://github.com/TheUiTeam/interocitor/tree/main/examples/todo-webdav>
+- Cloudflare demo: <https://github.com/TheUiTeam/interocitor/tree/main/examples/todo-cloudflare-do>
+- Monorepo root: <https://github.com/TheUiTeam/interocitor>
+
+Google Drive and standard WebDAV remain the baseline production paths today.
 
 ## License
 

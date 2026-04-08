@@ -93,10 +93,11 @@
 import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rm, stat, unlink, writeFile } from 'node:fs/promises';
-import { extname, join, normalize, dirname } from 'node:path';
+import { extname, join, normalize, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const PORT = Number(process.env.PORT || '4173');
-const ROOT = process.cwd();
+const ROOT = process.env.INTEROCITOR_REPO_ROOT || resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const WEBDAV_PREFIX = '/__webdav__';
 
 function parseArgs(argv) {

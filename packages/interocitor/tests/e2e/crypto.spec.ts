@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/tests/e2e/fixtures/harness.html');
+  await page.goto('/packages/interocitor/tests/e2e/fixtures/harness.html');
   await page.evaluate(() => {
     localStorage.removeItem('interocitor-key');
   });
@@ -12,7 +12,7 @@ test.beforeEach(async ({ page }) => {
 test.describe('generateKey', () => {
   test('produces a 256-bit AES-GCM CryptoKey', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateKey, exportKeyRaw } = await import('/dist/crypto/keys.js');
+      const { generateKey, exportKeyRaw } = await import('/packages/interocitor/dist/crypto/keys.js');
       const key = await generateKey();
       const raw = await exportKeyRaw(key);
       return { byteLength: raw.byteLength, algorithm: key.algorithm.name };
@@ -24,7 +24,7 @@ test.describe('generateKey', () => {
 
   test('generates unique keys each time', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateKey, exportKeyRaw } = await import('/dist/crypto/keys.js');
+      const { generateKey, exportKeyRaw } = await import('/packages/interocitor/dist/crypto/keys.js');
       const a = await exportKeyRaw(await generateKey());
       const b = await exportKeyRaw(await generateKey());
       // Compare as hex strings
@@ -41,7 +41,7 @@ test.describe('generateKey', () => {
 test.describe('keyToPassphrase / passphraseToKey', () => {
   test('round-trips a key through base58 passphrase', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateKey, keyToPassphrase, passphraseToKey, exportKeyRaw } = await import('/dist/crypto/keys.js');
+      const { generateKey, keyToPassphrase, passphraseToKey, exportKeyRaw } = await import('/packages/interocitor/dist/crypto/keys.js');
       const original = await generateKey();
       const passphrase = await keyToPassphrase(original);
       const restored = await passphraseToKey(passphrase);
@@ -65,7 +65,7 @@ test.describe('keyToPassphrase / passphraseToKey', () => {
 
   test('passphraseToKey trims whitespace', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateKey, keyToPassphrase, passphraseToKey, exportKeyRaw } = await import('/dist/crypto/keys.js');
+      const { generateKey, keyToPassphrase, passphraseToKey, exportKeyRaw } = await import('/packages/interocitor/dist/crypto/keys.js');
       const key = await generateKey();
       const passphrase = await keyToPassphrase(key);
       const padded = `  ${passphrase}  `;
@@ -83,7 +83,7 @@ test.describe('keyToPassphrase / passphraseToKey', () => {
 test.describe('keyToShareUrl / keyFromFragment', () => {
   test('embeds key in URL fragment and extracts it', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateKey, exportKeyRaw, importKeyRaw, keyToShareUrl, keyFromFragment } = await import('/dist/crypto/keys.js');
+      const { generateKey, exportKeyRaw, importKeyRaw, keyToShareUrl, keyFromFragment } = await import('/packages/interocitor/dist/crypto/keys.js');
       const key = await generateKey();
       const raw = await exportKeyRaw(key);
       const url = keyToShareUrl(raw, 'https://app.example.com/join');
@@ -107,7 +107,7 @@ test.describe('keyToShareUrl / keyFromFragment', () => {
 
   test('keyFromFragment returns null for missing key param', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { keyFromFragment } = await import('/dist/crypto/keys.js');
+      const { keyFromFragment } = await import('/packages/interocitor/dist/crypto/keys.js');
       return keyFromFragment('nope=123');
     });
 
@@ -120,8 +120,8 @@ test.describe('keyToShareUrl / keyFromFragment', () => {
 test.describe('encryptEntry / decryptEntry', () => {
   test('round-trips plaintext through encryption', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateKey } = await import('/dist/crypto/keys.js');
-      const { encryptEntry, decryptEntry } = await import('/dist/crypto/encryption.js');
+      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { encryptEntry, decryptEntry } = await import('/packages/interocitor/dist/crypto/encryption.js');
       const key = await generateKey();
       const plaintext = '{"id":"chg_1","ops":[]}';
       const encrypted = await encryptEntry(key, plaintext);
@@ -141,8 +141,8 @@ test.describe('encryptEntry / decryptEntry', () => {
 
   test('fails to decrypt with wrong key', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateKey } = await import('/dist/crypto/keys.js');
-      const { encryptEntry, decryptEntry } = await import('/dist/crypto/encryption.js');
+      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { encryptEntry, decryptEntry } = await import('/packages/interocitor/dist/crypto/encryption.js');
       const keyA = await generateKey();
       const keyB = await generateKey();
       const encrypted = await encryptEntry(keyA, 'secret data');
@@ -159,8 +159,8 @@ test.describe('encryptEntry / decryptEntry', () => {
 
   test('fails on corrupted ciphertext', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateKey } = await import('/dist/crypto/keys.js');
-      const { decryptEntry } = await import('/dist/crypto/encryption.js');
+      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { decryptEntry } = await import('/packages/interocitor/dist/crypto/encryption.js');
       const key = await generateKey();
       const corrupt = JSON.stringify({ v: 1, iv: 'AAAA', ct: 'BBBB' });
       try {
@@ -176,8 +176,8 @@ test.describe('encryptEntry / decryptEntry', () => {
 
   test('rejects unknown envelope version', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateKey } = await import('/dist/crypto/keys.js');
-      const { decryptEntry } = await import('/dist/crypto/encryption.js');
+      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { decryptEntry } = await import('/packages/interocitor/dist/crypto/encryption.js');
       const key = await generateKey();
       try {
         await decryptEntry(key, JSON.stringify({ v: 99, iv: 'x', ct: 'y' }));
@@ -193,8 +193,8 @@ test.describe('encryptEntry / decryptEntry', () => {
 
   test('each encryption produces a different ciphertext (random IV)', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateKey } = await import('/dist/crypto/keys.js');
-      const { encryptEntry } = await import('/dist/crypto/encryption.js');
+      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { encryptEntry } = await import('/packages/interocitor/dist/crypto/encryption.js');
       const key = await generateKey();
       const a = await encryptEntry(key, 'same input');
       const b = await encryptEntry(key, 'same input');
@@ -210,8 +210,8 @@ test.describe('encryptEntry / decryptEntry', () => {
 test.describe('encryptNdjson / decryptNdjson', () => {
   test('encrypts and decrypts multiple lines independently', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateKey } = await import('/dist/crypto/keys.js');
-      const { encryptNdjson, decryptNdjson } = await import('/dist/crypto/encryption.js');
+      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { encryptNdjson, decryptNdjson } = await import('/packages/interocitor/dist/crypto/encryption.js');
       const key = await generateKey();
       const lines = ['{"a":1}', '{"b":2}', '{"c":3}'];
       const encrypted = await encryptNdjson(key, lines);
@@ -225,8 +225,8 @@ test.describe('encryptNdjson / decryptNdjson', () => {
 
   test('decryptNdjson returns null for corrupt lines without throwing', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateKey } = await import('/dist/crypto/keys.js');
-      const { encryptEntry, decryptNdjson } = await import('/dist/crypto/encryption.js');
+      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { encryptEntry, decryptNdjson } = await import('/packages/interocitor/dist/crypto/encryption.js');
       const key = await generateKey();
       const good = await encryptEntry(key, 'valid');
       const content = `${good}\n{totally broken}\n${good}`;
@@ -243,8 +243,8 @@ test.describe('encryptNdjson / decryptNdjson', () => {
 test.describe('verifyKey', () => {
   test('returns true for matching key', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateKey, verifyKey } = await import('/dist/crypto/keys.js');
-      const { encryptEntry } = await import('/dist/crypto/encryption.js');
+      const { generateKey, verifyKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { encryptEntry } = await import('/packages/interocitor/dist/crypto/encryption.js');
       const key = await generateKey();
       const sample = await encryptEntry(key, 'test');
       return verifyKey(key, sample);
@@ -255,8 +255,8 @@ test.describe('verifyKey', () => {
 
   test('returns false for wrong key', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateKey, verifyKey } = await import('/dist/crypto/keys.js');
-      const { encryptEntry } = await import('/dist/crypto/encryption.js');
+      const { generateKey, verifyKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { encryptEntry } = await import('/packages/interocitor/dist/crypto/encryption.js');
       const keyA = await generateKey();
       const keyB = await generateKey();
       const sample = await encryptEntry(keyA, 'test');
@@ -272,7 +272,7 @@ test.describe('verifyKey', () => {
 test.describe('storeKeyLocally / loadKeyLocally / clearKeyLocally', () => {
   test('persists and restores a key from localStorage', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateKey, exportKeyRaw, storeKeyLocally, loadKeyLocally } = await import('/dist/crypto/keys.js');
+      const { generateKey, exportKeyRaw, storeKeyLocally, loadKeyLocally } = await import('/packages/interocitor/dist/crypto/keys.js');
       const key = await generateKey();
       await storeKeyLocally(key);
       const restored = await loadKeyLocally();
@@ -286,7 +286,7 @@ test.describe('storeKeyLocally / loadKeyLocally / clearKeyLocally', () => {
 
   test('loadKeyLocally returns null when no key is stored', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { loadKeyLocally } = await import('/dist/crypto/keys.js');
+      const { loadKeyLocally } = await import('/packages/interocitor/dist/crypto/keys.js');
       return loadKeyLocally();
     });
 
@@ -295,7 +295,7 @@ test.describe('storeKeyLocally / loadKeyLocally / clearKeyLocally', () => {
 
   test('clearKeyLocally removes the stored key', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateKey, storeKeyLocally, loadKeyLocally, clearKeyLocally } = await import('/dist/crypto/keys.js');
+      const { generateKey, storeKeyLocally, loadKeyLocally, clearKeyLocally } = await import('/packages/interocitor/dist/crypto/keys.js');
       await storeKeyLocally(await generateKey());
       clearKeyLocally();
       return loadKeyLocally();

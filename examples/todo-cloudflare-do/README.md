@@ -1,4 +1,12 @@
+<p align="center">
+  <a href="https://github.com/TheUiTeam/interocitor">
+    <img src="https://raw.githubusercontent.com/TheUiTeam/interocitor/main/docs/assets/hero.svg" alt="interocitor" width="560"/>
+  </a>
+</p>
+
 # TODO over Cloudflare Worker + Durable Objects
+
+GitHub example directory: <https://github.com/TheUiTeam/interocitor/tree/main/examples/todo-cloudflare-do>
 
 This example provides an Interocitor-native endpoint with:
 
@@ -120,7 +128,7 @@ The example keeps D1 setup intentionally simple: the full schema lives in a sing
 ## Run locally
 
 ```bash
-cd /Users/akorzunov/dev/github/interocitor/examples/todo-cloudflare-do
+cd examples/todo-cloudflare-do
 yarn
 yarn wrangler d1 create todo-cloudflare-do-db
 ## copy returned database_id + preview_database_id into wrangler.toml
@@ -138,7 +146,7 @@ Worker starts on `http://127.0.0.1:8787`.
 1. Build `interocitor` root once:
 
 ```bash
-cd /Users/akorzunov/dev/github/interocitor
+# from the monorepo root
 yarn build
 ```
 
@@ -200,7 +208,7 @@ The reconnect spec simulates DO loss by dropping live SSE clients through the pr
 ## Deploy
 
 ```bash
-cd /Users/akorzunov/dev/github/interocitor/examples/todo-cloudflare-do
+cd examples/todo-cloudflare-do
 yarn db:migrate:remote
 yarn deploy
 ```

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/tests/e2e/fixtures/harness.html');
+  await page.goto('/packages/interocitor/tests/e2e/fixtures/harness.html');
   await page.evaluate(async () => {
     // Delete the database before each test to ensure clean state
     await new Promise<void>((resolve, reject) => {
@@ -18,7 +18,7 @@ test.beforeEach(async ({ page }) => {
 test.describe('LocalStore — row operations', () => {
   test('putRow + getRow round-trip', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const { LocalStore } = await import('/packages/interocitor/dist/storage/local-store.js');
       const store = new LocalStore();
       await store.open();
 
@@ -41,7 +41,7 @@ test.describe('LocalStore — row operations', () => {
 
   test('getRow returns undefined for missing row', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const { LocalStore } = await import('/packages/interocitor/dist/storage/local-store.js');
       const store = new LocalStore();
       await store.open();
       const row = await store.getRow('nope', 'nope');
@@ -54,7 +54,7 @@ test.describe('LocalStore — row operations', () => {
 
   test('putRows writes multiple rows atomically', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const { LocalStore } = await import('/packages/interocitor/dist/storage/local-store.js');
       const store = new LocalStore();
       await store.open();
 
@@ -73,7 +73,7 @@ test.describe('LocalStore — row operations', () => {
 
   test('getTable returns only rows for that table (excluding deleted)', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const { LocalStore } = await import('/packages/interocitor/dist/storage/local-store.js');
       const store = new LocalStore();
       await store.open();
 
@@ -95,7 +95,7 @@ test.describe('LocalStore — row operations', () => {
 
   test('clearRows removes all rows but keeps other stores', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const { LocalStore } = await import('/packages/interocitor/dist/storage/local-store.js');
       const store = new LocalStore();
       await store.open();
 
@@ -115,7 +115,7 @@ test.describe('LocalStore — row operations', () => {
 
   test('queryWhere uses schema indexes for equality/range lookups', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const { LocalStore } = await import('/packages/interocitor/dist/storage/local-store.js');
       const store = new LocalStore('interocitor-indexed', undefined, {
         version: 1,
         tables: {
@@ -168,7 +168,7 @@ test.describe('LocalStore — row operations', () => {
 
   test('queryWhere falls back to table scan when field is not indexed', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const { LocalStore } = await import('/packages/interocitor/dist/storage/local-store.js');
       const store = new LocalStore('interocitor-scan', undefined, {
         version: 1,
         tables: {
@@ -207,7 +207,7 @@ test.describe('LocalStore — row operations', () => {
 
   test('legacy indexes array still works for compatibility', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const { LocalStore } = await import('/packages/interocitor/dist/storage/local-store.js');
       const store = new LocalStore('interocitor-legacy-indexes', undefined, {
         version: 1,
         tables: {
@@ -237,7 +237,7 @@ test.describe('LocalStore — row operations', () => {
 test.describe('LocalStore — outbox', () => {
   test('pushOutbox + drainOutbox FIFO semantics', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const { LocalStore } = await import('/packages/interocitor/dist/storage/local-store.js');
       const store = new LocalStore();
       await store.open();
 
@@ -263,7 +263,7 @@ test.describe('LocalStore — outbox', () => {
 
   test('drainOutbox returns empty array when outbox is empty', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const { LocalStore } = await import('/packages/interocitor/dist/storage/local-store.js');
       const store = new LocalStore();
       await store.open();
       const drained = await store.drainOutbox();
@@ -280,7 +280,7 @@ test.describe('LocalStore — outbox', () => {
 test.describe('LocalStore — cursors', () => {
   test('getCursor returns 0 for unknown device', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const { LocalStore } = await import('/packages/interocitor/dist/storage/local-store.js');
       const store = new LocalStore();
       await store.open();
       const cursor = await store.getCursor('dev_unknown');
@@ -293,7 +293,7 @@ test.describe('LocalStore — cursors', () => {
 
   test('setCursor + getCursor round-trip', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const { LocalStore } = await import('/packages/interocitor/dist/storage/local-store.js');
       const store = new LocalStore();
       await store.open();
       await store.setCursor('dev_a', 42);
@@ -310,7 +310,7 @@ test.describe('LocalStore — cursors', () => {
 
   test('getAllCursors returns full map', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const { LocalStore } = await import('/packages/interocitor/dist/storage/local-store.js');
       const store = new LocalStore();
       await store.open();
       await store.setCursor('dev_a', 10);
@@ -329,7 +329,7 @@ test.describe('LocalStore — cursors', () => {
 test.describe('LocalStore — meta', () => {
   test('setMeta + getMeta round-trip for various types', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const { LocalStore } = await import('/packages/interocitor/dist/storage/local-store.js');
       const store = new LocalStore();
       await store.open();
 
@@ -358,7 +358,7 @@ test.describe('LocalStore — meta', () => {
 test.describe('LocalStore — clearAll', () => {
   test('nukes every object store', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { LocalStore } = await import('/dist/storage/local-store.js');
+      const { LocalStore } = await import('/packages/interocitor/dist/storage/local-store.js');
       const store = new LocalStore();
       await store.open();
 

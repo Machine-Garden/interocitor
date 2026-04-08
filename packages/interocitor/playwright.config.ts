@@ -1,6 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
+import { fileURLToPath } from 'node:url';
 
 const PORT = Number(process.env.PLAYWRIGHT_WEBDAV_PORT || '4174');
+const serverEntry = fileURLToPath(new URL('../interocitor-webdav/server.mjs', import.meta.url));
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -16,9 +18,8 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: `PORT=${PORT} yarn test:e2e:server`,
+    command: `PORT=${PORT} node ${JSON.stringify(serverEntry)} --mode=memory`,
     url: `http://127.0.0.1:${PORT}`,
-    // Always launch the test server so e2e uses in-memory WebDAV storage only.
     reuseExistingServer: false,
     timeout: 10_000,
   },
@@ -29,4 +30,3 @@ export default defineConfig({
     },
   ],
 });
-

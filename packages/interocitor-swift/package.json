@@ -1,0 +1,15 @@
+{
+  "name": "interocitor-swift",
+  "version": "0.0.0-beta.2",
+  "description": "Swift workspace for Interocitor with IndexedDB-style storage concepts mapped onto SQLite.",
+  "files": [
+    "Package.swift",
+    "Sources",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "check": "node -e \"console.log('interocitor-swift placeholder')\""
+  },
+  "license": "MIT"
+}

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/tests/e2e/fixtures/harness.html');
+  await page.goto('/packages/interocitor/tests/e2e/fixtures/harness.html');
   await page.evaluate(async () => {
     localStorage.removeItem('interocitor-device-id');
     await new Promise<void>((resolve, reject) => {
@@ -16,8 +16,8 @@ test.beforeEach(async ({ page }) => {
 test.describe('SyncEngine protocol (MemoryAdapter)', () => {
   test('bootstraps manifests and default direct-cloud mode', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine } = await import('/dist/index.js');
-      const { MemoryAdapter } = await import('/dist/adapters/memory.js');
+      const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
       localStorage.setItem('interocitor-device-id', 'dev_bootstrap');
       const adapter = new MemoryAdapter();
@@ -41,8 +41,8 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('flush writes one file per change and updates head', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine } = await import('/dist/index.js');
-      const { MemoryAdapter } = await import('/dist/adapters/memory.js');
+      const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
       localStorage.setItem('interocitor-device-id', 'dev_writer');
       const adapter = new MemoryAdapter();
@@ -75,8 +75,8 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('two devices converge via change files', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/dist/index.js');
-      const { MemoryAdapter } = await import('/dist/adapters/memory.js');
+      const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
       const shared = new MemoryAdapter();
 
@@ -110,8 +110,8 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('supports schema indexes + table.where queries', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine, types } = await import('/dist/index.js');
-      const { MemoryAdapter } = await import('/dist/adapters/memory.js');
+      const { SyncEngine, types } = await import('/packages/interocitor/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
       localStorage.setItem('interocitor-device-id', 'dev_where');
       const adapter = new MemoryAdapter();
@@ -158,8 +158,8 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('rejects unauthorized server writer in manifest', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine } = await import('/dist/index.js');
-      const { MemoryAdapter } = await import('/dist/adapters/memory.js');
+      const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
       const adapter = new MemoryAdapter();
       const now = new Date().toISOString();
@@ -213,9 +213,9 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('encrypted change files do not leak plaintext', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine } = await import('/dist/index.js');
-      const { MemoryAdapter } = await import('/dist/adapters/memory.js');
-      const { generateKey } = await import('/dist/crypto/keys.js');
+      const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
+      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
 
       const key = await generateKey();
       localStorage.setItem('interocitor-device-id', 'dev_enc');
@@ -243,8 +243,8 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('can start without a remote adapter and sync later', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/dist/index.js');
-      const { MemoryAdapter } = await import('/dist/adapters/memory.js');
+      const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
       const remote = new MemoryAdapter();
 
@@ -306,8 +306,8 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('setRemoteStorage migrates full local state to a new backend at runtime', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/dist/index.js');
-      const { MemoryAdapter } = await import('/dist/adapters/memory.js');
+      const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
       const remoteA = new MemoryAdapter();
       const remoteB = new MemoryAdapter();
@@ -384,8 +384,8 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('can detach from multiple adapters and later rejoin the old adapter with concurrent changes', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/dist/index.js');
-      const { MemoryAdapter } = await import('/dist/adapters/memory.js');
+      const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
       const adapterA = new MemoryAdapter();
       const adapterB = new MemoryAdapter();
@@ -469,8 +469,8 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('direct-cloud compaction works and clients rehydrate from snapshot', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/dist/index.js');
-      const { MemoryAdapter } = await import('/dist/adapters/memory.js');
+      const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
       const shared = new MemoryAdapter();
 
@@ -517,8 +517,8 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('non-authorized client compaction is rejected in server-managed mode', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine } = await import('/dist/index.js');
-      const { MemoryAdapter } = await import('/dist/adapters/memory.js');
+      const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
       localStorage.setItem('interocitor-device-id', 'dev_not_server');
       const engine = new SyncEngine(new MemoryAdapter(), {

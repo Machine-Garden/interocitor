@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "sh -c 'wrangler dev --port ${PORT:-8787} --persist-to .wrangler/state'",
     "deploy": "wrangler deploy",
-    "check": "node --check src/worker.js",
+    "check": "node --check ../../packages/interocitor-workers/src/index.js",
     "db:migrate:local": "wrangler d1 migrations apply TODO_DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply TODO_DB --remote"
   },

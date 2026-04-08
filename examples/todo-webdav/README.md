@@ -1,20 +1,26 @@
 # TODO over local WebDAV
 
-This is a manual playground for `SyncEngine` + `WebDAVAdapter`.
+Manual playground for `interocitor` + `WebDAVAdapter`.
 
-## Start
+GitHub example directory: <https://github.com/TheUiTeam/interocitor/tree/main/examples/todo-webdav>
 
-From project root:
+## Start from the repo root
 
 ```bash
 yarn demo:todo
 ```
 
-This starts the local WebDAV server in file mode. Sync files are written to:
+Or run the example-owned file-backed server script directly:
+
+```bash
+yarn --cwd examples/todo-webdav server:file
+```
+
+Sync files are written to:
 
 - `examples/todo-webdav/webdav-data/`
 
-Then open in two browser tabs/windows:
+Then open:
 
 - `http://127.0.0.1:4173/examples/todo-webdav/index.html`
 
@@ -30,6 +36,5 @@ Then open in two browser tabs/windows:
 
 - Join token includes `baseUrl`, `remotePath`, and key passphrase.
 - Demo mode is file-backed so you can inspect cloud-side artifacts.
-- E2E mode uses memory storage via `yarn test:e2e:*`.
-- Server storage is intentionally abstracted for future SQLite/D1-backed persistence.
-
+- Package-level e2e validation uses the in-memory server mode.
+- Server storage remains abstracted for future SQLite/D1-backed persistence.

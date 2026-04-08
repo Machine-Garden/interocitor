@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 44" fill="none">
+  <style>
+    .badge { stroke: #ccc; stroke-width: 1; fill: none; rx: 4; }
+    .badge-text { font-family: 'Courier New', monospace; font-size: 11px; fill: #555; text-anchor: middle; letter-spacing: 1px; }
+    .sep { stroke: #ddd; stroke-width: 0.5; }
+    @media (prefers-color-scheme: dark) {
+      .badge { stroke: #555; }
+      .badge-text { fill: #aaa; }
+      .sep { stroke: #444; }
+    }
+  </style>
+  <g transform="translate(0, 6)">
+    <rect x="0" y="0" width="128" height="30" class="badge" rx="4"/>
+    <text x="64" y="20" class="badge-text">ZERO SERVERS</text>
+
+    <rect x="140" y="0" width="128" height="30" class="badge" rx="4"/>
+    <text x="204" y="20" class="badge-text">E2E ENCRYPTED</text>
+
+    <rect x="280" y="0" width="128" height="30" class="badge" rx="4"/>
+    <text x="344" y="20" class="badge-text">CRDT MERGE</text>
+
+    <rect x="420" y="0" width="128" height="30" class="badge" rx="4"/>
+    <text x="484" y="20" class="badge-text">OFFLINE-FIRST</text>
+
+    <rect x="560" y="0" width="148" height="30" class="badge" rx="4"/>
+    <text x="634" y="20" class="badge-text">ZERO DEPS</text>
+
+    <rect x="720" y="0" width="78" height="30" class="badge" rx="4"/>
+    <text x="759" y="20" class="badge-text">MIT</text>
+  </g>
+</svg>

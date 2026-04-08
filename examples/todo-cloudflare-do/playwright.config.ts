@@ -26,7 +26,7 @@ export default defineConfig({
       timeout: 10_000,
     },
     {
-      command: `sh -c 'node --check src/worker.js && npx wrangler d1 migrations apply TODO_DB --local --config wrangler.playwright.toml && npx wrangler dev --config wrangler.playwright.toml --port ${WORKER_PORT} --persist-to .wrangler/state'`,
+      command: `sh -c 'node --check ../../packages/interocitor-workers/src/index.js && npx wrangler d1 migrations apply TODO_DB --local --config wrangler.playwright.toml && npx wrangler dev --config wrangler.playwright.toml --port ${WORKER_PORT} --persist-to .wrangler/state'`,
       url: `http://127.0.0.1:${WORKER_PORT}/health`,
       reuseExistingServer: false,
       timeout: 30_000,

@@ -26,15 +26,15 @@ test('two isolated contexts sync via shared WebDAV route mock', async ({ browser
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
 
-    await pageA.goto(`${baseURL}/tests/e2e/fixtures/harness-plain.html`);
-    await pageB.goto(`${baseURL}/tests/e2e/fixtures/harness-plain.html`);
+    await pageA.goto(`${baseURL}/packages/interocitor/tests/e2e/fixtures/harness-plain.html`);
+    await pageB.goto(`${baseURL}/packages/interocitor/tests/e2e/fixtures/harness-plain.html`);
 
     await clearLocalDb(pageA);
     await clearLocalDb(pageB);
 
     const written = await pageA.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/dist/index.js');
-      const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+      const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
+      const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
       localStorage.setItem('interocitor-device-id', 'ctx_a');
 
@@ -60,8 +60,8 @@ test('two isolated contexts sync via shared WebDAV route mock', async ({ browser
     expect(written).toBe('from context A');
 
     const readOnB = await pageB.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/dist/index.js');
-      const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+      const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
+      const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
       localStorage.setItem('interocitor-device-id', 'ctx_b');
 
@@ -111,15 +111,15 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
 
-    await pageA.goto(`${baseURL}/tests/e2e/fixtures/harness-plain.html`);
-    await pageB.goto(`${baseURL}/tests/e2e/fixtures/harness-plain.html`);
+    await pageA.goto(`${baseURL}/packages/interocitor/tests/e2e/fixtures/harness-plain.html`);
+    await pageB.goto(`${baseURL}/packages/interocitor/tests/e2e/fixtures/harness-plain.html`);
 
     await clearLocalDb(pageA);
     await clearLocalDb(pageB);
 
     const firstPhase = await pageA.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/dist/index.js');
-      const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+      const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
+      const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
       localStorage.setItem('interocitor-device-id', 'ctx_roundtrip_a');
       const engine = new SyncEngine({
@@ -157,8 +157,8 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
     expect(firstPhase).toBe('seed offline');
 
     const secondClientWrite = await pageB.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/dist/index.js');
-      const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+      const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
+      const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
       localStorage.setItem('interocitor-device-id', 'ctx_roundtrip_b');
       const engine = new SyncEngine(
@@ -187,8 +187,8 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
     expect(secondClientWrite).toBe('from old adapter');
 
     const clientOneAfterRejoin = await pageA.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/dist/index.js');
-      const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+      const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
+      const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
       localStorage.setItem('interocitor-device-id', 'ctx_roundtrip_a');
       const engine = new SyncEngine({
@@ -216,8 +216,8 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
     });
 
     const clientTwoAfterPull = await pageB.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/dist/index.js');
-      const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+      const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
+      const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
       localStorage.setItem('interocitor-device-id', 'ctx_roundtrip_b');
       const engine = new SyncEngine(

@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.json",
+  "extends": "../../../tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
     "rootDir": ".",
@@ -7,4 +7,3 @@
   },
   "include": ["./**/*.ts"]
 }
-

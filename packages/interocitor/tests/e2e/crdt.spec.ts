@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/tests/e2e/fixtures/harness.html');
+  await page.goto('/packages/interocitor/tests/e2e/fixtures/harness.html');
 });
 
 // ─── applyOp: upsert ────────────────────────────────────────────────
@@ -9,7 +9,7 @@ test.beforeEach(async ({ page }) => {
 test.describe('applyOp — upsert', () => {
   test('creates a new row in an empty table', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { applyOp, readColumn } = await import('/dist/core/crdt.js');
+      const { applyOp, readColumn } = await import('/packages/interocitor/dist/core/crdt.js');
       const tables: Record<string, Record<string, any>> = {};
       const row = applyOp(tables, {
         type: 'upsert',
@@ -37,7 +37,7 @@ test.describe('applyOp — upsert', () => {
 
   test('updates a column with a newer HLC', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { applyOp, readColumn } = await import('/dist/core/crdt.js');
+      const { applyOp, readColumn } = await import('/packages/interocitor/dist/core/crdt.js');
       const tables: Record<string, Record<string, any>> = {};
 
       applyOp(tables, {
@@ -58,7 +58,7 @@ test.describe('applyOp — upsert', () => {
 
   test('rejects a column update with an older HLC (stale write)', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { applyOp, readColumn } = await import('/dist/core/crdt.js');
+      const { applyOp, readColumn } = await import('/packages/interocitor/dist/core/crdt.js');
       const tables: Record<string, Record<string, any>> = {};
 
       applyOp(tables, {
@@ -80,7 +80,7 @@ test.describe('applyOp — upsert', () => {
 
   test('merges independent columns from different devices', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { applyOp, readColumn } = await import('/dist/core/crdt.js');
+      const { applyOp, readColumn } = await import('/packages/interocitor/dist/core/crdt.js');
       const tables: Record<string, Record<string, any>> = {};
 
       applyOp(tables, {
@@ -109,7 +109,7 @@ test.describe('applyOp — upsert', () => {
 test.describe('applyOp — delete', () => {
   test('soft-deletes an existing row', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { applyOp } = await import('/dist/core/crdt.js');
+      const { applyOp } = await import('/packages/interocitor/dist/core/crdt.js');
       const tables: Record<string, Record<string, any>> = {};
 
       applyOp(tables, {
@@ -131,7 +131,7 @@ test.describe('applyOp — delete', () => {
 
   test('rejects a delete older than existing column HLC', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { applyOp } = await import('/dist/core/crdt.js');
+      const { applyOp } = await import('/packages/interocitor/dist/core/crdt.js');
       const tables: Record<string, Record<string, any>> = {};
 
       applyOp(tables, {
@@ -153,7 +153,7 @@ test.describe('applyOp — delete', () => {
 
   test('creates a tombstone for an unknown row', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { applyOp } = await import('/dist/core/crdt.js');
+      const { applyOp } = await import('/packages/interocitor/dist/core/crdt.js');
       const tables: Record<string, Record<string, any>> = {};
 
       const row = applyOp(tables, {
@@ -175,7 +175,7 @@ test.describe('applyOp — delete', () => {
 
   test('upsert with newer HLC revives a tombstoned row', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { applyOp, readColumn } = await import('/dist/core/crdt.js');
+      const { applyOp, readColumn } = await import('/packages/interocitor/dist/core/crdt.js');
       const tables: Record<string, Record<string, any>> = {};
 
       applyOp(tables, {
@@ -205,7 +205,7 @@ test.describe('applyOp — delete', () => {
 
   test('upsert with older HLC than delete does NOT revive', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { applyOp } = await import('/dist/core/crdt.js');
+      const { applyOp } = await import('/packages/interocitor/dist/core/crdt.js');
       const tables: Record<string, Record<string, any>> = {};
 
       applyOp(tables, {
@@ -232,7 +232,7 @@ test.describe('applyOp — delete', () => {
 
   test('rejects a duplicate delete with an older HLC', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { applyOp } = await import('/dist/core/crdt.js');
+      const { applyOp } = await import('/packages/interocitor/dist/core/crdt.js');
       const tables: Record<string, Record<string, any>> = {};
 
       applyOp(tables, {
@@ -262,7 +262,7 @@ test.describe('applyOp — delete', () => {
 test.describe('applyChangeEntry', () => {
   test('applies a batch of operations and returns affected rows', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { applyChangeEntry, readColumn } = await import('/dist/core/crdt.js');
+      const { applyChangeEntry, readColumn } = await import('/packages/interocitor/dist/core/crdt.js');
       const tables: Record<string, Record<string, any>> = {};
 
       const affected = applyChangeEntry(tables, {
@@ -296,7 +296,7 @@ test.describe('applyChangeEntry', () => {
 test.describe('readColumn / rowToPlain', () => {
   test('readColumn unwraps ColumnEntry value', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { readColumn } = await import('/dist/core/crdt.js');
+      const { readColumn } = await import('/packages/interocitor/dist/core/crdt.js');
       const row = {
         _table: 't', _rowId: 'r', _deleted: false, _schemaVersion: 1,
         name: { value: 'Alice', hlc: '000001000000000000-0000-dev_a' },
@@ -309,7 +309,7 @@ test.describe('readColumn / rowToPlain', () => {
 
   test('readColumn returns undefined for non-existent column', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { readColumn } = await import('/dist/core/crdt.js');
+      const { readColumn } = await import('/packages/interocitor/dist/core/crdt.js');
       const row = { _table: 't', _rowId: 'r', _deleted: false, _schemaVersion: 1 };
       return readColumn(row, 'missing');
     });
@@ -319,7 +319,7 @@ test.describe('readColumn / rowToPlain', () => {
 
   test('rowToPlain strips HLC metadata from all columns', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { rowToPlain } = await import('/dist/core/crdt.js');
+      const { rowToPlain } = await import('/packages/interocitor/dist/core/crdt.js');
       const row = {
         _table: 'tasks', _rowId: 't1', _deleted: false, _schemaVersion: 1,
         title: { value: 'Do stuff', hlc: '000001000000000000-0000-dev_a' },
@@ -339,7 +339,7 @@ test.describe('readColumn / rowToPlain', () => {
 
   test('rowToPlain handles a row with no user columns', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { rowToPlain } = await import('/dist/core/crdt.js');
+      const { rowToPlain } = await import('/packages/interocitor/dist/core/crdt.js');
       return rowToPlain({ _table: 't', _rowId: 'r', _deleted: true, _schemaVersion: 1 });
     });
 

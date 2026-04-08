@@ -1,13 +1,13 @@
 import { expect, test } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/tests/e2e/fixtures/harness.html');
+  await page.goto('/packages/interocitor/tests/e2e/fixtures/harness.html');
 });
 
 test.describe('hlcInit', () => {
   test('creates a clock seeded from wall time', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { hlcInit } = await import('/dist/core/hlc.js');
+      const { hlcInit } = await import('/packages/interocitor/dist/core/hlc.js');
       const before = Date.now();
       const hlc = hlcInit('dev_test');
       const after = Date.now();
@@ -24,7 +24,7 @@ test.describe('hlcInit', () => {
 test.describe('hlcNow', () => {
   test('advances wall time when clock moves forward', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { hlcInit, hlcNow } = await import('/dist/core/hlc.js');
+      const { hlcInit, hlcNow } = await import('/packages/interocitor/dist/core/hlc.js');
       const h0 = hlcInit('dev_a');
       // Force clock into the past so wall time will be ahead
       h0.ts = h0.ts - 1000;
@@ -38,7 +38,7 @@ test.describe('hlcNow', () => {
 
   test('increments counter when wall time has not advanced', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { hlcNow } = await import('/dist/core/hlc.js');
+      const { hlcNow } = await import('/packages/interocitor/dist/core/hlc.js');
       // Set ts far in the future so Date.now() won't catch up
       const h0 = { ts: Date.now() + 1_000_000, counter: 3, nodeId: 'dev_a' };
       const h1 = hlcNow(h0);
@@ -52,7 +52,7 @@ test.describe('hlcNow', () => {
 test.describe('hlcReceive', () => {
   test('advances to remote ts when remote is ahead', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { hlcReceive } = await import('/dist/core/hlc.js');
+      const { hlcReceive } = await import('/packages/interocitor/dist/core/hlc.js');
       const local = { ts: 1000, counter: 0, nodeId: 'a' };
       const remote = { ts: 2000, counter: 5, nodeId: 'b' };
       return hlcReceive(local, remote);
@@ -64,7 +64,7 @@ test.describe('hlcReceive', () => {
 
   test('increments max counter when timestamps are equal', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { hlcReceive } = await import('/dist/core/hlc.js');
+      const { hlcReceive } = await import('/packages/interocitor/dist/core/hlc.js');
       const farFuture = Date.now() + 10_000_000;
       const local = { ts: farFuture, counter: 3, nodeId: 'a' };
       const remote = { ts: farFuture, counter: 7, nodeId: 'b' };
@@ -76,7 +76,7 @@ test.describe('hlcReceive', () => {
 
   test('clamps extreme future remote timestamps to max skew window', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { hlcReceive, HLC_MAX_FUTURE_SKEW_MS } = await import('/dist/core/hlc.js');
+      const { hlcReceive, HLC_MAX_FUTURE_SKEW_MS } = await import('/packages/interocitor/dist/core/hlc.js');
       const before = Date.now();
       const local = { ts: before, counter: 0, nodeId: 'a' };
       const remote = { ts: before + 24 * 60 * 60 * 1000, counter: 0, nodeId: 'b' };
@@ -93,7 +93,7 @@ test.describe('hlcReceive', () => {
 test.describe('hlcSerialize / hlcParse round-trip', () => {
   test('survives a round-trip for normal values', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { hlcSerialize, hlcParse } = await import('/dist/core/hlc.js');
+      const { hlcSerialize, hlcParse } = await import('/packages/interocitor/dist/core/hlc.js');
       const original = { ts: 1711785600000, counter: 42, nodeId: 'dev_x1y2z3' };
       const serialized = hlcSerialize(original);
       const parsed = hlcParse(serialized);
@@ -107,7 +107,7 @@ test.describe('hlcSerialize / hlcParse round-trip', () => {
 
   test('produces lexicographically sortable strings', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { hlcSerialize } = await import('/dist/core/hlc.js');
+      const { hlcSerialize } = await import('/packages/interocitor/dist/core/hlc.js');
       const a = hlcSerialize({ ts: 1000, counter: 0, nodeId: 'a' });
       const b = hlcSerialize({ ts: 2000, counter: 0, nodeId: 'a' });
       const c = hlcSerialize({ ts: 2000, counter: 1, nodeId: 'a' });
@@ -122,7 +122,7 @@ test.describe('hlcSerialize / hlcParse round-trip', () => {
 test.describe('hlcCompare', () => {
   test('orders by timestamp first', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { hlcCompare } = await import('/dist/core/hlc.js');
+      const { hlcCompare } = await import('/packages/interocitor/dist/core/hlc.js');
       const a = { ts: 100, counter: 99, nodeId: 'z' };
       const b = { ts: 200, counter: 0, nodeId: 'a' };
       return hlcCompare(a, b);
@@ -133,7 +133,7 @@ test.describe('hlcCompare', () => {
 
   test('orders by counter when timestamps are equal', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { hlcCompare } = await import('/dist/core/hlc.js');
+      const { hlcCompare } = await import('/packages/interocitor/dist/core/hlc.js');
       const a = { ts: 100, counter: 1, nodeId: 'z' };
       const b = { ts: 100, counter: 2, nodeId: 'a' };
       return hlcCompare(a, b);
@@ -144,7 +144,7 @@ test.describe('hlcCompare', () => {
 
   test('orders by nodeId when ts and counter are equal', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { hlcCompare } = await import('/dist/core/hlc.js');
+      const { hlcCompare } = await import('/packages/interocitor/dist/core/hlc.js');
       const a = { ts: 100, counter: 1, nodeId: 'alpha' };
       const b = { ts: 100, counter: 1, nodeId: 'beta' };
       return hlcCompare(a, b);
@@ -155,7 +155,7 @@ test.describe('hlcCompare', () => {
 
   test('returns 0 for identical clocks', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { hlcCompare } = await import('/dist/core/hlc.js');
+      const { hlcCompare } = await import('/packages/interocitor/dist/core/hlc.js');
       const a = { ts: 100, counter: 1, nodeId: 'x' };
       return hlcCompare(a, { ...a });
     });
@@ -167,7 +167,7 @@ test.describe('hlcCompare', () => {
 test.describe('hlcCompareStr', () => {
   test('agrees with hlcCompare on serialized forms', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { hlcCompare, hlcCompareStr, hlcSerialize } = await import('/dist/core/hlc.js');
+      const { hlcCompare, hlcCompareStr, hlcSerialize } = await import('/packages/interocitor/dist/core/hlc.js');
       const a = { ts: 1000, counter: 5, nodeId: 'dev_a' };
       const b = { ts: 1000, counter: 10, nodeId: 'dev_b' };
       const objCmp = hlcCompare(a, b);

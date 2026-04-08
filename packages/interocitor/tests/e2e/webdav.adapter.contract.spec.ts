@@ -9,7 +9,7 @@ import { expect, test } from '@playwright/test';
  */
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/tests/e2e/fixtures/harness.html');
+  await page.goto('/packages/interocitor/tests/e2e/fixtures/harness.html');
   await page.evaluate(async () => {
     await window.__webdavMock.resetIndexedDb();
     window.__webdavMock.resetCloud();
@@ -19,7 +19,7 @@ test.beforeEach(async ({ page }) => {
 
 test('authenticate sets authenticated state', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+    const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
     const adapter = new WebDAVAdapter({
       baseUrl: `${location.origin}/__webdav__`,
       auth: { username: 'user', password: 'pass' },
@@ -38,7 +38,7 @@ test('authenticate sets authenticated state', async ({ page }) => {
 
 test('authenticate throws on unauthorized response', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+    const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
     window.__webdavMock.setUnauthorized(true);
 
     const adapter = new WebDAVAdapter({
@@ -60,7 +60,7 @@ test('authenticate throws on unauthorized response', async ({ page }) => {
 
 test('ensureFolder is idempotent for existing paths', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+    const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
     const adapter = new WebDAVAdapter({
       baseUrl: `${location.origin}/__webdav__`,
       auth: { username: 'user', password: 'pass' },
@@ -80,7 +80,7 @@ test('ensureFolder is idempotent for existing paths', async ({ page }) => {
 
 test('writeFile/readFile supports string and binary payloads', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+    const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
     const adapter = new WebDAVAdapter({
       baseUrl: `${location.origin}/__webdav__`,
       auth: { username: 'user', password: 'pass' },
@@ -104,7 +104,7 @@ test('writeFile/readFile supports string and binary payloads', async ({ page }) 
 
 test('writeFile overwrite updates content and metadata size', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+    const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
     const adapter = new WebDAVAdapter({
       baseUrl: `${location.origin}/__webdav__`,
       auth: { username: 'user', password: 'pass' },
@@ -128,7 +128,7 @@ test('writeFile overwrite updates content and metadata size', async ({ page }) =
 
 test('listFiles returns only direct file children (not subfolders)', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+    const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
     const adapter = new WebDAVAdapter({
       baseUrl: `${location.origin}/__webdav__`,
       auth: { username: 'user', password: 'pass' },
@@ -151,7 +151,7 @@ test('listFiles returns only direct file children (not subfolders)', async ({ pa
 
 test('getFileMetadata returns details for existing file and null for missing file', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+    const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
     const adapter = new WebDAVAdapter({
       baseUrl: `${location.origin}/__webdav__`,
       auth: { username: 'user', password: 'pass' },
@@ -180,7 +180,7 @@ test('getFileMetadata returns details for existing file and null for missing fil
 
 test('deleteFile is idempotent (existing and missing file)', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+    const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
     const adapter = new WebDAVAdapter({
       baseUrl: `${location.origin}/__webdav__`,
       auth: { username: 'user', password: 'pass' },
@@ -202,7 +202,7 @@ test('deleteFile is idempotent (existing and missing file)', async ({ page }) =>
 
 test('path normalization supports leading/trailing slash variants', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+    const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
     const adapter = new WebDAVAdapter({
       baseUrl: `${location.origin}/__webdav__/`,
       auth: { username: 'user', password: 'pass' },

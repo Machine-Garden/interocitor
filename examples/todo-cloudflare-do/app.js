@@ -90,7 +90,7 @@ function taskRowId() {
 }
 
 async function buildSession(overrides = {}) {
-  const { generateKey, keyToPassphrase } = await import('../../dist/crypto/keys.js');
+  const { generateKey, keyToPassphrase } = await import('../../packages/interocitor/dist/crypto/keys.js');
   const key = await generateKey();
   const passphrase = await keyToPassphrase(key);
 
@@ -139,9 +139,9 @@ async function autoCreateSession() {
 }
 
 async function connect() {
-  const { SyncEngine } = await import('../../dist/index.js');
-  const { CloudflareAdapter } = await import('../../dist/adapters/cloudflare.js');
-  const { passphraseToKey } = await import('../../dist/crypto/keys.js');
+  const { SyncEngine } = await import('../../packages/interocitor/dist/index.js');
+  const { CloudflareAdapter } = await import('../../packages/interocitor/dist/adapters/cloudflare.js');
+  const { passphraseToKey } = await import('../../packages/interocitor/dist/crypto/keys.js');
 
   const session = readSessionFromUi();
   await disconnect();

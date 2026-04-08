@@ -1,0 +1,28 @@
+{
+  "name": "interocitor-workers",
+  "version": "0.0.0-beta.2",
+  "description": "Cloudflare Workers runtime for Interocitor-native sync endpoints, fanout, and maintenance flows.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "check": "node --check ./src/index.js"
+  },
+  "keywords": [
+    "interocitor",
+    "cloudflare-workers",
+    "durable-objects",
+    "d1"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

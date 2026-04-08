@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/tests/e2e/fixtures/harness.html');
+  await page.goto('/packages/interocitor/tests/e2e/fixtures/harness.html');
   await page.evaluate(async () => {
     localStorage.removeItem('interocitor-device-id');
     await window.__webdavMock.resetIndexedDb();
@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
 
 test('WebDAV adapter supports authenticate, CRUD, listing, and metadata', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+    const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
     const adapter = new WebDAVAdapter({
       baseUrl: `${location.origin}/__webdav__`,
@@ -49,8 +49,8 @@ test('WebDAV adapter supports authenticate, CRUD, listing, and metadata', async 
 
 test('SyncEngine writes file-per-change paths and syncs rows through WebDAV', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { SyncEngine, rowToPlain, readColumn } = await import('/dist/index.js');
-    const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+    const { SyncEngine, rowToPlain, readColumn } = await import('/packages/interocitor/dist/index.js');
+    const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
     const makeEngine = (deviceId: string) => {
       localStorage.setItem('interocitor-device-id', deviceId);
@@ -114,8 +114,8 @@ test('SyncEngine writes file-per-change paths and syncs rows through WebDAV', as
 
 test('rejects unauthorized writer manifests over WebDAV', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { SyncEngine } = await import('/dist/index.js');
-    const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+    const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
+    const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
     const now = new Date().toISOString();
 
     const adapter = new WebDAVAdapter({
@@ -173,9 +173,9 @@ test('rejects unauthorized writer manifests over WebDAV', async ({ page }) => {
 
 test('encrypted sync over WebDAV keeps cloud payload opaque', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { SyncEngine, readColumn } = await import('/dist/index.js');
-    const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
-    const { generateKey } = await import('/dist/crypto/keys.js');
+    const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
+    const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
+    const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
 
     const key = await generateKey();
 
@@ -220,8 +220,8 @@ test('encrypted sync over WebDAV keeps cloud payload opaque', async ({ page }) =
 
 test('direct-cloud compaction over WebDAV restores clients from snapshot', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { SyncEngine, readColumn } = await import('/dist/index.js');
-    const { WebDAVAdapter } = await import('/dist/adapters/webdav.js');
+    const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
+    const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
     const makeEngine = (deviceId: string) => {
       localStorage.setItem('interocitor-device-id', deviceId);

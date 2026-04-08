@@ -17,7 +17,7 @@ This example provides an Interocitor-native endpoint with:
 - `<prefix>` is the Durable Object name (session partition key)
 - all files/folders under the same prefix are persisted in D1 rows
 
-## What role DO play here
+## What role do Durable Objects play here
 
 Durable Objects are **not strictly required for plain polling sync**, but they are **recommended** for this shape of push fanout.
 
@@ -114,6 +114,7 @@ Configurable guardrails:
 - `INTEROCITOR_MAX_CONTROL_BYTES` — manifests, head, device heartbeat files
 - `INTEROCITOR_MAX_CHANGE_BYTES` — change-file ceiling
 - `INTEROCITOR_MAX_MAINLINE_BYTES` — mainline snapshot ceiling
+- `INTEROCITOR_MAX_PREFIX_BYTES` — total byte ceiling per prefix across all file categories
 - `INTEROCITOR_MAX_GENERIC_FILE_BYTES` — catch-all file ceiling
 
 This example keeps explicit application-level limits even though D1 stores file content in a `BLOB`, because operationally safe payload sizes matter more than the raw storage type alone.

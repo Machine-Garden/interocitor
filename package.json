@@ -11,7 +11,7 @@
   ],
   "scripts": {
     "build": "yarn workspace interocitor build",
-    "build:all": "yarn workspace interocitor build && yarn workspace interocitor-webdav check && yarn workspace interocitor-workers check && yarn workspace interocitor-swift check && yarn workspace todo-webdav-example check && yarn workspace todo-cloudflare-do-example check",
+    "build:all": "yarn workspace interocitor build && yarn workspaces foreach --all --exclude interocitor -p run check",
     "validate": "yarn build:all",
     "demo:todo": "yarn workspace interocitor build && yarn demo:todo:server",
     "demo:todo:server": "yarn workspace todo-webdav-example server:file",

@@ -326,7 +326,7 @@ Key never leaves devices. Cloud folder only contains ciphertext. All devices los
 
 LWW-per-column. Each field carries its own HLC timestamp. On merge, highest HLC wins per field independently.
 
-```
+```text
 Device A: task.title  = "Review PR"  at T1
 Device B: task.status = "done"       at T2
 
@@ -364,7 +364,7 @@ engine.on((event) => {
 
 ## Cloud folder layout
 
-```
+```text
 {remotePath}/                                    e.g. /Interocitor/MyApp
   manifest.json                                  ← pointer: { currentGeneration, file }
   manifest-{generation}.json                     ← immutable; epoch, watermark, snapshotPath
@@ -403,7 +403,7 @@ Related examples:
 
 ## What this is not
 
-A sync layer for structured JSON across a small device mesh. Not:
+Interocitor is a sync layer for structured JSON across a small device mesh. It is not:
 
 - **A multiplayer gaming backend** — it synchronizes durable state through files, not optimized for ephemeral push updates (e.g. mouse pointers).
 - **A query engine** — supports simple secondary indexes + where clauses, not SQL joins/aggregations.

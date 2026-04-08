@@ -4,7 +4,7 @@ const STATIC_PORT = Number(process.env.PLAYWRIGHT_CF_STATIC_PORT || '4174');
 const WORKER_PORT = Number(process.env.PLAYWRIGHT_CF_WORKER_PORT || '8788');
 
 export default defineConfig({
-  testDir: '.',
+  testDir: './tests/e2e',
   testMatch: ['*.e2e.spec.ts'],
   timeout: 45_000,
   expect: {

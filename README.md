@@ -373,7 +373,7 @@ Related examples:
 
 ## What this is not
 
-A sync layer for structured JSON across a small device mesh. Not:
+Interocitor is a sync layer for structured JSON across a small device mesh. It is not:
 
 - **A multiplayer gaming backend** — it synchronizes durable state through files, not optimized for ephemeral push updates (e.g. mouse pointers).
 - **A query engine** — supports simple secondary indexes + where clauses, not SQL joins/aggregations.

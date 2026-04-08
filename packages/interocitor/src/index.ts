@@ -80,6 +80,8 @@ export type {
   Manifest,
   ManifestPointer,
   ServerConfig,
+  MeshChangePayload,
+  MeshSnapshotPayload,
   DeviceInfo,
   DeviceMetadata,
   DeviceHead,

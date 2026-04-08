@@ -170,6 +170,18 @@ export interface Snapshot {
   tables: Record<string, Record<string, Row>>;
 }
 
+export interface MeshChangePayload {
+  meshId: string;
+  kind: 'change';
+  entry: ChangeEntry;
+}
+
+export interface MeshSnapshotPayload {
+  meshId: string;
+  kind: 'snapshot';
+  snapshot: Snapshot;
+}
+
 // ─── Manifest ────────────────────────────────────────────────────────
 
 export interface ServerConfig {
@@ -364,6 +376,7 @@ export type SyncEvent =
   | { type: 'sync:start' }
   | { type: 'sync:complete'; entriesMerged: number }
   | { type: 'sync:error'; error: Error }
+  | { type: 'remote:poisoned'; error: Error; path?: string }
   | { type: 'flush:start'; entryCount: number }
   | { type: 'flush:complete' }
   | { type: 'flush:error'; error: Error }

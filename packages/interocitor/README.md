@@ -322,6 +322,18 @@ engine.setEncryptionKey(sameKey);
 
 Key never leaves devices. Cloud folder only contains ciphertext. All devices lose the key → data is unrecoverable. That's the point. Print it.
 
+### Client-side fingerprint verification
+
+Interocitor also performs **client-side fingerprint verification** for encrypted remotes. Every encrypted change and snapshot payload carries the mesh fingerprint (`meshId`) inside the encrypted envelope alongside its payload kind (`change` or `snapshot`).
+
+When a device decrypts remote content it verifies that fingerprint against the manifest/local mesh it already trusts.
+
+- matching fingerprint → payload is accepted and merged
+- wrong fingerprint → remote is treated as poisoned
+- poisoned remote → sync is cut off and the engine emits `remote:poisoned`
+
+This protects against cross-mesh ciphertext injection and misrouted storage. It does **not** turn a stolen real mesh key into a safe situation — someone with the actual mesh key can still produce valid same-mesh ciphertext.
+
 ## CRDT strategy
 
 LWW-per-column. Each field carries its own HLC timestamp. On merge, highest HLC wins per field independently.
@@ -349,6 +361,7 @@ engine.on((event) => {
     case 'sync:start':         // pull cycle begins
     case 'sync:complete':      // pull done, N entries merged
     case 'sync:error':
+    case 'remote:poisoned':    // encrypted payload fingerprint mismatch / poisoned remote
     case 'flush:start':        // push cycle begins
     case 'flush:complete':
     case 'flush:error':

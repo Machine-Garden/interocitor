@@ -14,25 +14,27 @@
  *   fan out invalidation messages across multiple Worker invocations.
  *   Without DO, a write on Worker instance A would never notify SSE clients
  *   connected to instance B.
- *   Remove TODO_DAV binding entirely to disable SSE (/events/* → 501);
- *   everything else keeps working with polling as fallback.
+ *   Remove the INTEROCITOR_EVENTS binding entirely to disable SSE
+ *   (/events/* → 501); everything else keeps working with polling as fallback.
  *
  * URL layout
  *   GET  /health                                     health check
  *   *    /io/<prefix>/...                            Interocitor-native API (JSON + binary)
  *   GET  /events/<prefix>                            SSE stream (requires DO)
- *   POST /io/<prefix>/__interocitor__/execute        privileged compact
+ *   POST /__interocitor/system/<prefix>              token-gated system API
  *
  * Append-only mode  (INTEROCITOR_APPEND_ONLY=1, default ON)
  *   DELETE             → 405
  *   PUT on existing    → 409
- *   Compact via /execute is the only way to prune.
- *
  */
 
 const IO_PREFIX = '/io';
 const EVENTS_PREFIX = '/events';
-const EXECUTE_SUFFIX = '/__interocitor__/execute';
+const SYSTEM_PREFIX = '/__interocitor/system';
+const D1_BINDING_NAME = 'INTEROCITOR_DB';
+const EVENTS_BINDING_NAME = 'INTEROCITOR_EVENTS';
+const EXECUTE_OP_PRUNE_COMPACTED_CHANGES = 'prune-compacted-changes';
+const EXECUTE_OP_COMPACT_LEGACY = 'compact';
 
 const DEFAULT_CONTROL_BYTES = 256 * 1024;
 const DEFAULT_CHANGE_BYTES = 8 * 1024 * 1024;
@@ -100,6 +102,26 @@ async function hasAccess(request, env, prefix) {
 
   const expected = await sha256Hex(`${prefix}${accessSecret}`);
   return token === expected;
+}
+
+function getDatabase(env) {
+  const db = env?.[D1_BINDING_NAME];
+  if (!db) throw new Error(`Missing D1 binding ${D1_BINDING_NAME}`);
+  return db;
+}
+
+function getEventsBinding(env) {
+  return env?.[EVENTS_BINDING_NAME] ?? null;
+}
+
+function hasSystemAccess(request, env) {
+  const expected = String(env?.INTEROCITOR_SYSTEM_TOKEN || '').trim();
+  if (!expected) return false;
+
+  const auth = request.headers.get('Authorization') || '';
+  const bearerToken = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length).trim() : '';
+  const headerToken = String(request.headers.get('x-interocitor-system-token') || '').trim();
+  return bearerToken === expected || headerToken === expected;
 }
 
 // ─── Path helpers ─────────────────────────────────────────────────────────────
@@ -519,8 +541,7 @@ async function dbListTtlCandidates(db, olderThanIso, limit, scopePrefix = null) 
 }
 
 async function runMaintenance(env, ctx, log, options = {}) {
-  const db = env?.TODO_DB;
-  if (!db) throw new Error('Missing D1 binding TODO_DB');
+  const db = getDatabase(env);
   const config = getWorkerConfig(env);
   const startedAt = options.nowIso ?? nowIso();
   const ttlCutoff = new Date(Date.parse(startedAt) - (config.pathTtlHours * 60 * 60 * 1000)).toISOString();
@@ -725,7 +746,7 @@ async function dbListFolders(db, prefix, path) {
   return folders;
 }
 
-async function dbCompact(db, prefix, remotePath, watermarkHlc) {
+async function dbPruneCompactedChanges(db, prefix, remotePath, watermarkHlc) {
   const normalizedRoot = normalizePath(remotePath);
   const root = normalizedRoot === '/' ? '' : normalizedRoot;
   const { results = [] } = await db
@@ -760,36 +781,37 @@ async function dbCompact(db, prefix, remotePath, watermarkHlc) {
 // ─── Execute ──────────────────────────────────────────────────────────────────
 
 async function handleExecute(db, prefix, request, env, ctx, log) {
-  const expected = env?.INTEROCITOR_EXEC_TOKEN;
-  if (expected && (request.headers.get('x-interocitor-token') || '') !== expected) {
-    log.error('execute forbidden — bad x-interocitor-token', { prefix });
-    return new Response('Forbidden', { status: 403 });
-  }
-
   const payload = await request.json().catch(() => null);
   if (!payload) return new Response('Invalid JSON body', { status: 400 });
 
   const op = String(payload.op || '');
 
-  if (op === 'compact') {
+  if (op === EXECUTE_OP_PRUNE_COMPACTED_CHANGES || op === EXECUTE_OP_COMPACT_LEGACY) {
     const remotePath = normalizePath(String(payload.remotePath || '/'));
     const watermarkHlc = String(payload.watermarkHlc || '');
     if (!watermarkHlc) return new Response('Missing watermarkHlc', { status: 400 });
 
-    log.info('execute compact', { prefix, remotePath, watermarkHlc });
-    const result = await dbCompact(db, prefix, remotePath, watermarkHlc);
-    log.info('execute compact done', { prefix, ...result });
+    const canonicalOp = EXECUTE_OP_PRUNE_COMPACTED_CHANGES;
+    const requestedOp = op;
+    log.info('execute prune compacted changes', { prefix, remotePath, watermarkHlc, requestedOp });
+    const result = await dbPruneCompactedChanges(db, prefix, remotePath, watermarkHlc);
+    log.info('execute prune compacted changes done', { prefix, ...result, requestedOp });
 
     const root = normalizePath(remotePath) === '/' ? '' : normalizePath(remotePath);
     const receiptDir = `${root}/.interocitor/commands`;
-    const receiptPath = `${receiptDir}/compact-${Date.now().toString(36)}.json`;
+    const receiptPath = `${receiptDir}/prune-${Date.now().toString(36)}.json`;
     const ts = nowIso();
     await dbEnsureFolderTree(db, prefix, receiptDir);
     await dbOverwriteFile(db, prefix, receiptPath,
-      textEncoder.encode(JSON.stringify({ op: 'compact', ...result, ts }, null, 2)));
+      textEncoder.encode(JSON.stringify({
+        op: canonicalOp,
+        requestedOp,
+        ...result,
+        ts,
+      }, null, 2)));
     await dbRecordMeshActivity(db, prefix, remotePath, 'write', ts);
 
-    return jsonResponse({ ok: true, ...result, receiptPath });
+    return jsonResponse({ ok: true, op: canonicalOp, requestedOp, ...result, receiptPath });
   }
 
   if (op === 'run-maintenance') {
@@ -812,9 +834,10 @@ async function handleExecute(db, prefix, request, env, ctx, log) {
   }
 
   if (op === 'drop-sse-clients') {
-    if (!env?.TODO_DAV) return new Response('SSE not configured (TODO_DAV binding missing)', { status: 400 });
+    const eventsBinding = getEventsBinding(env);
+    if (!eventsBinding) return new Response(`SSE not configured (${EVENTS_BINDING_NAME} binding missing)`, { status: 400 });
     log.info('execute drop-sse-clients', { prefix });
-    const stub = env.TODO_DAV.get(env.TODO_DAV.idFromName(prefix));
+    const stub = eventsBinding.get(eventsBinding.idFromName(prefix));
     return stub.fetch(new Request('https://internal/__reset-clients', { method: 'POST' }));
   }
 
@@ -875,9 +898,13 @@ async function handleIoRequest(request, env, ctx, url, log) {
   const opPath = `/${segments.slice(1).join('/')}`;
 
   if (!prefix) return withCors(new Response('Path must start with /io/<prefix>', { status: 400 }));
-  if (!env.TODO_DB) return withCors(new Response('Missing D1 binding TODO_DB', { status: 500 }));
 
-  const db = env.TODO_DB;
+  let db;
+  try {
+    db = getDatabase(env);
+  } catch (error) {
+    return withCors(new Response(String(error?.message || error), { status: 500 }));
+  }
   const appendOnly = String(env.INTEROCITOR_APPEND_ONLY ?? '1') !== '0';
   const config = getWorkerConfig(env);
 
@@ -933,10 +960,6 @@ async function handleIoRequest(request, env, ctx, url, log) {
     }));
   }
 
-  if (method === 'POST' && opPath === EXECUTE_SUFFIX) {
-    return withCors(await handleExecute(db, prefix, request, env, ctx, log));
-  }
-
   if (opPath === '/file') {
     const path = normalizePath(url.searchParams.get('path') || '/');
 
@@ -980,8 +1003,9 @@ async function handleIoRequest(request, env, ctx, url, log) {
       }
 
       if (pathType === PATH_TYPE.MANIFEST_POINTER || pathType === PATH_TYPE.HEAD) {
-        if (env.TODO_DAV) {
-          const stub = env.TODO_DAV.get(env.TODO_DAV.idFromName(prefix));
+        const eventsBinding = getEventsBinding(env);
+        if (eventsBinding) {
+          const stub = eventsBinding.get(eventsBinding.idFromName(prefix));
           const req = new Request('https://internal/__write-validated', {
             method: 'POST',
             headers: {
@@ -1043,13 +1067,14 @@ async function handleIoRequest(request, env, ctx, url, log) {
 // ─── DO notifier (fire-and-forget) ───────────────────────────────────────────
 
 function notifyDo(env, ctx, prefix, payload) {
-  if (!env?.TODO_DAV) return;
+  const eventsBinding = getEventsBinding(env);
+  if (!eventsBinding) return;
   const req = new Request('https://internal/__broadcast', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  const p = env.TODO_DAV.get(env.TODO_DAV.idFromName(prefix)).fetch(req).catch(() => {});
+  const p = eventsBinding.get(eventsBinding.idFromName(prefix)).fetch(req).catch(() => {});
   ctx?.waitUntil?.(p);
 }
 
@@ -1073,19 +1098,37 @@ export default {
       return withCors(new Response('Unauthorized', { status: 401 }));
     }
 
+    if (url.pathname.startsWith(`${SYSTEM_PREFIX}/`)) {
+      const prefix = decodeURIComponent(url.pathname.slice(`${SYSTEM_PREFIX}/`.length))
+        .split('/').filter(Boolean)[0] ?? '';
+      if (!prefix) return withCors(new Response('Missing prefix', { status: 400 }));
+      if (!hasSystemAccess(request, env)) {
+        log.error('System API forbidden', { method, pathname: url.pathname, prefix });
+        return withCors(new Response('Forbidden', { status: 403 }));
+      }
+      let db;
+      try {
+        db = getDatabase(env);
+      } catch (error) {
+        return withCors(new Response(String(error?.message || error), { status: 500 }));
+      }
+      return withCors(await handleExecute(db, prefix, request, env, ctx, log));
+    }
+
     if (url.pathname.startsWith(`${IO_PREFIX}/`)) {
       return handleIoRequest(request, env, ctx, url, log);
     }
 
     if (url.pathname.startsWith(`${EVENTS_PREFIX}/`)) {
-      if (!env.TODO_DAV) {
-        return withCors(new Response('SSE not configured (TODO_DAV binding missing)', { status: 501 }));
+      const eventsBinding = getEventsBinding(env);
+      if (!eventsBinding) {
+        return withCors(new Response(`SSE not configured (${EVENTS_BINDING_NAME} binding missing)`, { status: 501 }));
       }
       const prefix = decodeURIComponent(url.pathname.slice(`${EVENTS_PREFIX}/`.length))
         .split('/').filter(Boolean)[0] ?? '';
       if (!prefix) return withCors(new Response('Missing prefix', { status: 400 }));
       log.info('SSE subscribe', { prefix });
-      const stub = env.TODO_DAV.get(env.TODO_DAV.idFromName(prefix));
+      const stub = eventsBinding.get(eventsBinding.idFromName(prefix));
       return withCors(await stub.fetch(new Request('https://internal/__events', request)));
     }
 
@@ -1136,8 +1179,12 @@ export class TodoDavBroadcaster {
       return new Response('Missing required headers', { status: 400 });
     }
 
-    const db = this.env?.TODO_DB;
-    if (!db) return new Response('Missing D1 binding TODO_DB', { status: 500 });
+    let db;
+    try {
+      db = getDatabase(this.env);
+    } catch (error) {
+      return new Response(String(error?.message || error), { status: 500 });
+    }
 
     const bytes = new Uint8Array(await request.arrayBuffer());
     const wrote = await semanticWrite(db, prefix, path, pathType, bytes);

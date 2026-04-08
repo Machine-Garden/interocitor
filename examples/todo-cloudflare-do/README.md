@@ -41,7 +41,7 @@ Durable Objects are **not strictly required for plain polling sync**, but they a
 
 - Adapter-facing base URL: `https://<host>/<optional-prefix>/io/<namespace>`
 - SSE endpoint: `.../events/<namespace>` (derived from base URL)
-- Execute endpoint: `POST .../io/<namespace>/__interocitor__/execute`
+- System endpoint: `POST .../__interocitor/system/<namespace>`
 
 Deployment can be:
 
@@ -49,14 +49,14 @@ Deployment can be:
 - dedicated subdomain (example: `https://interocitor.mysite.com/io/team-a`)
 - shared worker behind gateway/reroute (preserve auth header, query string, SSE streaming)
 
-## Mutation policy (append-only + execute)
+## Mutation policy (append-only + system endpoint)
 
 - Default mode is append-only (`INTEROCITOR_APPEND_ONLY=1`).
 - In append-only mode:
   - `DELETE` returns `405`
   - `PUT` to an existing file returns `409`
-- Privileged operations are done via `POST /io/<prefix>/__interocitor__/execute`.
-- Execute requires `x-interocitor-token` header matching Worker secret `INTEROCITOR_EXEC_TOKEN`.
+- Privileged operations are done via `POST /__interocitor/system/<prefix>`.
+- System operations require `Authorization: Bearer <token>` matching Worker secret `INTEROCITOR_SYSTEM_TOKEN`.
 
 Access-token model (for normal adapter traffic):
 
@@ -65,11 +65,21 @@ Access-token model (for normal adapter traffic):
 - If `INTEROCITOR_ACCESS_TOKEN` is not set, the backend is public.
 - This access token protects backend usage/cost, not data confidentiality.
 
-### Execute compact
+### System op: prune-compacted-changes
 
-Compaction is implemented server-side as a privileged prune over `changes/*.json` up to a watermark HLC.
+Real compaction is client-side: a device with the mesh key pulls, builds the encrypted snapshot, and publishes the next manifest generation. The worker never decrypts mesh data. This system op only performs the privileged cleanup step afterward by pruning `changes/*.json` up to a watermark HLC.
 
-Request body:
+Canonical request body:
+
+```json
+{
+  "op": "prune-compacted-changes",
+  "remotePath": "/team-a/todo-app",
+  "watermarkHlc": "2026-04-07T12:30:00.000Z:000001:dev_x"
+}
+```
+
+Legacy compatibility:
 
 ```json
 {
@@ -81,13 +91,14 @@ Request body:
 
 Notes:
 
+- The worker does **not** build snapshots, merge rows, or decrypt encrypted payloads.
 - It only prunes files named like `<hlc>-chg_*.json` and skips `head.json`.
 - It writes an immutable command receipt to `/.interocitor/commands/` under the same remote path.
-- Automatic compaction is intentionally **not** enabled in this example yet.
+- Automatic post-compaction pruning is intentionally **not** enabled in this example yet.
 
-### Execute maintenance
+### System op: maintenance
 
-The same privileged execute endpoint also exposes product-ish maintenance/admin helpers:
+The same privileged system endpoint also exposes product-ish maintenance/admin helpers:
 
 ```json
 { "op": "run-maintenance" }
@@ -133,7 +144,7 @@ cd examples/todo-cloudflare-do
 yarn
 yarn wrangler d1 create todo-cloudflare-do-db
 ## copy returned database_id + preview_database_id into wrangler.toml
-yarn wrangler secret put INTEROCITOR_EXEC_TOKEN
+yarn wrangler secret put INTEROCITOR_SYSTEM_TOKEN
 yarn wrangler secret put INTEROCITOR_ACCESS_TOKEN
 yarn db:migrate:local
 yarn check
@@ -204,7 +215,7 @@ Current example coverage includes:
 - mesh-path activity tracking + TTL cleanup
 - oversized writes rejected before D1 persistence
 
-The reconnect spec simulates DO loss by dropping live SSE clients through the privileged execute endpoint in the **test-only** Wrangler config. This validates the behavior you actually care about: EventSource reconnects automatically and sync resumes without waiting for the long polling interval.
+The reconnect spec simulates DO loss by dropping live SSE clients through the privileged system endpoint in the **test-only** Wrangler config. This validates the behavior you actually care about: EventSource reconnects automatically and sync resumes without waiting for the long polling interval.
 
 ## Deploy
 

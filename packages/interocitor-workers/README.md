@@ -35,7 +35,7 @@ That example uses this package as its Wrangler `main` entry, but this package is
 - native IO endpoints
 - folder/file metadata
 - append-only mutation support
-- compaction hooks
+- post-compaction change pruning hooks (server never decrypts mesh data)
 - path activity tracking
 - maintenance and TTL cleanup
 - SSE invalidation streams

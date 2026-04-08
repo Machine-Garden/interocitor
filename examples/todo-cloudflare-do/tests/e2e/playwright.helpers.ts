@@ -6,7 +6,7 @@ export const CF_POLL_INTERVAL_MS = 10 * 60 * 1000;
 export const CF_SSE_TIMEOUT_MS = 5_000;
 export const CF_WORKER_BASE_URL = `http://127.0.0.1:${process.env.PLAYWRIGHT_CF_WORKER_PORT || '8788'}`;
 export const CF_ACCESS_SECRET = process.env.PLAYWRIGHT_CF_ACCESS_SECRET || 'playwright-access-secret';
-export const CF_EXEC_SECRET = process.env.PLAYWRIGHT_CF_EXEC_SECRET || 'playwright-exec-secret';
+export const CF_SYSTEM_SECRET = process.env.PLAYWRIGHT_CF_SYSTEM_SECRET || 'playwright-system-secret';
 
 export function makeNamespace(prefix = 'team-cf'): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -119,12 +119,11 @@ export async function clearEvents(page: Page): Promise<void> {
 }
 
 async function executeControl(namespace: string, payload: Record<string, unknown>): Promise<unknown> {
-  const res = await fetch(`${CF_WORKER_BASE_URL}/io/${encodeURIComponent(namespace)}/__interocitor__/execute`, {
+  const res = await fetch(`${CF_WORKER_BASE_URL}/__interocitor/system/${encodeURIComponent(namespace)}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${accessTokenForNamespace(namespace)}`,
-      'x-interocitor-token': CF_EXEC_SECRET,
+      Authorization: `Bearer ${CF_SYSTEM_SECRET}`,
     },
     body: JSON.stringify(payload),
   });

@@ -6,7 +6,7 @@ compatibility_date = "2026-04-07"
 INTEROCITOR_APPEND_ONLY = "1"
 INTEROCITOR_VERBOSE = "1"
 INTEROCITOR_ACCESS_TOKEN = "playwright-access-secret"
-INTEROCITOR_EXEC_TOKEN = "playwright-exec-secret"
+INTEROCITOR_SYSTEM_TOKEN = "playwright-system-secret"
 INTEROCITOR_PATH_TTL_HOURS = "0"
 INTEROCITOR_MAINTENANCE_MAX_PATHS_PER_RUN = "100"
 INTEROCITOR_MAX_CONTROL_BYTES = "262144"
@@ -18,14 +18,14 @@ INTEROCITOR_MAX_GENERIC_FILE_BYTES = "1048576"
 crons = ["0 */4 * * *"]
 
 [[d1_databases]]
-binding = "TODO_DB"
+binding = "INTEROCITOR_DB"
 database_name = "todo-cloudflare-do-db"
 database_id = "REPLACE_WITH_REAL_D1_DATABASE_ID"
 preview_database_id = "REPLACE_WITH_REAL_D1_PREVIEW_DATABASE_ID"
 migrations_dir = "migrations"
 
 [[durable_objects.bindings]]
-name = "TODO_DAV"
+name = "INTEROCITOR_EVENTS"
 class_name = "TodoDavBroadcaster"
 
 [[migrations]]

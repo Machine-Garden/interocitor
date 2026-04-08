@@ -291,6 +291,20 @@ import { MemoryAdapter } from 'interocitor/adapters/memory';
 
 ## Encryption
 
+AES-256-GCM via Web Crypto API. Key is generated on the first device, shared to others as a base58 passphrase (~43 chars), a URL fragment (`#key=…`, never hits the server), or a QR code.
+
+Key never leaves devices. Cloud folder only contains ciphertext.
+
+### Client-side fingerprint verification
+
+For encrypted remotes, every encrypted change and snapshot payload carries the mesh fingerprint (`meshId`) inside the encrypted envelope. Clients verify that fingerprint after decrypting remote payloads.
+
+- matching fingerprint → accept and merge
+- wrong fingerprint → treat remote as poisoned and cut off sync
+- poisoned remote → emit `remote:poisoned`
+
+This protects against cross-mesh ciphertext injection and storage mix-ups. It does **not** protect against someone who already has the real mesh key.
+
 Optional end-to-end encryption uses AES-256-GCM via Web Crypto.
 
 ```ts
@@ -319,6 +333,7 @@ const unsub = engine.on((event) => {
     case 'sync:start':
     case 'sync:complete':
     case 'sync:error':
+    case 'remote:poisoned':
     case 'flush:start':
     case 'flush:complete':
     case 'flush:error':

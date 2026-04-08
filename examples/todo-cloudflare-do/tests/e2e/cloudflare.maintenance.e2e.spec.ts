@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer';
 import { expect, test } from '@playwright/test';
 
 import {
-  CF_EXEC_SECRET,
+  CF_SYSTEM_SECRET,
   CF_TESTS_ENABLED,
   CF_WORKER_BASE_URL,
   accessTokenForNamespace,
@@ -42,12 +42,11 @@ async function getFile(namespace: string, path: string): Promise<Response> {
 }
 
 async function execute(namespace: string, payload: Record<string, unknown>): Promise<any> {
-  const response = await fetch(`${CF_WORKER_BASE_URL}/io/${encodeURIComponent(namespace)}/__interocitor__/execute`, {
+  const response = await fetch(`${CF_WORKER_BASE_URL}/__interocitor/system/${encodeURIComponent(namespace)}`, {
     method: 'POST',
     headers: {
-      ...authHeaders(namespace),
+      Authorization: `Bearer ${CF_SYSTEM_SECRET}`,
       'Content-Type': 'application/json',
-      'x-interocitor-token': CF_EXEC_SECRET,
     },
     body: JSON.stringify(payload),
   });

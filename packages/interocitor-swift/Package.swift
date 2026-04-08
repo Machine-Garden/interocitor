@@ -11,6 +11,16 @@ let package = Package(
         .library(name: "InterocitorSwift", targets: ["InterocitorSwift"])
     ],
     targets: [
-        .target(name: "InterocitorSwift")
+        .target(
+            name: "InterocitorSwift",
+            // SQLite3 ships with macOS and iOS — no external dependency needed.
+            linkerSettings: [
+                .linkedLibrary("sqlite3")
+            ]
+        ),
+        .testTarget(
+            name: "InterocitorSwiftTests",
+            dependencies: ["InterocitorSwift"]
+        )
     ]
 )

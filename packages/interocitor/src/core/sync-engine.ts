@@ -29,6 +29,8 @@ import type {
   DatabaseSchemaDefinition,
   WhereClause,
   ReplicaConfig,
+  MeshChangePayload,
+  MeshSnapshotPayload,
 } from '../core/types.ts';
 
 import { hlcInit, hlcNow, hlcSerialize, hlcParse, hlcReceive, hlcCompareStr } from '../core/hlc.ts';
@@ -156,6 +158,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   // NOT a full dataset mirror; reads go to IDB directly.
   private tables: Record<string, Record<string, Row>> = {};
   private manifest: Manifest | null = null;
+  private remotePoisonError: Error | null = null;
 
   // Known table names (populated from IDB index on init, updated on writes)
   private knownTables: Set<string> = new Set();
@@ -216,6 +219,9 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   }
 
   private requireAdapter(operation: string): StorageAdapter {
+    if (this.remotePoisonError) {
+      throw this.remotePoisonError;
+    }
     if (!this.adapter) {
       throw new Error(`No remote storage adapter configured. Call setRemoteStorage() before ${operation}.`);
     }
@@ -231,9 +237,11 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
   private async resetRemoteSyncState(): Promise<void> {
     this.manifest = null;
+    this.remotePoisonError = null;
     this.connected = false;
     await this.local.setMeta('cursor', '');
     await this.local.setMeta('epoch', 0);
+    await this.local.setMeta('meshId', '');
   }
 
   private getRowHlc(row: Row): string {
@@ -315,7 +323,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   private startPolling(): void {
     this.stopPolling();
     this.pollTimer = setInterval(() => {
-      this.pull().catch(err => this.emit({ type: 'sync:error', error: err }));
+      this.pull().catch(() => {});
     }, this.config.pollInterval);
   }
 
@@ -389,13 +397,83 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     return encryptEntry(this.encryptionKey, plaintext);
   }
 
-  private async decodeFromCloud(data: string): Promise<string | null> {
+  private async decodeFromCloud(data: string): Promise<string> {
     if (!this.encrypted || !this.encryptionKey) return data;
-    try {
-      return await decryptEntry(this.encryptionKey, data);
-    } catch {
-      return null;
+    return decryptEntry(this.encryptionKey, data);
+  }
+
+  private async poisonRemote(error: unknown, path?: string): Promise<Error> {
+    const poisoned = error instanceof Error ? error : new Error(String(error));
+    if (!this.remotePoisonError) {
+      this.remotePoisonError = poisoned;
+      this.stopPolling();
+      this.clearScheduledFlush();
+      this.connected = false;
     }
+    this.emit({ type: 'remote:poisoned', error: poisoned, path });
+    return poisoned;
+  }
+
+  private async assertExpectedMeshId(meshId: string): Promise<void> {
+    if (!meshId) {
+      throw new Error('Remote mesh is missing meshId');
+    }
+
+    const manifestMeshId = this.manifest?.meshId;
+    if (manifestMeshId && manifestMeshId !== meshId) {
+      throw new Error(`Remote mesh mismatch: expected ${manifestMeshId}, got ${meshId}`);
+    }
+
+    const storedMeshId = await this.local.getMeta('meshId');
+    if (typeof storedMeshId === 'string' && storedMeshId && storedMeshId !== meshId) {
+      throw new Error(`Remote mesh mismatch: expected ${storedMeshId}, got ${meshId}`);
+    }
+
+    await this.local.setMeta('meshId', meshId);
+  }
+
+  private async encodeChangePayload(entry: ChangeEntry): Promise<string> {
+    const meshId = this.manifest?.meshId;
+    if (!meshId) {
+      throw new Error('Cannot encode change payload before manifest is loaded');
+    }
+
+    const payload: MeshChangePayload = { meshId, kind: 'change', entry };
+    return this.encodeForCloud(JSON.stringify(payload));
+  }
+
+  private async decodeChangePayload(data: string, path: string): Promise<ChangeEntry> {
+    const decoded = await this.decodeFromCloud(data);
+    const payload = JSON.parse(decoded) as MeshChangePayload;
+
+    if (payload.kind !== 'change' || !payload.entry) {
+      throw new Error(`Remote change payload has invalid shape: ${path}`);
+    }
+
+    await this.assertExpectedMeshId(String(payload.meshId || ''));
+    return payload.entry;
+  }
+
+  private async encodeSnapshotPayload(snapshot: Snapshot): Promise<string> {
+    const meshId = this.manifest?.meshId;
+    if (!meshId) {
+      throw new Error('Cannot encode snapshot payload before manifest is loaded');
+    }
+
+    const payload: MeshSnapshotPayload = { meshId, kind: 'snapshot', snapshot };
+    return this.encodeForCloud(JSON.stringify(payload));
+  }
+
+  private async decodeSnapshotPayload(data: string, path: string): Promise<Snapshot> {
+    const decoded = await this.decodeFromCloud(data);
+    const payload = JSON.parse(decoded) as MeshSnapshotPayload;
+
+    if (payload.kind !== 'snapshot' || !payload.snapshot) {
+      throw new Error(`Remote snapshot payload has invalid shape: ${path}`);
+    }
+
+    await this.assertExpectedMeshId(String(payload.meshId || ''));
+    return payload.snapshot;
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────
@@ -516,10 +594,13 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
   async disconnect(): Promise<void> {
     this.stopPolling();
     this.clearScheduledFlush();
-    await this.flush();
+    if (!this.remotePoisonError) {
+      await this.flush();
+    }
     this.local.close();
     this.connected = false;
     this.initialized = false;
+    this.remotePoisonError = null;
   }
 
   /**
@@ -547,7 +628,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     const wasConnected = this.connected;
     const hadAdapter = this.adapter !== null;
 
-    if (wasConnected && hadAdapter) {
+    if (wasConnected && hadAdapter && !this.remotePoisonError) {
       await this.pull();
     }
 
@@ -565,6 +646,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     }
 
     this.adapter = adapter;
+    this.remotePoisonError = null;
 
     if (wasConnected && adapter) {
       await this.connect();
@@ -683,8 +765,14 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     }
 
     const pointer = await this.readJson<ManifestPointer>(p.manifestPointer);
-    const manifest = await this.readJson<Manifest>(`${this.config.remotePath}/${pointer.file}`);
+    const manifestPath = `${this.config.remotePath}/${pointer.file}`;
+    const manifest = await this.readJson<Manifest>(manifestPath);
     await this.validateManifestHash(manifest as unknown as { contentHash: string; [key: string]: unknown });
+    try {
+      await this.assertExpectedMeshId(manifest.meshId);
+    } catch (err) {
+      throw await this.poisonRemote(err, manifestPath);
+    }
 
     if (manifest.version !== 3) {
       throw new Error(`Unsupported manifest version ${manifest.version} (expected 3).`);
@@ -903,6 +991,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     this.clearScheduledFlush();
 
     try {
+      await this.loadOrCreateManifest();
       await this.flushToAdapter(this.adapter, this.config.remotePath, entries, true);
 
       // Best-effort replication — failures don't fail the primary flush.
@@ -947,8 +1036,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
     for (const entry of entries) {
       const fileName = `${entry.hlc}-${entry.id}.json`;
-      const raw = JSON.stringify(entry);
-      const payload = await this.encodeForCloud(raw);
+      const payload = await this.encodeChangePayload(entry);
       await adapter.writeFile(p.changeFile(fileName), textEncoder.encode(payload));
 
       if (!lastWrittenHlc || hlcCompareStr(entry.hlc, lastWrittenHlc) > 0) {
@@ -1035,9 +1123,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
           if (cursor && hlcCompareStr(fileHlc, cursor) <= 0) continue;
 
           const raw = textDecoder.decode(await adapter.readFile(file.path));
-          const decoded = await this.decodeFromCloud(raw);
-          if (!decoded) continue;
-          const entry = JSON.parse(decoded) as ChangeEntry;
+          const entry = await this.decodeChangePayload(raw, file.path);
           if (cursor && hlcCompareStr(entry.hlc, cursor) <= 0) continue;
 
           const remoteHlc = hlcParse(entry.hlc);
@@ -1061,8 +1147,8 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
           if (!latestMergedHlc || hlcCompareStr(entry.hlc, latestMergedHlc) > 0) {
             latestMergedHlc = entry.hlc;
           }
-        } catch {
-          // Skip corrupt or unreadable entry.
+        } catch (err) {
+          throw await this.poisonRemote(err, file.path);
         }
       }
 
@@ -1076,6 +1162,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
     } catch (err) {
       log('error', 'pull() — failed', err);
       this.emit({ type: 'sync:error', error: err as Error });
+      throw err;
     }
   }
 
@@ -1099,18 +1186,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
     try {
       const data = await adapter.readFile(snapshotPath);
-      let json: string;
-
-      if (this.encrypted && this.encryptionKey) {
-        const content = textDecoder.decode(data);
-        const decrypted = await this.decodeFromCloud(content);
-        if (!decrypted) throw new Error('Failed to decrypt snapshot');
-        json = decrypted;
-      } else {
-        json = textDecoder.decode(data);
-      }
-
-      const snapshot = JSON.parse(json) as Snapshot;
+      const snapshot = await this.decodeSnapshotPayload(textDecoder.decode(data), snapshotPath);
 
       // Clear local state
       await this.local.clearAll();
@@ -1135,9 +1211,10 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
 
       await this.local.setMeta('epoch', snapshot.epoch);
       this.emit({ type: 'rehydrate:complete', rowCount });
-    } catch {
-      // No snapshot available — start fresh
-      this.emit({ type: 'rehydrate:complete', rowCount: 0 });
+    } catch (err) {
+      const poisoned = await this.poisonRemote(err, snapshotPath);
+      this.emit({ type: 'sync:error', error: poisoned });
+      throw poisoned;
     }
 
     // Pull any changes since the snapshot
@@ -1186,8 +1263,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>> = Reco
       tables: snapshotTables,
     };
 
-    const snapshotJson = JSON.stringify(snapshot);
-    const snapshotPayload = await this.encodeForCloud(snapshotJson);
+    const snapshotPayload = await this.encodeSnapshotPayload(snapshot);
     await adapter.writeFile(snapshotPath, textEncoder.encode(snapshotPayload));
 
     const manifestPayload = {

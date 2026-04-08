@@ -211,11 +211,12 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
     expect(result).toContain('Unauthorized manifest writer');
   });
 
-  test('encrypted change files do not leak plaintext', async ({ page }) => {
+  test('encrypted change files are mesh-bound and do not leak plaintext', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
       const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { decryptEntry } = await import('/packages/interocitor/dist/crypto/encryption.js');
 
       const key = await generateKey();
       localStorage.setItem('interocitor-device-id', 'dev_enc');
@@ -231,14 +232,265 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       await engine.connect();
       await engine.put('secrets', 's1', { text: 'classified' });
       await engine.flush();
+      const meshId = engine.getMeshId();
       await engine.disconnect();
 
       const dump = adapter.dump();
       const payload = Object.entries(dump).find(([path]) => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(path));
-      return payload ? payload[1] : '';
+      if (!payload) {
+        return { ciphertext: '', meshId: null, kind: null, decrypted: null };
+      }
+
+      const ciphertext = payload[1];
+      const decrypted = JSON.parse(await decryptEntry(key, ciphertext));
+      return {
+        ciphertext,
+        meshId,
+        kind: decrypted.kind,
+        decryptedMeshId: decrypted.meshId,
+        opsCount: Array.isArray(decrypted.entry?.ops) ? decrypted.entry.ops.length : 0,
+        leakedPlaintext: ciphertext.includes('classified'),
+      };
     });
 
-    expect(result.includes('classified')).toBe(false);
+    expect(result.leakedPlaintext).toBe(false);
+    expect(result.kind).toBe('change');
+    expect(result.decryptedMeshId).toBe(result.meshId);
+    expect(result.opsCount).toBe(1);
+  });
+
+  test('encrypted snapshots are mesh-bound and do not leak plaintext', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
+      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { decryptEntry } = await import('/packages/interocitor/dist/crypto/encryption.js');
+
+      const key = await generateKey();
+      const adapter = new MemoryAdapter();
+      localStorage.setItem('interocitor-device-id', 'dev_snapshot_fp');
+
+      const engine = new SyncEngine(adapter, {
+        remotePath: '/MeshSnapshotFP',
+        dbName: 'mesh-snapshot-fp-db',
+        pollInterval: 600_000,
+        flushThreshold: 1,
+      });
+      engine.setEncryptionKey(key);
+
+      await engine.init();
+      await engine.connect();
+      await engine.put('notes', 'n1', { text: 'classified snapshot' });
+      await engine.flush();
+      await engine.compact();
+      const meshId = engine.getMeshId();
+      await engine.disconnect();
+
+      const dump = adapter.dump();
+      const payload = Object.entries(dump).find(([path]) => path.includes('/mainline/snapshot-1-'));
+      if (!payload) {
+        return { ciphertext: '', meshId: null, kind: null, snapshotMeshId: null, leakedPlaintext: true };
+      }
+
+      const ciphertext = payload[1];
+      const decrypted = JSON.parse(await decryptEntry(key, ciphertext));
+      return {
+        meshId,
+        kind: decrypted.kind,
+        snapshotMeshId: decrypted.meshId,
+        tables: Object.keys(decrypted.snapshot?.tables ?? {}),
+        leakedPlaintext: ciphertext.includes('classified snapshot'),
+      };
+    });
+
+    expect(result.leakedPlaintext).toBe(false);
+    expect(result.kind).toBe('snapshot');
+    expect(result.snapshotMeshId).toBe(result.meshId);
+    expect(result.tables).toContain('notes');
+  });
+
+  test('encrypted wrong-mesh snapshot data poisons the remote and cuts off sync', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
+      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+
+      const adapter = new MemoryAdapter();
+      const key = await generateKey();
+
+      localStorage.setItem('interocitor-device-id', 'dev_snapshot_source');
+      const source = new SyncEngine(adapter, {
+        remotePath: '/MeshSnapshotSource',
+        dbName: 'mesh-snapshot-source-db',
+        pollInterval: 600_000,
+        flushThreshold: 1,
+      });
+      source.setEncryptionKey(key);
+      await source.init();
+      await source.connect();
+      await source.put('notes', 'n1', { text: 'source snapshot payload' });
+      await source.flush();
+      await source.compact();
+      await source.disconnect();
+
+      localStorage.setItem('interocitor-device-id', 'dev_snapshot_target_seed');
+      const targetSeed = new SyncEngine(adapter, {
+        remotePath: '/MeshSnapshotTarget',
+        dbName: 'mesh-snapshot-target-seed-db',
+        pollInterval: 600_000,
+        flushThreshold: 1,
+      });
+      targetSeed.setEncryptionKey(key);
+      await targetSeed.init();
+      await targetSeed.connect();
+      await targetSeed.put('notes', 'n1', { text: 'target snapshot payload' });
+      await targetSeed.flush();
+      await targetSeed.compact();
+      await targetSeed.disconnect();
+
+      const dump = adapter.dump();
+      const sourceSnapshot = Object.entries(dump).find(([path]) => path.startsWith('/MeshSnapshotSource/mainline/snapshot-1-'));
+      const targetSnapshot = Object.entries(dump).find(([path]) => path.startsWith('/MeshSnapshotTarget/mainline/snapshot-1-'));
+      if (!sourceSnapshot || !targetSnapshot) throw new Error('Snapshot file not found');
+      await adapter.writeFile(targetSnapshot[0], sourceSnapshot[1]);
+
+      await new Promise<void>((resolve) => {
+        const req = indexedDB.deleteDatabase('interocitor');
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+        req.onblocked = () => resolve();
+      });
+
+      localStorage.setItem('interocitor-device-id', 'dev_snapshot_target_reader');
+      const target = new SyncEngine(adapter, {
+        remotePath: '/MeshSnapshotTarget',
+        dbName: 'mesh-snapshot-target-reader-db',
+        pollInterval: 600_000,
+      });
+      target.setEncryptionKey(key);
+      await target.init();
+
+      const events: Array<{ type: string; path?: string; message?: string }> = [];
+      target.on((event) => {
+        if (event.type === 'remote:poisoned') {
+          events.push({ type: event.type, path: event.path, message: event.error.message });
+        }
+      });
+
+      let connectError = 'no-error';
+      try {
+        await target.connect();
+      } catch (error: any) {
+        connectError = String(error?.message ?? error);
+      }
+
+      let followupRehydrateError = 'no-error';
+      try {
+        await target.rehydrate();
+      } catch (error: any) {
+        followupRehydrateError = String(error?.message ?? error);
+      }
+
+      return {
+        connectError,
+        followupRehydrateError,
+        poisonEventCount: events.length,
+        poisonPath: events[0]?.path ?? null,
+        poisonMessage: events[0]?.message ?? null,
+      };
+    });
+
+    expect(result.connectError).toContain('Remote mesh mismatch');
+    expect(result.followupRehydrateError).toContain('Remote mesh mismatch');
+    expect(result.poisonEventCount).toBeGreaterThan(0);
+    expect(result.poisonPath).toContain('/MeshSnapshotTarget/mainline/snapshot-1-');
+    expect(result.poisonMessage).toContain('Remote mesh mismatch');
+  });
+
+  test('encrypted wrong-mesh data poisons the remote and cuts off sync', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
+      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+
+      const adapter = new MemoryAdapter();
+      const key = await generateKey();
+
+      localStorage.setItem('interocitor-device-id', 'dev_source');
+      const source = new SyncEngine(adapter, {
+        remotePath: '/MeshSource',
+        dbName: 'mesh-source-db',
+        pollInterval: 600_000,
+        flushThreshold: 1,
+      });
+      source.setEncryptionKey(key);
+      await source.init();
+      await source.connect();
+      await source.put('notes', 'n1', { text: 'poison me' });
+      await source.flush();
+      await source.disconnect();
+
+      localStorage.setItem('interocitor-device-id', 'dev_target_seed');
+      const targetSeed = new SyncEngine(adapter, {
+        remotePath: '/MeshTarget',
+        dbName: 'mesh-target-seed-db',
+        pollInterval: 600_000,
+      });
+      targetSeed.setEncryptionKey(key);
+      await targetSeed.init();
+      await targetSeed.connect();
+      await targetSeed.disconnect();
+
+      const dump = adapter.dump();
+      const sourceChange = Object.entries(dump).find(([path]) => path.startsWith('/MeshSource/changes/') && /-chg_[^/]+\.json$/.test(path));
+      if (!sourceChange) throw new Error('Source change file not found');
+      const poisonedPath = sourceChange[0].replace('/MeshSource/', '/MeshTarget/');
+      await adapter.writeFile(poisonedPath, sourceChange[1]);
+
+      localStorage.setItem('interocitor-device-id', 'dev_target_reader');
+      const target = new SyncEngine(adapter, {
+        remotePath: '/MeshTarget',
+        dbName: 'mesh-target-reader-db',
+        pollInterval: 600_000,
+      });
+      target.setEncryptionKey(key);
+      await target.init();
+
+      const events: Array<{ type: string; path?: string; message?: string }> = [];
+      target.on((event) => {
+        if (event.type === 'remote:poisoned') {
+          events.push({ type: event.type, path: event.path, message: event.error.message });
+        }
+      });
+
+      let connectError = 'no-error';
+      try {
+        await target.connect();
+      } catch (error: any) {
+        connectError = String(error?.message ?? error);
+      }
+
+      let followupPullError = 'no-error';
+      try {
+        await target.pull();
+      } catch (error: any) {
+        followupPullError = String(error?.message ?? error);
+      }
+
+      return {
+        connectError,
+        followupPullError,
+        poisonEventCount: events.length,
+        poisonPath: events[0]?.path ?? null,
+        poisonMessage: events[0]?.message ?? null,
+      };
+    });
+
+    expect(result.connectError).toContain('Remote mesh mismatch');
+    expect(result.followupPullError).toContain('Remote mesh mismatch');
+    expect(result.poisonEventCount).toBeGreaterThan(0);
+    expect(result.poisonPath).toContain('/MeshTarget/changes/');
+    expect(result.poisonMessage).toContain('Remote mesh mismatch');
   });
 
   test('can start without a remote adapter and sync later', async ({ page }) => {

@@ -18,7 +18,7 @@ INTEROCITOR_MAX_GENERIC_FILE_BYTES = "8388608"
 crons = ["0 */4 * * *"]
 
 [[d1_databases]]
-binding = "TODO_DB"
+binding = "INTEROCITOR_DB"
 database_name = "todo-cloudflare-do-db"
 # Replace with your real D1 IDs after `wrangler d1 create todo-cloudflare-do-db`.
 database_id = "REPLACE_WITH_REAL_D1_DATABASE_ID"
@@ -26,7 +26,7 @@ preview_database_id = "REPLACE_WITH_REAL_D1_PREVIEW_DATABASE_ID"
 migrations_dir = "migrations"
 
 [[durable_objects.bindings]]
-name = "TODO_DAV"
+name = "INTEROCITOR_EVENTS"
 class_name = "TodoDavBroadcaster"
 
 [[migrations]]

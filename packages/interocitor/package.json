@@ -59,7 +59,8 @@
   ],
   "license": "MIT",
   "devDependencies": {
-    "@playwright/test": "^1.54.2"
+    "@playwright/test": "^1.54.2",
+    "typescript": "^6.0.0"
   },
   "engines": {
     "node": ">=18.0.0"

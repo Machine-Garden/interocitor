@@ -75,6 +75,15 @@ export class WebDAVAdapter implements StorageAdapter {
     }
   }
 
+  /**
+   * Returns the WebDAV base URL (without credentials) for embedding in a QR payload.
+   * The scanner uses this to point their WebDAVAdapter at the same server.
+   * Auth (username/password or token) must be configured separately by the user.
+   */
+  getHandshakeConfig(): string {
+    return JSON.stringify({ baseUrl: this.config.baseUrl });
+  }
+
   isAuthenticated(): boolean {
     return this.authenticated;
   }

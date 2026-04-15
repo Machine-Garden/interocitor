@@ -277,6 +277,23 @@ export interface StorageAdapter {
 
   // Metadata
   getFileMetadata(path: string): Promise<FileEntry | null>;
+
+  /**
+   * Return an opaque config string describing how to reach this backend,
+   * suitable for embedding in a handshake QR code payload.
+   *
+   * Must NOT include credentials (passwords, tokens, OAuth secrets).
+   * The scanner uses this to configure their own adapter instance before
+   * starting the ECDH relay exchange.
+   *
+   * Returns undefined for adapters where the backend address is already
+   * baked into the app (e.g. a fixed Cloudflare Worker URL known to all
+   * app users). In that case the scanner configures their adapter independently.
+   *
+   * The returned string should be treated as opaque by the handshake layer;
+   * only the same adapter class knows how to parse it.
+   */
+  getHandshakeConfig?(): string;
 }
 
 // ─── Local Storage Adapter ───────────────────────────────────────────

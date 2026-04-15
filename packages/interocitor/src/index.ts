@@ -34,6 +34,35 @@
  * ```
  */
 
+// ─── Handshake ────────────────────────────────────────────────────────
+
+export {
+  generateShareQR,
+  generateJoinQR,
+  handleScannedQR,
+  encodeQRPayload,
+  decodeQRPayload,
+  buildPairUrl,
+  parseQRFromUrl,
+  generateECDHKeypair,
+  exportECDHPublicKey,
+  importECDHPublicKey,
+  createGeneratorSession,
+  runScannerHandshake,
+} from './handshake/index.ts';
+
+export type {
+  HandshakeQRPayload,
+  HandshakeIntent,
+  HandshakeCredentials,
+  GeneratorSession,
+  GenerateShareQROptions,
+  GenerateShareQRResult,
+  GenerateJoinQROptions,
+  GenerateJoinQRResult,
+  HandleScannedQROptions,
+} from './handshake/index.ts';
+
 // ─── Engine ───────────────────────────────────────────────────────────
 
 export { SyncEngine } from './core/sync-engine.ts';

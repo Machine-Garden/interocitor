@@ -30,6 +30,14 @@ export class MemoryAdapter implements StorageAdapter {
     this.authenticated = true;
   }
 
+  /**
+   * Memory adapter has no real backend — returns an empty config.
+   * Only useful in tests where both sides share the same in-memory store.
+   */
+  getHandshakeConfig(): string {
+    return JSON.stringify({});
+  }
+
   isAuthenticated(): boolean {
     return this.authenticated;
   }

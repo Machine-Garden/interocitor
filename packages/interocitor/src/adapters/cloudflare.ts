@@ -42,6 +42,12 @@ interface IoFileMeta {
  * });
  * ```
  */
+/** Config shape embedded in QR payloads for CloudflareAdapter. Credentials excluded. */
+export interface CloudflareHandshakeConfig {
+  /** Worker IO base URL including the /io/<prefix> path segment. */
+  baseUrl: string;
+}
+
 export class CloudflareAdapter implements StorageAdapter {
   readonly name = 'cloudflare';
 
@@ -108,6 +114,15 @@ export class CloudflareAdapter implements StorageAdapter {
     }
 
     throw new Error(`Cloudflare Worker unreachable: HTTP ${res.status}`);
+  }
+
+  /**
+   * Returns the worker base URL (without credentials) for embedding in a QR payload.
+   * The scanner uses this to point their CloudflareAdapter at the same worker shard.
+   */
+  getHandshakeConfig(): string {
+    const cfg: CloudflareHandshakeConfig = { baseUrl: this.config.baseUrl };
+    return JSON.stringify(cfg);
   }
 
   isAuthenticated(): boolean {

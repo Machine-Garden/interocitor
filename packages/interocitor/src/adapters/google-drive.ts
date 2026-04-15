@@ -104,6 +104,15 @@ export class GoogleDriveAdapter implements StorageAdapter {
     localStorage.setItem('gdrive-access-token', token);
   }
 
+  /**
+   * Returns the Google OAuth clientId for embedding in a QR payload.
+   * The scanner uses this to configure their GoogleDriveAdapter.
+   * The OAuth flow (and resulting access token) is performed separately by the user.
+   */
+  getHandshakeConfig(): string {
+    return JSON.stringify({ clientId: this.config.clientId });
+  }
+
   isAuthenticated(): boolean {
     return this.accessToken !== null;
   }

@@ -8,7 +8,7 @@
  *   https://<worker>/io/<prefix>
  *
  * The adapter derives:
- *   https://<worker>/events/<prefix>  (SSE invalidations)
+ *   wss://<worker>/notify/<prefix>  (WebSocket invalidations via InterocitorRelay DO)
  */
 
 import type { StorageAdapter, FileEntry } from '../core/types.ts';
@@ -31,7 +31,7 @@ interface IoFileMeta {
 /**
  * Interocitor-native Cloudflare adapter for Worker + D1 based deployments.
  *
- * Use this when you want a purpose-fit backend with optional SSE-driven
+ * Use this when you want a purpose-fit backend with optional WebSocket-driven
  * invalidation instead of a generic file protocol like WebDAV.
  *
  * @example
@@ -68,12 +68,13 @@ export class CloudflareAdapter implements StorageAdapter {
     return u.toString().replace(/\/$/, '');
   }
 
-  private get eventsUrl(): string {
+  private get notifyUrl(): string {
     const u = new URL(this.config.baseUrl);
     if (!u.pathname.includes('/io/')) {
       throw new Error('CloudflareAdapter baseUrl must include /io/<prefix>');
     }
-    u.pathname = u.pathname.replace('/io/', '/events/');
+    u.pathname = u.pathname.replace('/io/', '/notify/');
+    u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
     if (this.config.token) {
       u.searchParams.set('access_token', this.config.token);
     }
@@ -117,33 +118,58 @@ export class CloudflareAdapter implements StorageAdapter {
     onInvalidate: (payload: { type: string; path: string; ts: number }) => void,
     hooks?: { onReady?: () => void; onError?: () => void },
   ): () => void {
-    const source = new EventSource(this.eventsUrl);
+    let ws: WebSocket | null = null;
+    let cancelled = false;
+    let backoffMs = 1000;
+    const MAX_BACKOFF_MS = 30_000;
 
-    const handler = (e: Event) => {
+    const connect = () => {
+      if (cancelled) return;
       try {
-        onInvalidate(JSON.parse((e as MessageEvent).data));
+        ws = new WebSocket(this.notifyUrl);
       } catch {
-        onInvalidate({ type: 'unknown', path: '/', ts: Date.now() });
+        hooks?.onError?.();
+        scheduleReconnect();
+        return;
       }
-    };
-    const readyHandler = () => {
-      hooks?.onReady?.();
-    };
-    const errorHandler = () => {
-      hooks?.onError?.();
+
+      ws.onopen = () => {
+        backoffMs = 1000;
+        hooks?.onReady?.();
+      };
+
+      ws.onmessage = (e: MessageEvent) => {
+        try {
+          const msg = JSON.parse(e.data as string) as { type: string; path: string; ts: number };
+          if (msg.type === 'invalidation' || msg.type === 'invalidate' || msg.type === 'compact') {
+            onInvalidate(msg);
+          }
+        } catch {
+          onInvalidate({ type: 'unknown', path: '/', ts: Date.now() });
+        }
+      };
+
+      ws.onerror = () => {
+        hooks?.onError?.();
+      };
+
+      ws.onclose = () => {
+        if (!cancelled) scheduleReconnect();
+      };
     };
 
-    source.addEventListener('ready', readyHandler);
-    source.addEventListener('invalidate', handler);
-    source.addEventListener('compact', handler);
-    source.addEventListener('error', errorHandler);
+    const scheduleReconnect = () => {
+      if (cancelled) return;
+      setTimeout(() => connect(), backoffMs);
+      backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
+    };
+
+    connect();
 
     return () => {
-      source.removeEventListener('ready', readyHandler);
-      source.removeEventListener('invalidate', handler);
-      source.removeEventListener('compact', handler);
-      source.removeEventListener('error', errorHandler);
-      source.close();
+      cancelled = true;
+      try { ws?.close(1000, 'unsubscribed'); } catch {}
+      ws = null;
     };
   }
 

@@ -1,5 +1,5 @@
 name = "todo-cloudflare-do"
-main = "../../packages/interocitor-workers/src/index.js"
+main = "./todo-interocitor.js"
 compatibility_date = "2026-04-07"
 
 [vars]
@@ -24,12 +24,4 @@ database_name = "todo-cloudflare-do-db"
 database_id = "REPLACE_WITH_REAL_D1_DATABASE_ID"
 preview_database_id = "REPLACE_WITH_REAL_D1_PREVIEW_DATABASE_ID"
 migrations_dir = "migrations"
-
-[[durable_objects.bindings]]
-name = "INTEROCITOR_EVENTS"
-class_name = "TodoDavBroadcaster"
-
-[[migrations]]
-tag = "v1"
-new_classes = ["TodoDavBroadcaster"]
 

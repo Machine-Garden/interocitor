@@ -1,7 +1,7 @@
 {
   "name": "interocitor-workers",
   "version": "0.0.0-beta.2",
-  "description": "Cloudflare Workers runtime for Interocitor-native sync endpoints, fanout, and maintenance flows.",
+  "description": "Cloudflare Workers runtime for Interocitor-native sync endpoints, semantic storage ops, relay wiring, and maintenance flows.",
   "type": "module",
   "main": "./src/index.js",
   "exports": {
@@ -13,7 +13,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "check": "node --check ./src/index.js"
+    "check": "node --input-type=module -e \"import './src/index.js'; import './src/worker.js'; import './src/ops.js'; import './src/relay.js'; import './src/db-adapter.js';\""
   },
   "keywords": [
     "interocitor",

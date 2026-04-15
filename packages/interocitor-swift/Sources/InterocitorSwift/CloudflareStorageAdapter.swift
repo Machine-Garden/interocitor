@@ -4,13 +4,12 @@
  * StorageAdapter implementation for interocitor-workers (Cloudflare Worker + D1).
  *
  * Base URL shape:  https://<worker>/io/<prefix>
- * SSE events URL:  https://<worker>/events/<prefix>
+ * WebSocket URL:   wss://<worker>/notify/<prefix>
  *
  * Mirrors packages/interocitor/src/adapters/cloudflare.ts
  *
- * Includes SSE-driven invalidation via `subscribeToInvalidations(onInvalidate:)`.
- * On Apple platforms this uses URLSession streaming; on Linux it falls back to
- * polling (SSE requires Foundation's URLSession with streaming support).
+ * Includes WebSocket-driven invalidation via `subscribeToInvalidations(onInvalidate:)`
+ * using URLSessionWebSocketTask with exponential-backoff reconnection.
  */
 
 import Foundation
@@ -180,12 +179,12 @@ public actor CloudflareStorageAdapter: StorageAdapter {
         return (try? decoder.decode(Payload.self, from: data))?.file?.asFileEntry
     }
 
-    // MARK: - SSE Invalidation
+    // MARK: - WebSocket Invalidation
 
     /// Subscribe to real-time invalidation events from the Cloudflare Worker.
     ///
-    /// The worker sends `invalidate` and `compact` events over Server-Sent Events.
-    /// On Apple platforms this uses a background URLSession streaming task.
+    /// Opens a WebSocket to `wss://<worker>/notify/<prefix>` and calls `onInvalidate`
+    /// for each invalidation message. Reconnects with exponential backoff on close/error.
     ///
     /// - Returns: A cancellation closure — call it to stop the subscription.
     public nonisolated func subscribeToInvalidations(
@@ -193,35 +192,16 @@ public actor CloudflareStorageAdapter: StorageAdapter {
         onReady: (@Sendable () -> Void)? = nil,
         onError: (@Sendable () -> Void)? = nil
     ) -> () -> Void {
-        guard let eventsURLString = buildEventsURL(),
-              let url = URL(string: eventsURLString) else {
-            return {}
-        }
+        guard let wsURL = buildWebSocketURL() else { return {} }
 
-        var req = URLRequest(url: url)
-        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        req.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        if let token = config.token {
-            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        req.timeoutInterval = 300
-
-        let task = SSETask(
-            request: req,
-            session: URLSession.shared,
-            onEvent: { eventName, data in
-                switch eventName {
-                case "ready":
-                    onReady?()
-                case "invalidate", "compact":
-                    if let parsed = parseInvalidation(data) { onInvalidate(parsed) }
-                default:
-                    break
-                }
-            },
-            onError: { _ in onError?() }
+        let task = WSTask(
+            url: wsURL,
+            token: config.token,
+            onInvalidate: onInvalidate,
+            onReady: onReady,
+            onError: onError
         )
-        task.start()
+        task.connect()
         return { task.cancel() }
     }
 
@@ -243,14 +223,21 @@ public actor CloudflareStorageAdapter: StorageAdapter {
         return u
     }
 
-    private nonisolated func buildEventsURL() -> String? {
-        // Replace /io/ with /events/ in the base URL
+    private nonisolated func buildWebSocketURL() -> URL? {
         guard config.baseURL.contains("/io/") else { return nil }
-        var eventsURL = config.baseURL.replacingOccurrences(of: "/io/", with: "/events/")
-        if let token = config.token {
-            eventsURL += "?access_token=\(token)"
+        var wsURLString = config.baseURL.replacingOccurrences(of: "/io/", with: "/notify/")
+        // http -> ws, https -> wss
+        if wsURLString.hasPrefix("https://") {
+            wsURLString = "wss://" + wsURLString.dropFirst("https://".count)
+        } else if wsURLString.hasPrefix("http://") {
+            wsURLString = "ws://" + wsURLString.dropFirst("http://".count)
         }
-        return eventsURL
+        if let token = config.token,
+           var comps = URLComponents(string: wsURLString) {
+            comps.queryItems = [URLQueryItem(name: "access_token", value: token)]
+            return comps.url
+        }
+        return URL(string: wsURLString)
     }
 
     private func addHeaders(to req: inout URLRequest, contentType: String? = nil) {
@@ -289,91 +276,89 @@ private func parseInvalidation(_ data: String) -> InvalidationPayload? {
     )
 }
 
-// MARK: - SSETask (minimal Server-Sent Events client)
+// MARK: - WSTask (WebSocket client with exponential-backoff reconnection)
 
-/// A lightweight SSE client using a streaming URLSession data task.
-/// Handles `event:` / `data:` fields and reconnects are left to the caller.
-private final class SSETask: @unchecked Sendable {
-    private let request: URLRequest
+/// Connects to the relay WebSocket, dispatches invalidation messages, and
+/// reconnects automatically with exponential backoff on close or error.
+private final class WSTask: @unchecked Sendable {
+    private let url: URL
+    private let token: String?
+    private let onInvalidate: @Sendable (InvalidationPayload) -> Void
+    private let onReady: (@Sendable () -> Void)?
+    private let onError: (@Sendable () -> Void)?
+
+    private var wsTask: URLSessionWebSocketTask?
+    private var cancelled = false
+    private var backoffMs: UInt64 = 1_000
+    private let maxBackoffMs: UInt64 = 30_000
     private let session: URLSession
-    private let onEvent: @Sendable (String, String) -> Void
-    private let onError: @Sendable (Error?) -> Void
-    private var dataTask: URLSessionDataTask?
-    private var buffer = ""
-    private var currentEventName = "message"
 
-    init(request: URLRequest,
-         session: URLSession,
-         onEvent: @escaping @Sendable (String, String) -> Void,
-         onError: @escaping @Sendable (Error?) -> Void) {
-        self.request = request
-        self.session = session
-        self.onEvent = onEvent
+    init(url: URL,
+         token: String?,
+         onInvalidate: @escaping @Sendable (InvalidationPayload) -> Void,
+         onReady: (@Sendable () -> Void)?,
+         onError: (@Sendable () -> Void)?) {
+        self.url = url
+        self.token = token
+        self.onInvalidate = onInvalidate
+        self.onReady = onReady
         self.onError = onError
+        self.session = URLSession(configuration: .default)
     }
 
-    func start() {
-        let delegate = SSEDelegate(onChunk: { [weak self] data in
-            self?.process(chunk: data)
-        }, onError: { [weak self] error in
-            self?.onError(error)
-        })
-        let streamSession = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
-        let task = streamSession.dataTask(with: request)
-        self.dataTask = task
-        delegate.task = task
+    func connect() {
+        guard !cancelled else { return }
+        var req = URLRequest(url: url)
+        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let task = session.webSocketTask(with: req)
+        wsTask = task
         task.resume()
+        onReady?()
+        receiveLoop(task: task)
     }
 
     func cancel() {
-        dataTask?.cancel()
-        dataTask = nil
+        cancelled = true
+        wsTask?.cancel(with: .goingAway, reason: nil)
+        wsTask = nil
     }
 
-    private func process(chunk: Data) {
-        guard let text = String(data: chunk, encoding: .utf8) else { return }
-        buffer += text
-        // Process complete lines
-        while let range = buffer.range(of: "\n") {
-            let line = String(buffer[buffer.startIndex..<range.lowerBound])
-            buffer = String(buffer[range.upperBound...])
-            processLine(line)
+    private func receiveLoop(task: URLSessionWebSocketTask) {
+        task.receive { [weak self] result in
+            guard let self, !self.cancelled else { return }
+            switch result {
+            case .success(let message):
+                self.handle(message: message)
+                self.receiveLoop(task: task)
+            case .failure:
+                self.onError?()
+                self.scheduleReconnect()
+            }
         }
     }
 
-    private func processLine(_ line: String) {
-        if line.isEmpty {
-            // Empty line = dispatch event
-            return // dispatch happens when we accumulate data — handled per data: line
+    private func handle(message: URLSessionWebSocketTask.Message) {
+        let text: String
+        switch message {
+        case .string(let s): text = s
+        case .data(let d):   text = String(data: d, encoding: .utf8) ?? ""
+        @unknown default:    return
         }
-        if line.hasPrefix("event:") {
-            currentEventName = line.dropFirst(6).trimmingCharacters(in: .whitespaces)
-        } else if line.hasPrefix("data:") {
-            let data = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
-            let eventName = currentEventName
-            currentEventName = "message"
-            onEvent(eventName, data)
+        if let payload = parseInvalidation(text) {
+            onInvalidate(payload)
         }
     }
-}
 
-private final class SSEDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
-    let onChunk: @Sendable (Data) -> Void
-    let onError: @Sendable (Error?) -> Void
-    weak var task: URLSessionDataTask?
-
-    init(onChunk: @escaping @Sendable (Data) -> Void,
-         onError: @escaping @Sendable (Error?) -> Void) {
-        self.onChunk = onChunk
-        self.onError = onError
-    }
-
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        onChunk(data)
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error { onError(error) }
+    private func scheduleReconnect() {
+        guard !cancelled else { return }
+        let delay = backoffMs
+        backoffMs = min(backoffMs * 2, maxBackoffMs)
+        Task {
+            try? await Task.sleep(nanoseconds: delay * 1_000_000)
+            guard !self.cancelled else { return }
+            self.backoffMs = 1_000  // reset after successful reconnect attempt
+            self.connect()
+        }
     }
 }
 

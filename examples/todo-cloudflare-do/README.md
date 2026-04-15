@@ -4,52 +4,34 @@
   </a>
 </p>
 
-# TODO over Cloudflare Worker + Durable Objects
+# TODO over Cloudflare Worker + D1
 
 GitHub example directory: <https://github.com/TheUiTeam/interocitor/tree/main/examples/todo-cloudflare-do>
 
-This example shows the Cloudflare-hosted version of the same Interocitor promise: the server can coordinate transport, but it still should not be able to read your data.
-
-## Why this example exists
-
-The WebDAV example proves the model with a very dumb mailbox. This example proves the model can still hold when the transport gets smarter.
-
-Here Cloudflare provides ordering, fanout, persistence, and maintenance behavior. But merge and decryption stay on the client. That is the line Interocitor is trying not to cross.
-
-## What role do Durable Objects play here
-
-Durable Objects provide per-prefix coordination for request ordering and server-sent event fanout. They are transport coordinators, not document interpreters.
+This example shows Interocitor mounted into an app-owned Worker under a prefix, with D1-backed transport state and no Durable Objects.
 
 ## What is implemented
 
-- Durable Object for per-prefix request ordering and SSE fanout
+- app-owned Worker entry at `todo-interocitor.js`
+- Interocitor mounted under `/todo-interocitor`
 - D1-backed metadata and append-only mutation persistence
 - Interocitor-native endpoints for sync flows
 - maintenance and compaction-related cleanup hooks
 
-## API shape
+## Route ownership
 
-This example exposes Interocitor-native transport endpoints rather than generic WebDAV.
+App owns:
+- `/`
+- `/api/ping`
 
-## Mutation policy (append-only + system endpoint)
+Interocitor owns:
+- `/todo-interocitor/health`
+- `/todo-interocitor/io/*`
+- `/todo-interocitor/__interocitor/*`
+
+## Mutation policy
 
 Normal sync writes are append-only. Administrative cleanup happens through explicit system operations so transport maintenance does not become silent mutation of application state.
-
-### System op: prune-compacted-changes
-
-Used to prune changes that are no longer needed after compaction-related workflows.
-
-### System op: maintenance
-
-Used for retention cleanup and related housekeeping.
-
-## Retention and size limits
-
-See the Worker source and Wrangler configuration for the latest limits and operational settings.
-
-## Persistence behavior
-
-The worker persists transport-side metadata while leaving payload interpretation to clients.
 
 ## Run locally
 
@@ -60,24 +42,9 @@ yarn --cwd examples/todo-cloudflare-do db:migrate:local
 yarn --cwd examples/todo-cloudflare-do dev
 ```
 
-## Use with `CloudflareAdapter`
-
-Point the browser client at the local Worker endpoint and use the same encrypted Interocitor session across multiple tabs or devices.
-
-## SSE client hint
-
-This example includes invalidation fanout. Clients can use SSE as a hint to trigger sync sooner, but the authoritative state still comes from local storage plus encrypted artifact exchange.
-
-## Opt-in Playwright coverage
-
-From the repo root:
-
-```bash
-yarn test:e2e:cloudflare
-yarn test:e2e:cloudflare:run
-```
-
 ## Deploy
+
+`wrangler.toml` points at `./todo-interocitor.js`, not directly at the package source.
 
 ```bash
 yarn --cwd examples/todo-cloudflare-do deploy

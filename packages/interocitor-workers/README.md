@@ -8,63 +8,85 @@
 
 Cloudflare Workers runtime for Interocitor-native transport flows.
 
-## Why this package exists
+## Shape
 
-Interocitor's rule is simple: the transport must not need to understand your data.
+This package is split by responsibility:
 
-This package provides a Cloudflare-hosted transport layer that adds operational conveniences — request ordering, invalidation fanout, maintenance workflows, metadata tracking — without moving merge or decryption to the server.
+- `src/worker.js` — thin Worker wiring, mount composition, auth, HTTP routes
+- `src/ops.js` — semantic storage ops, re-exported from the spike implementation
+- `src/relay.js` — separate relay wiring and compose helper for future paid-plan realtime paths
+- `src/db-adapter.js` — database adapter seam
+- `src/index.js` — stitch file only
 
-That matters because once the server must interpret document structure to do sync work, true client-side encryption stops being structural. `interocitor-workers` keeps the server useful but deliberately dumb about your plaintext.
+## Clear separation
 
-## What it is
+Your app stays the app.
 
-This package contains a generic Worker entrypoint intended to back Interocitor-native storage flows on Cloudflare using:
+Interocitor is one wrapped subsystem inside it.
 
-- Workers
-- Durable Objects
-- D1
-- server-sent events for invalidation
+App owns:
+- app routes
+- auth policy
+- business logic
+- non-Interocitor endpoints
 
-## Entry point
+Interocitor owns only the prefix you give it:
+- `/<prefix>/health`
+- `/<prefix>/io/*`
+- `/<prefix>/__interocitor/*`
 
-- worker source: `src/index.js`
+## Main API
 
-## Current scope
+```js
+import { withInterocitor } from 'interocitor-workers';
 
-- native IO endpoints
-- folder and file metadata
-- append-only mutation support
-- post-compaction change pruning hooks
-- path activity tracking
-- maintenance and TTL cleanup
-- SSE invalidation streams
+const appWorker = {
+  async fetch(request) {
+    const url = new URL(request.url);
 
-## Important architectural point
+    if (url.pathname === '/') {
+      return new Response('app root');
+    }
 
-The Worker may coordinate transport behavior, but it should not become a merge engine.
+    if (url.pathname === '/api/ping') {
+      return Response.json({ ok: true, source: 'app' });
+    }
 
-- ciphertext comes in
-- ciphertext goes out
-- clients decrypt
-- clients merge
-- clients answer queries locally
+    return new Response('App route not found', { status: 404 });
+  },
+};
 
-That is the entire reason Interocitor can promise a privacy-first sync model.
+export default withInterocitor('/todo-interocitor', appWorker);
+```
 
-## Example consumer
+## Relay API
 
-The current TODO demo that consumes this runtime lives here:
+Relay is separate. End user installs and composes it only when wanted.
 
-- GitHub: <https://github.com/TheUiTeam/interocitor/tree/main/examples/todo-cloudflare-do>
-- Monorepo path: `examples/todo-cloudflare-do`
+```js
+import { InterocitorRelay, withInterocitorRelay } from 'interocitor-workers';
 
-That example uses this package as its Wrangler `main` entry, while this package itself stays generic and reusable.
+const appWorker = {
+  async fetch() {
+    return new Response('app route');
+  },
+};
 
-## What this package is not
+const relayWorker = {
+  async fetch(request, env, ctx) {
+    const relay = new InterocitorRelay({}, env);
+    return relay.fetch(request, env, ctx);
+  },
+};
 
-- not a general-purpose database API
-- not a server-side CRDT merge service
-- not plaintext application storage
+export default withInterocitorRelay('/todo-interocitor-relay', appWorker, relayWorker);
+```
+
+## Notes
+
+- cache is part of the semantic ops layer
+- relay is optional
+- database seam exists for future Hyperdrive / PlanetScale backends
 
 ## License
 

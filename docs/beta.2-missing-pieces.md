@@ -1,64 +1,159 @@
-# interocitor 0.0.0-beta.2 Missing Pieces
+# beta.2 missing pieces
 
-This file tracks what is not complete yet in the current beta branch.
+## WebSocket-based invalidation
 
-## Status Legend
+### Why SSE is removed
 
-- `implemented` - shipped and tested
-- `partial` - basic path exists but edge cases/coverage remain
-- `missing` - not implemented yet
+The original Cloudflare Worker implementation used Server-Sent Events (SSE) backed by a Durable Object for real-time invalidation. That model was removed because:
 
-## Core Protocol
+- Durable Object wall-clock billing is expensive for persistent connections
+- SSE is not needed for correctness — Interocitor pull sync is already correct without it
+- SSE was the only reason a Durable Object was required at all
 
-- `implemented` Manifest pointer + generation files (`manifest.json` → `manifest-{n}.json`)
-- `implemented` File-per-change writes in flat `changes/` folder + global `head.json`
-- `implemented` Manifest content-hash verification on read
-- `implemented` Flat folder layout (no channel indirection)
-- `partial` Delta lifecycle (`deltaPath` reserved but not fully produced/consumed)
-- `missing` Manifest read fallback to highest valid generation when pointer target is invalid
+### Current model
 
-## Sync Behavior
+Pull-based sync. Clients pull after local changes and on a configurable interval. No server push.
 
-- `implemented` Poll + merge from remote devices via HLC/LWW CRDT
-- `implemented` Cursor-based pull with HLC fast-skip via `head.json`
-- `implemented` Replica adapter support (best-effort write to backup remotes)
-- `partial` Efficient pull optimization by watermark/date-range pruning across large histories
+This is sufficient for most use cases and is the cheapest correct model.
 
-## Compaction / GC
+### Future: WebSocket-based invalidation (Paid plan)
 
-- `implemented` Compaction writes snapshot + publishes next manifest generation
-- `implemented` Direct-cloud compaction by client; optional server-managed restriction
-- `implemented` Change file pruning after compaction (≤ watermarkHlc)
-- `missing` Delta emission and delta-based catch-up
-- `missing` Garbage collection pass (reachability, grace windows, retention policy)
-- `missing` Tombstone retention enforcement against known-device sync state
+When realtime push is needed, the plan is to use the Cloudflare Workers [Hibernation API](https://developers.cloudflare.com/durable-objects/reference/websockets/#websocket-hibernation) rather than persistent SSE connections.
 
-## Security / Integrity
+#### How it will work
 
-- `implemented` Per-entry encryption envelopes for change files
-- `implemented` Unauthorized writer rejection when `server.managed=true`
-- `partial` Auth model hardening (writer identity only; no signatures)
-- `missing` Rotation workflow and explicit mixed-key migration handling
+Client opens a WebSocket to the Worker:
 
-## Testing Gaps
+```
+GET /todo-interocitor/ws/:prefix
+Upgrade: websocket
+Authorization: Bearer <access_token>
+```
 
-- `implemented` Full e2e browser suite currently green
-- `missing` Corrupt-pointer recovery and highest-valid-generation fallback tests
-- `missing` Eventual-consistency simulation tests for delayed folder listing visibility
-- `missing` Large-history performance regression tests
-- `missing` Explicit GC correctness tests
-- `missing` Replica adapter flush tests (multi-adapter write verification)
+Worker accepts the WebSocket using `acceptWebSocket()` and stores it in the Durable Object (`InterocitorRelay`) using the hibernation API.
 
-## Documentation Gaps
+```js
+// inside InterocitorRelay
+async fetch(request, env, ctx) {
+  const upgradeHeader = request.headers.get('Upgrade');
+  if (upgradeHeader === 'websocket') {
+    const pair = new WebSocketPair();
+    this.ctx.acceptWebSocket(pair[1]);
+    return new Response(null, { status: 101, webSocket: pair[0] });
+  }
+}
+```
 
-- `implemented` Public docs no longer use retired versioned draft branding
-- `implemented` Detailed protocol flows moved to `docs/flows.md`
-- `partial` `interocitor-architecture.md` still contains older NDJSON/append design context and needs an alignment pass
+When a write happens, the Worker calls `broadcast()` to the relay:
 
-## Next Recommended Implementation Order
+```js
+await broadcast(env, ctx, prefix, { type: 'file', path });
+```
 
-1. Manifest pointer fallback recovery
-2. Delta generation + apply path
-3. Garbage collection engine + tests
-4. Replica adapter e2e tests
-5. Eventual consistency + performance test fixtures
+The relay sends a small invalidation message to all hibernated sockets for that prefix:
+
+```js
+webSocketMessage(ws, message) {
+  // clients echo back to confirm liveness
+}
+
+// on broadcast
+for (const ws of this.ctx.getWebSockets()) {
+  ws.send(JSON.stringify({ type: 'invalidation', path, ts: Date.now() }));
+}
+```
+
+Client receives message and calls `pull()` immediately instead of waiting for next poll interval.
+
+#### Why hibernation not persistent connection
+
+- Hibernated WebSockets cost nothing while idle
+- Runtime wakes DO only on message
+- No wall-clock billing while waiting
+- Correct for mobile/battery-sensitive clients
+
+#### What needs to change in adapters
+
+Both `CloudflareAdapter` (JS/TS) and `CloudflareStorageAdapter` (Swift) need:
+
+1. Remove SSE subscriber logic (`subscribeToInvalidations` SSE path)
+2. Replace with optional WebSocket connection
+3. WebSocket message handler calls existing `invalidate()` / `onInvalidation` callback
+4. Reconnect logic on close/error (exponential backoff)
+5. Fall back to poll interval if WebSocket unavailable
+
+#### JS adapter change (`packages/interocitor/src/adapters/cloudflare.ts`)
+
+Current SSE path:
+```ts
+subscribeToInvalidations(onInvalidation: ...) {
+  const source = new EventSource(this.eventsUrl);
+  source.onmessage = (e) => onInvalidation(JSON.parse(e.data));
+  // ...
+}
+```
+
+Replace with:
+```ts
+subscribeToInvalidations(onInvalidation: ...) {
+  const ws = new WebSocket(`${this.config.workerBaseUrl}/ws/${this.config.namespace}`);
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'invalidation') onInvalidation(msg);
+  };
+  ws.onclose = () => /* reconnect with backoff */;
+  // ...
+}
+```
+
+#### Swift adapter change (`packages/interocitor-swift/Sources/InterocitorSwift/CloudflareStorageAdapter.swift`)
+
+Current SSE path: `SSETask` class and `SSEDelegate`.
+
+Replace with:
+- `URLSessionWebSocketTask`
+- message receive loop
+- reconnect on cancel/error
+- call existing `onInvalidation` handler on message
+
+#### Wrangler binding
+
+App that wants relay enables it:
+
+```toml
+[[durable_objects.bindings]]
+name = "INTEROCITOR_RELAY"
+class_name = "InterocitorRelay"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["InterocitorRelay"]
+```
+
+App that does not want relay pays nothing extra.
+
+#### Integration model
+
+Relay is opt-in and installed separately by the end user:
+
+```js
+import { withInterocitor, withInterocitorRelay, InterocitorRelay } from 'interocitor-workers';
+
+const appWorker = { ... };
+
+export default withInterocitorRelay(
+  '/todo-interocitor-relay',
+  withInterocitor('/todo-interocitor', appWorker),
+  { fetch: relayFetch }
+);
+
+export { InterocitorRelay };
+```
+
+Or deployed as a completely separate Worker if app team prefers full isolation.
+
+### Not in scope now
+
+- Long polling (adds Worker CPU cost per idle request)
+- SSE (DO wall-clock cost)
+- Server-side merge (breaks encryption guarantee)

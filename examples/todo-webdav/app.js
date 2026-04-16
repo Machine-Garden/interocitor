@@ -36,7 +36,7 @@ function randomSuffix() {
 }
 
 function makeRemotePath() {
-  return `/Interocitor/todo-app`;
+  return `/Interocitor/todo-${randomSuffix()}`;
 }
 
 function makeJoinToken(baseUrl, remotePath, keyPassphrase) {
@@ -90,7 +90,7 @@ function taskRowId() {
 }
 
 async function createSession() {
-  const { generateKey, keyToPassphrase } = await import('/packages/interocitor/dist/crypto/keys.js');
+  const { generateKey, keyToPassphrase } = await import('/packages/interocitor/dist/crypto/encryption.js');
   const key = await generateKey();
   const passphrase = await keyToPassphrase(key);
 
@@ -107,14 +107,12 @@ async function createSession() {
 async function connect() {
   const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
   const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
-  const { passphraseToKey } = await import('/packages/interocitor/dist/crypto/keys.js');
 
   const session = readSessionFromUi();
   await disconnect();
 
   const tabDeviceId = sessionStorage.getItem('todo-device-id') || `tab-${randomSuffix()}`;
   sessionStorage.setItem('todo-device-id', tabDeviceId);
-  localStorage.setItem('interocitor-device-id', tabDeviceId);
 
   const dbName = `interocitor-todo-${tabDeviceId}`;
   const adapter = new WebDAVAdapter({
@@ -125,12 +123,12 @@ async function connect() {
   const engine = new SyncEngine(adapter, {
     remotePath: session.remotePath,
     dbName,
+    deviceId: tabDeviceId,
+    passphrase: session.key,
     pollInterval: 5000,   // 5 s: reduces head.json 404 spam during idle periods
     flushDebounce: 200,
-    flushThreshold: 1,
+    flushThreshold: 50,
   });
-
-  engine.setEncryptionKey(await passphraseToKey(session.key));
 
   const unsub = engine.on((event) => {
     if (event.type === 'change' || event.type === 'delete' || event.type === 'sync:complete') {

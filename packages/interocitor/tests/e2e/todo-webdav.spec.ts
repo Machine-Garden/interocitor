@@ -10,6 +10,11 @@ test('TODO demo shares join token across tabs and syncs over local WebDAV', asyn
     await tabA.goto(`${baseURL}/examples/todo-webdav/index.html`);
     await tabB.goto(`${baseURL}/examples/todo-webdav/index.html`);
 
+    // Wait for auto-createSession (fire-and-forget on page load) to finish,
+    // then override with a fresh session that both tabs will share.
+    await tabA.waitForFunction(() => document.getElementById('key')?.value?.length > 0);
+    await tabB.waitForFunction(() => document.getElementById('key')?.value?.length > 0);
+
     const token = await tabA.evaluate(async () => {
       await window.__todoDemo.createSession();
       return window.__todoDemo.getShareToken();
@@ -58,6 +63,9 @@ test('local WebDAV server supports multiple remote paths without cross-talk', as
 
     await tabA.goto(`${baseURL}/examples/todo-webdav/index.html`);
     await tabB.goto(`${baseURL}/examples/todo-webdav/index.html`);
+
+    await tabA.waitForFunction(() => document.getElementById('key')?.value?.length > 0);
+    await tabB.waitForFunction(() => document.getElementById('key')?.value?.length > 0);
 
     const tokenA = await tabA.evaluate(async () => {
       await window.__todoDemo.createSession();

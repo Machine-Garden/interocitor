@@ -53,12 +53,12 @@ test('SyncEngine writes file-per-change paths and syncs rows through WebDAV', as
     const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
     const makeEngine = (deviceId: string) => {
-      localStorage.setItem('interocitor-device-id', deviceId);
       const adapter = new WebDAVAdapter({
         baseUrl: `${location.origin}/__webdav__`,
         auth: { username: 'u', password: 'p' },
       });
       return new SyncEngine(adapter, {
+        deviceId,
         remotePath: '/Interocitor',
         pollInterval: 60_000,
         flushDebounce: 5,
@@ -153,10 +153,9 @@ test('rejects unauthorized writer manifests over WebDAV', async ({ page }) => {
     }));
     await adapter.writeFile('/BadWeb/manifest.json', JSON.stringify({ currentGeneration: 1, file: 'manifest-1.json' }));
 
-    localStorage.setItem('interocitor-device-id', 'dev_bad');
     const engine = new SyncEngine(
       new WebDAVAdapter({ baseUrl: `${location.origin}/__webdav__`, auth: { username: 'u', password: 'p' } }),
-      { remotePath: '/BadWeb', pollInterval: 60_000 }
+      { deviceId: 'dev_bad', remotePath: '/BadWeb', pollInterval: 60_000 }
     );
 
     await engine.init();
@@ -175,17 +174,16 @@ test('encrypted sync over WebDAV keeps cloud payload opaque', async ({ page }) =
   const result = await page.evaluate(async () => {
     const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
     const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
-    const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+    const { generateKey, keyToPassphrase } = await import('/packages/interocitor/dist/crypto/keys.js');
 
     const key = await generateKey();
+    const passphrase = await keyToPassphrase(key);
 
     const makeEngine = (deviceId: string) => {
-      localStorage.setItem('interocitor-device-id', deviceId);
       const engine = new SyncEngine(
         new WebDAVAdapter({ baseUrl: `${location.origin}/__webdav__`, auth: { username: 'u', password: 'p' } }),
-        { remotePath: '/Encrypted', pollInterval: 60_000, flushDebounce: 5, flushThreshold: 1 },
+        { deviceId, remotePath: '/Encrypted', passphrase, encrypted: true, pollInterval: 60_000, flushDebounce: 5, flushThreshold: 1 },
       );
-      engine.setEncryptionKey(key);
       return engine;
     };
 
@@ -224,10 +222,9 @@ test('direct-cloud compaction over WebDAV restores clients from snapshot', async
     const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
     const makeEngine = (deviceId: string) => {
-      localStorage.setItem('interocitor-device-id', deviceId);
       return new SyncEngine(
         new WebDAVAdapter({ baseUrl: `${location.origin}/__webdav__`, auth: { username: 'u', password: 'p' } }),
-        { remotePath: '/WebCompact', pollInterval: 60_000, flushDebounce: 5, flushThreshold: 1 },
+        { deviceId, remotePath: '/WebCompact', pollInterval: 60_000, flushDebounce: 5, flushThreshold: 1 },
       );
     };
 

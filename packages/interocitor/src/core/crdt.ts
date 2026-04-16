@@ -1,16 +1,99 @@
 /**
- * CRDT Merge Engine — Last-Writer-Wins per column
+ * CRDT Merge Engine — configurable per-column merge strategy.
  *
  * Each column in each row carries its own HLC.
- * The highest HLC wins for that column independently.
- * Deletes are soft (tombstone with HLC).
+ * The merge strategy determines which value wins on conflict:
+ *
+ *  - `'remote-wins'` — Remote always overwrites local. (Default)
+ *  - `'lww'`         — Last-Writer-Wins. Highest HLC wins.
+ *  - `'local-wins'`  — Keep local value when both exist.
+ *  - custom function  — `(local, remote, ctx) => ColumnEntry`
+ *
+ * Deletes are soft (tombstone with HLC) and always use LWW.
  */
 
-import type { Row, Op, ColumnEntry, ChangeEntry } from './types.ts';
+import type {
+  Row,
+  Op,
+  ColumnEntry,
+  ChangeEntry,
+  DatabaseSchemaDefinition,
+  MergeStrategy,
+  TableMergeConfig,
+} from './types.ts';
 import { hlcCompareStr } from './hlc.ts';
 
 /** Reserved keys that are not user columns */
 const META_KEYS = new Set(['_table', '_rowId', '_deleted', '_deletedHlc', '_schemaVersion']);
+
+/**
+ * Resolve the merge strategy for a specific column.
+ *
+ * Resolution order (first defined wins):
+ *   field-level → table-level → database-level → 'lww'
+ */
+function resolveStrategy(
+  schema: DatabaseSchemaDefinition | undefined,
+  table: string,
+  field: string,
+): MergeStrategy {
+  const tableDef = schema?.tables[table];
+  if (tableDef?.merge) {
+    const m = tableDef.merge;
+    if (typeof m === 'object' && 'fields' in m) {
+      // TableMergeConfig
+      const config = m as TableMergeConfig;
+      if (config.fields?.[field]) return config.fields[field];
+      if (config.strategy) return config.strategy;
+    } else {
+      // bare MergeStrategy (string or function) on the table
+      return m as MergeStrategy;
+    }
+  }
+  // No schema at all → LWW (backwards compat for raw applyOp callers).
+  // Schema present but no mergeStrategy → remote-wins (sensible default).
+  if (!schema) return 'lww';
+  return schema.mergeStrategy ?? 'remote-wins';
+}
+
+/**
+ * Decide which column entry wins given a strategy.
+ *
+ * `local` may be undefined (new column). In that case, remote always wins
+ * regardless of strategy — there's no conflict.
+ */
+function mergeColumn(
+  local: ColumnEntry | undefined,
+  remote: ColumnEntry,
+  strategy: MergeStrategy,
+  table: string,
+  rowId: string,
+  field: string,
+): ColumnEntry | null {
+  // No local value → accept remote unconditionally
+  if (!local || !local.hlc) return remote;
+
+  if (typeof strategy === 'function') {
+    const result = strategy(local, remote, { table, rowId, field });
+    // Only count as changed if the result differs from local
+    return result.hlc !== local.hlc || result.value !== local.value ? result : null;
+  }
+
+  switch (strategy) {
+    case 'remote-wins':
+      return remote;
+
+    case 'local-wins':
+      // Only accept remote if it's strictly newer (no conflict — local
+      // hasn't written this column yet at this HLC).
+      // When both have values, local keeps its value.
+      return null;
+
+    case 'lww':
+    default:
+      return hlcCompareStr(remote.hlc, local.hlc) > 0 ? remote : null;
+  }
+}
 
 /**
  * Apply a single op to the in-memory state.
@@ -19,7 +102,8 @@ const META_KEYS = new Set(['_table', '_rowId', '_deleted', '_deletedHlc', '_sche
 export function applyOp(
   tables: Record<string, Record<string, Row>>,
   op: Op,
-  schemaVersion: number
+  schemaVersion: number,
+  schema?: DatabaseSchemaDefinition,
 ): Row | null {
   if (!tables[op.table]) {
     tables[op.table] = {};
@@ -75,8 +159,10 @@ export function applyOp(
 
   for (const [col, entry] of Object.entries(op.columns)) {
     const existing = row[col] as ColumnEntry | undefined;
-    if (!existing || !existing.hlc || hlcCompareStr(entry.hlc, existing.hlc) > 0) {
-      row[col] = entry;
+    const strategy = resolveStrategy(schema, op.table, col);
+    const winner = mergeColumn(existing, entry, strategy, op.table, op.rowId, col);
+    if (winner) {
+      row[col] = winner;
       changed = true;
     }
   }
@@ -103,11 +189,12 @@ export function applyOp(
 export function applyChangeEntry(
   tables: Record<string, Record<string, Row>>,
   entry: ChangeEntry,
-  schemaVersion: number
+  schemaVersion: number,
+  schema?: DatabaseSchemaDefinition,
 ): Row[] {
   const affected: Row[] = [];
   for (const op of entry.ops) {
-    const row = applyOp(tables, op, schemaVersion);
+    const row = applyOp(tables, op, schemaVersion, schema);
     if (row) affected.push(row);
   }
   return affected;

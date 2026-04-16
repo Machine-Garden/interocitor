@@ -133,17 +133,16 @@ interface CredentialEnvelope {
 
 interface CredentialPayload {
   remotePath: string;
-  meshKey?: string;  // base64url raw AES-GCM key bytes, omitted for unencrypted meshes
+  passphrase?: string;  // base58 passphrase, omitted for unencrypted meshes
 }
 
 async function encryptCredentials(
   wrappingKey: CryptoKey,
-  remotePath: string,
-  meshKey: CryptoKey | null,
+  creds: HandshakeCredentials,
 ): Promise<string> {
-  const payload: CredentialPayload = { remotePath };
-  if (meshKey !== null) {
-    payload.meshKey = uint8ToB64url(new Uint8Array(await crypto.subtle.exportKey('raw', meshKey)));
+  const payload: CredentialPayload = { remotePath: creds.remotePath };
+  if (creds.passphrase !== null) {
+    payload.passphrase = creds.passphrase;
   }
   const pt   = new TextEncoder().encode(JSON.stringify(payload));
   const ivRaw = crypto.getRandomValues(new Uint8Array(IV_LEN));
@@ -156,7 +155,7 @@ async function encryptCredentials(
 async function decryptCredentials(
   wrappingKey: CryptoKey,
   envelope: string,
-): Promise<{ remotePath: string; meshKey: CryptoKey | null }> {
+): Promise<HandshakeCredentials> {
   const { v, iv, ct } = JSON.parse(envelope) as CredentialEnvelope;
   if (v !== 1) throw new Error(`Unknown handshake envelope version: ${v}`);
   const ivBytes = b64urlToUint8(iv);
@@ -166,12 +165,8 @@ async function decryptCredentials(
     wrappingKey,
     toBuffer(ctBytes),
   );
-  const { remotePath, meshKey: meshKeyB64 } = JSON.parse(new TextDecoder().decode(pt)) as CredentialPayload;
-  let meshKey: CryptoKey | null = null;
-  if (meshKeyB64 !== undefined) {
-    meshKey = await crypto.subtle.importKey('raw', toBuffer(b64urlToUint8(meshKeyB64)), { name: 'AES-GCM' }, true, ['encrypt', 'decrypt']);
-  }
-  return { remotePath, meshKey };
+  const raw = JSON.parse(new TextDecoder().decode(pt)) as CredentialPayload;
+  return { remotePath: raw.remotePath, passphrase: raw.passphrase ?? null };
 }
 
 // ─── Relay paths ─────────────────────────────────────────────────────
@@ -226,7 +221,8 @@ async function relayCleanup(adapter: StorageAdapter, paths: { scannerPub: string
 
 export interface HandshakeCredentials {
   remotePath: string;
-  meshKey: CryptoKey | null;
+  /** Base58 passphrase for the mesh encryption key, or null for unencrypted meshes. */
+  passphrase: string | null;
 }
 
 // ─── Generator side ──────────────────────────────────────────────────
@@ -280,7 +276,7 @@ export async function createGeneratorSession(): Promise<GeneratorSession> {
       if (intent === 'share') {
         // Generator has credentials → encrypt and push them for the scanner.
         if (!ownCredentials) throw new Error('intent=share requires ownCredentials');
-        const envelope = await encryptCredentials(wrappingKey, ownCredentials.remotePath, ownCredentials.meshKey);
+        const envelope = await encryptCredentials(wrappingKey, ownCredentials);
         await relayWrite(adapter, paths.credentials, envelope);
         // Generator does not clean up — scanner deletes after reading.
         return null; // Generator already has credentials; nothing new to return.
@@ -352,7 +348,7 @@ export async function runScannerHandshake(
   } else {
     // intent === 'join': we push credentials to the generator.
     if (!ownCredentials) throw new Error('intent=join requires scanner to have ownCredentials');
-    const envelope = await encryptCredentials(wrappingKey, ownCredentials.remotePath, ownCredentials.meshKey);
+    const envelope = await encryptCredentials(wrappingKey, ownCredentials);
     await relayWrite(adapter, paths.credentials, envelope);
     // Scanner already has credentials; nothing new to return.
     return null;

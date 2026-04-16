@@ -14,93 +14,52 @@ Encrypted local-first CRDT sync for browser apps.
 
 ## Why
 
-You need a mailbox that can't read your mail.
+Interocitor is your app's __personal keychain__.
+Your devices hold the key. The cloud is only a mailbox. It carries encrypted sync artifacts and cannot read your mail.
 
-Interocitor is **privacy-first, local-second**.
-
-There are excellent local-first sync solutions. If you need real-time collaboration, rich queries, or operational transforms — use them. They will outperform Interocitor on almost every axis:
-
-| If you need | Use |
-| --- | --- |
-| Real-time multiplayer | [Logux](https://logux.org/), [Automerge](https://automerge.org/), [Yjs](https://yjs.dev/) |
-| Postgres ↔ local sync | [ElectricSQL](https://electric-sql.com/), [PowerSync](https://www.powersync.com/), [Zero](https://zero.rocicorp.dev/) |
-| Full-stack local-first DB | [Triplit](https://www.triplit.dev/), [Dexie Cloud](https://dexie.org/cloud/) |
-| Managed backend with offline | [Firebase](https://firebase.google.com/), [Supabase](https://supabase.com/), [Convex](https://www.convex.dev/) |
-| Reactive local store | [TinyBase](https://tinybase.org/) |
-
-Interocitor exists for a narrower problem: keep sync compatible with true client-side encryption.
-
-Most sync systems need the server to understand your data so it can merge, query, or partially replicate it. Once the server needs to understand the data, the server needs plaintext. That makes end-to-end encryption a feature layered around sync, not a property of sync itself.
-
-Interocitor takes the opposite approach. Merge happens on the client. Querying happens on the client. Conflict resolution happens on the client. The remote system is just a byte pipe. That means you can encrypt before upload and still sync successfully because the transport was never expected to interpret the payload.
-
-Trade-offs:
-
-- No server-side queries
-- No partial sync
-- Full dataset replicated to every participating device
-
-Benefits:
-
-- **True end-to-end encryption**
-- **Offline-native reads and writes**
-- **No purpose-built sync backend required**
-- **Transport-agnostic adapters**
-
-## Installation
-
-```bash
-yarn add interocitor
-```
+What this means:
+- encryption on by default
+- reads and writes are local-first
+- sync uses a remote mailbox, not a trusted database
+- restore is explicit app UI, not automatic magic
 
 ## Quick start
 
 ```ts
-import { Interocitor } from 'interocitor';
+import { SyncEngine, createRowId } from 'interocitor';
 import { WebDAVAdapter } from 'interocitor/adapters/webdav';
 
-const engine = new Interocitor({
-  dbName: 'todos',
-  schema: {
-    todos: {
-      indexes: ['done', 'createdAt']
-    }
-  },
-  adapter: new WebDAVAdapter({
-    baseUrl: 'http://127.0.0.1:8789',
-    remotePath: '/demo-room'
-  }),
-  encryption: {
-    passphrase: 'correct horse battery staple'
-  }
+const adapter = new WebDAVAdapter({
+  baseUrl: 'https://your-webdav-server.example.com',
+  auth: { username: 'user', password: 'pass' },
+});
+
+const engine = new SyncEngine(adapter, {
+  remotePath: '/MyApp',
+  dbName: 'my-app',
+  appName: 'My App',
+  // encrypted by default; set encrypted: false to opt out
 });
 
 await engine.init();
+await engine.connect();
 
-await engine.put('todos', {
-  id: 'todo-1',
-  text: 'Write encrypted sync docs',
+const id = createRowId({ prefix: 'todo' });
+await engine.put('todos', id, {
+  text: 'Ship privacy-first sync',
   done: false,
-  createdAt: Date.now()
 });
-
-await engine.sync();
-const rows = await engine.query('todos');
 ```
 
 ## How sync works
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/TheUiTeam/interocitor/main/docs/assets/sync-flow.svg" alt="sync flow" width="760"/>
-</p>
-
 ```mermaid
 flowchart LR
   A[Browser app] --> B[Interocitor engine]
-  B --> C[IndexedDB]
+  B --> C[Local store]
   B --> D[Encrypt changes locally]
   D --> E[Adapter]
-  E --> F[Remote mailbox]
+  E --> F[Remote mailbox\n(ciphertext only)]
   F --> E
   E --> G[Download ciphertext]
   G --> H[Decrypt locally]
@@ -109,63 +68,69 @@ flowchart LR
 
 ## Core API at a glance
 
-- `await engine.init()`
-- `await engine.put(table, row)`
-- `await engine.delete(table, id)`
-- `await engine.get(table, id)`
-- `await engine.query(table, options?)`
-- `await engine.sync()`
-- `engine.on('change', handler)`
+```ts
+await engine.init();
+await engine.connect();
+await engine.put(table, id, data);
+await engine.get(table, id);
+await engine.query(table);
+await engine.sync();
+
+await engine.secureWithBiometrics();   // optional, explicit keychain enrollment
+await engine.restoreWithBiometrics();  // explicit recovery flow
+```
+
+## Row IDs
+
+Use stable string IDs for synced rows. Do not use auto-increment IDs.
+
+Good default:
+
+```ts
+import { createRowId } from 'interocitor';
+
+const id = createRowId({ prefix: 'task' });
+```
+
+`createRowId()` uses platform crypto. No extra dependency needed.
 
 ## Offline guarantee
 
-| Operation | Network? | Backing store |
-| --- | --- | --- |
-| `init()` | No | IndexedDB |
-| `put()` | No | IndexedDB |
-| `delete()` | No | IndexedDB |
-| `get()` / `query()` | No | IndexedDB |
-| `sync()` | Yes, if adapter configured | Remote mailbox |
+Every read and write hits the local store. No network required.
+`sync()` is the only call that touches the remote mailbox.
+
+| Operation | Network? |
+| --- | --- |
+| `init()` | No |
+| `put()` | No |
+| `delete()` | No |
+| `get()` / `query()` | No |
+| `sync()` | Yes, if adapter configured |
 
 ## Adapters
 
 ### Google Drive
-
 For zero new backend infrastructure where Google Drive is acceptable as the encrypted mailbox.
 
 ### WebDAV
-
 For self-hosted sync, local demos, and inspectable remote artifacts.
 
 ### Cloudflare (experimental)
-
 For Interocitor-native transport flows with invalidation fanout and maintenance endpoints while keeping decryption client-side.
 
 ### Memory
-
 For tests and adapter-contract validation.
 
-## Encryption
+## Local store
 
-Interocitor is built around client-side encryption rather than retrofitting it later.
-
-```ts
-const engine = new Interocitor({
-  dbName: 'secure-db',
-  schema,
-  encryption: {
-    passphrase: 'correct horse battery staple'
-  }
-});
-```
-
-### Client-side fingerprint verification
-
-Expose a human-verifiable fingerprint in your UI if you want users to confirm that multiple devices joined the same encrypted dataset.
+Interocitor is a sync engine, not a database. The local store is a pluggable abstraction (`LocalStoreAdapter`). The browser default uses IndexedDB. The Swift package uses SQLite. You don't need to care which — reads, writes, and queries go through the engine API.
 
 ## CRDT strategy
 
-Interocitor uses a client-side CRDT strategy with hybrid logical clocks. Remote storage is only a transport and artifact exchange layer.
+Interocitor uses per-column CRDTs with hybrid logical clocks (HLC). All merge happens on the client. Remote storage is just a byte pipe.
+
+Conflict default: `'remote-wins'`.
+Override at database, table, or field level.
 
 ## Events
 
@@ -173,18 +138,6 @@ Interocitor uses a client-side CRDT strategy with hybrid logical clocks. Remote 
 engine.on('change', (event) => {
   console.log(event.type, event.table, event.id);
 });
-```
-
-## Cloud folder layout
-
-```text
-<remotePath>/
-  snapshot.meta
-  changes/
-    0000000001.json
-    0000000002.json
-  blobs/
-    ...encrypted payloads...
 ```
 
 ## Local TODO demo (WebDAV)
@@ -197,27 +150,28 @@ yarn demo:todo
 
 ## What this is not
 
-- **Not a multiplayer backend**
-- **Not server-queryable storage**
-- **Not partial sync**
-- **Not useful if your server must understand your data**
+- not Firebase
+- not Fireproof
+- not PowerSync
+- not Replicache
+- not a hosted backend
+- not a query engine over the cloud
+- not a server-trusted merge layer
 
 ## Tests
 
 From the monorepo root:
 
 ```bash
-yarn build
-yarn test:e2e
-yarn test:e2e:todo
+yarn workspace interocitor test
 ```
 
 ## Package context
 
-- Monorepo root: <https://github.com/TheUiTeam/interocitor>
-- Package home: <https://github.com/TheUiTeam/interocitor/tree/main/packages/interocitor>
-- WebDAV demo: <https://github.com/TheUiTeam/interocitor/tree/main/examples/todo-webdav>
-- Cloudflare example: <https://github.com/TheUiTeam/interocitor/tree/main/examples/todo-cloudflare-do>
+This package is the main JavaScript/TypeScript runtime in the monorepo. See also:
+- root `README.md` — monorepo overview
+- `packages/interocitor-swift` — Swift client
+- `examples/todo-webdav` — local demo app
 
 ## License
 

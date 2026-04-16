@@ -116,14 +116,15 @@ test.describe('Handshake via Cloudflare Worker relay', () => {
       pageA.evaluate(async ({ workerBaseUrl, relayBase, tok, remotePath }) => {
         const { CloudflareAdapter } = await import('/packages/interocitor/dist/adapters/cloudflare.js');
         const { generateShareQR }   = await import('/packages/interocitor/dist/index.js');
-        const { generateKey, exportKeyRaw } = await import('/packages/interocitor/dist/crypto/keys.js');
+        const { generateKey, keyToPassphrase } = await import('/packages/interocitor/dist/crypto/keys.js');
 
         const adapter = new CloudflareAdapter({ baseUrl: `${workerBaseUrl}/io${relayBase}`, token: tok });
         await adapter.authenticate();
 
-        const meshKey = await generateKey();
+        const key = await generateKey();
+        const passphrase = await keyToPassphrase(key);
         const share   = await generateShareQR({
-          adapter, relayBase, remotePath, meshKey,
+          adapter, relayBase, remotePath, passphrase,
           pollIntervalMs: 500, timeoutMs: 30_000,
         });
 
@@ -134,14 +135,13 @@ test.describe('Handshake via Cloudflare Worker relay', () => {
         await share.complete();
 
         const hex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
-        return { remotePath, meshKeyHex: hex(await exportKeyRaw(meshKey)), handshakeId: share.qrPayload.handshakeId };
+        return { remotePath, passphraseHex: hex(new TextEncoder().encode(passphrase)), handshakeId: share.qrPayload.handshakeId };
       }, { workerBaseUrl: CF_WORKER_BASE_URL, relayBase: RELAY_BASE, tok: token, remotePath: remote }),
 
       // Scanner (pageB): scans the QR, receives credentials
       pageB.evaluate(async ({ workerBaseUrl, relayBase, tok, pollForQRSrc }) => {
         const { CloudflareAdapter } = await import('/packages/interocitor/dist/adapters/cloudflare.js');
         const { handleScannedQR, decodeQRPayload } = await import('/packages/interocitor/dist/index.js');
-        const { exportKeyRaw } = await import('/packages/interocitor/dist/crypto/keys.js');
 
         const adapter = new CloudflareAdapter({ baseUrl: `${workerBaseUrl}/io${relayBase}`, token: tok });
         await adapter.authenticate();
@@ -159,12 +159,12 @@ test.describe('Handshake via Cloudflare Worker relay', () => {
 
         if (!received) throw new Error('share flow: expected credentials');
         const hex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
-        return { remotePath: received.remotePath, meshKeyHex: hex(await exportKeyRaw(received.meshKey!)) };
+        return { remotePath: received.remotePath, passphraseHex: hex(new TextEncoder().encode(received.passphrase!)) };
       }, { workerBaseUrl: CF_WORKER_BASE_URL, relayBase: RELAY_BASE, tok: token, pollForQRSrc: POLL_FOR_QR }),
     ]);
 
     expect(scanResult.remotePath).toBe(shareResult.remotePath);
-    expect(scanResult.meshKeyHex).toBe(shareResult.meshKeyHex);
+    expect(scanResult.passphraseHex).toBe(shareResult.passphraseHex);
   });
 
   test('share flow: unencrypted mesh — meshKey is null, remotePath delivered', async () => {
@@ -181,7 +181,7 @@ test.describe('Handshake via Cloudflare Worker relay', () => {
         await adapter.authenticate();
 
         const share = await generateShareQR({
-          adapter, relayBase, remotePath, meshKey: null,
+          adapter, relayBase, remotePath, passphrase: null,
           pollIntervalMs: 500, timeoutMs: 30_000,
         });
         await adapter.writeFile(`${relayBase}/__qr__/${share.qrPayload.handshakeId}`, share.qrEncoded);
@@ -204,12 +204,12 @@ test.describe('Handshake via Cloudflare Worker relay', () => {
           adapter, relayBase, payload,
           pollIntervalMs: 500, timeoutMs: 30_000,
         });
-        return { remotePath: received!.remotePath, hasMeshKey: received!.meshKey !== null };
+        return { remotePath: received!.remotePath, hasPassphrase: received!.passphrase !== null };
       }, { workerBaseUrl: CF_WORKER_BASE_URL, relayBase: RELAY_BASE, tok: token, pollForQRSrc: POLL_FOR_QR }),
     ]);
 
     expect(scanResult.remotePath).toBe(shareResult.remotePath);
-    expect(scanResult.hasMeshKey).toBe(false);
+    expect(scanResult.hasPassphrase).toBe(false);
   });
 
   // ── join flow ─────────────────────────────────────────────────────
@@ -224,7 +224,6 @@ test.describe('Handshake via Cloudflare Worker relay', () => {
       pageB.evaluate(async ({ workerBaseUrl, relayBase, tok }) => {
         const { CloudflareAdapter } = await import('/packages/interocitor/dist/adapters/cloudflare.js');
         const { generateJoinQR }    = await import('/packages/interocitor/dist/index.js');
-        const { exportKeyRaw }      = await import('/packages/interocitor/dist/crypto/keys.js');
 
         const adapter = new CloudflareAdapter({ baseUrl: `${workerBaseUrl}/io${relayBase}`, token: tok });
         await adapter.authenticate();
@@ -236,19 +235,20 @@ test.describe('Handshake via Cloudflare Worker relay', () => {
 
         const received = await join.credentials;
         const hex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
-        return { remotePath: received.remotePath, meshKeyHex: hex(await exportKeyRaw(received.meshKey!)) };
+        return { remotePath: received.remotePath, passphraseHex: hex(new TextEncoder().encode(received.passphrase!)) };
       }, { workerBaseUrl: CF_WORKER_BASE_URL, relayBase: RELAY_BASE, tok: token }),
 
       // Scanner (pageA): has credentials, pushes them
       pageA.evaluate(async ({ workerBaseUrl, relayBase, tok, remotePath, pollForQRSrc }) => {
         const { CloudflareAdapter } = await import('/packages/interocitor/dist/adapters/cloudflare.js');
         const { handleScannedQR, decodeQRPayload } = await import('/packages/interocitor/dist/index.js');
-        const { generateKey, exportKeyRaw } = await import('/packages/interocitor/dist/crypto/keys.js');
+        const { generateKey, keyToPassphrase } = await import('/packages/interocitor/dist/crypto/keys.js');
 
         const adapter = new CloudflareAdapter({ baseUrl: `${workerBaseUrl}/io${relayBase}`, token: tok });
         await adapter.authenticate();
 
-        const meshKey = await generateKey();
+        const key = await generateKey();
+        const passphrase = await keyToPassphrase(key);
 
         const pollForQR = new Function(`${pollForQRSrc}; return pollForQR;`)() as
           (adapter: unknown, relayBase: string) => Promise<string>;
@@ -256,17 +256,17 @@ test.describe('Handshake via Cloudflare Worker relay', () => {
         const payload = decodeQRPayload(await pollForQR(adapter, relayBase));
         await handleScannedQR({
           adapter, relayBase, payload,
-          ownCredentials: { remotePath, meshKey },
+          ownCredentials: { remotePath, passphrase },
           pollIntervalMs: 500, timeoutMs: 30_000,
         });
 
         const hex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
-        return { remotePath, meshKeyHex: hex(await exportKeyRaw(meshKey)) };
+        return { remotePath, passphraseHex: hex(new TextEncoder().encode(passphrase)) };
       }, { workerBaseUrl: CF_WORKER_BASE_URL, relayBase: RELAY_BASE, tok: token, remotePath: remote, pollForQRSrc: POLL_FOR_QR }),
     ]);
 
     expect(joinResult.remotePath).toBe(scanResult.remotePath);
-    expect(joinResult.meshKeyHex).toBe(scanResult.meshKeyHex);
+    expect(joinResult.passphraseHex).toBe(scanResult.passphraseHex);
   });
 
   // ── relay cleanup ─────────────────────────────────────────────────
@@ -280,13 +280,15 @@ test.describe('Handshake via Cloudflare Worker relay', () => {
       pageA.evaluate(async ({ workerBaseUrl, relayBase, tok, remotePath }) => {
         const { CloudflareAdapter } = await import('/packages/interocitor/dist/adapters/cloudflare.js');
         const { generateShareQR }   = await import('/packages/interocitor/dist/index.js');
-        const { generateKey }       = await import('/packages/interocitor/dist/crypto/keys.js');
+        const { generateKey, keyToPassphrase }       = await import('/packages/interocitor/dist/crypto/keys.js');
 
         const adapter = new CloudflareAdapter({ baseUrl: `${workerBaseUrl}/io${relayBase}`, token: tok });
         await adapter.authenticate();
 
+        const key = await generateKey();
+        const passphrase = await keyToPassphrase(key);
         const share = await generateShareQR({
-          adapter, relayBase, remotePath, meshKey: await generateKey(),
+          adapter, relayBase, remotePath, passphrase,
           pollIntervalMs: 500, timeoutMs: 30_000,
         });
         await adapter.writeFile(`${relayBase}/__qr__/${share.qrPayload.handshakeId}`, share.qrEncoded);
@@ -336,13 +338,15 @@ test.describe('Handshake via Cloudflare Worker relay', () => {
     const errorMsg = await pageA.evaluate(async ({ workerBaseUrl, relayBase, tok }) => {
       const { CloudflareAdapter } = await import('/packages/interocitor/dist/adapters/cloudflare.js');
       const { generateShareQR }   = await import('/packages/interocitor/dist/index.js');
-      const { generateKey }       = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { generateKey, keyToPassphrase }       = await import('/packages/interocitor/dist/crypto/keys.js');
 
       const adapter = new CloudflareAdapter({ baseUrl: `${workerBaseUrl}/io${relayBase}`, token: tok });
       await adapter.authenticate();
 
+      const key = await generateKey();
+      const passphrase = await keyToPassphrase(key);
       const share = await generateShareQR({
-        adapter, relayBase, remotePath: '/nowhere', meshKey: await generateKey(),
+        adapter, relayBase, remotePath: '/nowhere', passphrase,
         pollIntervalMs: 200, timeoutMs: 800,
       });
 

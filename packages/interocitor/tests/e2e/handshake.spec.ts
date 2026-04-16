@@ -9,7 +9,7 @@ test.beforeEach(async ({ page }) => {
 test.describe('QR payload encoding', () => {
   test('round-trip encodes share intent', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { encodeQRPayload, decodeQRPayload } = await import('/packages/interocitor/dist/index.js');
+      const { encodeQRPayload, decodeQRPayload } = await import('/packages/interocitor/dist/handshake/index.js');
       const payload = { intent: 'share', handshakeId: 'abc123', generatorPub: 'pubkey==' };
       const decoded = decodeQRPayload(encodeQRPayload(payload));
       return { match: JSON.stringify(payload) === JSON.stringify(decoded) };
@@ -19,7 +19,7 @@ test.describe('QR payload encoding', () => {
 
   test('round-trip encodes join intent', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { encodeQRPayload, decodeQRPayload } = await import('/packages/interocitor/dist/index.js');
+      const { encodeQRPayload, decodeQRPayload } = await import('/packages/interocitor/dist/handshake/index.js');
       const payload = { intent: 'join', handshakeId: 'xyz', generatorPub: 'pk' };
       const decoded = decodeQRPayload(encodeQRPayload(payload));
       return { intent: decoded.intent };
@@ -29,7 +29,7 @@ test.describe('QR payload encoding', () => {
 
   test('encoded string is URL-safe base64 (no +/= chars)', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { encodeQRPayload } = await import('/packages/interocitor/dist/index.js');
+      const { encodeQRPayload } = await import('/packages/interocitor/dist/handshake/index.js');
       return encodeQRPayload({ intent: 'share', handshakeId: 'abc', generatorPub: 'pk' });
     });
     expect(result).toMatch(/^[A-Za-z0-9_-]+$/);
@@ -59,7 +59,7 @@ test.describe('QR payload encoding', () => {
 
   test('decodeQRPayload throws on invalid intent', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { decodeQRPayload } = await import('/packages/interocitor/dist/index.js');
+      const { decodeQRPayload } = await import('/packages/interocitor/dist/handshake/index.js');
       try {
         const bad = btoa(JSON.stringify({ intent: 'hack', handshakeId: 'x', generatorPub: 'y' }))
           .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
@@ -70,27 +70,27 @@ test.describe('QR payload encoding', () => {
     expect(result).toContain('Invalid');
   });
 
-  test('QR payload does NOT contain remotePath or meshKey', async ({ page }) => {
+  test('QR payload does NOT contain remotePath or passphrase', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { generateShareQR } = await import('/packages/interocitor/dist/index.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
-      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
-      const meshKey = await generateKey();
+      const { generateKey, keyToPassphrase } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const passphrase = await keyToPassphrase(await generateKey());
       const { qrPayload, qrEncoded } = await generateShareQR({
         adapter: new MemoryAdapter(),
         relayBase: '/',
         remotePath: '/secret-path',
-        meshKey,
+        passphrase,
       });
       return {
         hasRemotePath: 'remotePath' in qrPayload,
-        hasMeshKey: 'meshKey' in qrPayload,
+        hasPassphrase: 'passphrase' in qrPayload,
         encodedContainsPath: qrEncoded.includes('secret'),
         keys: Object.keys(qrPayload),
       };
     });
     expect(result.hasRemotePath).toBe(false);
-    expect(result.hasMeshKey).toBe(false);
+    expect(result.hasPassphrase).toBe(false);
     expect(result.encodedContainsPath).toBe(false);
     // adapterConfig may also be present (from MemoryAdapter.getHandshakeConfig)
     expect(result.keys).toEqual(expect.arrayContaining(['generatorPub', 'handshakeId', 'intent']));
@@ -103,7 +103,7 @@ test.describe('QR payload encoding', () => {
 test.describe('ECDH keypair helpers', () => {
   test('generateECDHKeypair produces extractable P-256 keypair', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateECDHKeypair } = await import('/packages/interocitor/dist/index.js');
+      const { generateECDHKeypair } = await import('/packages/interocitor/dist/handshake/index.js');
       const { publicKey, privateKey } = await generateECDHKeypair();
       return {
         pubAlgo: publicKey.algorithm.name,
@@ -118,7 +118,7 @@ test.describe('ECDH keypair helpers', () => {
 
   test('exportECDHPublicKey / importECDHPublicKey round-trip', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateECDHKeypair, exportECDHPublicKey, importECDHPublicKey } = await import('/packages/interocitor/dist/index.js');
+      const { generateECDHKeypair, exportECDHPublicKey, importECDHPublicKey } = await import('/packages/interocitor/dist/handshake/index.js');
       const { publicKey } = await generateECDHKeypair();
       const exported = await exportECDHPublicKey(publicKey);
       const reExported = await exportECDHPublicKey(await importECDHPublicKey(exported));
@@ -129,7 +129,7 @@ test.describe('ECDH keypair helpers', () => {
 
   test('two keypairs produce different public keys', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateECDHKeypair, exportECDHPublicKey } = await import('/packages/interocitor/dist/index.js');
+      const { generateECDHKeypair, exportECDHPublicKey } = await import('/packages/interocitor/dist/handshake/index.js');
       const a = await exportECDHPublicKey((await generateECDHKeypair()).publicKey);
       const b = await exportECDHPublicKey((await generateECDHKeypair()).publicKey);
       return a === b;
@@ -139,7 +139,7 @@ test.describe('ECDH keypair helpers', () => {
 
   test('ECDH shared secret is symmetric', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateECDHKeypair, exportECDHPublicKey, importECDHPublicKey } = await import('/packages/interocitor/dist/index.js');
+      const { generateECDHKeypair, exportECDHPublicKey, importECDHPublicKey } = await import('/packages/interocitor/dist/handshake/index.js');
       const kpA = await generateECDHKeypair();
       const kpB = await generateECDHKeypair();
       const pubA = await importECDHPublicKey(await exportECDHPublicKey(kpA.publicKey));
@@ -156,21 +156,20 @@ test.describe('ECDH keypair helpers', () => {
 // ─── Share flow: generator has credentials, scanner joins ────────────
 
 test.describe('generateShareQR + handleScannedQR (share flow)', () => {
-  test('scanner receives correct remotePath and meshKey', async ({ page }) => {
+  test('scanner receives correct remotePath and passphrase', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { generateShareQR, handleScannedQR } = await import('/packages/interocitor/dist/index.js');
-      const { generateKey, exportKeyRaw } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { generateKey, keyToPassphrase } = await import('/packages/interocitor/dist/crypto/keys.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
       const adapter = new MemoryAdapter();
-      const meshKey = await generateKey();
-      const meshKeyRaw = await exportKeyRaw(meshKey);
+      const passphrase = await keyToPassphrase(await generateKey());
 
       const share = await generateShareQR({
         adapter,
         relayBase: '/',
         remotePath: '/team-alpha',
-        meshKey,
+        passphrase,
         pollIntervalMs: 50,
         timeoutMs: 10_000,
       });
@@ -186,22 +185,19 @@ test.describe('generateShareQR + handleScannedQR (share flow)', () => {
         }),
       ]);
 
-      const receivedRaw = await exportKeyRaw(received!.meshKey!);
-      const hex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
-
       return {
         remotePath: received!.remotePath,
-        keyMatch: hex(meshKeyRaw) === hex(receivedRaw),
+        passphraseMatch: received!.passphrase === passphrase,
         intent: share.qrPayload.intent,
       };
     });
 
     expect(result.remotePath).toBe('/team-alpha');
-    expect(result.keyMatch).toBe(true);
+    expect(result.passphraseMatch).toBe(true);
     expect(result.intent).toBe('share');
   });
 
-  test('unencrypted mesh — scanner receives remotePath, meshKey is null', async ({ page }) => {
+  test('unencrypted mesh — scanner receives remotePath, passphrase is null', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { generateShareQR, handleScannedQR } = await import('/packages/interocitor/dist/index.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
@@ -209,7 +205,7 @@ test.describe('generateShareQR + handleScannedQR (share flow)', () => {
       const adapter = new MemoryAdapter();
       const share = await generateShareQR({
         adapter, relayBase: '/', remotePath: '/plain-team',
-        meshKey: null, pollIntervalMs: 50, timeoutMs: 10_000,
+        passphrase: null, pollIntervalMs: 50, timeoutMs: 10_000,
       });
 
       const [, received] = await Promise.all([
@@ -217,24 +213,24 @@ test.describe('generateShareQR + handleScannedQR (share flow)', () => {
         handleScannedQR({ adapter, relayBase: '/', payload: share.qrPayload, pollIntervalMs: 50, timeoutMs: 10_000 }),
       ]);
 
-      return { remotePath: received!.remotePath, hasMeshKey: received!.meshKey !== null };
+      return { remotePath: received!.remotePath, hasPassphrase: received!.passphrase !== null };
     });
 
     expect(result.remotePath).toBe('/plain-team');
-    expect(result.hasMeshKey).toBe(false);
+    expect(result.hasPassphrase).toBe(false);
   });
 
   test('relay files are cleaned up after share handshake', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { generateShareQR, handleScannedQR } = await import('/packages/interocitor/dist/index.js');
-      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { generateKey, keyToPassphrase } = await import('/packages/interocitor/dist/crypto/keys.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
       const adapter = new MemoryAdapter();
-      const meshKey = await generateKey();
+      const passphrase = await keyToPassphrase(await generateKey());
       const share = await generateShareQR({
         adapter, relayBase: '/', remotePath: '/cleanup-test',
-        meshKey, pollIntervalMs: 50, timeoutMs: 10_000,
+        passphrase, pollIntervalMs: 50, timeoutMs: 10_000,
       });
       const { handshakeId } = share.qrPayload;
 
@@ -255,12 +251,12 @@ test.describe('generateShareQR + handleScannedQR (share flow)', () => {
   test('share times out if scanner never appears', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { generateShareQR } = await import('/packages/interocitor/dist/index.js');
-      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { generateKey, keyToPassphrase } = await import('/packages/interocitor/dist/crypto/keys.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
       const share = await generateShareQR({
         adapter: new MemoryAdapter(), relayBase: '/',
-        remotePath: '/timeout', meshKey: await generateKey(),
+        remotePath: '/timeout', passphrase: await keyToPassphrase(await generateKey()),
         pollIntervalMs: 50, timeoutMs: 200,
       });
       try { await share.complete(); return 'no-error'; }
@@ -276,12 +272,11 @@ test.describe('generateJoinQR + handleScannedQR (join flow)', () => {
   test('generator receives correct credentials pushed by scanner', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { generateJoinQR, handleScannedQR } = await import('/packages/interocitor/dist/index.js');
-      const { generateKey, exportKeyRaw } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { generateKey, keyToPassphrase } = await import('/packages/interocitor/dist/crypto/keys.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
       const adapter = new MemoryAdapter();
-      const meshKey = await generateKey();
-      const meshKeyRaw = await exportKeyRaw(meshKey);
+      const passphrase = await keyToPassphrase(await generateKey());
 
       const join = await generateJoinQR({
         adapter, relayBase: '/',
@@ -293,29 +288,27 @@ test.describe('generateJoinQR + handleScannedQR (join flow)', () => {
         adapter,
         relayBase: '/',
         payload: join.qrPayload,
-        ownCredentials: { remotePath: '/team-beta', meshKey },
+        ownCredentials: { remotePath: '/team-beta', passphrase },
         pollIntervalMs: 50,
         timeoutMs: 10_000,
       });
 
       // Generator receives
       const received = await join.credentials;
-      const receivedRaw = await exportKeyRaw(received.meshKey!);
-      const hex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
 
       return {
         remotePath: received.remotePath,
-        keyMatch: hex(meshKeyRaw) === hex(receivedRaw),
+        passphraseMatch: received.passphrase === passphrase,
         intent: join.qrPayload.intent,
       };
     });
 
     expect(result.remotePath).toBe('/team-beta');
-    expect(result.keyMatch).toBe(true);
+    expect(result.passphraseMatch).toBe(true);
     expect(result.intent).toBe('join');
   });
 
-  test('join flow unencrypted mesh — generator receives remotePath, null meshKey', async ({ page }) => {
+  test('join flow unencrypted mesh — generator receives remotePath, null passphrase', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { generateJoinQR, handleScannedQR } = await import('/packages/interocitor/dist/index.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
@@ -325,16 +318,16 @@ test.describe('generateJoinQR + handleScannedQR (join flow)', () => {
 
       await handleScannedQR({
         adapter, relayBase: '/', payload: join.qrPayload,
-        ownCredentials: { remotePath: '/open-team', meshKey: null },
+        ownCredentials: { remotePath: '/open-team', passphrase: null },
         pollIntervalMs: 50, timeoutMs: 10_000,
       });
 
       const received = await join.credentials;
-      return { remotePath: received.remotePath, hasMeshKey: received.meshKey !== null };
+      return { remotePath: received.remotePath, hasPassphrase: received.passphrase !== null };
     });
 
     expect(result.remotePath).toBe('/open-team');
-    expect(result.hasMeshKey).toBe(false);
+    expect(result.hasPassphrase).toBe(false);
   });
 
   test('join times out if scanner never appears', async ({ page }) => {
@@ -372,7 +365,7 @@ test.describe('generateJoinQR + handleScannedQR (join flow)', () => {
 test.describe('Security', () => {
   test('attacker without generatorPriv cannot derive wrapping key', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateECDHKeypair, exportECDHPublicKey, importECDHPublicKey } = await import('/packages/interocitor/dist/index.js');
+      const { generateECDHKeypair, exportECDHPublicKey, importECDHPublicKey } = await import('/packages/interocitor/dist/handshake/index.js');
 
       const generator = await generateECDHKeypair();
       const scanner   = await generateECDHKeypair();
@@ -403,7 +396,7 @@ test.describe('Security', () => {
       const { generateShareQR } = await import('/packages/interocitor/dist/index.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
       const adapter = new MemoryAdapter();
-      const base = { adapter, relayBase: '/', remotePath: '/m', meshKey: null };
+      const base = { adapter, relayBase: '/', remotePath: '/m', passphrase: null };
       const a = await generateShareQR(base);
       const b = await generateShareQR(base);
       return { same: a.qrPayload.handshakeId === b.qrPayload.handshakeId };
@@ -420,14 +413,14 @@ test.describe('QR output shape', () => {
       const { generateShareQR } = await import('/packages/interocitor/dist/index.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
       const { qrPayload } = await generateShareQR({
-        adapter: new MemoryAdapter(), relayBase: '/', remotePath: '/m', meshKey: null,
+        adapter: new MemoryAdapter(), relayBase: '/', remotePath: '/m', passphrase: null,
       });
       return Object.keys(qrPayload);
     });
     expect(result).toEqual(expect.arrayContaining(['intent', 'handshakeId', 'generatorPub']));
-    // No credentials, no mesh path
+    // No credentials, no passphrase
     expect(result).not.toContain('remotePath');
-    expect(result).not.toContain('meshKey');
+    expect(result).not.toContain('passphrase');
     // Only known keys present
     const allowed = ['intent', 'handshakeId', 'generatorPub', 'adapterConfig'];
     expect(result.every((k: string) => allowed.includes(k))).toBe(true);

@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 test.beforeEach(async ({ page }) => {
   await page.goto('/packages/interocitor/tests/e2e/fixtures/harness.html');
   await page.evaluate(async () => {
-    localStorage.removeItem('interocitor-device-id');
+    localStorage.removeItem('interocitor-key:interocitor');
     await new Promise<void>((resolve, reject) => {
       const req = indexedDB.deleteDatabase('interocitor');
       req.onsuccess = () => resolve();
@@ -19,9 +19,8 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
-      localStorage.setItem('interocitor-device-id', 'dev_bootstrap');
       const adapter = new MemoryAdapter();
-      const engine = new SyncEngine(adapter, { remotePath: '/MeshBoot', pollInterval: 600_000 });
+      const engine = new SyncEngine(adapter, { remotePath: '/MeshBoot', pollInterval: 600_000, deviceId: 'dev_bootstrap' });
 
       await engine.init();
       await engine.connect();
@@ -44,13 +43,13 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
-      localStorage.setItem('interocitor-device-id', 'dev_writer');
       const adapter = new MemoryAdapter();
       const engine = new SyncEngine(adapter, {
         remotePath: '/MeshFlush',
         pollInterval: 600_000,
         flushThreshold: 999,
         flushDebounce: 60_000,
+        deviceId: 'dev_writer',
       });
 
       await engine.init();
@@ -80,8 +79,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
       const shared = new MemoryAdapter();
 
-      localStorage.setItem('interocitor-device-id', 'dev_a');
-      const engineA = new SyncEngine(shared, { remotePath: '/MeshSync', pollInterval: 600_000, flushThreshold: 1 });
+      const engineA = new SyncEngine(shared, { remotePath: '/MeshSync', pollInterval: 600_000, flushThreshold: 1, deviceId: 'dev_a' });
       await engineA.init();
       await engineA.connect();
       await engineA.put('tasks', 'r1', { title: 'from a' });
@@ -95,8 +93,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
         req.onblocked = () => resolve();
       });
 
-      localStorage.setItem('interocitor-device-id', 'dev_b');
-      const engineB = new SyncEngine(shared, { remotePath: '/MeshSync', pollInterval: 600_000 });
+      const engineB = new SyncEngine(shared, { remotePath: '/MeshSync', pollInterval: 600_000, deviceId: 'dev_b' });
       await engineB.init();
       await engineB.connect();
       const row = await engineB.get('tasks', 'r1');
@@ -113,11 +110,11 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       const { SyncEngine, types } = await import('/packages/interocitor/dist/index.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
-      localStorage.setItem('interocitor-device-id', 'dev_where');
       const adapter = new MemoryAdapter();
       const engine = new SyncEngine(adapter, {
         remotePath: '/MeshWhere',
         pollInterval: 600_000,
+        deviceId: 'dev_where',
         schema: {
           version: 1,
           tables: {
@@ -192,11 +189,11 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       await adapter.writeFile('/Bad/manifest-1.json', JSON.stringify(globalManifest));
       await adapter.writeFile('/Bad/manifest.json', JSON.stringify({ currentGeneration: 1, file: 'manifest-1.json' }));
 
-      localStorage.setItem('interocitor-device-id', 'dev_bad');
       const engine = new SyncEngine(adapter, {
         remotePath: '/Bad',
         pollInterval: 600_000,
         serverId: 'server_relay_1',
+        deviceId: 'dev_bad',
       });
 
       await engine.init();
@@ -215,18 +212,19 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
     const result = await page.evaluate(async () => {
       const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
-      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { generateKey, keyToPassphrase } = await import('/packages/interocitor/dist/crypto/keys.js');
       const { decryptEntry } = await import('/packages/interocitor/dist/crypto/encryption.js');
 
       const key = await generateKey();
-      localStorage.setItem('interocitor-device-id', 'dev_enc');
+      const passphrase = await keyToPassphrase(key);
       const adapter = new MemoryAdapter();
       const engine = new SyncEngine(adapter, {
         remotePath: '/MeshEnc',
         pollInterval: 600_000,
         flushThreshold: 1,
+        deviceId: 'dev_enc',
+        passphrase,
       });
-      engine.setEncryptionKey(key);
 
       await engine.init();
       await engine.connect();
@@ -263,20 +261,21 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
     const result = await page.evaluate(async () => {
       const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
-      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { generateKey, keyToPassphrase } = await import('/packages/interocitor/dist/crypto/keys.js');
       const { decryptEntry } = await import('/packages/interocitor/dist/crypto/encryption.js');
 
       const key = await generateKey();
+      const passphrase = await keyToPassphrase(key);
       const adapter = new MemoryAdapter();
-      localStorage.setItem('interocitor-device-id', 'dev_snapshot_fp');
 
       const engine = new SyncEngine(adapter, {
         remotePath: '/MeshSnapshotFP',
         dbName: 'mesh-snapshot-fp-db',
         pollInterval: 600_000,
         flushThreshold: 1,
+        deviceId: 'dev_snapshot_fp',
+        passphrase,
       });
-      engine.setEncryptionKey(key);
 
       await engine.init();
       await engine.connect();
@@ -313,19 +312,20 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
     const result = await page.evaluate(async () => {
       const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
-      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { generateKey, keyToPassphrase } = await import('/packages/interocitor/dist/crypto/keys.js');
 
       const adapter = new MemoryAdapter();
       const key = await generateKey();
+      const passphrase = await keyToPassphrase(key);
 
-      localStorage.setItem('interocitor-device-id', 'dev_snapshot_source');
       const source = new SyncEngine(adapter, {
         remotePath: '/MeshSnapshotSource',
         dbName: 'mesh-snapshot-source-db',
         pollInterval: 600_000,
         flushThreshold: 1,
+        deviceId: 'dev_snapshot_source',
+        passphrase,
       });
-      source.setEncryptionKey(key);
       await source.init();
       await source.connect();
       await source.put('notes', 'n1', { text: 'source snapshot payload' });
@@ -333,14 +333,14 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       await source.compact();
       await source.disconnect();
 
-      localStorage.setItem('interocitor-device-id', 'dev_snapshot_target_seed');
       const targetSeed = new SyncEngine(adapter, {
         remotePath: '/MeshSnapshotTarget',
         dbName: 'mesh-snapshot-target-seed-db',
         pollInterval: 600_000,
         flushThreshold: 1,
+        deviceId: 'dev_snapshot_target_seed',
+        passphrase,
       });
-      targetSeed.setEncryptionKey(key);
       await targetSeed.init();
       await targetSeed.connect();
       await targetSeed.put('notes', 'n1', { text: 'target snapshot payload' });
@@ -361,13 +361,13 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
         req.onblocked = () => resolve();
       });
 
-      localStorage.setItem('interocitor-device-id', 'dev_snapshot_target_reader');
       const target = new SyncEngine(adapter, {
         remotePath: '/MeshSnapshotTarget',
         dbName: 'mesh-snapshot-target-reader-db',
         pollInterval: 600_000,
+        deviceId: 'dev_snapshot_target_reader',
+        passphrase,
       });
-      target.setEncryptionKey(key);
       await target.init();
 
       const events: Array<{ type: string; path?: string; message?: string }> = [];
@@ -411,32 +411,34 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
     const result = await page.evaluate(async () => {
       const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
-      const { generateKey } = await import('/packages/interocitor/dist/crypto/keys.js');
+      const { generateKey, keyToPassphrase } = await import('/packages/interocitor/dist/crypto/keys.js');
 
       const adapter = new MemoryAdapter();
       const key = await generateKey();
+      const passphrase = await keyToPassphrase(key);
 
-      localStorage.setItem('interocitor-device-id', 'dev_source');
       const source = new SyncEngine(adapter, {
         remotePath: '/MeshSource',
         dbName: 'mesh-source-db',
         pollInterval: 600_000,
-        flushThreshold: 1,
+        flushThreshold: 999,
+        flushDebounce: 60_000,
+        deviceId: 'dev_source',
+        passphrase,
       });
-      source.setEncryptionKey(key);
       await source.init();
       await source.connect();
       await source.put('notes', 'n1', { text: 'poison me' });
       await source.flush();
       await source.disconnect();
 
-      localStorage.setItem('interocitor-device-id', 'dev_target_seed');
       const targetSeed = new SyncEngine(adapter, {
         remotePath: '/MeshTarget',
         dbName: 'mesh-target-seed-db',
         pollInterval: 600_000,
+        deviceId: 'dev_target_seed',
+        passphrase,
       });
-      targetSeed.setEncryptionKey(key);
       await targetSeed.init();
       await targetSeed.connect();
       await targetSeed.disconnect();
@@ -447,13 +449,13 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       const poisonedPath = sourceChange[0].replace('/MeshSource/', '/MeshTarget/');
       await adapter.writeFile(poisonedPath, sourceChange[1]);
 
-      localStorage.setItem('interocitor-device-id', 'dev_target_reader');
       const target = new SyncEngine(adapter, {
         remotePath: '/MeshTarget',
         dbName: 'mesh-target-reader-db',
         pollInterval: 600_000,
+        deviceId: 'dev_target_reader',
+        passphrase,
       });
-      target.setEncryptionKey(key);
       await target.init();
 
       const events: Array<{ type: string; path?: string; message?: string }> = [];
@@ -500,12 +502,12 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
       const remote = new MemoryAdapter();
 
-      localStorage.setItem('interocitor-device-id', 'dev_offline');
       const engine = new SyncEngine({
         remotePath: '/MeshLateAttach',
         pollInterval: 600_000,
         flushDebounce: 60_000,
         flushThreshold: 999,
+        deviceId: 'dev_offline',
       });
 
       await engine.init();
@@ -531,10 +533,10 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
         req.onblocked = () => resolve();
       });
 
-      localStorage.setItem('interocitor-device-id', 'dev_late_reader');
       const reader = new SyncEngine(remote, {
         remotePath: '/MeshLateAttach',
         pollInterval: 600_000,
+        deviceId: 'dev_late_reader',
       });
       await reader.init();
       await reader.connect();
@@ -564,24 +566,24 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       const remoteA = new MemoryAdapter();
       const remoteB = new MemoryAdapter();
 
-      localStorage.setItem('interocitor-device-id', 'dev_primary');
       const engine = new SyncEngine(remoteA, {
         remotePath: '/MeshSwap',
         pollInterval: 600_000,
         flushDebounce: 5,
         flushThreshold: 1,
+        deviceId: 'dev_primary',
       });
       await engine.init();
       await engine.connect();
       await engine.put('tasks', 'local_1', { title: 'from primary' });
       await engine.flush();
 
-      localStorage.setItem('interocitor-device-id', 'dev_peer');
       const peer = new SyncEngine(remoteA, {
         remotePath: '/MeshSwap',
         pollInterval: 600_000,
         flushDebounce: 5,
         flushThreshold: 1,
+        deviceId: 'dev_peer',
       });
       await peer.init();
       await peer.connect();
@@ -589,7 +591,6 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       await peer.flush();
       await peer.disconnect();
 
-      localStorage.setItem('interocitor-device-id', 'dev_primary');
       await engine.pull();
       await engine.setRemoteStorage(remoteB);
       await engine.put('tasks', 'after_switch', { title: 'after switch' });
@@ -603,10 +604,10 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
         req.onblocked = () => resolve();
       });
 
-      localStorage.setItem('interocitor-device-id', 'dev_b_reader');
       const reader = new SyncEngine(remoteB, {
         remotePath: '/MeshSwap',
         pollInterval: 600_000,
+        deviceId: 'dev_b_reader',
       });
       await reader.init();
       await reader.connect();
@@ -642,13 +643,14 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       const adapterA = new MemoryAdapter();
       const adapterB = new MemoryAdapter();
 
-      localStorage.setItem('interocitor-device-id', 'dev_roundtrip_1');
       const clientOne = new SyncEngine({
         remotePath: '/MeshRoundTrip',
         dbName: 'mesh-roundtrip-client-one',
         pollInterval: 600_000,
         flushDebounce: 5,
         flushThreshold: 1,
+        deviceId: 'dev_roundtrip_1',
+        encrypted: false,
       });
       await clientOne.init();
       await clientOne.put('tasks', 'seed', { title: 'seed offline' });
@@ -664,20 +666,20 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       const dumpBAfterAttach = adapterB.dump();
       await clientOne.setRemoteStorage(null);
 
-      localStorage.setItem('interocitor-device-id', 'dev_roundtrip_2');
       const clientTwo = new SyncEngine(adapterA, {
         remotePath: '/MeshRoundTrip',
         dbName: 'mesh-roundtrip-client-two',
         pollInterval: 600_000,
         flushDebounce: 5,
         flushThreshold: 1,
+        deviceId: 'dev_roundtrip_2',
+        encrypted: false,
       });
       await clientTwo.init();
       await clientTwo.connect();
       await clientTwo.put('tasks', 'from_two', { title: 'from old adapter' });
       await clientTwo.flush();
 
-      localStorage.setItem('interocitor-device-id', 'dev_roundtrip_1');
       await clientOne.put('tasks', 'from_one_late', { title: 'from first while detached' });
       const offlineRow = await clientOne.get('tasks', 'from_one_late');
 
@@ -726,11 +728,11 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
       const shared = new MemoryAdapter();
 
-      localStorage.setItem('interocitor-device-id', 'dev_compactor');
       const serverEngine = new SyncEngine(shared, {
         remotePath: '/MeshCompact',
         pollInterval: 600_000,
         flushThreshold: 1,
+        deviceId: 'dev_compactor',
       });
       await serverEngine.init();
       await serverEngine.connect();
@@ -746,10 +748,10 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
         req.onblocked = () => resolve();
       });
 
-      localStorage.setItem('interocitor-device-id', 'dev_client');
       const clientEngine = new SyncEngine(shared, {
         remotePath: '/MeshCompact',
         pollInterval: 600_000,
+        deviceId: 'dev_client',
       });
       await clientEngine.init();
       await clientEngine.connect();
@@ -772,12 +774,12 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 
-      localStorage.setItem('interocitor-device-id', 'dev_not_server');
       const engine = new SyncEngine(new MemoryAdapter(), {
         remotePath: '/MeshCompactReject',
         serverManaged: true,
         serverId: 'server_relay_1',
         pollInterval: 600_000,
+        deviceId: 'dev_not_server',
       });
 
       await engine.init();

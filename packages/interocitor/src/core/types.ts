@@ -93,6 +93,58 @@ export interface TableIndexDefinition {
   unique?: boolean;
 }
 
+// ─── Merge Strategies ─────────────────────────────────────────────────
+
+/**
+ * Built-in column merge strategies (git-style):
+ *
+ * - `'remote-wins'` — Like git `--theirs`. Remote always overwrites local. Default.
+ * - `'lww'`         — Last-Writer-Wins. Highest HLC wins.
+ * - `'local-wins'`  — Like git `--ours`. Keep local value on conflict.
+ */
+export type BuiltinMergeStrategy = 'lww' | 'local-wins' | 'remote-wins';
+
+/**
+ * Custom merge function. Receives the local and incoming column entries
+ * plus context, returns the winning entry.
+ *
+ * Called only when both local and remote have a value for the column.
+ * Return `local` to keep, `remote` to accept, or a new ColumnEntry to
+ * produce a merged result.
+ */
+export type MergeFunction = (
+  local: ColumnEntry,
+  remote: ColumnEntry,
+  context: MergeContext,
+) => ColumnEntry;
+
+export interface MergeContext {
+  table: string;
+  rowId: string;
+  field: string;
+}
+
+/** Per-column merge strategy — builtin name or custom function. */
+export type MergeStrategy = BuiltinMergeStrategy | MergeFunction;
+
+/**
+ * Table-level merge config.
+ *
+ * - Set `strategy` for a table-wide default.
+ * - Set `fields` to override per column (like `.gitattributes` per file).
+ *
+ * Unspecified = inherits from {@link DatabaseSchemaDefinition.mergeStrategy},
+ * which itself defaults to `'remote-wins'`.
+ */
+export interface TableMergeConfig {
+  /** Default strategy for all fields in this table. */
+  strategy?: MergeStrategy;
+  /** Per-field overrides. */
+  fields?: Record<string, MergeStrategy>;
+}
+
+// ─── Schema / Field Types ─────────────────────────────────────────────
+
 export type SchemaFieldKind = 'string' | 'number' | 'boolean' | 'date' | 'json' | 'enum';
 
 export type IndexableSchemaFieldKind = Exclude<SchemaFieldKind, 'json'>;
@@ -118,6 +170,8 @@ export interface TableSchemaDefinition {
   fields?: Record<string, SchemaField>;
   /** Legacy style: kept for compatibility. */
   indexes?: TableIndexDefinition[];
+  /** Merge strategy for this table. Overrides the database-level default. */
+  merge?: MergeStrategy | TableMergeConfig;
 }
 
 /**
@@ -127,6 +181,8 @@ export interface DatabaseSchemaDefinition {
   /** Increment when index/table metadata changes. */
   version: number;
   tables: Record<string, TableSchemaDefinition>;
+  /** Default merge strategy for all tables. Default: `'remote-wins'`. */
+  mergeStrategy?: MergeStrategy;
 }
 
 export type WherePrimitive = string | number | boolean | Date;
@@ -351,6 +407,24 @@ export interface ReplicaConfig {
 export interface SyncConfig {
   /** Cloud folder path prefix, e.g. "/Interocitor" */
   remotePath: string;
+  /**
+   * Base58 passphrase for mesh encryption.
+   * When set, the engine derives the AES-256 key internally and persists
+   * it via the credential store. Implies encrypted = true.
+   */
+  passphrase?: string;
+  /**
+   * Encryption is on by default. Set to false to opt out.
+   * When enabled without a passphrase, the engine generates a fresh key
+   * on first init (retrieve via getPassphrase()).
+   */
+  encrypted?: boolean;
+  /**
+   * Override the auto-generated device ID.
+   * Primarily for tests. In production, omit — the engine generates
+   * and persists a unique ID per origin automatically.
+   */
+  deviceId?: string;
   /** If true, only serverId may publish manifests/compaction */
   serverManaged?: boolean;
   /** Authorized writer identity when serverManaged=true */
@@ -362,7 +436,7 @@ export interface SyncConfig {
   /** Max pending ops before forced flush (default 50) */
   flushThreshold?: number;
   /**
-   * IndexedDB database name for this engine's local cache.
+   * Local database name for this engine's local cache.
    * Use distinct names to isolate multiple engine instances on the same origin.
    * Default: "interocitor"
    */
@@ -382,6 +456,22 @@ export interface SyncConfig {
    * fail the primary flush.
    */
   replicas?: ReplicaConfig[];
+  /**
+   * Credential store for persisting key material (passphrase + device ID).
+   *
+   * Default: auto-detecting store that tries WebAuthn largeBlob (OS keychain,
+   * survives Safari ITP) and falls back to localStorage.
+   *
+   * Pass a custom `CredentialStore` implementation or `null` to disable
+   * credential persistence entirely.
+   */
+  credentialStore?: import('../storage/credential-store.ts').CredentialStore | null;
+
+  /**
+   * Human-readable app name shown in biometric prompts (Touch ID / Face ID)
+   * and OS keychain entries. Used by the default credential store.
+   */
+  appName: string;
 }
 
 // ─── Events ──────────────────────────────────────────────────────────

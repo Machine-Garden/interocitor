@@ -152,8 +152,8 @@ export interface GenerateShareQROptions {
   relayBase: string;
   /** The mesh cloud folder path to share with the joiner. */
   remotePath: string;
-  /** The mesh encryption key, or null for an unencrypted mesh. */
-  meshKey: CryptoKey | null;
+  /** Base58 passphrase for the mesh encryption key, or null for unencrypted. */
+  passphrase: string | null;
   /** Base URL for the pair link embedded in the QR payload (optional). */
   pairBaseUrl?: string;
   /** Polling interval while waiting for the scanner (ms, default 2000). */
@@ -181,7 +181,7 @@ export interface GenerateShareQRResult {
  * to a mesh and wants to invite another device.
  */
 export async function generateShareQR(options: GenerateShareQROptions): Promise<GenerateShareQRResult> {
-  const { adapter, relayBase, remotePath, meshKey, pairBaseUrl, pollIntervalMs, timeoutMs } = options;
+  const { adapter, relayBase, remotePath, passphrase, pairBaseUrl, pollIntervalMs, timeoutMs } = options;
 
   const session = await createGeneratorSession();
   const handshakeId = generateHandshakeId();
@@ -201,7 +201,7 @@ export async function generateShareQR(options: GenerateShareQROptions): Promise<
     async complete() {
       await session.complete(
         adapter, handshakeId, relayBase, 'share',
-        { remotePath, meshKey },
+        { remotePath, passphrase },
         { pollIntervalMs, timeoutMs },
       );
     },

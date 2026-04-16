@@ -36,14 +36,12 @@ test('two isolated contexts sync via shared WebDAV route mock', async ({ browser
       const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
       const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
-      localStorage.setItem('interocitor-device-id', 'ctx_a');
-
       const engine = new SyncEngine(
         new WebDAVAdapter({
           baseUrl: `${location.origin}/__webdav__`,
           auth: { username: 'u', password: 'p' },
         }),
-        { remotePath: '/Isolated', pollInterval: 60_000, flushDebounce: 5, flushThreshold: 1 },
+        { deviceId: 'ctx_a', remotePath: '/Isolated', pollInterval: 60_000, flushDebounce: 60_000, flushThreshold: 999 },
       );
 
       await engine.init();
@@ -63,14 +61,12 @@ test('two isolated contexts sync via shared WebDAV route mock', async ({ browser
       const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
       const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
-      localStorage.setItem('interocitor-device-id', 'ctx_b');
-
       const engine = new SyncEngine(
         new WebDAVAdapter({
           baseUrl: `${location.origin}/__webdav__`,
           auth: { username: 'u', password: 'p' },
         }),
-        { remotePath: '/Isolated', pollInterval: 60_000, flushDebounce: 5, flushThreshold: 1 },
+        { deviceId: 'ctx_b', remotePath: '/Isolated', pollInterval: 60_000, flushDebounce: 60_000, flushThreshold: 999 },
       );
 
       await engine.init();
@@ -121,13 +117,13 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
       const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
       const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
-      localStorage.setItem('interocitor-device-id', 'ctx_roundtrip_a');
       const engine = new SyncEngine({
+        deviceId: 'ctx_roundtrip_a',
         remotePath: '/RoundTrip',
         dbName: 'roundtrip-a',
         pollInterval: 60_000,
-        flushDebounce: 5,
-        flushThreshold: 1,
+        flushDebounce: 60_000,
+        flushThreshold: 999,
       });
 
       await engine.init();
@@ -160,18 +156,18 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
       const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
       const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
-      localStorage.setItem('interocitor-device-id', 'ctx_roundtrip_b');
       const engine = new SyncEngine(
         new WebDAVAdapter({
           baseUrl: `${location.origin}/__webdav_a__`,
           auth: { username: 'u', password: 'p' },
         }),
         {
+          deviceId: 'ctx_roundtrip_b',
           remotePath: '/RoundTrip',
           dbName: 'roundtrip-b',
           pollInterval: 60_000,
-          flushDebounce: 5,
-          flushThreshold: 1,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         },
       );
 
@@ -190,13 +186,13 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
       const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
       const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
-      localStorage.setItem('interocitor-device-id', 'ctx_roundtrip_a');
       const engine = new SyncEngine({
+        deviceId: 'ctx_roundtrip_a',
         remotePath: '/RoundTrip',
         dbName: 'roundtrip-a',
         pollInterval: 60_000,
-        flushDebounce: 5,
-        flushThreshold: 1,
+        flushDebounce: 60_000,
+        flushThreshold: 999,
       });
 
       await engine.init();
@@ -219,18 +215,18 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
       const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
       const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
-      localStorage.setItem('interocitor-device-id', 'ctx_roundtrip_b');
       const engine = new SyncEngine(
         new WebDAVAdapter({
           baseUrl: `${location.origin}/__webdav_a__`,
           auth: { username: 'u', password: 'p' },
         }),
         {
+          deviceId: 'ctx_roundtrip_b',
           remotePath: '/RoundTrip',
           dbName: 'roundtrip-b',
           pollInterval: 60_000,
-          flushDebounce: 5,
-          flushThreshold: 1,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         },
       );
 

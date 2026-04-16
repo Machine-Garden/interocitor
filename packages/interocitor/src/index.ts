@@ -8,23 +8,22 @@
  * ```ts
  * import { SyncEngine } from 'interocitor';
  * import { GoogleDriveAdapter } from 'interocitor/adapters/google-drive';
- * import { generateKey, keyToPassphrase } from 'interocitor/crypto/keys';
  *
  * const adapter = new GoogleDriveAdapter({
  *   clientId: 'YOUR_GOOGLE_CLIENT_ID',
  * });
- * const engine = new SyncEngine(adapter, { remotePath: '/Interocitor' });
- *
- * const key = await generateKey();
- * console.log('Share this with your mesh:', await keyToPassphrase(key));
- * engine.setEncryptionKey(key);
+ * const engine = new SyncEngine(adapter, {
+ *   remotePath: '/Interocitor',
+ *   encrypted: true, // generates key automatically
+ * });
  *
  * await engine.init();
  * await engine.connect();
  *
- * await engine.put('meals', 'meal_1', { name: 'Butter Chicken', servings: 4 });
+ * // Share this passphrase with other devices:
+ * console.log('Passphrase:', engine.getPassphrase());
  *
- * const meals = engine.query('meals');
+ * await engine.put('meals', 'meal_1', { name: 'Butter Chicken', servings: 4 });
  *
  * engine.on((event) => {
  *   if (event.type === 'change') {
@@ -34,28 +33,18 @@
  * ```
  */
 
-// ─── Handshake ────────────────────────────────────────────────────────
+// ─── Handshake (public API) ───────────────────────────────────────────
 
 export {
   generateShareQR,
   generateJoinQR,
   handleScannedQR,
-  encodeQRPayload,
-  decodeQRPayload,
   buildPairUrl,
   parseQRFromUrl,
-  generateECDHKeypair,
-  exportECDHPublicKey,
-  importECDHPublicKey,
-  createGeneratorSession,
-  runScannerHandshake,
 } from './handshake/index.ts';
 
 export type {
-  HandshakeQRPayload,
-  HandshakeIntent,
   HandshakeCredentials,
-  GeneratorSession,
   GenerateShareQROptions,
   GenerateShareQRResult,
   GenerateJoinQROptions,
@@ -67,12 +56,21 @@ export type {
 
 export { SyncEngine } from './core/sync-engine.ts';
 export { LocalStore } from './storage/local-store.ts';
+export {
+  type CredentialStore,
+  type StoredCredentials,
+  LocalStorageCredentialStore,
+  WebAuthnCredentialStore,
+  createCredentialStore,
+} from './storage/credential-store.ts';
 export { Table } from './core/table.ts';
 export { types } from './core/schema-types.ts';
 
 // ─── Row utilities ────────────────────────────────────────────────────
 
 export { readColumn, rowToPlain } from './core/crdt.ts';
+export { createRowId } from './core/row-id.ts';
+export type { CreateRowIdOptions } from './core/row-id.ts';
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -94,6 +92,11 @@ export type {
   IndexableSchemaFieldKind,
   SchemaField,
   IndexableSchemaField,
+  BuiltinMergeStrategy,
+  MergeStrategy,
+  MergeFunction,
+  MergeContext,
+  TableMergeConfig,
   WhereClause,
   WherePrimitive,
   WhereOperator,

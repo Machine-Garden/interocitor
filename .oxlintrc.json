@@ -32,14 +32,8 @@
     "unicorn/prefer-string-replace-all": "off",
     "unicorn/prefer-string-slice": "off",
     "unicorn/prefer-top-level-await": "off",
-    "unicorn/no-useless-spread": "off",
-    "unicorn/no-useless-switch-case": "off",
-    "unicorn/prefer-node-protocol": "off",
-    "typescript/no-explicit-any": "off",
     "typescript/ban-ts-comment": "warn",
-    "typescript/consistent-type-imports": "off",
     "typescript/no-unused-vars": "error",
-    "no-promise-executor-return": "off",
     "no-shadow": "off"
   }
 }

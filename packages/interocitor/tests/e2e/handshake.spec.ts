@@ -239,7 +239,10 @@ test.describe('generateShareQR + handleScannedQR (share flow)', () => {
         handleScannedQR({ adapter, relayBase: '/', payload: share.qrPayload, pollIntervalMs: 50, timeoutMs: 10_000 }),
       ]);
 
-      await new Promise(r => setTimeout(r, 100));
+      await new Promise((resolve) => {
+        setTimeout(resolve, 100);
+      });
+      
       const files = adapter.dump();
       const relayFiles = Object.keys(files).filter(k => k.includes(`handshake/${handshakeId}`));
       return { relayFiles };

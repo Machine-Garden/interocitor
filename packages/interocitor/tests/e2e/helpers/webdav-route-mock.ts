@@ -238,7 +238,7 @@ async function handleRoute(route: Route, request: Request, state: WebDavRouteSta
       for (const [filePath] of state.files) {
         if (filePath.startsWith(`${path}/`)) state.files.delete(filePath);
       }
-      for (const folder of [...state.folders]) {
+      for (const folder of state.folders) {
         if (folder.startsWith(`${path}/`)) state.folders.delete(folder);
       }
       state.folders.delete(path);

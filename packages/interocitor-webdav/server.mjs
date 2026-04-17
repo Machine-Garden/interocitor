@@ -248,10 +248,10 @@ function makeMemoryBackend() {
       if (files.delete(path)) return true;
       // Collection (folder) deletion — recursive
       if (folders.has(path)) {
-        for (const filePath of [...files.keys()]) {
+        for (const filePath of files.keys()) {
           if (filePath.startsWith(`${path}/`)) files.delete(filePath);
         }
-        for (const folder of [...folders]) {
+        for (const folder of folders) {
           if (folder.startsWith(`${path}/`)) folders.delete(folder);
         }
         folders.delete(path);

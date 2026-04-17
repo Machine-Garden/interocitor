@@ -373,7 +373,9 @@ window.__todoDemo = {
   async waitForSseReady(timeoutMs = 3000) {
     return await Promise.race([
       runtime.sseReady,
-      new Promise((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+      new Promise((resolve) => {
+        setTimeout(() => resolve(false), timeoutMs);
+      }),
     ]);
   },
   getEventTypes() {
@@ -386,7 +388,9 @@ window.__todoDemo = {
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
       if (runtime.eventLog.some((event) => event.type === type)) return true;
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      await new Promise((resolve) => {
+        setTimeout(resolve, 25);
+      });
     }
     return runtime.eventLog.some((event) => event.type === type);
   },

@@ -190,7 +190,9 @@ async function pollFor<T>(
   while (Date.now() < deadline) {
     const r = await fn();
     if (r !== null) return r;
-    await new Promise(res => setTimeout(res, intervalMs));
+    await new Promise((resolve) => {
+      setTimeout(resolve, intervalMs);
+    });
   }
   throw new Error(`Handshake timed out after ${timeoutMs}ms`);
 }

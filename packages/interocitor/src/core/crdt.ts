@@ -89,7 +89,6 @@ function mergeColumn(
       // When both have values, local keeps its value.
       return null;
 
-    case 'lww':
     default:
       return hlcCompareStr(remote.hlc, local.hlc) > 0 ? remote : null;
   }

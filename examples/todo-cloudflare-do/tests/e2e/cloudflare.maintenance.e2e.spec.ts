@@ -79,7 +79,9 @@ test('Cloudflare worker tracks mesh-path activity and TTL maintenance deletes in
   expect(status.paths[0].last_read_at).toBeTruthy();
   expect(status.paths[0].last_operation_at).toBeTruthy();
 
-  await new Promise((resolve) => setTimeout(resolve, 25));
+  await new Promise((resolve) => {
+    setTimeout(resolve, 25);
+  });
 
   const maintenanceRun = await execute(namespace, { op: 'run-maintenance' });
   expect(Number(maintenanceRun.ttlCandidates)).toBeGreaterThanOrEqual(1);

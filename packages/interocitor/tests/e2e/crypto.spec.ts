@@ -1,4 +1,8 @@
 import { expect, test } from '@playwright/test';
+function toHex(bytes: Uint8Array): string {
+  return Array.from(bytes).map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/packages/interocitor/tests/e2e/fixtures/harness.html');
@@ -28,7 +32,6 @@ test.describe('generateKey', () => {
       const a = await exportKeyRaw(await generateKey());
       const b = await exportKeyRaw(await generateKey());
       // Compare as hex strings
-      const toHex = (bytes: Uint8Array) => Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
       return { same: toHex(a) === toHex(b) };
     });
 
@@ -48,7 +51,6 @@ test.describe('keyToPassphrase / passphraseToKey', () => {
 
       const rawOrig = await exportKeyRaw(original);
       const rawRestored = await exportKeyRaw(restored);
-      const toHex = (bytes: Uint8Array) => Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 
       return {
         passphraseLength: passphrase.length,
@@ -70,7 +72,6 @@ test.describe('keyToPassphrase / passphraseToKey', () => {
       const passphrase = await keyToPassphrase(key);
       const padded = `  ${passphrase}  `;
       const restored = await passphraseToKey(padded);
-      const toHex = (bytes: Uint8Array) => Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
       return { match: toHex(await exportKeyRaw(key)) === toHex(await exportKeyRaw(restored)) };
     });
 
@@ -92,7 +93,6 @@ test.describe('keyToShareUrl / keyFromFragment', () => {
 
       const restored = await importKeyRaw(extractedRaw);
       const rawRestored = await exportKeyRaw(restored);
-      const toHex = (bytes: Uint8Array) => Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 
       return {
         url,
@@ -277,7 +277,6 @@ test.describe('storeKeyLocally / loadKeyLocally / clearKeyLocally', () => {
       await storeKeyLocally(key);
       const restored = await loadKeyLocally();
       if (!restored) return { match: false };
-      const toHex = (bytes: Uint8Array) => Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
       return { match: toHex(await exportKeyRaw(key)) === toHex(await exportKeyRaw(restored)) };
     });
 

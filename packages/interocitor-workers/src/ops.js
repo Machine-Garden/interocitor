@@ -1,5 +1,12 @@
 import { meshRootForPath, cacheKeyFor } from './paths.js';
 import { PATH_TYPE } from './paths.js';
+
+function decodeJsonBuffer(value) {
+  if (value instanceof ArrayBuffer) return new TextDecoder().decode(value);
+  if (value instanceof Uint8Array) return new TextDecoder().decode(value);
+  if (typeof value === 'string') return value;
+  return new TextDecoder().decode(new Uint8Array(value?.buffer ?? value ?? []));
+}
 void PATH_TYPE;
 /**
  * interocitor operations layer
@@ -328,13 +335,7 @@ export async function opPutSemantic(db, prefix, path, bytes, pathType, remoteRoo
   if (existing) {
     // Validate forward transition
     try {
-      const decode = (v) => {
-        if (v instanceof ArrayBuffer) return new TextDecoder().decode(v);
-        if (v instanceof Uint8Array) return new TextDecoder().decode(v);
-        if (typeof v === 'string') return v;
-        return new TextDecoder().decode(new Uint8Array(v?.buffer ?? v ?? []));
-      };
-      const existingJson = JSON.parse(decode(existing.content));
+      const existingJson = JSON.parse(decodeJsonBuffer(existing.content));
       const incomingJson = JSON.parse(new TextDecoder().decode(bytes));
 
       if (pathType === 'manifest-pointer') {

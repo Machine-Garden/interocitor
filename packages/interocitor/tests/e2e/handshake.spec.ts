@@ -1,4 +1,8 @@
 import { expect, test } from '@playwright/test';
+function hexFrom(b: ArrayBuffer): string {
+  return Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/packages/interocitor/tests/e2e/fixtures/harness.html');
@@ -146,8 +150,7 @@ test.describe('ECDH keypair helpers', () => {
       const pubB = await importECDHPublicKey(await exportECDHPublicKey(kpB.publicKey));
       const bitsAB = await crypto.subtle.deriveBits({ name: 'ECDH', public: pubB }, kpA.privateKey, 256);
       const bitsBA = await crypto.subtle.deriveBits({ name: 'ECDH', public: pubA }, kpB.privateKey, 256);
-      const hex = (b: ArrayBuffer) => Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2, '0')).join('');
-      return hex(bitsAB) === hex(bitsBA);
+      return hexFrom(bitsAB) === hexFrom(bitsBA);
     });
     expect(result).toBe(true);
   });
@@ -377,7 +380,6 @@ test.describe('Security', () => {
       const generatorPub = await importECDHPublicKey(await exportECDHPublicKey(generator.publicKey));
       const scannerPub   = await importECDHPublicKey(await exportECDHPublicKey(scanner.publicKey));
 
-      const hex = (b: ArrayBuffer) => Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2, '0')).join('');
 
       // Legitimate shared secret
       const legitBits = await crypto.subtle.deriveBits({ name: 'ECDH', public: scannerPub }, generator.privateKey, 256);

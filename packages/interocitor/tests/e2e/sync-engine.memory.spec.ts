@@ -1,5 +1,13 @@
 import { expect, test } from '@playwright/test';
 
+async function hashOf(obj: unknown): Promise<string> {
+  const json = JSON.stringify(obj);
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(json));
+  const hex = Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
+  return `sha256:${hex}`;
+}
+
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/packages/interocitor/tests/e2e/fixtures/harness.html');
   await page.evaluate(async () => {
@@ -161,12 +169,6 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       const adapter = new MemoryAdapter();
       const now = new Date().toISOString();
 
-      const hashOf = async (obj: unknown) => {
-        const json = JSON.stringify(obj);
-        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(json));
-        const hex = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
-        return `sha256:${hex}`;
-      };
 
       const globalPayload = {
         generation: 1,

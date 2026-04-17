@@ -27,6 +27,10 @@
  */
 
 import { expect, test, type Page } from '@playwright/test';
+function bytesToHex(b: Uint8Array): string {
+  return Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
 
 // ─── Config ──────────────────────────────────────────────────────────
 
@@ -134,8 +138,7 @@ test.describe('Handshake via Cloudflare Worker relay', () => {
         // Wait for pageB to complete the handshake
         await share.complete();
 
-        const hex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
-        return { remotePath, passphraseHex: hex(new TextEncoder().encode(passphrase)), handshakeId: share.qrPayload.handshakeId };
+        return { remotePath, passphraseHex: bytesToHex(new TextEncoder().encode(passphrase)), handshakeId: share.qrPayload.handshakeId };
       }, { workerBaseUrl: CF_WORKER_BASE_URL, relayBase: RELAY_BASE, tok: token, remotePath: remote }),
 
       // Scanner (pageB): scans the QR, receives credentials
@@ -158,8 +161,7 @@ test.describe('Handshake via Cloudflare Worker relay', () => {
         });
 
         if (!received) throw new Error('share flow: expected credentials');
-        const hex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
-        return { remotePath: received.remotePath, passphraseHex: hex(new TextEncoder().encode(received.passphrase!)) };
+        return { remotePath: received.remotePath, passphraseHex: bytesToHex(new TextEncoder().encode(received.passphrase!)) };
       }, { workerBaseUrl: CF_WORKER_BASE_URL, relayBase: RELAY_BASE, tok: token, pollForQRSrc: POLL_FOR_QR }),
     ]);
 
@@ -234,8 +236,7 @@ test.describe('Handshake via Cloudflare Worker relay', () => {
         await adapter.writeFile(`${relayBase}/__qr__/${join.qrPayload.handshakeId}`, join.qrEncoded);
 
         const received = await join.credentials;
-        const hex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
-        return { remotePath: received.remotePath, passphraseHex: hex(new TextEncoder().encode(received.passphrase!)) };
+        return { remotePath: received.remotePath, passphraseHex: bytesToHex(new TextEncoder().encode(received.passphrase!)) };
       }, { workerBaseUrl: CF_WORKER_BASE_URL, relayBase: RELAY_BASE, tok: token }),
 
       // Scanner (pageA): has credentials, pushes them
@@ -260,8 +261,7 @@ test.describe('Handshake via Cloudflare Worker relay', () => {
           pollIntervalMs: 500, timeoutMs: 30_000,
         });
 
-        const hex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
-        return { remotePath, passphraseHex: hex(new TextEncoder().encode(passphrase)) };
+        return { remotePath, passphraseHex: bytesToHex(new TextEncoder().encode(passphrase)) };
       }, { workerBaseUrl: CF_WORKER_BASE_URL, relayBase: RELAY_BASE, tok: token, remotePath: remote, pollForQRSrc: POLL_FOR_QR }),
     ]);
 

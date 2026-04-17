@@ -37,6 +37,21 @@ export interface PullContext {
   loadOrCreateManifest: () => Promise<void>;
 }
 
+function emitAffectedRows(
+  affected: Row[],
+  knownTables: Set<string>,
+  emit: (event: SyncEvent) => void,
+): void {
+  for (const row of affected) {
+    knownTables.add(row._table);
+    if (row._deleted) {
+      emit({ type: 'delete', table: row._table, rowId: row._rowId });
+    } else {
+      emit({ type: 'change', table: row._table, rowId: row._rowId, row });
+    }
+  }
+}
+
 /** Returns the updated HLC after pull. */
 export async function pull(ctx: PullContext): Promise<HLC> {
   const { adapter, local, remotePath, codecState, tables, knownTables, emit } = ctx;
@@ -95,14 +110,7 @@ export async function pull(ctx: PullContext): Promise<HLC> {
         if (affected.length > 0) {
           await local.putRows(affected);
           totalMerged += affected.length;
-          for (const row of affected) {
-            knownTables.add(row._table);
-            if (row._deleted) {
-              emit({ type: 'delete', table: row._table, rowId: row._rowId });
-            } else {
-              emit({ type: 'change', table: row._table, rowId: row._rowId, row });
-            }
-          }
+          emitAffectedRows(affected, knownTables, emit);
         }
 
         if (!latestMergedHlc || hlcCompareStr(entry.hlc, latestMergedHlc) > 0) {

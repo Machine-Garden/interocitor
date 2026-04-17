@@ -151,7 +151,7 @@ test.describe('Multi-device pairing flow', () => {
 
       // Phase A: Device 1 starts the share — returns QR payload and
       // begins waiting for scanner. We don't await complete() yet.
-      const step2_qr = await page1.evaluate(async (alphaPassphrase: string) => {
+      const step2_qr = await page1.evaluate(async (passArg: string) => {
         const { generateShareQR } = await import('/packages/interocitor/dist/index.js');
         const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
@@ -164,7 +164,7 @@ test.describe('Multi-device pairing flow', () => {
           adapter,
           relayBase: '/TeamAlpha',
           remotePath: '/TeamAlpha',
-          passphrase: alphaPassphrase,
+          passphrase: passArg,
           pollIntervalMs: 50,
           timeoutMs: 15_000,
         });
@@ -370,7 +370,7 @@ test.describe('Multi-device pairing flow', () => {
       //         Must restore the old key — without it, data is lost.
       // ──────────────────────────────────────────────────────────────
 
-      const step4 = await page2.evaluate(async (alphaPassphrase: string) => {
+      const step4 = await page2.evaluate(async (passArg: string) => {
         const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
         const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
@@ -382,7 +382,7 @@ test.describe('Multi-device pairing flow', () => {
           remotePath: '/TeamAlpha',
           dbName: 'team-alpha',
           deviceId: 'device_2',
-          passphrase: alphaPassphrase,
+          passphrase: passArg,
           pollInterval: 600_000,
           flushDebounce: 60_000,
           flushThreshold: 999,
@@ -407,7 +407,7 @@ test.describe('Multi-device pairing flow', () => {
       expect(step4.names).toEqual(['Internal Tool', 'Secret Project']);
 
       // Verify Device 1 sees the new row.
-      const step4_verify = await page1.evaluate(async (alphaPassphrase: string) => {
+      const step4_verify = await page1.evaluate(async (passArg: string) => {
         const { SyncEngine, readColumn } = await import('/packages/interocitor/dist/index.js');
         const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
@@ -419,7 +419,7 @@ test.describe('Multi-device pairing flow', () => {
           remotePath: '/TeamAlpha',
           dbName: 'team-alpha',
           deviceId: 'device_1',
-          passphrase: alphaPassphrase,
+          passphrase: passArg,
           pollInterval: 600_000,
           flushDebounce: 60_000,
           flushThreshold: 999,
@@ -444,7 +444,7 @@ test.describe('Multi-device pairing flow', () => {
       // ──────────────────────────────────────────────────────────────
 
       // Device 2: generate share QR for team-alpha.
-      const step5_qr = await page2.evaluate(async (alphaPassphrase: string) => {
+      const step5_qr = await page2.evaluate(async (passArg: string) => {
         const { generateShareQR } = await import('/packages/interocitor/dist/index.js');
         const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
 
@@ -457,7 +457,7 @@ test.describe('Multi-device pairing flow', () => {
           adapter,
           relayBase: '/TeamAlpha',
           remotePath: '/TeamAlpha',
-          passphrase: alphaPassphrase,
+          passphrase: passArg,
           pollIntervalMs: 50,
           timeoutMs: 15_000,
         });

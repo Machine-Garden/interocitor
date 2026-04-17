@@ -1,5 +1,17 @@
 import { expect, test } from '@playwright/test';
 
+function counterMerge(local: any, remote: any, _ctx: any) {
+  return {
+    value: (local.value as number) + (remote.value as number),
+    hlc: local.hlc > remote.hlc ? local.hlc : remote.hlc,
+  };
+}
+
+function keepLocal(local: any, _remote: any) {
+  return local;
+}
+
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/packages/interocitor/tests/e2e/fixtures/harness.html');
 });
@@ -218,10 +230,6 @@ test.describe('merge strategy — custom function', () => {
       const tables: Record<string, Record<string, any>> = {};
 
       // Counter merge: sum values, keep latest HLC
-      const counterMerge = (local: any, remote: any, _ctx: any) => ({
-        value: (local.value as number) + (remote.value as number),
-        hlc: local.hlc > remote.hlc ? local.hlc : remote.hlc,
-      });
 
       const schema = {
         version: 1,
@@ -287,7 +295,6 @@ test.describe('merge strategy — custom function', () => {
       const { applyOp, readColumn } = await import('/packages/interocitor/dist/core/crdt.js');
       const tables: Record<string, Record<string, any>> = {};
 
-      const keepLocal = (local: any, _remote: any) => local;
       const schema = {
         version: 1,
         tables: { t: { merge: keepLocal } },

@@ -424,11 +424,11 @@ if (webDavBackend.init) {
 }
 
 function readRequestBody(req) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolveBody, rejectBody) => {
     const chunks = [];
     req.on('data', chunk => chunks.push(Buffer.from(chunk)));
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
+    req.on('end', () => resolveBody(Buffer.concat(chunks)));
+    req.on('error', rejectBody);
   });
 }
 

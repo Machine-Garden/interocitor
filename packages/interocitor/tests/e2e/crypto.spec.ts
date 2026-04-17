@@ -28,6 +28,9 @@ test.describe('generateKey', () => {
 
   test('generates unique keys each time', async ({ page }) => {
     const result = await page.evaluate(async () => {
+      function toHex(bytes: Uint8Array): string {
+        return Array.from(bytes).map(byte => byte.toString(16).padStart(2, '0')).join('');
+      }
       const { generateKey, exportKeyRaw } = await import('/packages/interocitor/dist/crypto/keys.js');
       const a = await exportKeyRaw(await generateKey());
       const b = await exportKeyRaw(await generateKey());
@@ -44,6 +47,9 @@ test.describe('generateKey', () => {
 test.describe('keyToPassphrase / passphraseToKey', () => {
   test('round-trips a key through base58 passphrase', async ({ page }) => {
     const result = await page.evaluate(async () => {
+      function toHex(bytes: Uint8Array): string {
+        return Array.from(bytes).map(byte => byte.toString(16).padStart(2, '0')).join('');
+      }
       const { generateKey, keyToPassphrase, passphraseToKey, exportKeyRaw } = await import('/packages/interocitor/dist/crypto/keys.js');
       const original = await generateKey();
       const passphrase = await keyToPassphrase(original);
@@ -67,6 +73,9 @@ test.describe('keyToPassphrase / passphraseToKey', () => {
 
   test('passphraseToKey trims whitespace', async ({ page }) => {
     const result = await page.evaluate(async () => {
+      function toHex(bytes: Uint8Array): string {
+        return Array.from(bytes).map(byte => byte.toString(16).padStart(2, '0')).join('');
+      }
       const { generateKey, keyToPassphrase, passphraseToKey, exportKeyRaw } = await import('/packages/interocitor/dist/crypto/keys.js');
       const key = await generateKey();
       const passphrase = await keyToPassphrase(key);
@@ -84,6 +93,9 @@ test.describe('keyToPassphrase / passphraseToKey', () => {
 test.describe('keyToShareUrl / keyFromFragment', () => {
   test('embeds key in URL fragment and extracts it', async ({ page }) => {
     const result = await page.evaluate(async () => {
+      function toHex(bytes: Uint8Array): string {
+        return Array.from(bytes).map(byte => byte.toString(16).padStart(2, '0')).join('');
+      }
       const { generateKey, exportKeyRaw, importKeyRaw, keyToShareUrl, keyFromFragment } = await import('/packages/interocitor/dist/crypto/keys.js');
       const key = await generateKey();
       const raw = await exportKeyRaw(key);
@@ -272,6 +284,9 @@ test.describe('verifyKey', () => {
 test.describe('storeKeyLocally / loadKeyLocally / clearKeyLocally', () => {
   test('persists and restores a key from localStorage', async ({ page }) => {
     const result = await page.evaluate(async () => {
+      function toHex(bytes: Uint8Array): string {
+        return Array.from(bytes).map(byte => byte.toString(16).padStart(2, '0')).join('');
+      }
       const { generateKey, exportKeyRaw, storeKeyLocally, loadKeyLocally } = await import('/packages/interocitor/dist/crypto/keys.js');
       const key = await generateKey();
       await storeKeyLocally(key);

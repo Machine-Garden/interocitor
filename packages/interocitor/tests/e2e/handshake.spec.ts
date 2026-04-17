@@ -143,6 +143,9 @@ test.describe('ECDH keypair helpers', () => {
 
   test('ECDH shared secret is symmetric', async ({ page }) => {
     const result = await page.evaluate(async () => {
+      function hexFrom(b: ArrayBuffer): string {
+        return Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2, '0')).join('');
+      }
       const { generateECDHKeypair, exportECDHPublicKey, importECDHPublicKey } = await import('/packages/interocitor/dist/handshake/index.js');
       const kpA = await generateECDHKeypair();
       const kpB = await generateECDHKeypair();
@@ -371,6 +374,9 @@ test.describe('generateJoinQR + handleScannedQR (join flow)', () => {
 test.describe('Security', () => {
   test('attacker without generatorPriv cannot derive wrapping key', async ({ page }) => {
     const result = await page.evaluate(async () => {
+      function hex(b: ArrayBuffer): string {
+        return Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2, '0')).join('');
+      }
       const { generateECDHKeypair, exportECDHPublicKey, importECDHPublicKey } = await import('/packages/interocitor/dist/handshake/index.js');
 
       const generator = await generateECDHKeypair();

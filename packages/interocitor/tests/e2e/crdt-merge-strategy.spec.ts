@@ -226,6 +226,12 @@ test.describe('merge strategy — per-field', () => {
 test.describe('merge strategy — custom function', () => {
   test('custom function receives context and can produce merged value', async ({ page }) => {
     const result = await page.evaluate(async () => {
+      function counterMerge(local: any, remote: any, _ctx: any) {
+        return {
+          value: (local.value as number) + (remote.value as number),
+          hlc: local.hlc > remote.hlc ? local.hlc : remote.hlc,
+        };
+      }
       const { applyOp, readColumn } = await import('/packages/interocitor/dist/core/crdt.js');
       const tables: Record<string, Record<string, any>> = {};
 
@@ -292,6 +298,7 @@ test.describe('merge strategy — custom function', () => {
 
   test('custom function returning local means no change', async ({ page }) => {
     const result = await page.evaluate(async () => {
+      function keepLocal(local: any, _remote: any) { return local; }
       const { applyOp, readColumn } = await import('/packages/interocitor/dist/core/crdt.js');
       const tables: Record<string, Record<string, any>> = {};
 

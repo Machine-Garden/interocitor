@@ -41,7 +41,7 @@ test('two isolated contexts sync via shared WebDAV route mock', async ({ browser
           baseUrl: `${location.origin}/__webdav__`,
           auth: { username: 'u', password: 'p' },
         }),
-        { deviceId: 'ctx_a', remotePath: '/Isolated', pollInterval: 60_000, flushDebounce: 60_000, flushThreshold: 999 },
+        { deviceId: 'ctx_a', remotePath: '/Isolated', encrypted: false, pollInterval: 60_000, flushDebounce: 60_000, flushThreshold: 999 },
       );
 
       await engine.init();
@@ -66,7 +66,7 @@ test('two isolated contexts sync via shared WebDAV route mock', async ({ browser
           baseUrl: `${location.origin}/__webdav__`,
           auth: { username: 'u', password: 'p' },
         }),
-        { deviceId: 'ctx_b', remotePath: '/Isolated', pollInterval: 60_000, flushDebounce: 60_000, flushThreshold: 999 },
+        { deviceId: 'ctx_b', remotePath: '/Isolated', encrypted: false, pollInterval: 60_000, flushDebounce: 60_000, flushThreshold: 999 },
       );
 
       await engine.init();
@@ -121,6 +121,7 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
         deviceId: 'ctx_roundtrip_a',
         remotePath: '/RoundTrip',
         dbName: 'roundtrip-a',
+        encrypted: false,
         pollInterval: 60_000,
         flushDebounce: 60_000,
         flushThreshold: 999,
@@ -165,6 +166,7 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
           deviceId: 'ctx_roundtrip_b',
           remotePath: '/RoundTrip',
           dbName: 'roundtrip-b',
+          encrypted: false,
           pollInterval: 60_000,
           flushDebounce: 60_000,
           flushThreshold: 999,
@@ -190,6 +192,7 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
         deviceId: 'ctx_roundtrip_a',
         remotePath: '/RoundTrip',
         dbName: 'roundtrip-a',
+        encrypted: false,
         pollInterval: 60_000,
         flushDebounce: 60_000,
         flushThreshold: 999,
@@ -224,6 +227,7 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
           deviceId: 'ctx_roundtrip_b',
           remotePath: '/RoundTrip',
           dbName: 'roundtrip-b',
+          encrypted: false,
           pollInterval: 60_000,
           flushDebounce: 60_000,
           flushThreshold: 999,

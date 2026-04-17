@@ -163,6 +163,12 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('rejects unauthorized server writer in manifest', async ({ page }) => {
     const result = await page.evaluate(async () => {
+      async function hashOf(obj: unknown): Promise<string> {
+        const json = JSON.stringify(obj);
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(json));
+        const hex = Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
+        return `sha256:${hex}`;
+      }
       const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
       const { MemoryAdapter } = await import('/packages/interocitor/dist/adapters/memory.js');
 

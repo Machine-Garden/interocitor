@@ -52,7 +52,7 @@ function base58Decode(str: string): Uint8Array {
   const hex = num.toString(16).padStart(64, '0'); // 256 bits = 64 hex chars
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16) ?? 0;
+    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16) ?? 0;
   }
 
   return bytes;
@@ -123,9 +123,9 @@ export async function passphraseToKey(passphrase: string): Promise<CryptoKey> {
  */
 export function keyToShareUrl(raw: Uint8Array, baseUrl: string): string {
   const b64url = uint8ToBase64(raw)
-    .replaceAll(/\+/g, '-')
-    .replaceAll(/\//g, '_')
-    .replaceAll(/=/g, '');
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replaceAll('=', '');
   return `${baseUrl}#key=${b64url}`;
 }
 
@@ -133,7 +133,7 @@ export function keyToShareUrl(raw: Uint8Array, baseUrl: string): string {
 export function keyFromFragment(hash: string): Uint8Array | null {
   const match = hash.match(/key=([A-Za-z0-9_-]+)/);
   if (!match) return null;
-  const b64 = match[1].replaceAll(/-/g, '+').replaceAll(/_/g, '/');
+  const b64 = match[1].replaceAll('-', '+').replaceAll('_', '/');
   // Pad to multiple of 4
   const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
   return base64ToUint8(padded);

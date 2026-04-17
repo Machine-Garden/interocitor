@@ -73,8 +73,8 @@ export function hlcParse(s: string): HLC {
   const firstDash = s.indexOf('-');
   const secondDash = s.indexOf('-', firstDash + 1);
   return {
-    ts: parseInt(s.substring(0, firstDash), 10),
-    counter: parseInt(s.substring(firstDash + 1, secondDash), 16),
-    nodeId: s.substring(secondDash + 1),
+    ts: parseInt(s.slice(0, firstDash), 10),
+    counter: parseInt(s.slice(firstDash + 1, secondDash), 16),
+    nodeId: s.slice(secondDash + 1),
   };
 }

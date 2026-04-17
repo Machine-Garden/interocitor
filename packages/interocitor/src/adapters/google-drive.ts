@@ -276,7 +276,7 @@ export class GoogleDriveAdapter implements StorageAdapter {
       return {
         name: f.name,
         path,
-        size: parseInt(f.size || '0', 10),
+        size: parseInt(f.size ?? '0', 10),
         modifiedTime: f.modifiedTime,
       };
     });
@@ -412,7 +412,8 @@ export class GoogleDriveAdapter implements StorageAdapter {
     return {
       name: data.name,
       path,
-      size: parseInt(data.size || '0', 10),
+      size: parseInt(data.size ?? '0', 10),
+      
       modifiedTime: data.modifiedTime,
     };
   }

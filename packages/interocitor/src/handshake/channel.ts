@@ -82,11 +82,12 @@ const HKDF_INFO  = 'interocitor-handshake-v1';
 function uint8ToB64url(b: Uint8Array): string {
   let s = '';
   for (let i = 0; i < b.length; i++) s += String.fromCodePoint(b[i]);
-  return btoa(s).replaceAll(/\+/g, '-').replaceAll(/\//g, '_').replaceAll(/=/g, '');
+  return btoa(s).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 }
 
 function b64urlToUint8(s: string): Uint8Array {
-  const p = s.replaceAll(/-/g, '+').replaceAll(/_/g, '/');
+  const p = s.replaceAll('-', '+').replaceAll('_', '/');
+  
   const pad = (4 - (p.length % 4)) % 4;
   const bin = atob(p + '='.repeat(pad));
   const b = new Uint8Array(bin.length);

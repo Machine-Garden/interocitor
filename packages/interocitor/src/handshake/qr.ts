@@ -93,12 +93,12 @@ export function encodeQRPayload(payload: HandshakeQRPayload): string {
   for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCodePoint(bytes[i]);
   }
-  return btoa(binary).replaceAll(/\+/g, '-').replaceAll(/\//g, '_').replaceAll(/=/g, '');
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 }
 
 /** Decode a compact URL-safe base64 string back to HandshakeQRPayload. */
 export function decodeQRPayload(encoded: string): HandshakeQRPayload {
-  const padded = encoded.replaceAll(/-/g, '+').replaceAll(/_/g, '/');
+  const padded = encoded.replaceAll('-', '+').replaceAll('_', '/');
   const pad = (4 - (padded.length % 4)) % 4;
   const b64 = padded + '='.repeat(pad);
 

@@ -62,7 +62,7 @@ test.describe('QR payload encoding', () => {
       const { decodeQRPayload } = await import('/packages/interocitor/dist/handshake/index.js');
       try {
         const bad = btoa(JSON.stringify({ intent: 'hack', handshakeId: 'x', generatorPub: 'y' }))
-          .replaceAll(/\+/g, '-').replaceAll(/\//g, '_').replaceAll(/=/g, '');
+          .replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
         decodeQRPayload(bad);
         return 'no-error';
       } catch (e) { return (e as Error).message; }

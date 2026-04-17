@@ -52,7 +52,7 @@ export class MemoryAdapter implements StorageAdapter {
 
     for (const [path, file] of this.files) {
       if (path.startsWith(prefix)) {
-        const remaining = path.substring(prefix.length);
+        const remaining = path.slice(prefix.length);
         // Only direct children (no nested slashes)
         if (!remaining.includes('/')) {
           entries.push({
@@ -74,16 +74,16 @@ export class MemoryAdapter implements StorageAdapter {
     const names = new Set<string>();
     for (const path of this.files.keys()) {
       if (path.startsWith(prefix)) {
-        const remaining = path.substring(prefix.length);
+        const remaining = path.slice(prefix.length);
         const slash = remaining.indexOf('/');
         if (slash > 0) {
-          names.add(remaining.substring(0, slash));
+          names.add(remaining.slice(0, slash));
         }
       }
     }
     for (const folder of this.folders) {
       if (folder.startsWith(prefix)) {
-        const remaining = folder.substring(prefix.length);
+        const remaining = folder.slice(prefix.length);
         if (remaining && !remaining.includes('/')) {
           names.add(remaining);
         }

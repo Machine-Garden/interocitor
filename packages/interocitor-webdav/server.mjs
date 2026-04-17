@@ -276,7 +276,7 @@ function makeFileBackend(rootDir) {
   const dataRoot = join(ROOT, rootDir);
 
   function cleanDavPath(path) {
-    const normalized = normalize(path).replaceAll(/\\/g, '/');
+    const normalized = normalize(path).replaceAll('\\', '/');
     const withSlash = normalized.startsWith('/') ? normalized : `/${normalized}`;
     if (withSlash.includes('..')) return null;
     return withSlash;

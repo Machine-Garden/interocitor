@@ -34,7 +34,7 @@ function parseDavPath(input) {
   }
 
   const raw = url.pathname.slice(PREFIX.length) || '/';
-  const normalized = `/${raw}`.replace(/\/+/g, '/');
+  const normalized = `/${raw}`.replaceAll(/\/+/g, '/');
   const clean = normalized.length > 1 && normalized.endsWith('/')
     ? normalized.slice(0, -1)
     : normalized;
@@ -220,7 +220,7 @@ function createStore() {
         } else if (typeof body === 'string') {
           bytes = encoder.encode(body);
         } else {
-          const text = body == null ? '' : String(body);
+          const text = body === null || body === undefined ? '' : String(body);
           bytes = encoder.encode(text);
         }
 

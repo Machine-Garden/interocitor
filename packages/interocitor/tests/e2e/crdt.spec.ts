@@ -24,7 +24,7 @@ test.describe('applyOp — upsert', () => {
         row,
         title: row ? readColumn(row, 'title') : null,
         tableExists: 'tasks' in tables,
-        rowInTable: tables.tasks?.task_1 != null,
+        rowInTable: tables.tasks?.task_1 !== null && tables.tasks?.task_1 !== undefined,
       };
     });
 
@@ -162,9 +162,9 @@ test.describe('applyOp — delete', () => {
       }, 1);
 
       return {
-        created: row != null,
+        created: row !== null && row !== undefined,
         deleted: row?._deleted,
-        inTable: tables.t?.r_unknown != null,
+        inTable: tables.t?.r_unknown !== null && tables.t?.r_unknown !== undefined,
       };
     });
 

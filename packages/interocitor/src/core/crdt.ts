@@ -128,7 +128,7 @@ export function applyOp(
       existing._deleted = true;
       existing._deletedHlc = op.hlc;
       return existing;
-    } else {
+    }
       // Tombstone for a row we haven't seen — create it
       const row: Row = {
         _table: op.table,
@@ -139,7 +139,7 @@ export function applyOp(
       };
       table[op.rowId] = row;
       return row;
-    }
+    
   }
 
   // Upsert

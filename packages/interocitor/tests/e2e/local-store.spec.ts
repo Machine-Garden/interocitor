@@ -157,8 +157,8 @@ test.describe('LocalStore — row operations', () => {
 
       store.close();
       return {
-        open: open.map(r => r._rowId).sort(),
-        range: range.map(r => r._rowId).sort(),
+        open: open.map(r => r._rowId).toSorted(),
+        range: range.map(r => r._rowId).toSorted(),
       };
     });
 

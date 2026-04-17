@@ -52,7 +52,7 @@ function fileSizeLimitForPathType(pathType, env) {
 function normalizeMountPrefix(prefix = '') {
   const trimmed = String(prefix || '').trim();
   if (!trimmed || trimmed === '/') return '';
-  return `/${trimmed.replace(/^\/+|\/+$/g, '')}`;
+  return `/${trimmed.replaceAll(/^\/+|\/+$/g, '')}`;
 }
 
 function joinMountPath(prefix, path) {
@@ -300,7 +300,7 @@ export function createInterocitorMount(options = {}) {
   async function fetch(request, env, ctx) {
     const url = new URL(request.url);
     const strippedPath = stripMountPrefix(url.pathname, mountPrefix);
-    if (strippedPath == null) return new Response('Not found', { status: 404 });
+    if (strippedPath === null || strippedPath === undefined) return new Response('Not found', { status: 404 });
     url.pathname = strippedPath;
     return interocitorWorker.fetch(new Request(url.toString(), request), env, ctx);
   }

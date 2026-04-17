@@ -128,7 +128,7 @@ test.describe('Multi-device pairing flow', () => {
           deviceId,
           meshId,
           rowCount: rows.length,
-          names: rows.map((r: any) => readColumn(r, 'name')).sort(),
+          names: rows.map((r: any) => readColumn(r, 'name')).toSorted(),
           passphrase,
         };
       });
@@ -226,7 +226,7 @@ test.describe('Multi-device pairing flow', () => {
             deviceId,
             meshId,
             rowCount: rows.length,
-            names: rows.map((r: any) => readColumn(r, 'name')).sort(),
+            names: rows.map((r: any) => readColumn(r, 'name')).toSorted(),
           };
         }, step2_qr),
       ]);
@@ -328,7 +328,7 @@ test.describe('Multi-device pairing flow', () => {
 
           const meshId = engine.getMeshId();
           const rows = await engine.query('projects');
-          const betaNames = rows.map((r: any) => readColumn(r, 'name')).sort();
+          const betaNames = rows.map((r: any) => readColumn(r, 'name')).toSorted();
 
           await engine.disconnect();
 
@@ -343,7 +343,7 @@ test.describe('Multi-device pairing flow', () => {
           });
           await alphaEngine.init();
           const alphaRows = await alphaEngine.query('projects');
-          const alphaNames = alphaRows.map((r: any) => readColumn(r, 'name')).sort();
+          const alphaNames = alphaRows.map((r: any) => readColumn(r, 'name')).toSorted();
           await alphaEngine.disconnect();
 
           return {
@@ -391,7 +391,7 @@ test.describe('Multi-device pairing flow', () => {
         await engine.connect();
 
         const rows = await engine.query('projects');
-        const names = rows.map((r: any) => readColumn(r, 'name')).sort();
+        const names = rows.map((r: any) => readColumn(r, 'name')).toSorted();
         const meshId = engine.getMeshId();
 
         // Write something new — device 2 is back in the game.
@@ -428,7 +428,7 @@ test.describe('Multi-device pairing flow', () => {
         await engine.connect();
 
         const rows = await engine.query('projects');
-        const names = rows.map((r: any) => readColumn(r, 'name')).sort();
+        const names = rows.map((r: any) => readColumn(r, 'name')).toSorted();
 
         await engine.disconnect();
         return { names, rowCount: rows.length };
@@ -504,7 +504,7 @@ test.describe('Multi-device pairing flow', () => {
           const deviceId = engine.getDeviceId();
           const meshId = engine.getMeshId();
           const rows = await engine.query('projects');
-          const names = rows.map((r: any) => readColumn(r, 'name')).sort();
+          const names = rows.map((r: any) => readColumn(r, 'name')).toSorted();
 
           await engine.disconnect();
 

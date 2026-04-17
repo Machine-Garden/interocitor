@@ -94,10 +94,9 @@ import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { extname, join, normalize, dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const PORT = Number(process.env.PORT || '4173');
-const ROOT = process.env.INTEROCITOR_REPO_ROOT || resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const ROOT = process.env.INTEROCITOR_REPO_ROOT || resolve(import.meta.dirname, '../..');
 const WEBDAV_PREFIX = '/__webdav__';
 
 function parseArgs(argv) {
@@ -179,7 +178,7 @@ function parseDavPath(urlPath) {
   }
 
   const raw = pathname.slice(WEBDAV_PREFIX.length) || '/';
-  const normalized = `/${raw}`.replace(/\/+/g, '/');
+  const normalized = `/${raw}`.replaceAll(/\/+/g, '/');
   const clean = normalized.length > 1 && normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
   return decodeURIComponent(clean);
 }
@@ -277,7 +276,7 @@ function makeFileBackend(rootDir) {
   const dataRoot = join(ROOT, rootDir);
 
   function cleanDavPath(path) {
-    const normalized = normalize(path).replace(/\\/g, '/');
+    const normalized = normalize(path).replaceAll(/\\/g, '/');
     const withSlash = normalized.startsWith('/') ? normalized : `/${normalized}`;
     if (withSlash.includes('..')) return null;
     return withSlash;

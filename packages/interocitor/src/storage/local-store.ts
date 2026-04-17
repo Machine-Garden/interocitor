@@ -177,7 +177,7 @@ function rangeForClause(table: string, clause: WhereClause): IDBKeyRange | null 
       );
     case 'startsWith': {
       const prefix = String(clause.value ?? '');
-      return IDBKeyRange.bound([table, prefix], [table, `${prefix}\uffff`], false, false);
+      return IDBKeyRange.bound([table, prefix], [table, `${prefix}\uFFFF`], false, false);
     }
     case 'anyOf':
       return null;

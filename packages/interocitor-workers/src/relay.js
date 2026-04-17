@@ -77,7 +77,7 @@ export function broadcast(env, ctx, prefix, payload) {
 }
 
 export function createRelayMount(relayBase, relayWorker) {
-  const mountPrefix = `/${String(relayBase || '').trim().replace(/^\/+|\/+$/g, '')}`;
+  const mountPrefix = `/${String(relayBase || '').trim().replaceAll(/^\/+|\/+$/g, '')}`;
 
   function matches(pathname) {
     return Boolean(mountPrefix) && (pathname === mountPrefix || pathname.startsWith(`${mountPrefix}/`));

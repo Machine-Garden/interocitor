@@ -143,7 +143,7 @@ test('listFiles returns only direct file children (not subfolders)', async ({ pa
     await adapter.writeFile('/mesh/changes/nested/c.ndjson', 'c');
 
     const files = await adapter.listFiles('/mesh/changes');
-    return files.map((f: { name: string }) => f.name).sort();
+    return files.map((f: { name: string }) => f.name).toSorted();
   });
 
   expect(result).toEqual(['a.ndjson', 'b.ndjson']);

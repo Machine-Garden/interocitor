@@ -142,8 +142,8 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
       await engine.disconnect();
       return {
-        openTitles: open.map((row: any) => row.title).sort(),
-        p2plusTitles: p2plus.map((row: any) => row.title).sort(),
+        openTitles: open.map((row: any) => row.title).toSorted(),
+        p2plusTitles: p2plus.map((row: any) => row.title).toSorted(),
         schemaVersion: manifest?.schema,
       };
     });

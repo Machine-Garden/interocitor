@@ -50,7 +50,7 @@ function parseDavPath(request: Request, prefix: string): string | null {
   if (!url.pathname.startsWith(prefix)) return null;
 
   const raw = url.pathname.slice(prefix.length) || '/';
-  const normalized = `/${raw}`.replace(/\/+/g, '/');
+  const normalized = `/${raw}`.replaceAll(/\/+/g, '/');
   const clean = normalized.length > 1 && normalized.endsWith('/')
     ? normalized.slice(0, -1)
     : normalized;

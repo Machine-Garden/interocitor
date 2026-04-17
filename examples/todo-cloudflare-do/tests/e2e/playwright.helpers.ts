@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 export const CF_TESTS_ENABLED = Boolean(process.env.RUN_CF_EXAMPLE_TESTS);
 export const CF_POLL_INTERVAL_MS = 250;

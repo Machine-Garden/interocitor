@@ -218,7 +218,7 @@ test.describe('merge strategy — custom function', () => {
       const tables: Record<string, Record<string, any>> = {};
 
       // Counter merge: sum values, keep latest HLC
-      const counterMerge = (local: any, remote: any, ctx: any) => ({
+      const counterMerge = (local: any, remote: any, _ctx: any) => ({
         value: (local.value as number) + (remote.value as number),
         hlc: local.hlc > remote.hlc ? local.hlc : remote.hlc,
       });

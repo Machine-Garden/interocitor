@@ -206,7 +206,7 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
       const titles = (await engine.query('tasks'))
         .map((row) => readColumn(row, 'title'))
         .filter(Boolean)
-        .sort();
+        .toSorted();
       await engine.disconnect();
       return titles;
     });
@@ -236,7 +236,7 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
       const titles = (await engine.query('tasks'))
         .map((row) => readColumn(row, 'title'))
         .filter(Boolean)
-        .sort();
+        .toSorted();
       await engine.disconnect();
       return titles;
     });

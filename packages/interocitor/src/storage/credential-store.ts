@@ -119,7 +119,7 @@ export class WebAuthnCredentialStore implements CredentialStore {
     try {
       const stored = localStorage.getItem(this.credIdKey());
       if (!stored) return null;
-      const raw = Uint8Array.from(atob(stored), c => c.charCodeAt(0));
+      const raw = Uint8Array.from(atob(stored), c => c.codePointAt(0));
       return raw.buffer as ArrayBuffer;
     } catch {
       return null;
@@ -128,7 +128,7 @@ export class WebAuthnCredentialStore implements CredentialStore {
 
   private saveCredentialIdHint(rawId: ArrayBuffer): void {
     try {
-      const b64 = btoa(String.fromCharCode(...new Uint8Array(rawId)));
+      const b64 = btoa(String.fromCodePoint(...new Uint8Array(rawId)));
       localStorage.setItem(this.credIdKey(), b64);
     } catch { /* best-effort */ }
   }
@@ -143,7 +143,7 @@ export class WebAuthnCredentialStore implements CredentialStore {
         rp: { name: this.displayName, id: this.rpId },
         user: {
           id: userId,
-          name: `${this.displayName.toLowerCase().replace(/\s+/g, '-')}:${this.dbName}`,
+          name: `${this.displayName.toLowerCase().replaceAll(/\s+/g, '-')}:${this.dbName}`,
           displayName: this.displayName,
         },
         challenge,
@@ -241,7 +241,7 @@ export class WebAuthnCredentialStore implements CredentialStore {
 
 /** Check if WebAuthn with largeBlob is likely available. */
 async function isWebAuthnLargeBlobAvailable(): Promise<boolean> {
-  if (typeof globalThis.PublicKeyCredential === 'undefined') return false;
+  if (globalThis.PublicKeyCredential === undefined) return false;
   try {
     // Check platform authenticator availability
     const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();

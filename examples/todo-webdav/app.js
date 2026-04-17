@@ -1,21 +1,21 @@
 const els = {
-  baseUrl: document.getElementById('baseUrl'),
-  remotePath: document.getElementById('remotePath'),
-  key: document.getElementById('key'),
-  shareToken: document.getElementById('shareToken'),
-  joinTokenInput: document.getElementById('joinTokenInput'),
-  status: document.getElementById('status'),
-  taskInput: document.getElementById('taskInput'),
-  tasks: document.getElementById('tasks'),
-  newSessionBtn: document.getElementById('newSessionBtn'),
-  connectBtn: document.getElementById('connectBtn'),
-  disconnectBtn: document.getElementById('disconnectBtn'),
-  addTaskBtn: document.getElementById('addTaskBtn'),
-  refreshBtn: document.getElementById('refreshBtn'),
-  applyTokenBtn: document.getElementById('applyTokenBtn'),
-  copyTokenBtn: document.getElementById('copyTokenBtn'),
-  compactBtn: document.getElementById('compactBtn'),
-  compactStatus: document.getElementById('compactStatus'),
+  baseUrl: document.querySelector('#baseUrl'),
+  remotePath: document.querySelector('#remotePath'),
+  key: document.querySelector('#key'),
+  shareToken: document.querySelector('#shareToken'),
+  joinTokenInput: document.querySelector('#joinTokenInput'),
+  status: document.querySelector('#status'),
+  taskInput: document.querySelector('#taskInput'),
+  tasks: document.querySelector('#tasks'),
+  newSessionBtn: document.querySelector('#newSessionBtn'),
+  connectBtn: document.querySelector('#connectBtn'),
+  disconnectBtn: document.querySelector('#disconnectBtn'),
+  addTaskBtn: document.querySelector('#addTaskBtn'),
+  refreshBtn: document.querySelector('#refreshBtn'),
+  applyTokenBtn: document.querySelector('#applyTokenBtn'),
+  copyTokenBtn: document.querySelector('#copyTokenBtn'),
+  compactBtn: document.querySelector('#compactBtn'),
+  compactStatus: document.querySelector('#compactStatus'),
 };
 
 /**
@@ -210,7 +210,7 @@ async function refreshTasks() {
   }
 
   const all = await runtime.tasks.query();
-  const sorted = [...all].sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
+  const sorted = [...all].toSorted((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
 
   els.tasks.innerHTML = '';
   for (const item of sorted) {
@@ -232,10 +232,10 @@ async function refreshTasks() {
       void removeTask(String(item.id || ''));
     });
 
-    li.appendChild(checkbox);
-    li.appendChild(span);
-    li.appendChild(del);
-    els.tasks.appendChild(li);
+    li.append(checkbox);
+    li.append(span);
+    li.append(del);
+    els.tasks.append(li);
   }
 
   return sorted;

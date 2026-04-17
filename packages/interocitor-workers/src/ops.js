@@ -1,4 +1,6 @@
-import { classifyPath, meshRootForPath, cacheKeyFor, PATH_TYPE } from './paths.js';
+import { meshRootForPath, cacheKeyFor } from './paths.js';
+import { PATH_TYPE } from './paths.js';
+void PATH_TYPE;
 /**
  * interocitor operations layer
  *
@@ -103,7 +105,7 @@ function newEtag() {
 
 export function normalizePath(raw) {
   const s = String(raw).startsWith('/') ? raw : `/${raw}`;
-  const c = s.replace(/\/+/g, '/');
+  const c = s.replaceAll(/\/+/g, '/');
   if (c === '/') return '/';
   return c.endsWith('/') ? c.slice(0, -1) : c;
 }
@@ -140,9 +142,11 @@ function folderTreeStatements(db, prefix, target) {
 // ─── Metrics delta ───────────────────────────────────────────────────────────
 
 function metricsDelta(pathType, prevSize, nextSize) {
-  const prev = prevSize == null ? 0 : clampNonNeg(prevSize);
-  const next = nextSize == null ? 0 : clampNonNeg(nextSize);
-  const fileDelta = (nextSize != null ? 1 : 0) - (prevSize != null ? 1 : 0);
+  const prevMissing = prevSize === null || prevSize === undefined;
+  const nextMissing = nextSize === null || nextSize === undefined;
+  const prev = prevMissing ? 0 : clampNonNeg(prevSize);
+  const next = nextMissing ? 0 : clampNonNeg(nextSize);
+  const fileDelta = (nextMissing ? 0 : 1) - (prevMissing ? 0 : 1);
   const bytesDelta = next - prev;
   return {
     fileCountDelta: fileDelta,
@@ -370,7 +374,7 @@ export async function opPutSemantic(db, prefix, path, bytes, pathType, remoteRoo
 //
 // Last-write-wins.  One batch.
 
-export async function opPutOverwrite(db, prefix, path, bytes, pathType, remoteRoot) {
+export async function opPutOverwrite(db, prefix, path, bytes, _pathType, _remoteRoot) {
   const normalized = normalizePath(path);
   const now = nowIso();
   const etag = newEtag();

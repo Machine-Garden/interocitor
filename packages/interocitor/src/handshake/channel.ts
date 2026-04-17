@@ -81,16 +81,16 @@ const HKDF_INFO  = 'interocitor-handshake-v1';
 
 function uint8ToB64url(b: Uint8Array): string {
   let s = '';
-  for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
-  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  for (let i = 0; i < b.length; i++) s += String.fromCodePoint(b[i]);
+  return btoa(s).replaceAll(/\+/g, '-').replaceAll(/\//g, '_').replaceAll(/=/g, '');
 }
 
 function b64urlToUint8(s: string): Uint8Array {
-  const p = s.replace(/-/g, '+').replace(/_/g, '/');
+  const p = s.replaceAll(/-/g, '+').replaceAll(/_/g, '/');
   const pad = (4 - (p.length % 4)) % 4;
   const bin = atob(p + '='.repeat(pad));
   const b = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i);
+  for (let i = 0; i < bin.length; i++) b[i] = bin.codePointAt(i);
   return b;
 }
 
@@ -280,7 +280,7 @@ export async function createGeneratorSession(): Promise<GeneratorSession> {
         await relayWrite(adapter, paths.credentials, envelope);
         // Generator does not clean up — scanner deletes after reading.
         return null; // Generator already has credentials; nothing new to return.
-      } else {
+      }
         // intent === 'join': scanner will push credentials to us.
         const envelope = await pollFor(
           () => relayRead(adapter, paths.credentials),
@@ -291,7 +291,7 @@ export async function createGeneratorSession(): Promise<GeneratorSession> {
         // Clean up relay files after reading.
         relayCleanup(adapter, paths).catch(() => {});
         return credentials;
-      }
+      
     },
   };
 }
@@ -345,12 +345,12 @@ export async function runScannerHandshake(
     const credentials = await decryptCredentials(wrappingKey, envelope);
     relayCleanup(adapter, paths).catch(() => {});
     return credentials;
-  } else {
+  }
     // intent === 'join': we push credentials to the generator.
     if (!ownCredentials) throw new Error('intent=join requires scanner to have ownCredentials');
     const envelope = await encryptCredentials(wrappingKey, ownCredentials);
     await relayWrite(adapter, paths.credentials, envelope);
     // Scanner already has credentials; nothing new to return.
     return null;
-  }
+  
 }

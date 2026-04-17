@@ -105,7 +105,7 @@ export function decodeQRPayload(encoded: string): HandshakeQRPayload {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.codePointAt(i);
+    bytes[i] = binary.charCodeAt(i);
   }
   const json = new TextDecoder().decode(bytes);
   const payload = JSON.parse(json) as HandshakeQRPayload;

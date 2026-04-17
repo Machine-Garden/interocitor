@@ -119,7 +119,7 @@ export class WebAuthnCredentialStore implements CredentialStore {
     try {
       const stored = localStorage.getItem(this.credIdKey());
       if (!stored) return null;
-      const raw = Uint8Array.from(atob(stored), c => c.codePointAt(0));
+      const raw = Uint8Array.from(atob(stored), c => c.charCodeAt(0));
       return raw.buffer as ArrayBuffer;
     } catch {
       return null;
@@ -128,7 +128,10 @@ export class WebAuthnCredentialStore implements CredentialStore {
 
   private saveCredentialIdHint(rawId: ArrayBuffer): void {
     try {
-      const b64 = btoa(String.fromCodePoint(...new Uint8Array(rawId)));
+      const bytes = new Uint8Array(rawId);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      const b64 = btoa(binary);
       localStorage.setItem(this.credIdKey(), b64);
     } catch { /* best-effort */ }
   }

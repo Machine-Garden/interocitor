@@ -91,7 +91,7 @@ function b64urlToUint8(s: string): Uint8Array {
   const pad = (4 - (p.length % 4)) % 4;
   const bin = atob(p + '='.repeat(pad));
   const b = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) b[i] = bin.codePointAt(i);
+  for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i);
   return b;
 }
 

@@ -13,6 +13,10 @@
     "build": "yarn workspace interocitor build",
     "build:all": "yarn workspace interocitor build && yarn workspaces foreach --all --exclude interocitor -p run check",
     "validate": "yarn build:all",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
+    "format": "oxfmt .",
+    "format:check": "oxfmt . --check",
     "demo:todo": "yarn workspace interocitor build && yarn demo:todo:server",
     "demo:todo:server": "yarn workspace todo-webdav-example server:file",
     "test:e2e": "yarn workspace interocitor test:e2e",
@@ -36,6 +40,8 @@
   "license": "MIT",
   "devDependencies": {
     "@playwright/test": "^1.54.2",
+    "oxfmt": "^0.45.0",
+    "oxlint": "^1.60.0",
     "typescript": "^6.0.0"
   },
   "engines": {

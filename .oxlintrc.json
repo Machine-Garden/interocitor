@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/.yarn/**",
+    "**/.wrangler/**",
+    "**/coverage/**",
+    "**/webdav-data/**"
+  ],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "warn"
+  },
+  "rules": {
+    "eqeqeq": "error",
+    "no-console": "off",
+    "no-debugger": "error",
+    "no-alert": "error",
+    "unicorn/prefer-node-protocol": "off",
+    "typescript/no-explicit-any": "off",
+    "typescript/ban-ts-comment": "warn",
+    "typescript/consistent-type-imports": "warn",
+    "typescript/no-unused-vars": "error"
+  }
+}

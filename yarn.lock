@@ -7,14 +7,14 @@ __metadata:
 
 "@cloudflare/kv-asset-handler@npm:0.4.2":
   version: 0.4.2
-  resolution: "@cloudflare/kv-asset-handler@npm:0.4.2::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40cloudflare%2Fkv-asset-handler%2F-%2Fkv-asset-handler-0.4.2.tgz"
+  resolution: "@cloudflare/kv-asset-handler@npm:0.4.2"
   checksum: 10c0/c8877851ce069b04d32d50a640c9c0faaab054970204f64a4111bac3dd85f177c001a0b57d32f7e65269e3896268b8f94605f31e4fa06253a6a5779587a63d17
   languageName: node
   linkType: hard
 
 "@cloudflare/unenv-preset@npm:2.16.0":
   version: 2.16.0
-  resolution: "@cloudflare/unenv-preset@npm:2.16.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40cloudflare%2Funenv-preset%2F-%2Funenv-preset-2.16.0.tgz"
+  resolution: "@cloudflare/unenv-preset@npm:2.16.0"
   peerDependencies:
     unenv: 2.0.0-rc.24
     workerd: 1.20260301.1 || ~1.20260302.1 || ~1.20260303.1 || ~1.20260304.1 || >1.20260305.0 <2.0.0-0
@@ -25,44 +25,44 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@cloudflare/workerd-darwin-64@npm:1.20260405.1":
-  version: 1.20260405.1
-  resolution: "@cloudflare/workerd-darwin-64@npm:1.20260405.1::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40cloudflare%2Fworkerd-darwin-64%2F-%2Fworkerd-darwin-64-1.20260405.1.tgz"
+"@cloudflare/workerd-darwin-64@npm:1.20260415.1":
+  version: 1.20260415.1
+  resolution: "@cloudflare/workerd-darwin-64@npm:1.20260415.1"
   conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
-"@cloudflare/workerd-darwin-arm64@npm:1.20260405.1":
-  version: 1.20260405.1
-  resolution: "@cloudflare/workerd-darwin-arm64@npm:1.20260405.1::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40cloudflare%2Fworkerd-darwin-arm64%2F-%2Fworkerd-darwin-arm64-1.20260405.1.tgz"
+"@cloudflare/workerd-darwin-arm64@npm:1.20260415.1":
+  version: 1.20260415.1
+  resolution: "@cloudflare/workerd-darwin-arm64@npm:1.20260415.1"
   conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
-"@cloudflare/workerd-linux-64@npm:1.20260405.1":
-  version: 1.20260405.1
-  resolution: "@cloudflare/workerd-linux-64@npm:1.20260405.1::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40cloudflare%2Fworkerd-linux-64%2F-%2Fworkerd-linux-64-1.20260405.1.tgz"
+"@cloudflare/workerd-linux-64@npm:1.20260415.1":
+  version: 1.20260415.1
+  resolution: "@cloudflare/workerd-linux-64@npm:1.20260415.1"
   conditions: os=linux & cpu=x64
   languageName: node
   linkType: hard
 
-"@cloudflare/workerd-linux-arm64@npm:1.20260405.1":
-  version: 1.20260405.1
-  resolution: "@cloudflare/workerd-linux-arm64@npm:1.20260405.1::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40cloudflare%2Fworkerd-linux-arm64%2F-%2Fworkerd-linux-arm64-1.20260405.1.tgz"
+"@cloudflare/workerd-linux-arm64@npm:1.20260415.1":
+  version: 1.20260415.1
+  resolution: "@cloudflare/workerd-linux-arm64@npm:1.20260415.1"
   conditions: os=linux & cpu=arm64
   languageName: node
   linkType: hard
 
-"@cloudflare/workerd-windows-64@npm:1.20260405.1":
-  version: 1.20260405.1
-  resolution: "@cloudflare/workerd-windows-64@npm:1.20260405.1::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40cloudflare%2Fworkerd-windows-64%2F-%2Fworkerd-windows-64-1.20260405.1.tgz"
+"@cloudflare/workerd-windows-64@npm:1.20260415.1":
+  version: 1.20260415.1
+  resolution: "@cloudflare/workerd-windows-64@npm:1.20260415.1"
   conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
 
 "@cspotcode/source-map-support@npm:0.8.1":
   version: 0.8.1
-  resolution: "@cspotcode/source-map-support@npm:0.8.1::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40cspotcode%2Fsource-map-support%2F-%2Fsource-map-support-0.8.1.tgz"
+  resolution: "@cspotcode/source-map-support@npm:0.8.1"
   dependencies:
     "@jridgewell/trace-mapping": "npm:0.3.9"
   checksum: 10c0/05c5368c13b662ee4c122c7bfbe5dc0b613416672a829f3e78bc49a357a197e0218d6e74e7c66cfcd04e15a179acab080bd3c69658c9fbefd0e1ccd950a07fc6
@@ -70,213 +70,213 @@ __metadata:
   linkType: hard
 
 "@emnapi/runtime@npm:^1.7.0":
-  version: 1.9.2
-  resolution: "@emnapi/runtime@npm:1.9.2::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40emnapi%2Fruntime%2F-%2Fruntime-1.9.2.tgz"
+  version: 1.10.0
+  resolution: "@emnapi/runtime@npm:1.10.0"
   dependencies:
     tslib: "npm:^2.4.0"
-  checksum: 10c0/61c3a59e0c36784558b8d58eb02bd04815aa5fb0dbfbaf84d1b3050a78aa0cc63ea129ae806bd1e48062bfeb7fc36eb0e5431740d62f64ea51bdf426404b8caa
+  checksum: 10c0/953f14991d1aefb92ee6f8eb27dea725e484791a53a0cb5f47d9e0087b9a2c929ff2e92adf95af15d6ad456db6300c6b761ebf72b50a875b874a83520b3ba093
   languageName: node
   linkType: hard
 
 "@esbuild/aix-ppc64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/aix-ppc64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Faix-ppc64%2F-%2Faix-ppc64-0.27.3.tgz"
+  resolution: "@esbuild/aix-ppc64@npm:0.27.3"
   conditions: os=aix & cpu=ppc64
   languageName: node
   linkType: hard
 
 "@esbuild/android-arm64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/android-arm64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Fandroid-arm64%2F-%2Fandroid-arm64-0.27.3.tgz"
+  resolution: "@esbuild/android-arm64@npm:0.27.3"
   conditions: os=android & cpu=arm64
   languageName: node
   linkType: hard
 
 "@esbuild/android-arm@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/android-arm@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Fandroid-arm%2F-%2Fandroid-arm-0.27.3.tgz"
+  resolution: "@esbuild/android-arm@npm:0.27.3"
   conditions: os=android & cpu=arm
   languageName: node
   linkType: hard
 
 "@esbuild/android-x64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/android-x64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Fandroid-x64%2F-%2Fandroid-x64-0.27.3.tgz"
+  resolution: "@esbuild/android-x64@npm:0.27.3"
   conditions: os=android & cpu=x64
   languageName: node
   linkType: hard
 
 "@esbuild/darwin-arm64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/darwin-arm64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Fdarwin-arm64%2F-%2Fdarwin-arm64-0.27.3.tgz"
+  resolution: "@esbuild/darwin-arm64@npm:0.27.3"
   conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
 "@esbuild/darwin-x64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/darwin-x64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Fdarwin-x64%2F-%2Fdarwin-x64-0.27.3.tgz"
+  resolution: "@esbuild/darwin-x64@npm:0.27.3"
   conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
 "@esbuild/freebsd-arm64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/freebsd-arm64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Ffreebsd-arm64%2F-%2Ffreebsd-arm64-0.27.3.tgz"
+  resolution: "@esbuild/freebsd-arm64@npm:0.27.3"
   conditions: os=freebsd & cpu=arm64
   languageName: node
   linkType: hard
 
 "@esbuild/freebsd-x64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/freebsd-x64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Ffreebsd-x64%2F-%2Ffreebsd-x64-0.27.3.tgz"
+  resolution: "@esbuild/freebsd-x64@npm:0.27.3"
   conditions: os=freebsd & cpu=x64
   languageName: node
   linkType: hard
 
 "@esbuild/linux-arm64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/linux-arm64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Flinux-arm64%2F-%2Flinux-arm64-0.27.3.tgz"
+  resolution: "@esbuild/linux-arm64@npm:0.27.3"
   conditions: os=linux & cpu=arm64
   languageName: node
   linkType: hard
 
 "@esbuild/linux-arm@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/linux-arm@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Flinux-arm%2F-%2Flinux-arm-0.27.3.tgz"
+  resolution: "@esbuild/linux-arm@npm:0.27.3"
   conditions: os=linux & cpu=arm
   languageName: node
   linkType: hard
 
 "@esbuild/linux-ia32@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/linux-ia32@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Flinux-ia32%2F-%2Flinux-ia32-0.27.3.tgz"
+  resolution: "@esbuild/linux-ia32@npm:0.27.3"
   conditions: os=linux & cpu=ia32
   languageName: node
   linkType: hard
 
 "@esbuild/linux-loong64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/linux-loong64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Flinux-loong64%2F-%2Flinux-loong64-0.27.3.tgz"
+  resolution: "@esbuild/linux-loong64@npm:0.27.3"
   conditions: os=linux & cpu=loong64
   languageName: node
   linkType: hard
 
 "@esbuild/linux-mips64el@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/linux-mips64el@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Flinux-mips64el%2F-%2Flinux-mips64el-0.27.3.tgz"
+  resolution: "@esbuild/linux-mips64el@npm:0.27.3"
   conditions: os=linux & cpu=mips64el
   languageName: node
   linkType: hard
 
 "@esbuild/linux-ppc64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/linux-ppc64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Flinux-ppc64%2F-%2Flinux-ppc64-0.27.3.tgz"
+  resolution: "@esbuild/linux-ppc64@npm:0.27.3"
   conditions: os=linux & cpu=ppc64
   languageName: node
   linkType: hard
 
 "@esbuild/linux-riscv64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/linux-riscv64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Flinux-riscv64%2F-%2Flinux-riscv64-0.27.3.tgz"
+  resolution: "@esbuild/linux-riscv64@npm:0.27.3"
   conditions: os=linux & cpu=riscv64
   languageName: node
   linkType: hard
 
 "@esbuild/linux-s390x@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/linux-s390x@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Flinux-s390x%2F-%2Flinux-s390x-0.27.3.tgz"
+  resolution: "@esbuild/linux-s390x@npm:0.27.3"
   conditions: os=linux & cpu=s390x
   languageName: node
   linkType: hard
 
 "@esbuild/linux-x64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/linux-x64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Flinux-x64%2F-%2Flinux-x64-0.27.3.tgz"
+  resolution: "@esbuild/linux-x64@npm:0.27.3"
   conditions: os=linux & cpu=x64
   languageName: node
   linkType: hard
 
 "@esbuild/netbsd-arm64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/netbsd-arm64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Fnetbsd-arm64%2F-%2Fnetbsd-arm64-0.27.3.tgz"
+  resolution: "@esbuild/netbsd-arm64@npm:0.27.3"
   conditions: os=netbsd & cpu=arm64
   languageName: node
   linkType: hard
 
 "@esbuild/netbsd-x64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/netbsd-x64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Fnetbsd-x64%2F-%2Fnetbsd-x64-0.27.3.tgz"
+  resolution: "@esbuild/netbsd-x64@npm:0.27.3"
   conditions: os=netbsd & cpu=x64
   languageName: node
   linkType: hard
 
 "@esbuild/openbsd-arm64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/openbsd-arm64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Fopenbsd-arm64%2F-%2Fopenbsd-arm64-0.27.3.tgz"
+  resolution: "@esbuild/openbsd-arm64@npm:0.27.3"
   conditions: os=openbsd & cpu=arm64
   languageName: node
   linkType: hard
 
 "@esbuild/openbsd-x64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/openbsd-x64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Fopenbsd-x64%2F-%2Fopenbsd-x64-0.27.3.tgz"
+  resolution: "@esbuild/openbsd-x64@npm:0.27.3"
   conditions: os=openbsd & cpu=x64
   languageName: node
   linkType: hard
 
 "@esbuild/openharmony-arm64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/openharmony-arm64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Fopenharmony-arm64%2F-%2Fopenharmony-arm64-0.27.3.tgz"
+  resolution: "@esbuild/openharmony-arm64@npm:0.27.3"
   conditions: os=openharmony & cpu=arm64
   languageName: node
   linkType: hard
 
 "@esbuild/sunos-x64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/sunos-x64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Fsunos-x64%2F-%2Fsunos-x64-0.27.3.tgz"
+  resolution: "@esbuild/sunos-x64@npm:0.27.3"
   conditions: os=sunos & cpu=x64
   languageName: node
   linkType: hard
 
 "@esbuild/win32-arm64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/win32-arm64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Fwin32-arm64%2F-%2Fwin32-arm64-0.27.3.tgz"
+  resolution: "@esbuild/win32-arm64@npm:0.27.3"
   conditions: os=win32 & cpu=arm64
   languageName: node
   linkType: hard
 
 "@esbuild/win32-ia32@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/win32-ia32@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Fwin32-ia32%2F-%2Fwin32-ia32-0.27.3.tgz"
+  resolution: "@esbuild/win32-ia32@npm:0.27.3"
   conditions: os=win32 & cpu=ia32
   languageName: node
   linkType: hard
 
 "@esbuild/win32-x64@npm:0.27.3":
   version: 0.27.3
-  resolution: "@esbuild/win32-x64@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40esbuild%2Fwin32-x64%2F-%2Fwin32-x64-0.27.3.tgz"
+  resolution: "@esbuild/win32-x64@npm:0.27.3"
   conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
 
 "@gar/promise-retry@npm:^1.0.0":
   version: 1.0.3
-  resolution: "@gar/promise-retry@npm:1.0.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40gar%2Fpromise-retry%2F-%2Fpromise-retry-1.0.3.tgz"
+  resolution: "@gar/promise-retry@npm:1.0.3"
   checksum: 10c0/885b02c8b0d75b2d215da25f3b639158c4fbe8fefe0d79163304534b9a6d0710db4b7699f7cd3cc1a730792bff04cbe19f4850a62d3e105a663eaeec88f38332
   languageName: node
   linkType: hard
 
 "@img/colour@npm:^1.0.0":
   version: 1.1.0
-  resolution: "@img/colour@npm:1.1.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fcolour%2F-%2Fcolour-1.1.0.tgz"
+  resolution: "@img/colour@npm:1.1.0"
   checksum: 10c0/2ebea2c0bbaee73b99badcefa04e1e71d83f36e5369337d3121dca841f4569533c4e2faddda6d62dd247f0d5cca143711f9446c59bcce81e427ba433a7a94a17
   languageName: node
   linkType: hard
 
 "@img/sharp-darwin-arm64@npm:0.34.5":
   version: 0.34.5
-  resolution: "@img/sharp-darwin-arm64@npm:0.34.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-darwin-arm64%2F-%2Fsharp-darwin-arm64-0.34.5.tgz"
+  resolution: "@img/sharp-darwin-arm64@npm:0.34.5"
   dependencies:
     "@img/sharp-libvips-darwin-arm64": "npm:1.2.4"
   dependenciesMeta:
@@ -288,7 +288,7 @@ __metadata:
 
 "@img/sharp-darwin-x64@npm:0.34.5":
   version: 0.34.5
-  resolution: "@img/sharp-darwin-x64@npm:0.34.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-darwin-x64%2F-%2Fsharp-darwin-x64-0.34.5.tgz"
+  resolution: "@img/sharp-darwin-x64@npm:0.34.5"
   dependencies:
     "@img/sharp-libvips-darwin-x64": "npm:1.2.4"
   dependenciesMeta:
@@ -300,77 +300,77 @@ __metadata:
 
 "@img/sharp-libvips-darwin-arm64@npm:1.2.4":
   version: 1.2.4
-  resolution: "@img/sharp-libvips-darwin-arm64@npm:1.2.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-libvips-darwin-arm64%2F-%2Fsharp-libvips-darwin-arm64-1.2.4.tgz"
+  resolution: "@img/sharp-libvips-darwin-arm64@npm:1.2.4"
   conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
 "@img/sharp-libvips-darwin-x64@npm:1.2.4":
   version: 1.2.4
-  resolution: "@img/sharp-libvips-darwin-x64@npm:1.2.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-libvips-darwin-x64%2F-%2Fsharp-libvips-darwin-x64-1.2.4.tgz"
+  resolution: "@img/sharp-libvips-darwin-x64@npm:1.2.4"
   conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
 "@img/sharp-libvips-linux-arm64@npm:1.2.4":
   version: 1.2.4
-  resolution: "@img/sharp-libvips-linux-arm64@npm:1.2.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-libvips-linux-arm64%2F-%2Fsharp-libvips-linux-arm64-1.2.4.tgz"
+  resolution: "@img/sharp-libvips-linux-arm64@npm:1.2.4"
   conditions: os=linux & cpu=arm64 & libc=glibc
   languageName: node
   linkType: hard
 
 "@img/sharp-libvips-linux-arm@npm:1.2.4":
   version: 1.2.4
-  resolution: "@img/sharp-libvips-linux-arm@npm:1.2.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-libvips-linux-arm%2F-%2Fsharp-libvips-linux-arm-1.2.4.tgz"
+  resolution: "@img/sharp-libvips-linux-arm@npm:1.2.4"
   conditions: os=linux & cpu=arm & libc=glibc
   languageName: node
   linkType: hard
 
 "@img/sharp-libvips-linux-ppc64@npm:1.2.4":
   version: 1.2.4
-  resolution: "@img/sharp-libvips-linux-ppc64@npm:1.2.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-libvips-linux-ppc64%2F-%2Fsharp-libvips-linux-ppc64-1.2.4.tgz"
+  resolution: "@img/sharp-libvips-linux-ppc64@npm:1.2.4"
   conditions: os=linux & cpu=ppc64 & libc=glibc
   languageName: node
   linkType: hard
 
 "@img/sharp-libvips-linux-riscv64@npm:1.2.4":
   version: 1.2.4
-  resolution: "@img/sharp-libvips-linux-riscv64@npm:1.2.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-libvips-linux-riscv64%2F-%2Fsharp-libvips-linux-riscv64-1.2.4.tgz"
+  resolution: "@img/sharp-libvips-linux-riscv64@npm:1.2.4"
   conditions: os=linux & cpu=riscv64 & libc=glibc
   languageName: node
   linkType: hard
 
 "@img/sharp-libvips-linux-s390x@npm:1.2.4":
   version: 1.2.4
-  resolution: "@img/sharp-libvips-linux-s390x@npm:1.2.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-libvips-linux-s390x%2F-%2Fsharp-libvips-linux-s390x-1.2.4.tgz"
+  resolution: "@img/sharp-libvips-linux-s390x@npm:1.2.4"
   conditions: os=linux & cpu=s390x & libc=glibc
   languageName: node
   linkType: hard
 
 "@img/sharp-libvips-linux-x64@npm:1.2.4":
   version: 1.2.4
-  resolution: "@img/sharp-libvips-linux-x64@npm:1.2.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-libvips-linux-x64%2F-%2Fsharp-libvips-linux-x64-1.2.4.tgz"
+  resolution: "@img/sharp-libvips-linux-x64@npm:1.2.4"
   conditions: os=linux & cpu=x64 & libc=glibc
   languageName: node
   linkType: hard
 
 "@img/sharp-libvips-linuxmusl-arm64@npm:1.2.4":
   version: 1.2.4
-  resolution: "@img/sharp-libvips-linuxmusl-arm64@npm:1.2.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-libvips-linuxmusl-arm64%2F-%2Fsharp-libvips-linuxmusl-arm64-1.2.4.tgz"
+  resolution: "@img/sharp-libvips-linuxmusl-arm64@npm:1.2.4"
   conditions: os=linux & cpu=arm64 & libc=musl
   languageName: node
   linkType: hard
 
 "@img/sharp-libvips-linuxmusl-x64@npm:1.2.4":
   version: 1.2.4
-  resolution: "@img/sharp-libvips-linuxmusl-x64@npm:1.2.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-libvips-linuxmusl-x64%2F-%2Fsharp-libvips-linuxmusl-x64-1.2.4.tgz"
+  resolution: "@img/sharp-libvips-linuxmusl-x64@npm:1.2.4"
   conditions: os=linux & cpu=x64 & libc=musl
   languageName: node
   linkType: hard
 
 "@img/sharp-linux-arm64@npm:0.34.5":
   version: 0.34.5
-  resolution: "@img/sharp-linux-arm64@npm:0.34.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-linux-arm64%2F-%2Fsharp-linux-arm64-0.34.5.tgz"
+  resolution: "@img/sharp-linux-arm64@npm:0.34.5"
   dependencies:
     "@img/sharp-libvips-linux-arm64": "npm:1.2.4"
   dependenciesMeta:
@@ -382,7 +382,7 @@ __metadata:
 
 "@img/sharp-linux-arm@npm:0.34.5":
   version: 0.34.5
-  resolution: "@img/sharp-linux-arm@npm:0.34.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-linux-arm%2F-%2Fsharp-linux-arm-0.34.5.tgz"
+  resolution: "@img/sharp-linux-arm@npm:0.34.5"
   dependencies:
     "@img/sharp-libvips-linux-arm": "npm:1.2.4"
   dependenciesMeta:
@@ -394,7 +394,7 @@ __metadata:
 
 "@img/sharp-linux-ppc64@npm:0.34.5":
   version: 0.34.5
-  resolution: "@img/sharp-linux-ppc64@npm:0.34.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-linux-ppc64%2F-%2Fsharp-linux-ppc64-0.34.5.tgz"
+  resolution: "@img/sharp-linux-ppc64@npm:0.34.5"
   dependencies:
     "@img/sharp-libvips-linux-ppc64": "npm:1.2.4"
   dependenciesMeta:
@@ -406,7 +406,7 @@ __metadata:
 
 "@img/sharp-linux-riscv64@npm:0.34.5":
   version: 0.34.5
-  resolution: "@img/sharp-linux-riscv64@npm:0.34.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-linux-riscv64%2F-%2Fsharp-linux-riscv64-0.34.5.tgz"
+  resolution: "@img/sharp-linux-riscv64@npm:0.34.5"
   dependencies:
     "@img/sharp-libvips-linux-riscv64": "npm:1.2.4"
   dependenciesMeta:
@@ -418,7 +418,7 @@ __metadata:
 
 "@img/sharp-linux-s390x@npm:0.34.5":
   version: 0.34.5
-  resolution: "@img/sharp-linux-s390x@npm:0.34.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-linux-s390x%2F-%2Fsharp-linux-s390x-0.34.5.tgz"
+  resolution: "@img/sharp-linux-s390x@npm:0.34.5"
   dependencies:
     "@img/sharp-libvips-linux-s390x": "npm:1.2.4"
   dependenciesMeta:
@@ -430,7 +430,7 @@ __metadata:
 
 "@img/sharp-linux-x64@npm:0.34.5":
   version: 0.34.5
-  resolution: "@img/sharp-linux-x64@npm:0.34.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-linux-x64%2F-%2Fsharp-linux-x64-0.34.5.tgz"
+  resolution: "@img/sharp-linux-x64@npm:0.34.5"
   dependencies:
     "@img/sharp-libvips-linux-x64": "npm:1.2.4"
   dependenciesMeta:
@@ -442,7 +442,7 @@ __metadata:
 
 "@img/sharp-linuxmusl-arm64@npm:0.34.5":
   version: 0.34.5
-  resolution: "@img/sharp-linuxmusl-arm64@npm:0.34.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-linuxmusl-arm64%2F-%2Fsharp-linuxmusl-arm64-0.34.5.tgz"
+  resolution: "@img/sharp-linuxmusl-arm64@npm:0.34.5"
   dependencies:
     "@img/sharp-libvips-linuxmusl-arm64": "npm:1.2.4"
   dependenciesMeta:
@@ -454,7 +454,7 @@ __metadata:
 
 "@img/sharp-linuxmusl-x64@npm:0.34.5":
   version: 0.34.5
-  resolution: "@img/sharp-linuxmusl-x64@npm:0.34.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-linuxmusl-x64%2F-%2Fsharp-linuxmusl-x64-0.34.5.tgz"
+  resolution: "@img/sharp-linuxmusl-x64@npm:0.34.5"
   dependencies:
     "@img/sharp-libvips-linuxmusl-x64": "npm:1.2.4"
   dependenciesMeta:
@@ -466,7 +466,7 @@ __metadata:
 
 "@img/sharp-wasm32@npm:0.34.5":
   version: 0.34.5
-  resolution: "@img/sharp-wasm32@npm:0.34.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-wasm32%2F-%2Fsharp-wasm32-0.34.5.tgz"
+  resolution: "@img/sharp-wasm32@npm:0.34.5"
   dependencies:
     "@emnapi/runtime": "npm:^1.7.0"
   conditions: cpu=wasm32
@@ -475,28 +475,28 @@ __metadata:
 
 "@img/sharp-win32-arm64@npm:0.34.5":
   version: 0.34.5
-  resolution: "@img/sharp-win32-arm64@npm:0.34.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-win32-arm64%2F-%2Fsharp-win32-arm64-0.34.5.tgz"
+  resolution: "@img/sharp-win32-arm64@npm:0.34.5"
   conditions: os=win32 & cpu=arm64
   languageName: node
   linkType: hard
 
 "@img/sharp-win32-ia32@npm:0.34.5":
   version: 0.34.5
-  resolution: "@img/sharp-win32-ia32@npm:0.34.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-win32-ia32%2F-%2Fsharp-win32-ia32-0.34.5.tgz"
+  resolution: "@img/sharp-win32-ia32@npm:0.34.5"
   conditions: os=win32 & cpu=ia32
   languageName: node
   linkType: hard
 
 "@img/sharp-win32-x64@npm:0.34.5":
   version: 0.34.5
-  resolution: "@img/sharp-win32-x64@npm:0.34.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40img%2Fsharp-win32-x64%2F-%2Fsharp-win32-x64-0.34.5.tgz"
+  resolution: "@img/sharp-win32-x64@npm:0.34.5"
   conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
 
 "@isaacs/fs-minipass@npm:^4.0.0":
   version: 4.0.1
-  resolution: "@isaacs/fs-minipass@npm:4.0.1::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40isaacs%2Ffs-minipass%2F-%2Ffs-minipass-4.0.1.tgz"
+  resolution: "@isaacs/fs-minipass@npm:4.0.1"
   dependencies:
     minipass: "npm:^7.0.4"
   checksum: 10c0/c25b6dc1598790d5b55c0947a9b7d111cfa92594db5296c3b907e2f533c033666f692a3939eadac17b1c7c40d362d0b0635dc874cbfe3e70db7c2b07cc97a5d2
@@ -505,21 +505,21 @@ __metadata:
 
 "@jridgewell/resolve-uri@npm:^3.0.3":
   version: 3.1.2
-  resolution: "@jridgewell/resolve-uri@npm:3.1.2::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40jridgewell%2Fresolve-uri%2F-%2Fresolve-uri-3.1.2.tgz"
+  resolution: "@jridgewell/resolve-uri@npm:3.1.2"
   checksum: 10c0/d502e6fb516b35032331406d4e962c21fe77cdf1cbdb49c6142bcbd9e30507094b18972778a6e27cbad756209cfe34b1a27729e6fa08a2eb92b33943f680cf1e
   languageName: node
   linkType: hard
 
 "@jridgewell/sourcemap-codec@npm:^1.4.10":
   version: 1.5.5
-  resolution: "@jridgewell/sourcemap-codec@npm:1.5.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40jridgewell%2Fsourcemap-codec%2F-%2Fsourcemap-codec-1.5.5.tgz"
+  resolution: "@jridgewell/sourcemap-codec@npm:1.5.5"
   checksum: 10c0/f9e538f302b63c0ebc06eecb1dd9918dd4289ed36147a0ddce35d6ea4d7ebbda243cda7b2213b6a5e1d8087a298d5cf630fb2bd39329cdecb82017023f6081a0
   languageName: node
   linkType: hard
 
 "@jridgewell/trace-mapping@npm:0.3.9":
   version: 0.3.9
-  resolution: "@jridgewell/trace-mapping@npm:0.3.9::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40jridgewell%2Ftrace-mapping%2F-%2Ftrace-mapping-0.3.9.tgz"
+  resolution: "@jridgewell/trace-mapping@npm:0.3.9"
   dependencies:
     "@jridgewell/resolve-uri": "npm:^3.0.3"
     "@jridgewell/sourcemap-codec": "npm:^1.4.10"
@@ -529,7 +529,7 @@ __metadata:
 
 "@npmcli/agent@npm:^4.0.0":
   version: 4.0.0
-  resolution: "@npmcli/agent@npm:4.0.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40npmcli%2Fagent%2F-%2Fagent-4.0.0.tgz"
+  resolution: "@npmcli/agent@npm:4.0.0"
   dependencies:
     agent-base: "npm:^7.1.0"
     http-proxy-agent: "npm:^7.0.0"
@@ -542,7 +542,7 @@ __metadata:
 
 "@npmcli/fs@npm:^5.0.0":
   version: 5.0.0
-  resolution: "@npmcli/fs@npm:5.0.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40npmcli%2Ffs%2F-%2Ffs-5.0.0.tgz"
+  resolution: "@npmcli/fs@npm:5.0.0"
   dependencies:
     semver: "npm:^7.3.5"
   checksum: 10c0/26e376d780f60ff16e874a0ac9bc3399186846baae0b6e1352286385ac134d900cc5dafaded77f38d77f86898fc923ae1cee9d7399f0275b1aa24878915d722b
@@ -551,14 +551,280 @@ __metadata:
 
 "@npmcli/redact@npm:^4.0.0":
   version: 4.0.0
-  resolution: "@npmcli/redact@npm:4.0.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40npmcli%2Fredact%2F-%2Fredact-4.0.0.tgz"
+  resolution: "@npmcli/redact@npm:4.0.0"
   checksum: 10c0/a1e9ba9c70a6b40e175bda2c3dd8cfdaf096e6b7f7a132c855c083c8dfe545c3237cd56702e2e6627a580b1d63373599d49a1192c4078a85bf47bbde824df31c
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-android-arm-eabi@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-android-arm-eabi@npm:0.45.0"
+  conditions: os=android & cpu=arm
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-android-arm64@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-android-arm64@npm:0.45.0"
+  conditions: os=android & cpu=arm64
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-darwin-arm64@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-darwin-arm64@npm:0.45.0"
+  conditions: os=darwin & cpu=arm64
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-darwin-x64@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-darwin-x64@npm:0.45.0"
+  conditions: os=darwin & cpu=x64
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-freebsd-x64@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-freebsd-x64@npm:0.45.0"
+  conditions: os=freebsd & cpu=x64
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-linux-arm-gnueabihf@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-linux-arm-gnueabihf@npm:0.45.0"
+  conditions: os=linux & cpu=arm
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-linux-arm-musleabihf@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-linux-arm-musleabihf@npm:0.45.0"
+  conditions: os=linux & cpu=arm
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-linux-arm64-gnu@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-linux-arm64-gnu@npm:0.45.0"
+  conditions: os=linux & cpu=arm64 & libc=glibc
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-linux-arm64-musl@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-linux-arm64-musl@npm:0.45.0"
+  conditions: os=linux & cpu=arm64 & libc=musl
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-linux-ppc64-gnu@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-linux-ppc64-gnu@npm:0.45.0"
+  conditions: os=linux & cpu=ppc64 & libc=glibc
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-linux-riscv64-gnu@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-linux-riscv64-gnu@npm:0.45.0"
+  conditions: os=linux & cpu=riscv64 & libc=glibc
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-linux-riscv64-musl@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-linux-riscv64-musl@npm:0.45.0"
+  conditions: os=linux & cpu=riscv64 & libc=musl
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-linux-s390x-gnu@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-linux-s390x-gnu@npm:0.45.0"
+  conditions: os=linux & cpu=s390x & libc=glibc
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-linux-x64-gnu@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-linux-x64-gnu@npm:0.45.0"
+  conditions: os=linux & cpu=x64 & libc=glibc
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-linux-x64-musl@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-linux-x64-musl@npm:0.45.0"
+  conditions: os=linux & cpu=x64 & libc=musl
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-openharmony-arm64@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-openharmony-arm64@npm:0.45.0"
+  conditions: os=openharmony & cpu=arm64
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-win32-arm64-msvc@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-win32-arm64-msvc@npm:0.45.0"
+  conditions: os=win32 & cpu=arm64
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-win32-ia32-msvc@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-win32-ia32-msvc@npm:0.45.0"
+  conditions: os=win32 & cpu=ia32
+  languageName: node
+  linkType: hard
+
+"@oxfmt/binding-win32-x64-msvc@npm:0.45.0":
+  version: 0.45.0
+  resolution: "@oxfmt/binding-win32-x64-msvc@npm:0.45.0"
+  conditions: os=win32 & cpu=x64
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-android-arm-eabi@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-android-arm-eabi@npm:1.60.0"
+  conditions: os=android & cpu=arm
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-android-arm64@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-android-arm64@npm:1.60.0"
+  conditions: os=android & cpu=arm64
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-darwin-arm64@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-darwin-arm64@npm:1.60.0"
+  conditions: os=darwin & cpu=arm64
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-darwin-x64@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-darwin-x64@npm:1.60.0"
+  conditions: os=darwin & cpu=x64
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-freebsd-x64@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-freebsd-x64@npm:1.60.0"
+  conditions: os=freebsd & cpu=x64
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-linux-arm-gnueabihf@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-linux-arm-gnueabihf@npm:1.60.0"
+  conditions: os=linux & cpu=arm
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-linux-arm-musleabihf@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-linux-arm-musleabihf@npm:1.60.0"
+  conditions: os=linux & cpu=arm
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-linux-arm64-gnu@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-linux-arm64-gnu@npm:1.60.0"
+  conditions: os=linux & cpu=arm64 & libc=glibc
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-linux-arm64-musl@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-linux-arm64-musl@npm:1.60.0"
+  conditions: os=linux & cpu=arm64 & libc=musl
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-linux-ppc64-gnu@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-linux-ppc64-gnu@npm:1.60.0"
+  conditions: os=linux & cpu=ppc64 & libc=glibc
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-linux-riscv64-gnu@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-linux-riscv64-gnu@npm:1.60.0"
+  conditions: os=linux & cpu=riscv64 & libc=glibc
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-linux-riscv64-musl@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-linux-riscv64-musl@npm:1.60.0"
+  conditions: os=linux & cpu=riscv64 & libc=musl
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-linux-s390x-gnu@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-linux-s390x-gnu@npm:1.60.0"
+  conditions: os=linux & cpu=s390x & libc=glibc
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-linux-x64-gnu@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-linux-x64-gnu@npm:1.60.0"
+  conditions: os=linux & cpu=x64 & libc=glibc
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-linux-x64-musl@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-linux-x64-musl@npm:1.60.0"
+  conditions: os=linux & cpu=x64 & libc=musl
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-openharmony-arm64@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-openharmony-arm64@npm:1.60.0"
+  conditions: os=openharmony & cpu=arm64
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-win32-arm64-msvc@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-win32-arm64-msvc@npm:1.60.0"
+  conditions: os=win32 & cpu=arm64
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-win32-ia32-msvc@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-win32-ia32-msvc@npm:1.60.0"
+  conditions: os=win32 & cpu=ia32
+  languageName: node
+  linkType: hard
+
+"@oxlint/binding-win32-x64-msvc@npm:1.60.0":
+  version: 1.60.0
+  resolution: "@oxlint/binding-win32-x64-msvc@npm:1.60.0"
+  conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
 
 "@playwright/test@npm:^1.54.2":
   version: 1.59.1
-  resolution: "@playwright/test@npm:1.59.1::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40playwright%2Ftest%2F-%2Ftest-1.59.1.tgz"
+  resolution: "@playwright/test@npm:1.59.1"
   dependencies:
     playwright: "npm:1.59.1"
   bin:
@@ -569,7 +835,7 @@ __metadata:
 
 "@poppinss/colors@npm:^4.1.5":
   version: 4.1.6
-  resolution: "@poppinss/colors@npm:4.1.6::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40poppinss%2Fcolors%2F-%2Fcolors-4.1.6.tgz"
+  resolution: "@poppinss/colors@npm:4.1.6"
   dependencies:
     kleur: "npm:^4.1.5"
   checksum: 10c0/5c2cec5393e33294465873002f4c570adf36b5405b9f06551485162a6fb422d01de90ac20cb00800be6ab2f0d93da26e67302e95691dff2e0aa339cf93e5bf7f
@@ -578,7 +844,7 @@ __metadata:
 
 "@poppinss/dumper@npm:^0.6.4":
   version: 0.6.5
-  resolution: "@poppinss/dumper@npm:0.6.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40poppinss%2Fdumper%2F-%2Fdumper-0.6.5.tgz"
+  resolution: "@poppinss/dumper@npm:0.6.5"
   dependencies:
     "@poppinss/colors": "npm:^4.1.5"
     "@sindresorhus/is": "npm:^7.0.2"
@@ -589,56 +855,56 @@ __metadata:
 
 "@poppinss/exception@npm:^1.2.2":
   version: 1.2.3
-  resolution: "@poppinss/exception@npm:1.2.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40poppinss%2Fexception%2F-%2Fexception-1.2.3.tgz"
+  resolution: "@poppinss/exception@npm:1.2.3"
   checksum: 10c0/44e48400c9f2d33a4904bee99321b89239774bb9210049f1c55864725fd524ff55bc78a5a94a13d5edea93b84e13023c229c88ebba8c2dc717fb4b2205e42ac7
   languageName: node
   linkType: hard
 
 "@sindresorhus/is@npm:^7.0.2":
   version: 7.2.0
-  resolution: "@sindresorhus/is@npm:7.2.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40sindresorhus%2Fis%2F-%2Fis-7.2.0.tgz"
+  resolution: "@sindresorhus/is@npm:7.2.0"
   checksum: 10c0/0040c17d7826414363f99f5d56077c200789d51e6dfe5542920bfb29ab3828ec0ebf2845e8bae796bee461debb646b5e4c0a623140131cf3143471e915b50b54
   languageName: node
   linkType: hard
 
 "@speed-highlight/core@npm:^1.2.7":
   version: 1.2.15
-  resolution: "@speed-highlight/core@npm:1.2.15::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2F%40speed-highlight%2Fcore%2F-%2Fcore-1.2.15.tgz"
+  resolution: "@speed-highlight/core@npm:1.2.15"
   checksum: 10c0/1e069429a46aa1d1c15afde27ee94f78073c948357abccb17ddab71fe7cad0eb2fc761d553a918d30a13723e5c30a0374304844297e9bd37dd01953466cb93bb
   languageName: node
   linkType: hard
 
 "abbrev@npm:^4.0.0":
   version: 4.0.0
-  resolution: "abbrev@npm:4.0.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fabbrev%2F-%2Fabbrev-4.0.0.tgz"
+  resolution: "abbrev@npm:4.0.0"
   checksum: 10c0/b4cc16935235e80702fc90192e349e32f8ef0ed151ef506aa78c81a7c455ec18375c4125414b99f84b2e055199d66383e787675f0bcd87da7a4dbd59f9eac1d5
   languageName: node
   linkType: hard
 
 "agent-base@npm:^7.1.0, agent-base@npm:^7.1.2":
   version: 7.1.4
-  resolution: "agent-base@npm:7.1.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fagent-base%2F-%2Fagent-base-7.1.4.tgz"
+  resolution: "agent-base@npm:7.1.4"
   checksum: 10c0/c2c9ab7599692d594b6a161559ada307b7a624fa4c7b03e3afdb5a5e31cd0e53269115b620fcab024c5ac6a6f37fa5eb2e004f076ad30f5f7e6b8b671f7b35fe
   languageName: node
   linkType: hard
 
 "balanced-match@npm:^4.0.2":
   version: 4.0.4
-  resolution: "balanced-match@npm:4.0.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fbalanced-match%2F-%2Fbalanced-match-4.0.4.tgz"
+  resolution: "balanced-match@npm:4.0.4"
   checksum: 10c0/07e86102a3eb2ee2a6a1a89164f29d0dbaebd28f2ca3f5ca786f36b8b23d9e417eb3be45a4acf754f837be5ac0a2317de90d3fcb7f4f4dc95720a1f36b26a17b
   languageName: node
   linkType: hard
 
 "blake3-wasm@npm:2.1.5":
   version: 2.1.5
-  resolution: "blake3-wasm@npm:2.1.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fblake3-wasm%2F-%2Fblake3-wasm-2.1.5.tgz"
+  resolution: "blake3-wasm@npm:2.1.5"
   checksum: 10c0/5dc729d8e3a9d1d7ab016b36cdda264a327ada0239716df48435163e11d2bf6df25d6e421655a1f52649098ae49555268a654729b7d02768f77c571ab37ef814
   languageName: node
   linkType: hard
 
 "brace-expansion@npm:^5.0.5":
   version: 5.0.5
-  resolution: "brace-expansion@npm:5.0.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fbrace-expansion%2F-%2Fbrace-expansion-5.0.5.tgz"
+  resolution: "brace-expansion@npm:5.0.5"
   dependencies:
     balanced-match: "npm:^4.0.2"
   checksum: 10c0/4d238e14ed4f5cc9c07285550a41cef23121ca08ba99fa9eb5b55b580dcb6bf868b8210aa10526bdc9f8dc97f33ca2a7259039c4cc131a93042beddb424c48e3
@@ -647,7 +913,7 @@ __metadata:
 
 "cacache@npm:^20.0.1":
   version: 20.0.4
-  resolution: "cacache@npm:20.0.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fcacache%2F-%2Fcacache-20.0.4.tgz"
+  resolution: "cacache@npm:20.0.4"
   dependencies:
     "@npmcli/fs": "npm:^5.0.0"
     fs-minipass: "npm:^3.0.0"
@@ -665,21 +931,21 @@ __metadata:
 
 "chownr@npm:^3.0.0":
   version: 3.0.0
-  resolution: "chownr@npm:3.0.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fchownr%2F-%2Fchownr-3.0.0.tgz"
+  resolution: "chownr@npm:3.0.0"
   checksum: 10c0/43925b87700f7e3893296c8e9c56cc58f926411cce3a6e5898136daaf08f08b9a8eb76d37d3267e707d0dcc17aed2e2ebdf5848c0c3ce95cf910a919935c1b10
   languageName: node
   linkType: hard
 
 "cookie@npm:^1.0.2":
   version: 1.1.1
-  resolution: "cookie@npm:1.1.1::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fcookie%2F-%2Fcookie-1.1.1.tgz"
+  resolution: "cookie@npm:1.1.1"
   checksum: 10c0/79c4ddc0fcad9c4f045f826f42edf54bcc921a29586a4558b0898277fa89fb47be95bc384c2253f493af7b29500c830da28341274527328f18eba9f58afa112c
   languageName: node
   linkType: hard
 
 "debug@npm:4, debug@npm:^4.3.4":
   version: 4.4.3
-  resolution: "debug@npm:4.4.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fdebug%2F-%2Fdebug-4.4.3.tgz"
+  resolution: "debug@npm:4.4.3"
   dependencies:
     ms: "npm:^2.1.3"
   peerDependenciesMeta:
@@ -691,28 +957,28 @@ __metadata:
 
 "detect-libc@npm:^2.1.2":
   version: 2.1.2
-  resolution: "detect-libc@npm:2.1.2::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fdetect-libc%2F-%2Fdetect-libc-2.1.2.tgz"
+  resolution: "detect-libc@npm:2.1.2"
   checksum: 10c0/acc675c29a5649fa1fb6e255f993b8ee829e510b6b56b0910666949c80c364738833417d0edb5f90e4e46be17228b0f2b66a010513984e18b15deeeac49369c4
   languageName: node
   linkType: hard
 
 "env-paths@npm:^2.2.0":
   version: 2.2.1
-  resolution: "env-paths@npm:2.2.1::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fenv-paths%2F-%2Fenv-paths-2.2.1.tgz"
+  resolution: "env-paths@npm:2.2.1"
   checksum: 10c0/285325677bf00e30845e330eec32894f5105529db97496ee3f598478e50f008c5352a41a30e5e72ec9de8a542b5a570b85699cd63bd2bc646dbcb9f311d83bc4
   languageName: node
   linkType: hard
 
 "error-stack-parser-es@npm:^1.0.5":
   version: 1.0.5
-  resolution: "error-stack-parser-es@npm:1.0.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Ferror-stack-parser-es%2F-%2Ferror-stack-parser-es-1.0.5.tgz"
+  resolution: "error-stack-parser-es@npm:1.0.5"
   checksum: 10c0/040665eb87a42fe068c0da501bc258f3d15d3a03963c0723d7a2741e251d400c9776a52d2803afdc5709def99554cdb5a5d99c203c7eaf4885d3fbc217e2e8f7
   languageName: node
   linkType: hard
 
 "esbuild@npm:0.27.3":
   version: 0.27.3
-  resolution: "esbuild@npm:0.27.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fesbuild%2F-%2Fesbuild-0.27.3.tgz"
+  resolution: "esbuild@npm:0.27.3"
   dependencies:
     "@esbuild/aix-ppc64": "npm:0.27.3"
     "@esbuild/android-arm": "npm:0.27.3"
@@ -801,14 +1067,14 @@ __metadata:
 
 "exponential-backoff@npm:^3.1.1":
   version: 3.1.3
-  resolution: "exponential-backoff@npm:3.1.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fexponential-backoff%2F-%2Fexponential-backoff-3.1.3.tgz"
+  resolution: "exponential-backoff@npm:3.1.3"
   checksum: 10c0/77e3ae682b7b1f4972f563c6dbcd2b0d54ac679e62d5d32f3e5085feba20483cf28bd505543f520e287a56d4d55a28d7874299941faf637e779a1aa5994d1267
   languageName: node
   linkType: hard
 
 "fdir@npm:^6.5.0":
   version: 6.5.0
-  resolution: "fdir@npm:6.5.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Ffdir%2F-%2Ffdir-6.5.0.tgz"
+  resolution: "fdir@npm:6.5.0"
   peerDependencies:
     picomatch: ^3 || ^4
   peerDependenciesMeta:
@@ -820,7 +1086,7 @@ __metadata:
 
 "fs-minipass@npm:^3.0.0":
   version: 3.0.3
-  resolution: "fs-minipass@npm:3.0.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Ffs-minipass%2F-%2Ffs-minipass-3.0.3.tgz"
+  resolution: "fs-minipass@npm:3.0.3"
   dependencies:
     minipass: "npm:^7.0.3"
   checksum: 10c0/63e80da2ff9b621e2cb1596abcb9207f1cf82b968b116ccd7b959e3323144cce7fb141462200971c38bbf2ecca51695069db45265705bed09a7cd93ae5b89f94
@@ -829,7 +1095,7 @@ __metadata:
 
 "fsevents@npm:2.3.2":
   version: 2.3.2
-  resolution: "fsevents@npm:2.3.2::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Ffsevents%2F-%2Ffsevents-2.3.2.tgz"
+  resolution: "fsevents@npm:2.3.2"
   dependencies:
     node-gyp: "npm:latest"
   checksum: 10c0/be78a3efa3e181cda3cf7a4637cb527bcebb0bd0ea0440105a3bb45b86f9245b307dc10a2507e8f4498a7d4ec349d1910f4d73e4d4495b16103106e07eee735b
@@ -839,7 +1105,7 @@ __metadata:
 
 "fsevents@npm:~2.3.2":
   version: 2.3.3
-  resolution: "fsevents@npm:2.3.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Ffsevents%2F-%2Ffsevents-2.3.3.tgz"
+  resolution: "fsevents@npm:2.3.3"
   dependencies:
     node-gyp: "npm:latest"
   checksum: 10c0/a1f0c44595123ed717febbc478aa952e47adfc28e2092be66b8ab1635147254ca6cfe1df792a8997f22716d4cbafc73309899ff7bfac2ac3ad8cf2e4ecc3ec60
@@ -849,7 +1115,7 @@ __metadata:
 
 "fsevents@patch:fsevents@npm%3A2.3.2#optional!builtin<compat/fsevents>":
   version: 2.3.2
-  resolution: "fsevents@patch:fsevents@npm%3A2.3.2%3A%3A__archiveUrl=https%253A%252F%252Fpackages.atlassian.com%252Fapi%252Fnpm%252Fnpm-remote%252Ffsevents%252F-%252Ffsevents-2.3.2.tgz#optional!builtin<compat/fsevents>::version=2.3.2&hash=df0bf1"
+  resolution: "fsevents@patch:fsevents@npm%3A2.3.2#optional!builtin<compat/fsevents>::version=2.3.2&hash=df0bf1"
   dependencies:
     node-gyp: "npm:latest"
   conditions: os=darwin
@@ -858,7 +1124,7 @@ __metadata:
 
 "fsevents@patch:fsevents@npm%3A~2.3.2#optional!builtin<compat/fsevents>":
   version: 2.3.3
-  resolution: "fsevents@patch:fsevents@npm%3A2.3.3%3A%3A__archiveUrl=https%253A%252F%252Fpackages.atlassian.com%252Fapi%252Fnpm%252Fnpm-remote%252Ffsevents%252F-%252Ffsevents-2.3.3.tgz#optional!builtin<compat/fsevents>::version=2.3.3&hash=df0bf1"
+  resolution: "fsevents@patch:fsevents@npm%3A2.3.3#optional!builtin<compat/fsevents>::version=2.3.3&hash=df0bf1"
   dependencies:
     node-gyp: "npm:latest"
   conditions: os=darwin
@@ -867,7 +1133,7 @@ __metadata:
 
 "glob@npm:^13.0.0":
   version: 13.0.6
-  resolution: "glob@npm:13.0.6::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fglob%2F-%2Fglob-13.0.6.tgz"
+  resolution: "glob@npm:13.0.6"
   dependencies:
     minimatch: "npm:^10.2.2"
     minipass: "npm:^7.1.3"
@@ -878,21 +1144,21 @@ __metadata:
 
 "graceful-fs@npm:^4.2.6":
   version: 4.2.11
-  resolution: "graceful-fs@npm:4.2.11::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fgraceful-fs%2F-%2Fgraceful-fs-4.2.11.tgz"
+  resolution: "graceful-fs@npm:4.2.11"
   checksum: 10c0/386d011a553e02bc594ac2ca0bd6d9e4c22d7fa8cfbfc448a6d148c59ea881b092db9dbe3547ae4b88e55f1b01f7c4a2ecc53b310c042793e63aa44cf6c257f2
   languageName: node
   linkType: hard
 
 "http-cache-semantics@npm:^4.1.1":
   version: 4.2.0
-  resolution: "http-cache-semantics@npm:4.2.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fhttp-cache-semantics%2F-%2Fhttp-cache-semantics-4.2.0.tgz"
+  resolution: "http-cache-semantics@npm:4.2.0"
   checksum: 10c0/45b66a945cf13ec2d1f29432277201313babf4a01d9e52f44b31ca923434083afeca03f18417f599c9ab3d0e7b618ceb21257542338b57c54b710463b4a53e37
   languageName: node
   linkType: hard
 
 "http-proxy-agent@npm:^7.0.0":
   version: 7.0.2
-  resolution: "http-proxy-agent@npm:7.0.2::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fhttp-proxy-agent%2F-%2Fhttp-proxy-agent-7.0.2.tgz"
+  resolution: "http-proxy-agent@npm:7.0.2"
   dependencies:
     agent-base: "npm:^7.1.0"
     debug: "npm:^4.3.4"
@@ -902,7 +1168,7 @@ __metadata:
 
 "https-proxy-agent@npm:^7.0.1":
   version: 7.0.6
-  resolution: "https-proxy-agent@npm:7.0.6::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fhttps-proxy-agent%2F-%2Fhttps-proxy-agent-7.0.6.tgz"
+  resolution: "https-proxy-agent@npm:7.0.6"
   dependencies:
     agent-base: "npm:^7.1.2"
     debug: "npm:4"
@@ -912,7 +1178,7 @@ __metadata:
 
 "iconv-lite@npm:^0.7.2":
   version: 0.7.2
-  resolution: "iconv-lite@npm:0.7.2::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Ficonv-lite%2F-%2Ficonv-lite-0.7.2.tgz"
+  resolution: "iconv-lite@npm:0.7.2"
   dependencies:
     safer-buffer: "npm:>= 2.1.2 < 3.0.0"
   checksum: 10c0/3c228920f3bd307f56bf8363706a776f4a060eb042f131cd23855ceca962951b264d0997ab38a1ad340e1c5df8499ed26e1f4f0db6b2a2ad9befaff22f14b722
@@ -924,6 +1190,8 @@ __metadata:
   resolution: "interocitor-monorepo@workspace:."
   dependencies:
     "@playwright/test": "npm:^1.54.2"
+    oxfmt: "npm:^0.45.0"
+    oxlint: "npm:^1.60.0"
     typescript: "npm:^6.0.0"
   languageName: unknown
   linkType: soft
@@ -959,35 +1227,35 @@ __metadata:
 
 "ip-address@npm:^10.0.1":
   version: 10.1.0
-  resolution: "ip-address@npm:10.1.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fip-address%2F-%2Fip-address-10.1.0.tgz"
+  resolution: "ip-address@npm:10.1.0"
   checksum: 10c0/0103516cfa93f6433b3bd7333fa876eb21263912329bfa47010af5e16934eeeff86f3d2ae700a3744a137839ddfad62b900c7a445607884a49b5d1e32a3d7566
   languageName: node
   linkType: hard
 
 "isexe@npm:^4.0.0":
   version: 4.0.0
-  resolution: "isexe@npm:4.0.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fisexe%2F-%2Fisexe-4.0.0.tgz"
+  resolution: "isexe@npm:4.0.0"
   checksum: 10c0/5884815115bceac452877659a9c7726382531592f43dc29e5d48b7c4100661aed54018cb90bd36cb2eaeba521092570769167acbb95c18d39afdccbcca06c5ce
   languageName: node
   linkType: hard
 
 "kleur@npm:^4.1.5":
   version: 4.1.5
-  resolution: "kleur@npm:4.1.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fkleur%2F-%2Fkleur-4.1.5.tgz"
+  resolution: "kleur@npm:4.1.5"
   checksum: 10c0/e9de6cb49657b6fa70ba2d1448fd3d691a5c4370d8f7bbf1c2f64c24d461270f2117e1b0afe8cb3114f13bbd8e51de158c2a224953960331904e636a5e4c0f2a
   languageName: node
   linkType: hard
 
 "lru-cache@npm:^11.0.0, lru-cache@npm:^11.1.0, lru-cache@npm:^11.2.1":
-  version: 11.2.7
-  resolution: "lru-cache@npm:11.2.7::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Flru-cache%2F-%2Flru-cache-11.2.7.tgz"
-  checksum: 10c0/549cdb59488baa617135fc12159cafb1a97f91079f35093bb3bcad72e849fc64ace636d244212c181dfdf1a99bbfa90757ff303f98561958ee4d0f885d9bd5f7
+  version: 11.3.5
+  resolution: "lru-cache@npm:11.3.5"
+  checksum: 10c0/5b54ef7b88afb4bd25b7a778f1b2b1cde32d9770913e530da34ab203cf0442413bcaa6e372800cbab9562557a4480e4d8bf32e3a368bb5a91b12218eca085c66
   languageName: node
   linkType: hard
 
 "make-fetch-happen@npm:^15.0.0":
   version: 15.0.5
-  resolution: "make-fetch-happen@npm:15.0.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fmake-fetch-happen%2F-%2Fmake-fetch-happen-15.0.5.tgz"
+  resolution: "make-fetch-happen@npm:15.0.5"
   dependencies:
     "@gar/promise-retry": "npm:^1.0.0"
     "@npmcli/agent": "npm:^4.0.0"
@@ -1005,25 +1273,25 @@ __metadata:
   languageName: node
   linkType: hard
 
-"miniflare@npm:4.20260405.0":
-  version: 4.20260405.0
-  resolution: "miniflare@npm:4.20260405.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fminiflare%2F-%2Fminiflare-4.20260405.0.tgz"
+"miniflare@npm:4.20260415.0":
+  version: 4.20260415.0
+  resolution: "miniflare@npm:4.20260415.0"
   dependencies:
     "@cspotcode/source-map-support": "npm:0.8.1"
     sharp: "npm:^0.34.5"
-    undici: "npm:7.24.4"
-    workerd: "npm:1.20260405.1"
+    undici: "npm:7.24.8"
+    workerd: "npm:1.20260415.1"
     ws: "npm:8.18.0"
     youch: "npm:4.1.0-beta.10"
   bin:
     miniflare: bootstrap.js
-  checksum: 10c0/cdc44033c58dc8fe33009c33e3c8fb94e8b4e50b8f88b96a385cd3696c0e06fdc4598e01f5650320d179a6667b979ac5f9e28d79591ca155d701b3977528f120
+  checksum: 10c0/73a3517ca3cf933ba3f23574cbbdf1389f81102491caf1594bd842baba3300aa94442f35f815a88d9a17f025a183d3bb880a4fabed1702e1d4f8720f81173335
   languageName: node
   linkType: hard
 
 "minimatch@npm:^10.2.2":
   version: 10.2.5
-  resolution: "minimatch@npm:10.2.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fminimatch%2F-%2Fminimatch-10.2.5.tgz"
+  resolution: "minimatch@npm:10.2.5"
   dependencies:
     brace-expansion: "npm:^5.0.5"
   checksum: 10c0/6bb058bd6324104b9ec2f763476a35386d05079c1f5fe4fbf1f324a25237cd4534d6813ecd71f48208f4e635c1221899bef94c3c89f7df55698fe373aaae20fd
@@ -1032,7 +1300,7 @@ __metadata:
 
 "minipass-collect@npm:^2.0.1":
   version: 2.0.1
-  resolution: "minipass-collect@npm:2.0.1::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fminipass-collect%2F-%2Fminipass-collect-2.0.1.tgz"
+  resolution: "minipass-collect@npm:2.0.1"
   dependencies:
     minipass: "npm:^7.0.3"
   checksum: 10c0/5167e73f62bb74cc5019594709c77e6a742051a647fe9499abf03c71dca75515b7959d67a764bdc4f8b361cf897fbf25e2d9869ee039203ed45240f48b9aa06e
@@ -1041,7 +1309,7 @@ __metadata:
 
 "minipass-fetch@npm:^5.0.0":
   version: 5.0.2
-  resolution: "minipass-fetch@npm:5.0.2::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fminipass-fetch%2F-%2Fminipass-fetch-5.0.2.tgz"
+  resolution: "minipass-fetch@npm:5.0.2"
   dependencies:
     iconv-lite: "npm:^0.7.2"
     minipass: "npm:^7.0.3"
@@ -1056,7 +1324,7 @@ __metadata:
 
 "minipass-flush@npm:^1.0.5":
   version: 1.0.7
-  resolution: "minipass-flush@npm:1.0.7::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fminipass-flush%2F-%2Fminipass-flush-1.0.7.tgz"
+  resolution: "minipass-flush@npm:1.0.7"
   dependencies:
     minipass: "npm:^3.0.0"
   checksum: 10c0/960915c02aa0991662c37c404517dd93708d17f96533b2ca8c1e776d158715d8107c5ced425ffc61674c167d93607f07f48a83c139ce1057f8781e5dfb4b90c2
@@ -1065,7 +1333,7 @@ __metadata:
 
 "minipass-pipeline@npm:^1.2.4":
   version: 1.2.4
-  resolution: "minipass-pipeline@npm:1.2.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fminipass-pipeline%2F-%2Fminipass-pipeline-1.2.4.tgz"
+  resolution: "minipass-pipeline@npm:1.2.4"
   dependencies:
     minipass: "npm:^3.0.0"
   checksum: 10c0/cbda57cea20b140b797505dc2cac71581a70b3247b84480c1fed5ca5ba46c25ecc25f68bfc9e6dcb1a6e9017dab5c7ada5eab73ad4f0a49d84e35093e0c643f2
@@ -1074,7 +1342,7 @@ __metadata:
 
 "minipass-sized@npm:^2.0.0":
   version: 2.0.0
-  resolution: "minipass-sized@npm:2.0.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fminipass-sized%2F-%2Fminipass-sized-2.0.0.tgz"
+  resolution: "minipass-sized@npm:2.0.0"
   dependencies:
     minipass: "npm:^7.1.2"
   checksum: 10c0/f9201696a6f6d68610d04c9c83e3d2e5cb9c026aae1c8cbf7e17f386105cb79c1bb088dbc21bf0b1eb4f3fb5df384fd1e7aa3bf1f33868c416ae8c8a92679db8
@@ -1083,7 +1351,7 @@ __metadata:
 
 "minipass@npm:^3.0.0":
   version: 3.3.6
-  resolution: "minipass@npm:3.3.6::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fminipass%2F-%2Fminipass-3.3.6.tgz"
+  resolution: "minipass@npm:3.3.6"
   dependencies:
     yallist: "npm:^4.0.0"
   checksum: 10c0/a114746943afa1dbbca8249e706d1d38b85ed1298b530f5808ce51f8e9e941962e2a5ad2e00eae7dd21d8a4aae6586a66d4216d1a259385e9d0358f0c1eba16c
@@ -1092,14 +1360,14 @@ __metadata:
 
 "minipass@npm:^7.0.2, minipass@npm:^7.0.3, minipass@npm:^7.0.4, minipass@npm:^7.1.2, minipass@npm:^7.1.3":
   version: 7.1.3
-  resolution: "minipass@npm:7.1.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fminipass%2F-%2Fminipass-7.1.3.tgz"
+  resolution: "minipass@npm:7.1.3"
   checksum: 10c0/539da88daca16533211ea5a9ee98dc62ff5742f531f54640dd34429e621955e91cc280a91a776026264b7f9f6735947629f920944e9c1558369e8bf22eb33fbb
   languageName: node
   linkType: hard
 
 "minizlib@npm:^3.0.1, minizlib@npm:^3.1.0":
   version: 3.1.0
-  resolution: "minizlib@npm:3.1.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fminizlib%2F-%2Fminizlib-3.1.0.tgz"
+  resolution: "minizlib@npm:3.1.0"
   dependencies:
     minipass: "npm:^7.1.2"
   checksum: 10c0/5aad75ab0090b8266069c9aabe582c021ae53eb33c6c691054a13a45db3b4f91a7fb1bd79151e6b4e9e9a86727b522527c0a06ec7d45206b745d54cd3097bcec
@@ -1108,21 +1376,21 @@ __metadata:
 
 "ms@npm:^2.1.3":
   version: 2.1.3
-  resolution: "ms@npm:2.1.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fms%2F-%2Fms-2.1.3.tgz"
+  resolution: "ms@npm:2.1.3"
   checksum: 10c0/d924b57e7312b3b63ad21fc5b3dc0af5e78d61a1fc7cfb5457edaf26326bf62be5307cc87ffb6862ef1c2b33b0233cdb5d4f01c4c958cc0d660948b65a287a48
   languageName: node
   linkType: hard
 
 "negotiator@npm:^1.0.0":
   version: 1.0.0
-  resolution: "negotiator@npm:1.0.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fnegotiator%2F-%2Fnegotiator-1.0.0.tgz"
+  resolution: "negotiator@npm:1.0.0"
   checksum: 10c0/4c559dd52669ea48e1914f9d634227c561221dd54734070791f999c52ed0ff36e437b2e07d5c1f6e32909fc625fe46491c16e4a8f0572567d4dd15c3a4fda04b
   languageName: node
   linkType: hard
 
 "node-gyp@npm:latest":
   version: 12.2.0
-  resolution: "node-gyp@npm:12.2.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fnode-gyp%2F-%2Fnode-gyp-12.2.0.tgz"
+  resolution: "node-gyp@npm:12.2.0"
   dependencies:
     env-paths: "npm:^2.2.0"
     exponential-backoff: "npm:^3.1.1"
@@ -1142,7 +1410,7 @@ __metadata:
 
 "nopt@npm:^9.0.0":
   version: 9.0.0
-  resolution: "nopt@npm:9.0.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fnopt%2F-%2Fnopt-9.0.0.tgz"
+  resolution: "nopt@npm:9.0.0"
   dependencies:
     abbrev: "npm:^4.0.0"
   bin:
@@ -1151,16 +1419,158 @@ __metadata:
   languageName: node
   linkType: hard
 
+"oxfmt@npm:^0.45.0":
+  version: 0.45.0
+  resolution: "oxfmt@npm:0.45.0"
+  dependencies:
+    "@oxfmt/binding-android-arm-eabi": "npm:0.45.0"
+    "@oxfmt/binding-android-arm64": "npm:0.45.0"
+    "@oxfmt/binding-darwin-arm64": "npm:0.45.0"
+    "@oxfmt/binding-darwin-x64": "npm:0.45.0"
+    "@oxfmt/binding-freebsd-x64": "npm:0.45.0"
+    "@oxfmt/binding-linux-arm-gnueabihf": "npm:0.45.0"
+    "@oxfmt/binding-linux-arm-musleabihf": "npm:0.45.0"
+    "@oxfmt/binding-linux-arm64-gnu": "npm:0.45.0"
+    "@oxfmt/binding-linux-arm64-musl": "npm:0.45.0"
+    "@oxfmt/binding-linux-ppc64-gnu": "npm:0.45.0"
+    "@oxfmt/binding-linux-riscv64-gnu": "npm:0.45.0"
+    "@oxfmt/binding-linux-riscv64-musl": "npm:0.45.0"
+    "@oxfmt/binding-linux-s390x-gnu": "npm:0.45.0"
+    "@oxfmt/binding-linux-x64-gnu": "npm:0.45.0"
+    "@oxfmt/binding-linux-x64-musl": "npm:0.45.0"
+    "@oxfmt/binding-openharmony-arm64": "npm:0.45.0"
+    "@oxfmt/binding-win32-arm64-msvc": "npm:0.45.0"
+    "@oxfmt/binding-win32-ia32-msvc": "npm:0.45.0"
+    "@oxfmt/binding-win32-x64-msvc": "npm:0.45.0"
+    tinypool: "npm:2.1.0"
+  dependenciesMeta:
+    "@oxfmt/binding-android-arm-eabi":
+      optional: true
+    "@oxfmt/binding-android-arm64":
+      optional: true
+    "@oxfmt/binding-darwin-arm64":
+      optional: true
+    "@oxfmt/binding-darwin-x64":
+      optional: true
+    "@oxfmt/binding-freebsd-x64":
+      optional: true
+    "@oxfmt/binding-linux-arm-gnueabihf":
+      optional: true
+    "@oxfmt/binding-linux-arm-musleabihf":
+      optional: true
+    "@oxfmt/binding-linux-arm64-gnu":
+      optional: true
+    "@oxfmt/binding-linux-arm64-musl":
+      optional: true
+    "@oxfmt/binding-linux-ppc64-gnu":
+      optional: true
+    "@oxfmt/binding-linux-riscv64-gnu":
+      optional: true
+    "@oxfmt/binding-linux-riscv64-musl":
+      optional: true
+    "@oxfmt/binding-linux-s390x-gnu":
+      optional: true
+    "@oxfmt/binding-linux-x64-gnu":
+      optional: true
+    "@oxfmt/binding-linux-x64-musl":
+      optional: true
+    "@oxfmt/binding-openharmony-arm64":
+      optional: true
+    "@oxfmt/binding-win32-arm64-msvc":
+      optional: true
+    "@oxfmt/binding-win32-ia32-msvc":
+      optional: true
+    "@oxfmt/binding-win32-x64-msvc":
+      optional: true
+  bin:
+    oxfmt: bin/oxfmt
+  checksum: 10c0/bb839d8a95b56a0e9d8a89104114a609e6ee6631c22434a80d5d682fa4758d69ade81a558172d503ee051196cff5609e2f523d904ffa49db2acd31178ec8f768
+  languageName: node
+  linkType: hard
+
+"oxlint@npm:^1.60.0":
+  version: 1.60.0
+  resolution: "oxlint@npm:1.60.0"
+  dependencies:
+    "@oxlint/binding-android-arm-eabi": "npm:1.60.0"
+    "@oxlint/binding-android-arm64": "npm:1.60.0"
+    "@oxlint/binding-darwin-arm64": "npm:1.60.0"
+    "@oxlint/binding-darwin-x64": "npm:1.60.0"
+    "@oxlint/binding-freebsd-x64": "npm:1.60.0"
+    "@oxlint/binding-linux-arm-gnueabihf": "npm:1.60.0"
+    "@oxlint/binding-linux-arm-musleabihf": "npm:1.60.0"
+    "@oxlint/binding-linux-arm64-gnu": "npm:1.60.0"
+    "@oxlint/binding-linux-arm64-musl": "npm:1.60.0"
+    "@oxlint/binding-linux-ppc64-gnu": "npm:1.60.0"
+    "@oxlint/binding-linux-riscv64-gnu": "npm:1.60.0"
+    "@oxlint/binding-linux-riscv64-musl": "npm:1.60.0"
+    "@oxlint/binding-linux-s390x-gnu": "npm:1.60.0"
+    "@oxlint/binding-linux-x64-gnu": "npm:1.60.0"
+    "@oxlint/binding-linux-x64-musl": "npm:1.60.0"
+    "@oxlint/binding-openharmony-arm64": "npm:1.60.0"
+    "@oxlint/binding-win32-arm64-msvc": "npm:1.60.0"
+    "@oxlint/binding-win32-ia32-msvc": "npm:1.60.0"
+    "@oxlint/binding-win32-x64-msvc": "npm:1.60.0"
+  peerDependencies:
+    oxlint-tsgolint: ">=0.18.0"
+  dependenciesMeta:
+    "@oxlint/binding-android-arm-eabi":
+      optional: true
+    "@oxlint/binding-android-arm64":
+      optional: true
+    "@oxlint/binding-darwin-arm64":
+      optional: true
+    "@oxlint/binding-darwin-x64":
+      optional: true
+    "@oxlint/binding-freebsd-x64":
+      optional: true
+    "@oxlint/binding-linux-arm-gnueabihf":
+      optional: true
+    "@oxlint/binding-linux-arm-musleabihf":
+      optional: true
+    "@oxlint/binding-linux-arm64-gnu":
+      optional: true
+    "@oxlint/binding-linux-arm64-musl":
+      optional: true
+    "@oxlint/binding-linux-ppc64-gnu":
+      optional: true
+    "@oxlint/binding-linux-riscv64-gnu":
+      optional: true
+    "@oxlint/binding-linux-riscv64-musl":
+      optional: true
+    "@oxlint/binding-linux-s390x-gnu":
+      optional: true
+    "@oxlint/binding-linux-x64-gnu":
+      optional: true
+    "@oxlint/binding-linux-x64-musl":
+      optional: true
+    "@oxlint/binding-openharmony-arm64":
+      optional: true
+    "@oxlint/binding-win32-arm64-msvc":
+      optional: true
+    "@oxlint/binding-win32-ia32-msvc":
+      optional: true
+    "@oxlint/binding-win32-x64-msvc":
+      optional: true
+  peerDependenciesMeta:
+    oxlint-tsgolint:
+      optional: true
+  bin:
+    oxlint: bin/oxlint
+  checksum: 10c0/d12a2f4a6aeba5263e37b28e565b04ba8707eaec7cae53a43f3976771ec019f341fdd0f7fbd089e02c6c135d12a149a07b7162f96c2b3fa702b0642c93aff72f
+  languageName: node
+  linkType: hard
+
 "p-map@npm:^7.0.2":
   version: 7.0.4
-  resolution: "p-map@npm:7.0.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fp-map%2F-%2Fp-map-7.0.4.tgz"
+  resolution: "p-map@npm:7.0.4"
   checksum: 10c0/a5030935d3cb2919d7e89454d1ce82141e6f9955413658b8c9403cfe379283770ed3048146b44cde168aa9e8c716505f196d5689db0ae3ce9a71521a2fef3abd
   languageName: node
   linkType: hard
 
 "path-scurry@npm:^2.0.2":
   version: 2.0.2
-  resolution: "path-scurry@npm:2.0.2::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fpath-scurry%2F-%2Fpath-scurry-2.0.2.tgz"
+  resolution: "path-scurry@npm:2.0.2"
   dependencies:
     lru-cache: "npm:^11.0.0"
     minipass: "npm:^7.1.2"
@@ -1170,28 +1580,28 @@ __metadata:
 
 "path-to-regexp@npm:6.3.0":
   version: 6.3.0
-  resolution: "path-to-regexp@npm:6.3.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fpath-to-regexp%2F-%2Fpath-to-regexp-6.3.0.tgz"
+  resolution: "path-to-regexp@npm:6.3.0"
   checksum: 10c0/73b67f4638b41cde56254e6354e46ae3a2ebc08279583f6af3d96fe4664fc75788f74ed0d18ca44fa4a98491b69434f9eee73b97bb5314bd1b5adb700f5c18d6
   languageName: node
   linkType: hard
 
 "pathe@npm:^2.0.3":
   version: 2.0.3
-  resolution: "pathe@npm:2.0.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fpathe%2F-%2Fpathe-2.0.3.tgz"
+  resolution: "pathe@npm:2.0.3"
   checksum: 10c0/c118dc5a8b5c4166011b2b70608762e260085180bb9e33e80a50dcdb1e78c010b1624f4280c492c92b05fc276715a4c357d1f9edc570f8f1b3d90b6839ebaca1
   languageName: node
   linkType: hard
 
-"picomatch@npm:^4.0.3":
+"picomatch@npm:^4.0.4":
   version: 4.0.4
-  resolution: "picomatch@npm:4.0.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fpicomatch%2F-%2Fpicomatch-4.0.4.tgz"
+  resolution: "picomatch@npm:4.0.4"
   checksum: 10c0/e2c6023372cc7b5764719a5ffb9da0f8e781212fa7ca4bd0562db929df8e117460f00dff3cb7509dacfc06b86de924b247f504d0ce1806a37fac4633081466b0
   languageName: node
   linkType: hard
 
 "playwright-core@npm:1.59.1":
   version: 1.59.1
-  resolution: "playwright-core@npm:1.59.1::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fplaywright-core%2F-%2Fplaywright-core-1.59.1.tgz"
+  resolution: "playwright-core@npm:1.59.1"
   bin:
     playwright-core: cli.js
   checksum: 10c0/d41a74d9681ce3beb3d5239e9ed577710b4ad099a6ca2476219c6599d51e9cb4b80bd72ed82c528da6a5d929c18ae3b872cf02bb83f78fa1c2cb9199c501abee
@@ -1200,7 +1610,7 @@ __metadata:
 
 "playwright@npm:1.59.1":
   version: 1.59.1
-  resolution: "playwright@npm:1.59.1::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fplaywright%2F-%2Fplaywright-1.59.1.tgz"
+  resolution: "playwright@npm:1.59.1"
   dependencies:
     fsevents: "npm:2.3.2"
     playwright-core: "npm:1.59.1"
@@ -1215,21 +1625,21 @@ __metadata:
 
 "proc-log@npm:^6.0.0":
   version: 6.1.0
-  resolution: "proc-log@npm:6.1.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fproc-log%2F-%2Fproc-log-6.1.0.tgz"
+  resolution: "proc-log@npm:6.1.0"
   checksum: 10c0/4f178d4062733ead9d71a9b1ab24ebcecdfe2250916a5b1555f04fe2eda972a0ec76fbaa8df1ad9c02707add6749219d118a4fc46dc56bdfe4dde4b47d80bb82
   languageName: node
   linkType: hard
 
 "safer-buffer@npm:>= 2.1.2 < 3.0.0":
   version: 2.1.2
-  resolution: "safer-buffer@npm:2.1.2::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fsafer-buffer%2F-%2Fsafer-buffer-2.1.2.tgz"
+  resolution: "safer-buffer@npm:2.1.2"
   checksum: 10c0/7e3c8b2e88a1841c9671094bbaeebd94448111dd90a81a1f606f3f67708a6ec57763b3b47f06da09fc6054193e0e6709e77325415dc8422b04497a8070fa02d4
   languageName: node
   linkType: hard
 
 "semver@npm:^7.3.5, semver@npm:^7.7.3":
   version: 7.7.4
-  resolution: "semver@npm:7.7.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fsemver%2F-%2Fsemver-7.7.4.tgz"
+  resolution: "semver@npm:7.7.4"
   bin:
     semver: bin/semver.js
   checksum: 10c0/5215ad0234e2845d4ea5bb9d836d42b03499546ddafb12075566899fc617f68794bb6f146076b6881d755de17d6c6cc73372555879ec7dce2c2feee947866ad2
@@ -1238,7 +1648,7 @@ __metadata:
 
 "sharp@npm:^0.34.5":
   version: 0.34.5
-  resolution: "sharp@npm:0.34.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fsharp%2F-%2Fsharp-0.34.5.tgz"
+  resolution: "sharp@npm:0.34.5"
   dependencies:
     "@img/colour": "npm:^1.0.0"
     "@img/sharp-darwin-arm64": "npm:0.34.5"
@@ -1322,14 +1732,14 @@ __metadata:
 
 "smart-buffer@npm:^4.2.0":
   version: 4.2.0
-  resolution: "smart-buffer@npm:4.2.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fsmart-buffer%2F-%2Fsmart-buffer-4.2.0.tgz"
+  resolution: "smart-buffer@npm:4.2.0"
   checksum: 10c0/a16775323e1404dd43fabafe7460be13a471e021637bc7889468eb45ce6a6b207261f454e4e530a19500cc962c4cc5348583520843b363f4193cee5c00e1e539
   languageName: node
   linkType: hard
 
 "socks-proxy-agent@npm:^8.0.3":
   version: 8.0.5
-  resolution: "socks-proxy-agent@npm:8.0.5::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fsocks-proxy-agent%2F-%2Fsocks-proxy-agent-8.0.5.tgz"
+  resolution: "socks-proxy-agent@npm:8.0.5"
   dependencies:
     agent-base: "npm:^7.1.2"
     debug: "npm:^4.3.4"
@@ -1340,7 +1750,7 @@ __metadata:
 
 "socks@npm:^2.8.3":
   version: 2.8.7
-  resolution: "socks@npm:2.8.7::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fsocks%2F-%2Fsocks-2.8.7.tgz"
+  resolution: "socks@npm:2.8.7"
   dependencies:
     ip-address: "npm:^10.0.1"
     smart-buffer: "npm:^4.2.0"
@@ -1350,7 +1760,7 @@ __metadata:
 
 "ssri@npm:^13.0.0":
   version: 13.0.1
-  resolution: "ssri@npm:13.0.1::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fssri%2F-%2Fssri-13.0.1.tgz"
+  resolution: "ssri@npm:13.0.1"
   dependencies:
     minipass: "npm:^7.0.3"
   checksum: 10c0/cf6408a18676c57ff2ed06b8a20dc64bb3e748e5c7e095332e6aecaa2b8422b1e94a739a8453bf65156a8a47afe23757ba4ab52d3ea3b62322dc40875763e17a
@@ -1359,14 +1769,14 @@ __metadata:
 
 "supports-color@npm:^10.0.0":
   version: 10.2.2
-  resolution: "supports-color@npm:10.2.2::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fsupports-color%2F-%2Fsupports-color-10.2.2.tgz"
+  resolution: "supports-color@npm:10.2.2"
   checksum: 10c0/fb28dd7e0cdf80afb3f2a41df5e068d60c8b4f97f7140de2eaed5b42e075d82a0e980b20a2c0efd2b6d73cfacb55555285d8cc719fa0472220715aefeaa1da7c
   languageName: node
   linkType: hard
 
 "tar@npm:^7.5.4":
   version: 7.5.13
-  resolution: "tar@npm:7.5.13::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Ftar%2F-%2Ftar-7.5.13.tgz"
+  resolution: "tar@npm:7.5.13"
   dependencies:
     "@isaacs/fs-minipass": "npm:^4.0.0"
     chownr: "npm:^3.0.0"
@@ -1378,12 +1788,19 @@ __metadata:
   linkType: hard
 
 "tinyglobby@npm:^0.2.12":
-  version: 0.2.15
-  resolution: "tinyglobby@npm:0.2.15::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Ftinyglobby%2F-%2Ftinyglobby-0.2.15.tgz"
+  version: 0.2.16
+  resolution: "tinyglobby@npm:0.2.16"
   dependencies:
     fdir: "npm:^6.5.0"
-    picomatch: "npm:^4.0.3"
-  checksum: 10c0/869c31490d0d88eedb8305d178d4c75e7463e820df5a9b9d388291daf93e8b1eb5de1dad1c1e139767e4269fe75f3b10d5009b2cc14db96ff98986920a186844
+    picomatch: "npm:^4.0.4"
+  checksum: 10c0/f2e09fd93dd95c41e522113b686ff6f7c13020962f8698a864a257f3d7737599afc47722b7ab726e12f8a813f779906187911ff8ee6701ede65072671a7e934b
+  languageName: node
+  linkType: hard
+
+"tinypool@npm:2.1.0":
+  version: 2.1.0
+  resolution: "tinypool@npm:2.1.0"
+  checksum: 10c0/9fb1c760558c6264e0f4cfde96a63b12450b43f1730fbe6274aa24ddbdf488745c08924d0dea7a1303b47d555416a6415f2113898c69b6ecf731e75ac95238a5
   languageName: node
   linkType: hard
 
@@ -1403,41 +1820,41 @@ __metadata:
 
 "tslib@npm:^2.4.0":
   version: 2.8.1
-  resolution: "tslib@npm:2.8.1::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Ftslib%2F-%2Ftslib-2.8.1.tgz"
+  resolution: "tslib@npm:2.8.1"
   checksum: 10c0/9c4759110a19c53f992d9aae23aac5ced636e99887b51b9e61def52611732872ff7668757d4e4c61f19691e36f4da981cd9485e869b4a7408d689f6bf1f14e62
   languageName: node
   linkType: hard
 
 "typescript@npm:^6.0.0":
-  version: 6.0.2
-  resolution: "typescript@npm:6.0.2::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Ftypescript%2F-%2Ftypescript-6.0.2.tgz"
+  version: 6.0.3
+  resolution: "typescript@npm:6.0.3"
   bin:
     tsc: bin/tsc
     tsserver: bin/tsserver
-  checksum: 10c0/4b860b0bf87cc0fee0f66d8ef2640b5a8a8a8c74d1129adb82e389e5f97124383823c47946bef8a73ede371461143a3aa8544399d2133c7b2e4f07e81860af7f
+  checksum: 10c0/4a25ff5045b984370f48f196b3a0120779b1b343d40b9a68d114ea5e5fff099809b2bb777576991a63a5cd59cf7bffd96ff6fe10afcefbcb8bd6fb96ad4b6606
   languageName: node
   linkType: hard
 
 "typescript@patch:typescript@npm%3A^6.0.0#optional!builtin<compat/typescript>":
-  version: 6.0.2
-  resolution: "typescript@patch:typescript@npm%3A6.0.2%3A%3A__archiveUrl=https%253A%252F%252Fpackages.atlassian.com%252Fapi%252Fnpm%252Fnpm-remote%252Ftypescript%252F-%252Ftypescript-6.0.2.tgz#optional!builtin<compat/typescript>::version=6.0.2&hash=5786d5"
+  version: 6.0.3
+  resolution: "typescript@patch:typescript@npm%3A6.0.3#optional!builtin<compat/typescript>::version=6.0.3&hash=5786d5"
   bin:
     tsc: bin/tsc
     tsserver: bin/tsserver
-  checksum: 10c0/49f0b84fc6ca55653e77752b8a61beabc09ee3dae5d965c31596225aa6ef213c5727b1d2e895b900416dc603854ba0872ac4a812c2a4ed6793a601f9c675de02
+  checksum: 10c0/2f25c74e65663c248fa1ade2b8459d9ce5372ff9dad07067310f132966ebec1d93f6c42f0baf77a6b6a7a91460463f708e6887013aaade22111037457c6b25df
   languageName: node
   linkType: hard
 
-"undici@npm:7.24.4":
-  version: 7.24.4
-  resolution: "undici@npm:7.24.4::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fundici%2F-%2Fundici-7.24.4.tgz"
-  checksum: 10c0/cb302e81fadb7f0b7946ab77595715c0961b46a025ccecae79ba599432d0bc8d1e3da4dfe7ff66bc74f115c1b8ff0f099bc4e9bf313db4562da23995872c6d17
+"undici@npm:7.24.8":
+  version: 7.24.8
+  resolution: "undici@npm:7.24.8"
+  checksum: 10c0/5b3cb18b1c6ccff564c37390547b2f137c666ada5083af6d5b5671dc12f73530ae2872e16fab1e3948b46013fed7c81ed10bce23f7dbf21b73794244b70b7eea
   languageName: node
   linkType: hard
 
 "unenv@npm:2.0.0-rc.24":
   version: 2.0.0-rc.24
-  resolution: "unenv@npm:2.0.0-rc.24::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Funenv%2F-%2Funenv-2.0.0-rc.24.tgz"
+  resolution: "unenv@npm:2.0.0-rc.24"
   dependencies:
     pathe: "npm:^2.0.3"
   checksum: 10c0/e8556b4287fcf647f23db790eea2782cc79f182370718680e3aba4753d5fb7177abf5d6df489c8f74f7e3ad6cd554b8623cc01caf3e6f2d5548e69178adb1691
@@ -1446,7 +1863,7 @@ __metadata:
 
 "which@npm:^6.0.0":
   version: 6.0.1
-  resolution: "which@npm:6.0.1::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fwhich%2F-%2Fwhich-6.0.1.tgz"
+  resolution: "which@npm:6.0.1"
   dependencies:
     isexe: "npm:^4.0.0"
   bin:
@@ -1455,15 +1872,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"workerd@npm:1.20260405.1":
-  version: 1.20260405.1
-  resolution: "workerd@npm:1.20260405.1::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fworkerd%2F-%2Fworkerd-1.20260405.1.tgz"
+"workerd@npm:1.20260415.1":
+  version: 1.20260415.1
+  resolution: "workerd@npm:1.20260415.1"
   dependencies:
-    "@cloudflare/workerd-darwin-64": "npm:1.20260405.1"
-    "@cloudflare/workerd-darwin-arm64": "npm:1.20260405.1"
-    "@cloudflare/workerd-linux-64": "npm:1.20260405.1"
-    "@cloudflare/workerd-linux-arm64": "npm:1.20260405.1"
-    "@cloudflare/workerd-windows-64": "npm:1.20260405.1"
+    "@cloudflare/workerd-darwin-64": "npm:1.20260415.1"
+    "@cloudflare/workerd-darwin-arm64": "npm:1.20260415.1"
+    "@cloudflare/workerd-linux-64": "npm:1.20260415.1"
+    "@cloudflare/workerd-linux-arm64": "npm:1.20260415.1"
+    "@cloudflare/workerd-windows-64": "npm:1.20260415.1"
   dependenciesMeta:
     "@cloudflare/workerd-darwin-64":
       optional: true
@@ -1477,25 +1894,25 @@ __metadata:
       optional: true
   bin:
     workerd: bin/workerd
-  checksum: 10c0/783a2a837c53eef5749907f24bea7395301ac178e65504f32b907f7cf492bf6664271b98e7b8bbc2d10ae7733ba2a7d9be886e8e52b107c7740ec324f814f143
+  checksum: 10c0/aab5517ecff1e58a6005b83163df7f4775e72c6d6d0cd008c02c0424160c6228d3b0b38e85c302e2e05ac6bf7c1c379ec5c236fc5ba5e98712b29d17bfdb3378
   languageName: node
   linkType: hard
 
 "wrangler@npm:^4.10.0":
-  version: 4.81.0
-  resolution: "wrangler@npm:4.81.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fwrangler%2F-%2Fwrangler-4.81.0.tgz"
+  version: 4.83.0
+  resolution: "wrangler@npm:4.83.0"
   dependencies:
     "@cloudflare/kv-asset-handler": "npm:0.4.2"
     "@cloudflare/unenv-preset": "npm:2.16.0"
     blake3-wasm: "npm:2.1.5"
     esbuild: "npm:0.27.3"
     fsevents: "npm:~2.3.2"
-    miniflare: "npm:4.20260405.0"
+    miniflare: "npm:4.20260415.0"
     path-to-regexp: "npm:6.3.0"
     unenv: "npm:2.0.0-rc.24"
-    workerd: "npm:1.20260405.1"
+    workerd: "npm:1.20260415.1"
   peerDependencies:
-    "@cloudflare/workers-types": ^4.20260405.1
+    "@cloudflare/workers-types": ^4.20260415.1
   dependenciesMeta:
     fsevents:
       optional: true
@@ -1505,13 +1922,13 @@ __metadata:
   bin:
     wrangler: bin/wrangler.js
     wrangler2: bin/wrangler.js
-  checksum: 10c0/0a97bab9bb358969956f1b97b570e6b5cb92d87f5bb55115a780465280a45aa4763d2409f68ef70f901d4df525847a5958ad3fbd45ffa3c25e4b4c71804af400
+  checksum: 10c0/e10f8dfd88a546a345c2fe36ac5d42a433897e48e72d068ae6e748f69235f6c659da8e7354f7beb5219fdcfcc25276cc6822122d0a145c7866d8be5b6dd465af
   languageName: node
   linkType: hard
 
 "ws@npm:8.18.0":
   version: 8.18.0
-  resolution: "ws@npm:8.18.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fws%2F-%2Fws-8.18.0.tgz"
+  resolution: "ws@npm:8.18.0"
   peerDependencies:
     bufferutil: ^4.0.1
     utf-8-validate: ">=5.0.2"
@@ -1526,21 +1943,21 @@ __metadata:
 
 "yallist@npm:^4.0.0":
   version: 4.0.0
-  resolution: "yallist@npm:4.0.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fyallist%2F-%2Fyallist-4.0.0.tgz"
+  resolution: "yallist@npm:4.0.0"
   checksum: 10c0/2286b5e8dbfe22204ab66e2ef5cc9bbb1e55dfc873bbe0d568aa943eb255d131890dfd5bf243637273d31119b870f49c18fcde2c6ffbb7a7a092b870dc90625a
   languageName: node
   linkType: hard
 
 "yallist@npm:^5.0.0":
   version: 5.0.0
-  resolution: "yallist@npm:5.0.0::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fyallist%2F-%2Fyallist-5.0.0.tgz"
+  resolution: "yallist@npm:5.0.0"
   checksum: 10c0/a499c81ce6d4a1d260d4ea0f6d49ab4da09681e32c3f0472dee16667ed69d01dae63a3b81745a24bd78476ec4fcf856114cb4896ace738e01da34b2c42235416
   languageName: node
   linkType: hard
 
 "youch-core@npm:^0.3.3":
   version: 0.3.3
-  resolution: "youch-core@npm:0.3.3::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fyouch-core%2F-%2Fyouch-core-0.3.3.tgz"
+  resolution: "youch-core@npm:0.3.3"
   dependencies:
     "@poppinss/exception": "npm:^1.2.2"
     error-stack-parser-es: "npm:^1.0.5"
@@ -1550,7 +1967,7 @@ __metadata:
 
 "youch@npm:4.1.0-beta.10":
   version: 4.1.0-beta.10
-  resolution: "youch@npm:4.1.0-beta.10::__archiveUrl=https%3A%2F%2Fpackages.atlassian.com%2Fapi%2Fnpm%2Fnpm-remote%2Fyouch%2F-%2Fyouch-4.1.0-beta.10.tgz"
+  resolution: "youch@npm:4.1.0-beta.10"
   dependencies:
     "@poppinss/colors": "npm:^4.1.5"
     "@poppinss/dumper": "npm:^0.6.4"

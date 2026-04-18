@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 const STATIC_PORT = Number(process.env.PLAYWRIGHT_CF_STATIC_PORT || '4174');
 const WORKER_PORT = Number(process.env.PLAYWRIGHT_CF_WORKER_PORT || '8788');
-const serverEntry = fileURLToPath(new URL('../../packages/interocitor-webdav/server.mjs', import.meta.url));
+const serverEntry = fileURLToPath(new URL('../../packages/webdav/server.mjs', import.meta.url));
 
 export default defineConfig({
   testDir: './tests/e2e',

@@ -10,19 +10,19 @@
     "examples/*"
   ],
   "scripts": {
-    "build": "yarn workspace interocitor build",
-    "build:all": "yarn workspace interocitor build && yarn workspaces foreach --all --exclude interocitor -p run check",
+    "build": "yarn workspace @interocitor/core build",
+    "build:all": "yarn workspace @interocitor/core build && yarn workspaces foreach --all --exclude @interocitor/core -p run check",
     "validate": "yarn build:all",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
     "format": "oxfmt .",
     "format:check": "oxfmt . --check",
-    "demo:todo": "yarn workspace interocitor build && yarn demo:todo:server",
+    "demo:todo": "yarn workspace @interocitor/core build && yarn demo:todo:server",
     "demo:todo:server": "yarn workspace todo-webdav-example server:file",
-    "test:e2e": "yarn workspace interocitor test:e2e",
-    "test:e2e:todo": "yarn workspace interocitor test:e2e:todo",
-    "test:e2e:cloudflare": "yarn workspace interocitor build && playwright test -c examples/todo-cloudflare-do/playwright.config.ts",
-    "test:e2e:cloudflare:run": "yarn workspace interocitor build && RUN_CF_EXAMPLE_TESTS=1 playwright test -c examples/todo-cloudflare-do/playwright.config.ts",
+    "test:e2e": "yarn workspace @interocitor/core test:e2e",
+    "test:e2e:todo": "yarn workspace @interocitor/core test:e2e:todo",
+    "test:e2e:cloudflare": "yarn workspace @interocitor/core build && playwright test -c examples/todo-cloudflare-do/playwright.config.ts",
+    "test:e2e:cloudflare:run": "yarn workspace @interocitor/core build && RUN_CF_EXAMPLE_TESTS=1 playwright test -c examples/todo-cloudflare-do/playwright.config.ts",
     "test:e2e:install": "playwright install chromium"
   },
   "keywords": [

@@ -1,4 +1,4 @@
-import { withInterocitor } from '../../packages/interocitor-workers/src/index.js';
+import { withInterocitor } from '../../packages/workers/dist/index.js';
 
 const appWorker = {
   async fetch(request) {
@@ -15,4 +15,4 @@ const appWorker = {
   },
 };
 
-export default withInterocitor('/todo-interocitor', appWorker);
+export default withInterocitor(appWorker, { mountPrefix: '/todo-interocitor' });

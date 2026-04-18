@@ -90,7 +90,7 @@ function taskRowId() {
 }
 
 async function createSession() {
-  const { generateKey, keyToPassphrase } = await import('/packages/interocitor/dist/crypto/encryption.js');
+  const { generateKey, keyToPassphrase } = await import('/packages/core/dist/crypto/encryption.js');
   const key = await generateKey();
   const passphrase = await keyToPassphrase(key);
 
@@ -105,8 +105,8 @@ async function createSession() {
 }
 
 async function connect() {
-  const { SyncEngine } = await import('/packages/interocitor/dist/index.js');
-  const { WebDAVAdapter } = await import('/packages/interocitor/dist/adapters/webdav.js');
+  const { SyncEngine } = await import('/packages/core/dist/index.js');
+  const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
   const session = readSessionFromUi();
   await disconnect();

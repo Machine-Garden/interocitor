@@ -1,0 +1,684 @@
+import { meshRootForPath, cacheKeyFor } from './paths.ts';
+import type { PathType } from './paths.ts';
+import type { D1Database, D1PreparedStatement, QueryRow } from './types.ts';
+
+// ─── ops.ts ──────────────────────────────────────────────────────────────────
+//
+// Goals:
+//   1. Batch D1 statements — one round-trip per operation, not 5–7
+//   2. Cache API for immutable files — free reads, zero D1 cost on hits
+//   3. Drop per-request activity tracking on reads (kills 2–3 D1 calls per GET)
+//   4. Conditional SQL for semantic writes — no DO round-trip needed
+//   5. WebSocket Hibernation DO — pure fanout, zero idle cost
+
+// ─── Internal row types ──────────────────────────────────────────────────────
+
+interface FileRow extends QueryRow {
+  content: ArrayBuffer | Uint8Array | string | null;
+  size: number | null;
+  modified_time: string | null;
+  etag: string | null;
+}
+
+interface FileListRow extends QueryRow {
+  path: string;
+  size: number | null;
+  modified_time: string | null;
+  etag: string | null;
+}
+
+interface FolderListRow extends QueryRow {
+  path: string;
+}
+
+interface MetricsRow extends QueryRow {
+  file_count: number | null;
+  total_bytes: number | null;
+}
+
+// ─── Cache helpers ───────────────────────────────────────────────────────────
+
+interface CacheEntry {
+  bytes: Uint8Array;
+  etag: string;
+  modifiedTime: string;
+  size: number;
+}
+
+interface CacheNamespace {
+  match(input: RequestInfo | URL): Promise<Response | undefined>;
+  put(input: RequestInfo | URL, response: Response): Promise<void>;
+  delete(input: RequestInfo | URL): Promise<boolean>;
+}
+
+interface GlobalCaches {
+  default: CacheNamespace;
+}
+
+declare const caches: GlobalCaches | undefined;
+
+function getDefaultCache(): CacheNamespace | undefined {
+  // biome-ignore lint/suspicious/noExplicitAny: Cloudflare Workers cache API not in DOM lib
+  const gc = (typeof caches !== 'undefined' ? caches : (globalThis as any).caches) as GlobalCaches | undefined;
+  return gc?.default;
+}
+
+function decodeJsonBuffer(value: ArrayBuffer | Uint8Array | string | null | undefined): string {
+  if (value instanceof ArrayBuffer) return new TextDecoder().decode(value);
+  if (value instanceof Uint8Array) return new TextDecoder().decode(value);
+  if (typeof value === 'string') return value;
+  // biome-ignore lint/suspicious/noExplicitAny: runtime-typed D1 binary blob
+  const v = value as any;
+  return new TextDecoder().decode(new Uint8Array(v?.buffer ?? v ?? []));
+}
+
+function isImmutablePathType(pathType: PathType): boolean {
+  return (
+    pathType === 'change-file' ||
+    pathType === 'manifest-snapshot' ||
+    pathType === 'mainline-snapshot'
+  );
+}
+
+async function cacheGet(prefix: string, path: string): Promise<CacheEntry | null> {
+  const cache = getDefaultCache();
+  if (!cache) return null;
+  const resp = await cache.match(cacheKeyFor(prefix, path));
+  if (!resp) return null;
+  const bytes = new Uint8Array(await resp.arrayBuffer());
+  const etag = resp.headers.get('ETag') ?? '';
+  const modifiedTime = resp.headers.get('X-Modified-Time') ?? '';
+  return { bytes, etag, modifiedTime, size: bytes.byteLength };
+}
+
+async function cachePut(
+  prefix: string,
+  path: string,
+  bytes: Uint8Array,
+  etag: string,
+  modifiedTime: string,
+): Promise<void> {
+  const cache = getDefaultCache();
+  if (!cache) return;
+  await cache.put(
+    cacheKeyFor(prefix, path),
+    new Response(bytes as unknown as BodyInit, {
+      headers: {
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'Content-Type': 'application/octet-stream',
+        ETag: etag,
+        'X-Modified-Time': modifiedTime,
+      },
+    }),
+  );
+}
+
+async function cacheDelete(prefix: string, path: string): Promise<void> {
+  const cache = getDefaultCache();
+  if (!cache) return;
+  await cache.delete(cacheKeyFor(prefix, path));
+}
+
+// ─── Shared helpers ──────────────────────────────────────────────────────────
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function newEtag(): string {
+  return `"${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}"`;
+}
+
+export function normalizePath(raw: string): string {
+  const s = String(raw).startsWith('/') ? raw : `/${raw}`;
+  const c = s.replaceAll(/\/+/g, '/');
+  if (c === '/') return '/';
+  return c.endsWith('/') ? c.slice(0, -1) : c;
+}
+
+export function fileNameFromPath(path: string): string {
+  return path.split('/').filter(Boolean).pop() ?? '';
+}
+
+function clampNonNeg(v: unknown): number {
+  return Math.max(0, Math.trunc(Number(v) || 0));
+}
+
+// ─── Folder tree (batched) ───────────────────────────────────────────────────
+
+function folderTreeStatements(
+  db: D1Database,
+  prefix: string,
+  target: string,
+): D1PreparedStatement[] {
+  const n = normalizePath(target);
+  if (!n || n === '/') return [];
+  const stmts: D1PreparedStatement[] = [];
+  const now = nowIso();
+  let cur = '';
+  for (const seg of n.split('/').filter(Boolean)) {
+    cur += `/${seg}`;
+    stmts.push(
+      db.prepare('INSERT OR IGNORE INTO folders (prefix,path,created_at) VALUES (?1,?2,?3)')
+        .bind(prefix, cur, now),
+    );
+  }
+  return stmts;
+}
+
+// ─── Metrics delta ───────────────────────────────────────────────────────────
+
+interface MetricsDelta {
+  fileCountDelta: number;
+  totalBytesDelta: number;
+  changeBytesDelta: number;
+  mainlineBytesDelta: number;
+}
+
+function metricsDelta(
+  pathType: PathType,
+  prevSize: number | null | undefined,
+  nextSize: number | null | undefined,
+): MetricsDelta {
+  const prevMissing = prevSize === null || prevSize === undefined;
+  const nextMissing = nextSize === null || nextSize === undefined;
+  const prev = prevMissing ? 0 : clampNonNeg(prevSize);
+  const next = nextMissing ? 0 : clampNonNeg(nextSize);
+  const fileDelta = (nextMissing ? 0 : 1) - (prevMissing ? 0 : 1);
+  const bytesDelta = next - prev;
+  return {
+    fileCountDelta: fileDelta,
+    totalBytesDelta: bytesDelta,
+    changeBytesDelta: pathType === 'change-file' ? bytesDelta : 0,
+    mainlineBytesDelta: pathType === 'mainline-snapshot' ? bytesDelta : 0,
+  };
+}
+
+interface MeshDeltaOptions {
+  touchRead?: boolean;
+  touchWrite?: boolean;
+  touchOperation?: boolean;
+}
+
+function meshDeltaStatements(
+  db: D1Database,
+  prefix: string,
+  remoteRoot: string | null,
+  delta: MetricsDelta,
+  now: string,
+  options: MeshDeltaOptions = {},
+): D1PreparedStatement[] {
+  if (!remoteRoot) return [];
+  const today = now.slice(0, 10);
+  const touchRead = options.touchRead ? now : null;
+  const touchWrite = options.touchWrite ? now : null;
+  const touchOperation = options.touchOperation === false ? null : now;
+  return [
+    db.prepare(
+      `INSERT OR IGNORE INTO mesh_paths (
+         prefix, remote_root, created_at, updated_at, last_operation_at,
+         last_read_at, last_write_at, last_ttl_delete_at, deleted_at,
+         ops_day, ops_count_day, writes_count_day,
+         current_file_count, current_total_bytes, current_change_bytes, current_mainline_bytes
+       ) VALUES (?1, ?2, ?3, ?3, NULL, NULL, NULL, NULL, NULL, ?4, 0, 0, 0, 0, 0, 0)`,
+    ).bind(prefix, remoteRoot, now, today),
+    db.prepare(
+      `UPDATE mesh_paths SET
+         updated_at = ?3,
+         deleted_at = NULL,
+         last_operation_at = COALESCE(?8, last_operation_at),
+         last_read_at = COALESCE(?9, last_read_at),
+         last_write_at = COALESCE(?10, last_write_at),
+         ops_count_day = CASE WHEN ops_day = ?11 THEN ops_count_day + ?12 ELSE ?12 END,
+         writes_count_day = CASE WHEN ops_day = ?11 THEN writes_count_day + ?13 ELSE ?13 END,
+         ops_day = ?11,
+         current_file_count      = MAX(0, current_file_count      + ?4),
+         current_total_bytes     = MAX(0, current_total_bytes     + ?5),
+         current_change_bytes    = MAX(0, current_change_bytes    + ?6),
+         current_mainline_bytes  = MAX(0, current_mainline_bytes  + ?7)
+       WHERE prefix = ?1 AND remote_root = ?2`,
+    ).bind(
+      prefix, remoteRoot, now,
+      delta.fileCountDelta,
+      delta.totalBytesDelta,
+      delta.changeBytesDelta,
+      delta.mainlineBytesDelta,
+      touchOperation,
+      touchRead,
+      touchWrite,
+      today,
+      touchOperation ? 1 : 0,
+      touchWrite ? 1 : 0,
+    ),
+  ];
+}
+
+// ─── OP: Get file ────────────────────────────────────────────────────────────
+
+export interface GetFileResult {
+  found: boolean;
+  bytes?: Uint8Array;
+  size?: number;
+  etag?: string;
+  modifiedTime?: string;
+  source?: 'cache' | 'd1';
+}
+
+export async function opGetFile(
+  db: D1Database,
+  prefix: string,
+  path: string,
+  pathType: PathType,
+): Promise<GetFileResult> {
+  const normalized = normalizePath(path);
+  const remoteRoot = meshRootForPath(normalized, pathType);
+
+  if (isImmutablePathType(pathType)) {
+    const cached = await cacheGet(prefix, normalized);
+    if (cached) {
+      return {
+        found: true,
+        bytes: cached.bytes,
+        size: cached.size,
+        etag: cached.etag,
+        modifiedTime: cached.modifiedTime,
+        source: 'cache',
+      };
+    }
+  }
+
+  const row = await db.prepare(
+    'SELECT content, size, modified_time, etag FROM files WHERE prefix=?1 AND path=?2 LIMIT 1',
+  ).bind(prefix, normalized).first<FileRow>();
+
+  if (!row) return { found: false };
+
+  const raw = row.content;
+  const bytes = raw instanceof ArrayBuffer
+    ? new Uint8Array(raw)
+    : raw instanceof Uint8Array
+      ? raw
+      // biome-ignore lint/suspicious/noExplicitAny: runtime-typed D1 binary blob
+      : new Uint8Array((raw as any)?.buffer ?? raw ?? []);
+  const etag = String(row.etag ?? '');
+  const modifiedTime = String(row.modified_time ?? '');
+
+  if (isImmutablePathType(pathType)) {
+    await cachePut(prefix, normalized, bytes, etag, modifiedTime);
+  }
+
+  if (remoteRoot) {
+    const now = nowIso();
+    await db.batch(meshDeltaStatements(db, prefix, remoteRoot, {
+      fileCountDelta: 0,
+      totalBytesDelta: 0,
+      changeBytesDelta: 0,
+      mainlineBytesDelta: 0,
+    }, now, { touchRead: true, touchWrite: false }));
+  }
+
+  return {
+    found: true,
+    bytes,
+    size: Number(row.size ?? bytes.byteLength),
+    etag,
+    modifiedTime,
+    source: 'd1',
+  };
+}
+
+// ─── OP: Put immutable file ──────────────────────────────────────────────────
+
+export interface PutResult {
+  wrote: boolean;
+  status: number;
+}
+
+export async function opPutImmutable(
+  db: D1Database,
+  prefix: string,
+  path: string,
+  bytes: Uint8Array,
+  pathType: PathType,
+  remoteRoot: string | null,
+): Promise<PutResult> {
+  const normalized = normalizePath(path);
+  const now = nowIso();
+  const etag = newEtag();
+  const parentDir = normalized.slice(0, normalized.lastIndexOf('/')) || '/';
+
+  const delta = metricsDelta(pathType, null, bytes.byteLength);
+  const results = await db.batch([
+    ...folderTreeStatements(db, prefix, parentDir),
+    db.prepare(
+      'INSERT OR IGNORE INTO files (prefix,path,content,size,modified_time,etag) VALUES (?1,?2,?3,?4,?5,?6)',
+    ).bind(prefix, normalized, bytes, bytes.byteLength, now, etag),
+    ...meshDeltaStatements(db, prefix, remoteRoot, delta, now, { touchWrite: true }),
+  ]);
+
+  const insertIdx = folderTreeStatements(db, prefix, parentDir).length;
+  const insertResult = results[insertIdx];
+  const wrote = (insertResult?.meta?.changes ?? 0) > 0;
+
+  if (wrote) {
+    await cachePut(prefix, normalized, bytes, etag, now);
+  }
+
+  return { wrote, status: wrote ? 201 : 200 };
+}
+
+// ─── OP: Put semantic (manifest.json / head.json) ────────────────────────────
+
+export async function opPutSemantic(
+  db: D1Database,
+  prefix: string,
+  path: string,
+  bytes: Uint8Array,
+  pathType: PathType,
+  remoteRoot: string | null,
+): Promise<PutResult> {
+  const normalized = normalizePath(path);
+  const now = nowIso();
+  const etag = newEtag();
+  const parentDir = normalized.slice(0, normalized.lastIndexOf('/')) || '/';
+
+  const existing = await db.prepare(
+    'SELECT content, size FROM files WHERE prefix=?1 AND path=?2 LIMIT 1',
+  ).bind(prefix, normalized).first<FileRow>();
+
+  if (existing) {
+    try {
+      const existingJson = JSON.parse(decodeJsonBuffer(existing.content));
+      const incomingJson = JSON.parse(new TextDecoder().decode(bytes));
+
+      if (pathType === 'manifest-pointer') {
+        const oldGen = Number(existingJson?.currentGeneration ?? -1);
+        const newGen = Number(incomingJson?.currentGeneration ?? -1);
+        if (newGen < oldGen) return { wrote: false, status: 409 };
+      }
+      if (pathType === 'head') {
+        const oldHlc = String(existingJson?.latestHlc ?? '');
+        const newHlc = String(incomingJson?.latestHlc ?? '');
+        if (newHlc < oldHlc) return { wrote: false, status: 409 };
+      }
+    } catch {
+      // Corrupt existing file — allow overwrite to unblock
+    }
+  }
+
+  const prevSize = existing ? Number(existing.size ?? 0) : null;
+  const delta = metricsDelta(pathType, prevSize, bytes.byteLength);
+
+  await db.batch([
+    ...folderTreeStatements(db, prefix, parentDir),
+    db.prepare(
+      `INSERT INTO files (prefix,path,content,size,modified_time,etag) VALUES (?1,?2,?3,?4,?5,?6)
+       ON CONFLICT(prefix,path) DO UPDATE SET
+         content=excluded.content, size=excluded.size,
+         modified_time=excluded.modified_time, etag=excluded.etag`,
+    ).bind(prefix, normalized, bytes, bytes.byteLength, now, etag),
+    ...meshDeltaStatements(db, prefix, remoteRoot, delta, now),
+  ]);
+
+  return { wrote: true, status: 204 };
+}
+
+// ─── OP: Put overwrite (device heartbeats) ───────────────────────────────────
+
+export async function opPutOverwrite(
+  db: D1Database,
+  prefix: string,
+  path: string,
+  bytes: Uint8Array,
+  _pathType: PathType,
+  _remoteRoot: string | null,
+): Promise<PutResult> {
+  const normalized = normalizePath(path);
+  const now = nowIso();
+  const etag = newEtag();
+  const parentDir = normalized.slice(0, normalized.lastIndexOf('/')) || '/';
+
+  await db.batch([
+    ...folderTreeStatements(db, prefix, parentDir),
+    db.prepare(
+      `INSERT INTO files (prefix,path,content,size,modified_time,etag) VALUES (?1,?2,?3,?4,?5,?6)
+       ON CONFLICT(prefix,path) DO UPDATE SET
+         content=excluded.content, size=excluded.size,
+         modified_time=excluded.modified_time, etag=excluded.etag`,
+    ).bind(prefix, normalized, bytes, bytes.byteLength, now, etag),
+  ]);
+
+  return { wrote: true, status: 204 };
+}
+
+// ─── OP: List children ───────────────────────────────────────────────────────
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  size: number;
+  modifiedTime: string;
+  etag: string;
+}
+
+export interface ListChildrenResult {
+  files: FileEntry[];
+  folders: string[];
+}
+
+export async function opListChildren(
+  db: D1Database,
+  prefix: string,
+  path: string,
+): Promise<ListChildrenResult> {
+  const normalized = normalizePath(path);
+  const pattern = normalized === '/' ? '/%' : `${normalized}/%`;
+  const slashCount = normalized === '/' ? 1 : normalized.split('/').filter(Boolean).length + 1;
+  const depthTarget = slashCount;
+
+  const [filesResult, foldersResult] = await db.batch([
+    db.prepare(
+      `SELECT path, size, modified_time, etag FROM files
+       WHERE prefix = ?1
+         AND path LIKE ?2
+         AND LENGTH(path) - LENGTH(REPLACE(path, '/', '')) = ?3`,
+    ).bind(prefix, pattern, depthTarget),
+    db.prepare(
+      `SELECT path FROM folders
+       WHERE prefix = ?1
+         AND path LIKE ?2
+         AND LENGTH(path) - LENGTH(REPLACE(path, '/', '')) = ?3`,
+    ).bind(prefix, pattern, depthTarget),
+  ]);
+
+  const files: FileEntry[] = (filesResult.results ?? []).map((row) => {
+    const r = row as FileListRow;
+    return {
+      name: fileNameFromPath(String(r.path)),
+      path: String(r.path),
+      size: Number(r.size ?? 0),
+      modifiedTime: String(r.modified_time ?? ''),
+      etag: String(r.etag ?? ''),
+    };
+  });
+
+  const folders: string[] = (foldersResult.results ?? [])
+    .map((row) => {
+      const r = row as FolderListRow;
+      return String(r.path).split('/').filter(Boolean).pop() ?? '';
+    })
+    .filter(Boolean);
+
+  return { files, folders };
+}
+
+// ─── OP: Delete path ─────────────────────────────────────────────────────────
+
+export async function opDeletePath(
+  db: D1Database,
+  prefix: string,
+  path: string,
+  remoteRoot: string | null,
+): Promise<boolean> {
+  const normalized = normalizePath(path);
+
+  if (normalized === '/') {
+    await db.batch([
+      db.prepare('DELETE FROM files WHERE prefix = ?1').bind(prefix),
+      db.prepare('DELETE FROM folders WHERE prefix = ?1').bind(prefix),
+    ]);
+    await db.prepare(
+      `UPDATE mesh_paths SET
+         current_file_count = 0, current_total_bytes = 0,
+         current_change_bytes = 0, current_mainline_bytes = 0,
+         deleted_at = ?2, updated_at = ?2
+       WHERE prefix = ?1`,
+    ).bind(prefix, nowIso()).run();
+    return true;
+  }
+
+  const like = `${normalized}/%`;
+  const now = nowIso();
+
+  const [filesDeleted] = await db.batch([
+    db.prepare(
+      'DELETE FROM files WHERE prefix = ?1 AND (path = ?2 OR path LIKE ?3)',
+    ).bind(prefix, normalized, like),
+    db.prepare(
+      'DELETE FROM folders WHERE prefix = ?1 AND (path = ?2 OR path LIKE ?3)',
+    ).bind(prefix, normalized, like),
+  ]);
+
+  const deletedCount = filesDeleted?.meta?.changes ?? 0;
+  if (deletedCount === 0) return false;
+
+  if (remoteRoot) {
+    await db.batch(meshDeltaStatements(db, prefix, remoteRoot, {
+      fileCountDelta: -deletedCount,
+      totalBytesDelta: 0,
+      changeBytesDelta: 0,
+      mainlineBytesDelta: 0,
+    }, now));
+  }
+
+  return true;
+}
+
+// ─── OP: Prune compacted changes ─────────────────────────────────────────────
+
+export interface PruneResult {
+  pruned: number;
+  bytesPruned: number;
+  totalCandidates: number;
+  remotePath?: string;
+  watermarkHlc?: string;
+}
+
+interface FileSizeRow extends QueryRow {
+  path: string;
+  size: number | null;
+}
+
+export async function opPruneCompacted(
+  db: D1Database,
+  prefix: string,
+  remotePath: string,
+  watermarkHlc: string,
+): Promise<PruneResult> {
+  const root = normalizePath(remotePath);
+  const changesPattern = `${root === '/' ? '' : root}/changes/%`;
+
+  const { results = [] } = await db.prepare(
+    'SELECT path, size FROM files WHERE prefix = ?1 AND path LIKE ?2',
+  ).bind(prefix, changesPattern).all<FileSizeRow>();
+
+  const toDelete: string[] = [];
+  let bytesPruned = 0;
+
+  for (const row of results) {
+    const filePath = String(row.path);
+    const name = fileNameFromPath(filePath);
+    if (name === 'head.json') continue;
+    const hlcEnd = name.lastIndexOf('-chg_');
+    const hlc = hlcEnd > 0 ? name.slice(0, hlcEnd) : null;
+    if (hlc && hlc <= watermarkHlc) {
+      toDelete.push(filePath);
+      bytesPruned += Number(row.size ?? 0);
+    }
+  }
+
+  if (toDelete.length === 0) {
+    return { pruned: 0, bytesPruned: 0, totalCandidates: results.length };
+  }
+
+  const CHUNK = 90;
+  for (let i = 0; i < toDelete.length; i += CHUNK) {
+    const chunk = toDelete.slice(i, i + CHUNK);
+    await db.batch(
+      chunk.map((p) =>
+        db.prepare('DELETE FROM files WHERE prefix = ?1 AND path = ?2').bind(prefix, p),
+      ),
+    );
+  }
+
+  await Promise.allSettled(toDelete.map((p) => cacheDelete(prefix, p)));
+
+  const now = nowIso();
+  await db.batch(meshDeltaStatements(db, prefix, root, {
+    fileCountDelta: -toDelete.length,
+    totalBytesDelta: -bytesPruned,
+    changeBytesDelta: -bytesPruned,
+    mainlineBytesDelta: 0,
+  }, now));
+
+  return {
+    pruned: toDelete.length,
+    bytesPruned,
+    totalCandidates: results.length,
+    remotePath: root,
+    watermarkHlc,
+  };
+}
+
+// ─── OP: Reconcile metrics ───────────────────────────────────────────────────
+
+export interface ReconcileResult {
+  fileCount: number;
+  totalBytes: number;
+}
+
+export async function opReconcileMetrics(
+  db: D1Database,
+  prefix: string,
+  remoteRoot: string,
+): Promise<ReconcileResult> {
+  const normalized = normalizePath(remoteRoot);
+  const pattern = normalized === '/' ? '/%' : `${normalized}/%`;
+
+  const row = await db.prepare(
+    `SELECT
+       COUNT(*) as file_count,
+       COALESCE(SUM(size), 0) as total_bytes
+     FROM files
+     WHERE prefix = ?1 AND (path = ?2 OR path LIKE ?3)`,
+  ).bind(prefix, normalized, pattern).first<MetricsRow>();
+
+  const now = nowIso();
+  await db.prepare(
+    `UPDATE mesh_paths SET
+       current_file_count = ?3,
+       current_total_bytes = ?4,
+       updated_at = ?5
+     WHERE prefix = ?1 AND remote_root = ?2`,
+  ).bind(
+    prefix, normalized,
+    Number(row?.file_count ?? 0),
+    Number(row?.total_bytes ?? 0),
+    now,
+  ).run();
+
+  return {
+    fileCount: Number(row?.file_count ?? 0),
+    totalBytes: Number(row?.total_bytes ?? 0),
+  };
+}

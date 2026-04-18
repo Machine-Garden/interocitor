@@ -29,7 +29,7 @@ interface GoogleDriveConfig {
  * @example
  * ```ts
  * const adapter = new GoogleDriveAdapter({ clientId: 'YOUR_GOOGLE_CLIENT_ID' });
- * const engine = new SyncEngine(adapter, { remotePath: '/MyApp' });
+ * const engine = new Interocitor(adapter, { remotePath: '/MyApp' });
  * ```
  */
 export class GoogleDriveAdapter implements StorageAdapter {

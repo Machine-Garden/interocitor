@@ -1,7 +1,7 @@
 /**
  * Codec — encryption/decryption of change and snapshot payloads.
  *
- * Extracted from SyncEngine to keep the orchestrator lean.
+ * Extracted from Interocitor to keep the orchestrator lean.
  * Not part of the public API.
  */
 

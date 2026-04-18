@@ -8,7 +8,7 @@
   <strong>The JavaScript mailbox that can't read your mail.</strong>
 </p>
 
-# interocitor
+# @interocitor/core
 
 Encrypted local-first CRDT sync for browser apps.
 
@@ -26,29 +26,28 @@ What this means:
 ## Quick start
 
 ```ts
-import { SyncEngine, createRowId } from 'interocitor';
-import { WebDAVAdapter } from 'interocitor/adapters/webdav';
+import { Interocitor } from '@interocitor/core';
+import { WebDAVAdapter } from '@interocitor/core/adapters/webdav';
 
-const adapter = new WebDAVAdapter({
-  baseUrl: 'https://your-webdav-server.example.com',
-  auth: { username: 'user', password: 'pass' },
-});
-
-const engine = new SyncEngine(adapter, {
+const db = new Interocitor({
   remotePath: '/MyApp',
   dbName: 'my-app',
   appName: 'My App',
   // encrypted by default; set encrypted: false to opt out
 });
 
-await engine.init();
-await engine.connect();
-
-const id = createRowId({ prefix: 'todo' });
-await engine.put('todos', id, {
+// local-only usage works immediately
+const id = await db.table('todos').add({
   text: 'Ship privacy-first sync',
   done: false,
-});
+}, { prefix: 'todo' });
+
+// attach transport later, when app/backend is ready
+await db.setRemoteStorage(new WebDAVAdapter({
+  baseUrl: 'https://your-webdav-server.example.com',
+  auth: { username: 'user', password: 'pass' },
+}));
+await db.connect();
 ```
 
 ## How sync works
@@ -69,43 +68,96 @@ flowchart LR
 ## Core API at a glance
 
 ```ts
-await engine.init();
-await engine.connect();
-await engine.put(table, id, data);
-await engine.get(table, id);
-await engine.query(table);
-await engine.sync();
+const db = new Interocitor({ dbName: 'my-app', appName: 'My App', schema });
 
-await engine.secureWithBiometrics();   // optional, explicit keychain enrollment
-await engine.restoreWithBiometrics();  // explicit recovery flow
+await db.table('tasks').add({ title: 'Ship it', done: false }, { prefix: 'task' });
+await db.table('tasks').patch(taskId, { done: true });
+await db.table('tasks').replace(taskId, fullTask);
+await db.table('tasks').get(taskId);
+await db.table('tasks').query();
+await db.table('tasks').where('done').equals(false).orderBy('title');
+
+await db.connect();
+await db.secureWithBiometrics();
+await db.restoreWithBiometrics();
+```
+
+No `await db.init()` — initialization is automatic.
+
+## Schema typing
+
+```ts
+const schema = {
+  version: 1,
+  tables: {
+    todos: {
+      fields: {
+        text: types.string,
+        done: types.boolean,
+        createdAt: types.index(types.date),
+        note: types.optional(types.string),
+        dueAt: types.optional(types.index(types.date)),
+      },
+    },
+  },
+} satisfies DatabaseSchemaDefinition;
+
+// inferred row type:
+// { text: string; done: boolean; createdAt: Date; note?: string; dueAt?: Date }
+```
+
+`types.optional()` marks property presence, not `T | undefined` value type.
+When present, `dueAt` is still `Date`, not `Date | undefined`.
+
+Typed JSON also works:
+
+```ts
+items: types.typed<ReceiptItem[]>('json')
+metadata: types.optional(types.typed<Record<string, unknown>>('json'))
 ```
 
 ## Row IDs
 
 Use stable string IDs for synced rows. Do not use auto-increment IDs.
 
-Good default:
+Usually app code should not import `createRowId()` directly. Prefer:
 
 ```ts
-import { createRowId } from 'interocitor';
-
-const id = createRowId({ prefix: 'task' });
+const id = await db.table('tasks').add({ title: 'Ship it' }, { prefix: 'task' });
 ```
 
-`createRowId()` uses platform crypto. No extra dependency needed.
+If you need raw ID generation, `createRowId()` still exists and uses platform crypto.
 
 ## Offline guarantee
 
 Every read and write hits the local store. No network required.
-`sync()` is the only call that touches the remote mailbox.
+`connect()` and background sync are the only flows that touch the remote mailbox.
 
 | Operation | Network? |
 | --- | --- |
-| `init()` | No |
-| `put()` | No |
-| `delete()` | No |
-| `get()` / `query()` | No |
-| `sync()` | Yes, if adapter configured |
+| `new Interocitor()` | No |
+| `table.add()` | No |
+| `table.patch()` / `table.replace()` | No |
+| `table.delete()` | No |
+| `table.get()` / `table.query()` | No |
+| `connect()` | Yes, if adapter configured |
+
+## Local-only mode
+
+No adapter. No remote. Just IndexedDB.
+
+```ts
+const db = new Interocitor({
+  dbName: 'meal-planner',
+  appName: 'Meal Planner',
+  encrypted: false,
+  schema,
+});
+
+const rows = await db.table('weekPlans').query();
+```
+
+You can attach transport later with `setRemoteStorage()`.
 
 ## Adapters
 
@@ -163,7 +215,7 @@ yarn demo:todo
 From the monorepo root:
 
 ```bash
-yarn workspace interocitor test
+yarn workspace @interocitor/core test
 ```
 
 ## Package context

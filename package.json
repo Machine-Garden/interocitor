@@ -10,8 +10,8 @@
     "examples/*"
   ],
   "scripts": {
-    "build": "yarn workspace @interocitor/core build",
-    "build:all": "yarn workspace @interocitor/core build && yarn workspaces foreach --all --exclude @interocitor/core -p run check",
+    "build:int": "yarn workspace @interocitor/core build",
+    "build:all": "yarn build:int && yarn workspaces foreach --all --exclude @interocitor/core -p run build",
     "validate": "yarn build:all",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",

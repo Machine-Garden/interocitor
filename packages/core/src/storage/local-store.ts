@@ -255,7 +255,7 @@ function txComplete(transaction: IDBTransaction): Promise<void> {
 // ─── Public API ──────────────────────────────────────────────────────
 
 /**
- * Default IndexedDB-backed local persistence layer used by {@link SyncEngine}.
+ * Default IndexedDB-backed local persistence layer used by {@link Interocitor}.
  *
  * Most applications do not need to interact with this class directly unless
  * they are supplying a custom `localStoreFactory` or swapping local storage at

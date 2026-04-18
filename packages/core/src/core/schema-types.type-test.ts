@@ -9,7 +9,7 @@ import type {
   SyncConfig,
 } from './types.ts';
 import { types } from './schema-types.ts';
-import type { SyncEngine } from './sync-engine.ts';
+import type { Interocitor } from './sync-engine.ts';
 
 // ─── Scalar types carry their generic ────────────────────────────────
 
@@ -177,13 +177,24 @@ const _badConfig: SyncConfig<{ tasks: { title: string } }> = {
 };
 void _badConfig;
 
-// ─── SyncEngine<S> inferred from config ─────────────────────────────
+// ─── Interocitor<S> inferred from config ────────────────────────────
 
 // Declare engine typed via inferred schema — table() returns Table<TaskRow>
-declare const typedEngine: SyncEngine<InferSchemaType<typeof typedSchema>>;
-
-// table() with known key → Table<{ title: string; status: 'open'|'done'; priority: number }>
+declare const typedEngine: Interocitor<InferSchemaType<typeof typedSchema>>;
 const tasksTable = typedEngine.table('tasks');
+type _AddArg = Parameters<typeof tasksTable.add>[0];
+type _ReplaceArg = Parameters<typeof tasksTable.replace>[1];
+const _addOk: _AddArg = { title: 'x', status: 'open', priority: 1 };
+// @ts-expect-error — missing required field status
+const _addBad: _AddArg = { title: 'x', priority: 1 };
+const _replaceOk: _ReplaceArg = { title: 'x', status: 'open', priority: 1 };
+// @ts-expect-error — missing required field priority
+const _replaceBad: _ReplaceArg = { title: 'x', status: 'open' };
+void _addOk; void _replaceOk;
+
+// table() returns Table<TaskRow> and concrete row typing propagates through methods.
+
+// table() with known key → Table<{ title: string; status: 'open'|'done'; priority: number }> 
 type _TasksGet = Awaited<ReturnType<typeof tasksTable.get>>;
 // _TasksGet should be { title: string; ... } | undefined — not Record<string,unknown>
 const _checkGet: _TasksGet = { title: 'x', status: 'open', priority: 1 };
@@ -237,4 +248,46 @@ const _num:    InferFieldType<typeof types.number> = 42;             // number
 // @ts-expect-error — string is not number
 const _badNum: InferFieldType<typeof types.number> = 'x';
 
+// ─── Optional fields ─────────────────────────────────────────────────
+
+const _optionalStringField: SchemaField<string> = types.string.optional;
+const _optionalJsonField: SchemaField<{ foo: string }> = types.typed<{ foo: string }>('json').optional;
+// @ts-expect-error — optional fields cannot be indexed
+const _optionalIndexedString: IndexableSchemaField<string> = types.index(types.string.optional);
+// @ts-expect-error — optional fields cannot be unique
+const _optionalUniqueString: IndexableSchemaField<string> = types.unique(types.string.optional);
+
+const optionalSchema = {
+  version: 1,
+  tables: {
+    tasks: {
+      fields: {
+        title: types.string,
+        note: types.string.optional,
+        payload: types.typed<{ foo: string }>('json').optional,
+      },
+    },
+  },
+} satisfies DatabaseSchemaDefinition;
+
+type OptionalDB = InferSchemaType<typeof optionalSchema>;
+type OptionalTaskRow = OptionalDB['tasks'];
+
+const _optionalOk1: OptionalTaskRow = { title: 'x' };
+
+// Optional field read type MUST be T | undefined
+declare const _optRow: OptionalTaskRow;
+const _noteRead: string | undefined = _optRow.note;
+// @ts-expect-error — optional field is string | undefined, not string
+const _noteStrict: string = _optRow.note;
+void _noteRead; void _noteStrict;
+const _optionalOk2: OptionalTaskRow = { title: 'x', note: 'hello', payload: { foo: 'bar' } };
+// @ts-expect-error — title required
+const _optionalBad1: OptionalTaskRow = { note: 'hello' };
+// @ts-expect-error — note must be string when present
+const _optionalBad2: OptionalTaskRow = { title: 'x', note: 42 };
+// @ts-expect-error — payload must match typed JSON payload
+const _optionalBad3: OptionalTaskRow = { title: 'x', payload: { foo: 42 } };
+
+void _optionalStringField; void _optionalJsonField; void _optionalIndexedString; void _optionalUniqueString; void _optionalOk1; void _optionalOk2;
 void _weekId; void _date; void _num; void _badNum;

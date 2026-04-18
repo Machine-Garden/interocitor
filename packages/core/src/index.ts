@@ -6,13 +6,13 @@
  *
  * @example
  * ```ts
- * import { SyncEngine } from 'interocitor';
+ * import { Interocitor } from 'interocitor';
  * import { GoogleDriveAdapter } from 'interocitor/adapters/google-drive';
  *
  * const adapter = new GoogleDriveAdapter({
  *   clientId: 'YOUR_GOOGLE_CLIENT_ID',
  * });
- * const engine = new SyncEngine(adapter, {
+ * const engine = new Interocitor(adapter, {
  *   remotePath: '/Interocitor',
  *   encrypted: true, // generates key automatically
  * });
@@ -54,7 +54,7 @@ export type {
 
 // ─── Engine ───────────────────────────────────────────────────────────
 
-export { SyncEngine } from './core/sync-engine.ts';
+export { Interocitor } from './core/sync-engine.ts';
 export { LocalStore } from './storage/local-store.ts';
 export {
   type CredentialStore,
@@ -89,6 +89,8 @@ export type {
   TableSchemaDefinition,
   InferSchemaType,
   InferTableType,
+  TableEvent,
+  TableEventListener,
   TableIndexDefinition,
   SchemaFieldKind,
   IndexableSchemaFieldKind,

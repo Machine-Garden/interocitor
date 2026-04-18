@@ -1,7 +1,7 @@
 /**
  * Pull — download remote changes and merge into local state.
  *
- * Extracted from SyncEngine. Not part of the public API.
+ * Extracted from Interocitor. Not part of the public API.
  */
 
 import type {

@@ -14,10 +14,11 @@
 
 ## Monorepo umbrella
 
-- `packages/interocitor` — the main JavaScript/TypeScript package
+- `packages/core` — `@interocitor/core`, the main JavaScript/TypeScript package
+- `packages/react` — `@interocitor/react`, React bindings
 - `packages/interocitor-swift` — Swift client
-- `packages/interocitor-webdav` — tiny local WebDAV server for demos/tests
-- `packages/interocitor-workers` — Cloudflare transport pieces
+- `packages/webdav` — `@interocitor/webdav`, tiny local WebDAV server for demos/tests
+- `packages/workers` — `@interocitor/workers`, Cloudflare transport pieces
 - `examples/` — runnable demos
 
 ## Why
@@ -34,29 +35,26 @@ What this means:
 ## Quick start
 
 ```ts
-import { SyncEngine, createRowId } from 'interocitor';
-import { WebDAVAdapter } from 'interocitor/adapters/webdav';
+import { Interocitor } from '@interocitor/core';
+import { WebDAVAdapter } from '@interocitor/core/adapters/webdav';
 
-const adapter = new WebDAVAdapter({
-  baseUrl: 'https://your-webdav-server.example.com',
-  auth: { username: 'user', password: 'pass' },
-});
-
-const engine = new SyncEngine(adapter, {
+const db = new Interocitor({
   remotePath: '/MyApp',
   dbName: 'my-app',
   appName: 'My App',
   // encrypted by default; set encrypted: false to opt out
 });
 
-await engine.init();
-await engine.connect();
-
-const id = createRowId({ prefix: 'todo' });
-await engine.put('todos', id, {
+const id = await db.table('todos').add({
   text: 'Ship privacy-first sync',
   done: false,
-});
+}, { prefix: 'todo' });
+
+await db.setRemoteStorage(new WebDAVAdapter({
+  baseUrl: 'https://your-webdav-server.example.com',
+  auth: { username: 'user', password: 'pass' },
+}));
+await db.connect();
 ```
 
 ## How sync works
@@ -80,28 +78,72 @@ Google Drive / WebDAV / Cloudflare / custom]
 
 ## Core API at a glance
 
-- `await engine.init()` — open local storage and load state; no network required
-- `await engine.put(table, id, data)` — insert or update a row locally
-- `await engine.delete(table, id)` — tombstone locally
-- `await engine.query(table, options?)` — read from local indexes only
-- `await engine.sync()` — exchange encrypted artifacts with the remote adapter
-- `await engine.secureWithBiometrics()` — optional, explicit keychain enrollment
-- `await engine.restoreWithBiometrics()` — explicit recovery flow
+- `new Interocitor(config)` — create local-first database; auto-initializes internally
+- `await db.table(name).add(data, { prefix? })` — insert with generated row ID
+- `await db.table(name).patch(id, partial)` — patch touched fields only
+- `await db.table(name).replace(id, row)` — full replace
+- `await db.table(name).delete(id)` — tombstone locally
+- `await db.table(name).query()` — read from local indexes only
+- `await db.table(name).where(field).equals(value).orderBy(field, dir)` — filtered local query with explicit ordering
+- `await db.connect()` — authenticate + sync when remote adapter is configured
+- `await db.secureWithBiometrics()` — optional, explicit keychain enrollment
+- `await db.restoreWithBiometrics()` — explicit recovery flow
+
+## Local-only mode
+
+No adapter needed. IndexedDB only.
+
+```ts
+import { Interocitor } from '@interocitor/core';
+
+const db = new Interocitor({
+  dbName: 'meal-planner',
+  appName: 'Meal Planner',
+  encrypted: false,
+  schema,
+});
+
+const id = await db.table('tasks').add({ title: 'Buy milk', done: false });
+const rows = await db.table('tasks').query();
+```
+
+Transport can be attached later with `setRemoteStorage()`.
+
+## Schema typing
+
+```ts
+const schema = {
+  version: 1,
+  tables: {
+    todos: {
+      fields: {
+        text: types.string,
+        done: types.boolean,
+        createdAt: types.index(types.date),
+        note: types.optional(types.string),
+        dueAt: types.optional(types.index(types.date)),
+      },
+    },
+  },
+} satisfies DatabaseSchemaDefinition;
+
+// inferred row type:
+// { text: string; done: boolean; createdAt: Date; note?: string; dueAt?: Date }
+```
+
+`types.optional()` marks property presence, not `T | undefined` value type.
 
 ## Row IDs
 
 Use stable string IDs for synced rows. Do not use auto-increment IDs.
 
-Good default:
+Usually app code should not import `createRowId()` directly. Prefer:
 
 ```ts
-import { createRowId } from 'interocitor';
-
-const id = createRowId({ prefix: 'todo' });
-await engine.put('todos', id, { text: 'Ship it', done: false });
+const id = await db.table('todos').add({ text: 'Ship it', done: false }, { prefix: 'todo' });
 ```
 
-`createRowId()` uses platform crypto. No extra dependency needed.
+If you need raw ID generation, `createRowId()` still exists and uses platform crypto.
 
 ## Offline guarantee
 
@@ -137,7 +179,7 @@ No pairing server. No accounts. No copy-pasting keys.
 Devices pair by scanning a QR code. The exchange runs over the same cloud backend used for sync.
 
 ```ts
-import { SyncEngine, generateShareQR, handleScannedQR } from 'interocitor';
+import { Interocitor, generateShareQR, handleScannedQR } from '@interocitor/core';
 
 const passphrase = engine.getPassphrase();
 const { qrPayload, complete } = await generateShareQR({
@@ -154,13 +196,13 @@ const credentials = await handleScannedQR({
   payload: scannedQrPayload,
 });
 
-const joiner = new SyncEngine(adapter, {
+const joiner = new Interocitor({
   remotePath: credentials.remotePath,
   passphrase: credentials.passphrase,
   dbName: 'team-alpha',
   appName: 'My App',
 });
-await joiner.init();
+await joiner.setRemoteStorage(adapter);
 await joiner.connect();
 ```
 
@@ -210,15 +252,16 @@ yarn demo:todo:cloudflare
 ## Tests
 
 ```bash
-yarn workspace interocitor test
+yarn workspace @interocitor/core test
 ```
 
 ## Package map
 
-- [`packages/interocitor`](./packages/interocitor) — the main JavaScript/TypeScript engine with adapters and encryption helpers
+- [`packages/core`](./packages/core) — `@interocitor/core`, the main JavaScript/TypeScript engine with adapters and encryption helpers
+- [`packages/react`](./packages/react) — `@interocitor/react`, React bindings
 - [`packages/interocitor-swift`](./packages/interocitor-swift) — Swift client
-- [`packages/interocitor-webdav`](./packages/interocitor-webdav) — local WebDAV server for demos/tests
-- [`packages/interocitor-workers`](./packages/interocitor-workers) — Cloudflare transport pieces
+- [`packages/webdav`](./packages/webdav) — `@interocitor/webdav`, local WebDAV server for demos/tests
+- [`packages/workers`](./packages/workers) — `@interocitor/workers`, Cloudflare transport pieces
 
 ## License
 

@@ -1,7 +1,7 @@
 /**
  * Compaction — snapshot + manifest rotation + change file pruning.
  *
- * Extracted from SyncEngine. Not part of the public API.
+ * Extracted from Interocitor. Not part of the public API.
  */
 
 import type {

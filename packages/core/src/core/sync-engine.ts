@@ -47,9 +47,10 @@ import { compact as doCompact, rehydrate as doRehydrate } from './compaction.ts'
 // ─── Config ──────────────────────────────────────────────────────────
 
 type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> =
-  Omit<Required<SyncConfig<S>>, 'schema' | 'replicas' | 'passphrase' | 'encrypted' | 'deviceId' | 'credentialStore' | 'appName'> & {
+  Omit<Required<SyncConfig<S>>, 'schema' | 'replicas' | 'passphrase' | 'encrypted' | 'deviceId' | 'credentialStore' | 'appName' | 'onInit'> & {
     schema?: DatabaseSchemaDefinition<S>;
     replicas: ReplicaConfig[];
+    onInit?: SyncConfig<S>['onInit'];
   };
 
 // ─── Sync Engine ─────────────────────────────────────────────────────
@@ -58,20 +59,25 @@ type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> =
  * Typed sync engine. `S` is your database shape — inferred automatically
  * from `InferSchemaType<typeof schema>`. No default: either typed or `any`.
  *
+ * Initialization is automatic — just construct and use. No `await engine.init()` needed.
+ *
  * @example
  * const schema = { version: 1, tables: { tasks: { fields: { title: types.string } } } }
  *   satisfies DatabaseSchemaDefinition;
  *
  * type DB = InferSchemaType<typeof schema>;
- * const engine = new SyncEngine<DB>(adapter, { schema, remotePath: '/App', appName: 'App' });
  *
- * // Or declare a typed getter:
- * const getDb = async (): Promise<SyncEngine<DB>> => { ... }
+ * // Local-only (no adapter):
+ * const db = new Interocitor<DB>({ schema, dbName: 'myapp', appName: 'My App' });
+ * const tasks = await db.table('tasks').query(); // ready immediately
  *
- * engine.table('tasks'); // Table<{ title: string }>
- * engine.table('other'); // TS error — 'other' is not keyof DB
+ * // With remote sync:
+ * const db = new Interocitor<DB>(adapter, { schema, remotePath: '/App', appName: 'App' });
+ * await db.connect(); // authenticate + sync
+ *
+ * db.table('other'); // TS error — 'other' is not keyof DB
  */
-export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
+export class Interocitor<S extends Record<string, Record<string, unknown>>> {
   private adapter: StorageAdapter | null;
   private config: ResolvedSyncConfig<S>;
   private serverId: string;
@@ -100,6 +106,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
   // Lifecycle state
   private initialized = false;
   private connected = false;
+  private readonly initPromise: Promise<void>;
 
   // Event listeners
   private listeners: Set<SyncEventListener> = new Set();
@@ -117,7 +124,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
    * config — no manual type parameter needed:
    *
    * @example
-   * const engine = new SyncEngine(adapter, { schema, remotePath: '/App', appName: 'App' });
+   * const engine = new Interocitor(adapter, { schema, remotePath: '/App', appName: 'App' });
    * const tasks = engine.table('tasks'); // Table<{ title: string; status: 'open' | 'done' }>
    */
   constructor(config: SyncConfig<S>);
@@ -156,8 +163,15 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
       this.encrypted = true;
     } else {
       this.encrypted = true;
-      // Will generate key in init() if no persisted key found
+      // Will generate key in doInit() if no persisted key found
     }
+
+    this.initPromise = this.doInit();
+  }
+
+  /** Await this before any storage operation. Returns the shared init promise. */
+  private ensureReady(): Promise<void> {
+    return this.initPromise;
   }
 
   // ── Internal accessors ─────────────────────────────────────────────
@@ -441,7 +455,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
 
   // ── Lifecycle ──────────────────────────────────────────────────────
 
-  async init(): Promise<void> {
+  private async doInit(): Promise<void> {
     log('debug', 'init() — opening local store', { dbName: this.config.dbName, encrypted: this.encrypted });
     try {
       await this.local.open();
@@ -469,6 +483,9 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
     }
     log('debug', 'init() — complete', { knownTables: Array.from(this.knownTables) });
     this.initialized = true;
+    if (this.config.onInit) {
+      await this.config.onInit(this);
+    }
   }
 
   /**
@@ -491,9 +508,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
   }
 
   async connect(): Promise<void> {
-    if (!this.initialized) {
-      throw new Error('Engine must be initialized via init() before connect()');
-    }
+    await this.ensureReady();
 
     const adapter = this.requireAdapter('connect()');
 
@@ -541,7 +556,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
       log('debug', 'connect() — running initial pull');
       await this.pull();
     }
-    await this.flush();
+    await this.doFlush();
 
     this.startPolling();
     this.connected = true;
@@ -550,16 +565,17 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
     if (typeof window !== 'undefined') {
       window.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
-          this.flush().catch(() => {});
+          this.doFlush().catch(() => {});
         }
       });
     }
   }
 
   async disconnect(): Promise<void> {
+    await this.ensureReady();
     this.stopPolling();
     this.clearScheduledFlush();
-    if (!this.remotePoisonError) await this.flush();
+    if (!this.remotePoisonError) await this.doFlush();
     this.local.close();
     this.connected = false;
     this.initialized = false;
@@ -567,6 +583,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
   }
 
   async setRemoteStorage(adapter: StorageAdapter | null): Promise<void> {
+    await this.ensureReady();
     const wasConnected = this.connected;
     const hadAdapter = this.adapter !== null;
 
@@ -590,8 +607,9 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
   }
 
   async setLocalStorage(local: LocalStoreAdapter): Promise<void> {
+    await this.ensureReady();
     const wasConnected = this.connected;
-    if (wasConnected) await this.flush();
+    if (wasConnected) await this.doFlush();
 
     this.clearScheduledFlush();
     this.pendingCount = 0;
@@ -604,7 +622,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
 
     if (!wasConnected) return;
     await this.pull();
-    await this.flush();
+    await this.doFlush();
   }
 
   // ── Manifest (delegated) ───────────────────────────────────────────
@@ -628,6 +646,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
     columns: Partial<S[K]>,
     userId?: string,
   ): Promise<S[K]> {
+    await this.ensureReady();
     this.hlc = hlcNow(this.hlc);
     const hlcStr = hlcSerialize(this.hlc);
 
@@ -660,6 +679,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
   }
 
   async delete<K extends keyof S & string>(table: K, rowId: string, userId?: string): Promise<void> {
+    await this.ensureReady();
     this.hlc = hlcNow(this.hlc);
     const hlcStr = hlcSerialize(this.hlc);
 
@@ -688,20 +708,24 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
   // ── Read ───────────────────────────────────────────────────────────
 
   async get<K extends keyof S & string>(table: K, rowId: string): Promise<S[K] | undefined> {
+    await this.ensureReady();
     const row = await this.local.getRow(table, rowId);
     if (!row || row._deleted) return undefined;
     return row as unknown as S[K];
   }
 
   async query<K extends keyof S & string>(table: K): Promise<S[K][]> {
+    await this.ensureReady();
     return this.local.getTable(table) as unknown as S[K][];
   }
 
   async queryWhere<K extends keyof S & string>(table: K, clause: WhereClause): Promise<S[K][]> {
+    await this.ensureReady();
     return this.local.queryWhere(table, clause) as unknown as S[K][];
   }
 
   async tableNames(): Promise<string[]> {
+    await this.ensureReady();
     return Array.from(this.knownTables);
   }
 
@@ -714,16 +738,23 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
   private scheduleFlush(): void {
     this.pendingCount++;
     if (this.pendingCount >= this.config.flushThreshold) {
-      this.flush().catch(err => this.emit({ type: 'flush:error', error: err }));
+      this.doFlush().catch(err => this.emit({ type: 'flush:error', error: err }));
       return;
     }
     if (this.flushTimer) clearTimeout(this.flushTimer);
     this.flushTimer = setTimeout(() => {
-      this.flush().catch(err => this.emit({ type: 'flush:error', error: err }));
+      this.doFlush().catch(err => this.emit({ type: 'flush:error', error: err }));
     }, this.config.flushDebounce);
   }
 
+  /** Public flush — waits for init. Safe to call from user code. */
   async flush(): Promise<void> {
+    await this.ensureReady();
+    return this.doFlush();
+  }
+
+  /** Internal flush — no ensureReady guard (called from connect, pull, doInit). */
+  private async doFlush(): Promise<void> {
     if (!this.adapter) {
       this.clearScheduledFlush();
       return;
@@ -764,6 +795,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
   // ── Pull (cloud → local) ──────────────────────────────────────────
 
   async pull(): Promise<void> {
+    await this.ensureReady();
     const adapter = this.requireAdapter('pull()');
     this.hlc = await doPull({
       adapter,
@@ -785,6 +817,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
   // ── Rehydrate / Compact ────────────────────────────────────────────
 
   async rehydrate(): Promise<void> {
+    await this.ensureReady();
     const adapter = this.requireAdapter('rehydrate()');
     this.hlc = await doRehydrate({
       adapter,
@@ -802,6 +835,7 @@ export class SyncEngine<S extends Record<string, Record<string, unknown>>> {
   }
 
   async compact(): Promise<void> {
+    await this.ensureReady();
     const adapter = this.requireAdapter('compact()');
     if (!this.manifest) throw new Error('Engine is not connected');
 

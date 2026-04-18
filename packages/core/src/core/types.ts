@@ -154,9 +154,14 @@ export interface SchemaField<T = unknown, K extends SchemaFieldKind = SchemaFiel
   readonly kind: K;
   readonly index?: boolean;
   readonly unique?: boolean;
+  /** Optional field in app-level typing. Omitted fields are allowed. */
+  readonly optional?: true;
   /** @internal phantom — never exists at runtime; typed as T to preserve inference */
   readonly _type: T;
 }
+
+export type OptionalSchemaField<T = unknown, K extends SchemaFieldKind = SchemaFieldKind> =
+  SchemaField<T, K> & { readonly optional: true; readonly __optional: true };
 
 /** Narrows kind to the set that IndexedDB can use as a key. */
 export type IndexableSchemaField<T = unknown> = SchemaField<T, IndexableSchemaFieldKind>;
@@ -219,9 +224,16 @@ export type InferFieldType<F> = F extends SchemaField<infer T> ? T : unknown;
  * Works on literal `typeof table` shapes — no generic parameter needed.
  * @internal
  */
+type OptionalFieldKeys<F> = {
+  [K in keyof F]-?: F[K] extends { optional: true } ? K : never
+}[keyof F];
+
+type RequiredFieldKeys<F> = Exclude<keyof F, OptionalFieldKeys<F>>;
+
 export type InferTableShape<T> =
   T extends { fields: infer F }
-    ? { [K in keyof F]: InferFieldType<F[K]> }
+    ? ({ [K in RequiredFieldKeys<F>]: InferFieldType<F[K]> } &
+       { [K in OptionalFieldKeys<F>]?: InferFieldType<F[K]> })
     : Record<string, unknown>;
 
 /**
@@ -268,7 +280,7 @@ export type WhereOperator =
 
 /**
  * Dexie-style predicate description used by {@link Table.where} and
- * {@link SyncEngine.queryWhere}.
+ * {@link Interocitor.queryWhere}.
  */
 export interface WhereClause {
   field: string;
@@ -469,7 +481,7 @@ export interface ReplicaConfig {
 // ─── Sync Engine Config ──────────────────────────────────────────────
 
 /**
- * Configuration for a {@link SyncEngine} instance.
+ * Configuration for a {@link Interocitor} instance.
  *
  * Supports both fully local startup and immediate sync with a remote adapter.
  */
@@ -520,6 +532,19 @@ export interface SyncConfig<
   localStoreFactory?: LocalStoreFactory;
   /** Optional table/index metadata for local query planning and migrations. */
   schema?: DatabaseSchemaDefinition<S>;
+
+  /**
+   * Called once after the engine has fully initialized (local store open,
+   * encryption resolved, local state loaded). Use for migrations.
+   * You do not need to call `engine.init()` — it is called internally.
+   *
+   * @example
+   * onInit: async (engine) => {
+   *   await migrateLegacyData(engine);
+   * }
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onInit?: (engine: any) => Promise<void>;
   /**
    * Write-only replica adapters for backup.
    * Flush writes to primary + all replicas. Pull reads primary only.
@@ -568,6 +593,18 @@ export type SyncEvent =
   | { type: 'replica:error'; adapter: string; error: Error };
 
 /**
- * Listener callback registered with {@link SyncEngine.on}.
+ * Listener callback registered with {@link Interocitor.on}.
  */
 export type SyncEventListener = (event: SyncEvent) => void;
+
+/**
+ * Event emitted by table-level subscriptions.
+ */
+export type TableEvent<T> =
+  | { type: 'change'; rowId: string; row: T }
+  | { type: 'delete'; rowId: string };
+
+/**
+ * Listener callback for table-level subscriptions.
+ */
+export type TableEventListener<T> = (event: TableEvent<T>) => void;

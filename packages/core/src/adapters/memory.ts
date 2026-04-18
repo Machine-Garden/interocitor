@@ -16,7 +16,7 @@ import type { StorageAdapter, FileEntry } from '../core/types.ts';
  * @example
  * ```ts
  * const adapter = new MemoryAdapter();
- * const engine = new SyncEngine(adapter, { remotePath: '/Demo' });
+ * const engine = new Interocitor(adapter, { remotePath: '/Demo' });
  * ```
  */
 export class MemoryAdapter implements StorageAdapter {

@@ -51,10 +51,11 @@ export function generateId(prefix: string): string {
 export function getDeviceId(override?: string): string {
   if (override) return override;
   const KEY = 'interocitor-device-id';
-  let id = localStorage.getItem(KEY);
+  const storage = typeof localStorage !== 'undefined' ? localStorage : null;
+  let id = storage?.getItem(KEY) ?? null;
   if (!id) {
     id = generateId('dev');
-    localStorage.setItem(KEY, id);
+    try { storage?.setItem(KEY, id); } catch { /* ok */ }
   }
   return id;
 }

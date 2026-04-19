@@ -54,11 +54,13 @@ export class LocalStorageCredentialStore implements CredentialStore {
   private get deviceKey(): string { return 'interocitor-device-id'; }
 
   async save(creds: StoredCredentials): Promise<void> {
+    if (typeof localStorage === 'undefined') return;
     localStorage.setItem(this.keyKey(), creds.passphrase);
     localStorage.setItem(this.deviceKey, creds.deviceId);
   }
 
   async load(): Promise<StoredCredentials | null> {
+    if (typeof localStorage === 'undefined') return null;
     const passphrase = localStorage.getItem(this.keyKey());
     const deviceId = localStorage.getItem(this.deviceKey);
     if (!passphrase || !deviceId) return null;
@@ -66,6 +68,7 @@ export class LocalStorageCredentialStore implements CredentialStore {
   }
 
   async clear(): Promise<void> {
+    if (typeof localStorage === 'undefined') return;
     localStorage.removeItem(this.keyKey());
     // Device ID intentionally kept — shared across meshes, survives credential clear.
   }
@@ -116,6 +119,7 @@ export class WebAuthnCredentialStore implements CredentialStore {
 
   /** Read credential ID hint from localStorage (best-effort, survives only if ITP hasn't wiped). */
   private loadCredentialIdHint(): ArrayBuffer | null {
+    if (typeof localStorage === 'undefined') return null;
     try {
       const stored = localStorage.getItem(this.credIdKey());
       if (!stored) return null;
@@ -127,6 +131,7 @@ export class WebAuthnCredentialStore implements CredentialStore {
   }
 
   private saveCredentialIdHint(rawId: ArrayBuffer): void {
+    if (typeof localStorage === 'undefined') return;
     try {
       const bytes = new Uint8Array(rawId);
       let binary = '';

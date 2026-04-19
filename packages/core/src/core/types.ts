@@ -543,8 +543,7 @@ export interface SyncConfig<
    *   await migrateLegacyData(engine);
    * }
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onInit?: (engine: any) => Promise<void>;
+  onInit?: (engine: import('./sync-engine.ts').InterocitorInitContext<S>) => Promise<void>;
   /**
    * Write-only replica adapters for backup.
    * Flush writes to primary + all replicas. Pull reads primary only.

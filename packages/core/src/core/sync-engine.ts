@@ -18,7 +18,6 @@ import type {
   Manifest,
   Row,
   Op,
-  UpsertOp,
   ColumnEntry,
   SyncEvent,
   SyncEventListener,
@@ -29,9 +28,8 @@ import type {
 
 import type { HLC } from './types.ts';
 import { hlcInit, hlcNow, hlcSerialize, hlcParse, hlcCompareStr } from './hlc.ts';
-import { applyOp } from './crdt.ts';
-import { LocalStore } from '../storage/local-store.ts';
 import { Table } from './table.ts';
+import { LocalStore } from '../storage/local-store.ts';
 
 // Extracted modules
 import { paths, log, generateId, getDeviceId, ROW_META_KEYS } from './internals.ts';
@@ -77,7 +75,21 @@ type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> =
  *
  * db.table('other'); // TS error — 'other' is not keyof DB
  */
+export interface InterocitorInitContext<S extends Record<string, Record<string, unknown>>> {
+  put<K extends keyof S & string>(table: K, rowId: string, columns: Partial<S[K]>, userId?: string): Promise<S[K]>;
+  delete<K extends keyof S & string>(table: K, rowId: string, userId?: string): Promise<void>;
+  get<K extends keyof S & string>(table: K, rowId: string): Promise<S[K] | undefined>;
+  query<K extends keyof S & string>(table: K): Promise<S[K][]>;
+  queryWhere<K extends keyof S & string>(table: K, clause: WhereClause): Promise<S[K][]>;
+  table<K extends keyof S & string>(name: K): Table<S[K]>;
+  on(listener: SyncEventListener): () => void;
+  getDeviceId(): string;
+  getMeshId(): string | undefined;
+  isEncrypted(): boolean;
+}
+
 export class Interocitor<S extends Record<string, Record<string, unknown>>> {
+  declare readonly InitContext: InterocitorInitContext<S>;
   private adapter: StorageAdapter | null;
   private config: ResolvedSyncConfig<S>;
   private serverId: string;
@@ -149,6 +161,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
       localStoreFactory: config.localStoreFactory ?? (() => new LocalStore(config.dbName, undefined, config.schema)),
       schema: config.schema,
       replicas: config.replicas ?? [],
+      onInit: config.onInit
     };
     this.serverId = this.config.serverId;
     this.local = this.config.localStoreFactory();
@@ -172,6 +185,78 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
   /** Await this before any storage operation. Returns the shared init promise. */
   private ensureReady(): Promise<void> {
     return this.initPromise;
+  }
+
+  private async putNow<K extends keyof S & string>(
+    table: K,
+    rowId: string,
+    columns: Partial<S[K]>,
+    _userId?: string,
+  ): Promise<S[K]> {
+    const tableName = table as string;
+    const current = await this.local.getRow(tableName, rowId);
+    const row: Row = current
+      ? { ...current }
+      : { _table: tableName, _rowId: rowId, _deleted: false, _schemaVersion: this.schema?.version ?? 0 };
+
+    const nextHlc = hlcNow(this.hlc);
+    this.hlc = nextHlc;
+
+    for (const [key, value] of Object.entries(columns as Record<string, unknown>)) {
+      row[key] = { value: value === undefined ? null : value, hlc: hlcSerialize(nextHlc) };
+    }
+    row._deleted = false;
+    row._deletedHlc = undefined;
+
+    await this.local.putRow(row);
+    this.knownTables.add(tableName);
+
+    this.emit({ type: 'change', table: tableName, rowId, row });
+    this.scheduleFlush();
+    return row as unknown as S[K];
+  }
+
+  private async deleteNow<K extends keyof S & string>(table: K, rowId: string, _userId?: string): Promise<void> {
+    const tableName = table as string;
+    const current = await this.local.getRow(tableName, rowId);
+    if (!current || current._deleted) return;
+
+    const nextHlc = hlcNow(this.hlc);
+    this.hlc = nextHlc;
+    current._deleted = true;
+    current._deletedHlc = hlcSerialize(nextHlc);
+    await this.local.putRow(current);
+    this.emit({ type: 'delete', table: tableName, rowId });
+    this.scheduleFlush();
+  }
+
+  private async getNow<K extends keyof S & string>(table: K, rowId: string): Promise<S[K] | undefined> {
+    const row = await this.local.getRow(table as string, rowId);
+    if (!row || row._deleted) return undefined;
+    return row as unknown as S[K];
+  }
+
+  private async queryNow<K extends keyof S & string>(table: K): Promise<S[K][]> {
+    return this.local.getTable(table as string) as unknown as S[K][];
+  }
+
+  private async queryWhereNow<K extends keyof S & string>(table: K, clause: WhereClause): Promise<S[K][]> {
+    return this.local.queryWhere(table as string, clause) as unknown as S[K][];
+  }
+
+  private get initContext(): InterocitorInitContext<S> {
+    return {
+      put: this.putNow.bind(this),
+      delete: this.deleteNow.bind(this),
+      get: this.getNow.bind(this),
+      query: this.queryNow.bind(this),
+      queryWhere: this.queryWhereNow.bind(this),
+      table: <K extends keyof S & string>(name: K) => new Table(this.initContext as any, name),
+      on: this.on.bind(this),
+      getDeviceId: this.getDeviceId.bind(this),
+      getMeshId: this.getMeshId.bind(this),
+      isEncrypted: this.isEncrypted.bind(this),
+    };
   }
 
   // ── Internal accessors ─────────────────────────────────────────────
@@ -484,7 +569,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
     log('debug', 'init() — complete', { knownTables: Array.from(this.knownTables) });
     this.initialized = true;
     if (this.config.onInit) {
-      await this.config.onInit(this);
+      await this.config.onInit(this.initContext);
     }
   }
 
@@ -499,7 +584,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
     if (stored.deviceId && stored.deviceId !== this.deviceId) {
       this.deviceId = stored.deviceId;
       this.hlc.nodeId = stored.deviceId;
-      try { localStorage.setItem('interocitor-device-id', stored.deviceId); } catch { /* ok */ }
+      try {
+        if (typeof localStorage !== 'undefined') localStorage.setItem('interocitor-device-id', stored.deviceId);
+      } catch { /* ok */ }
     }
 
     if (this.encrypted && !this.passphrase && stored.passphrase) {
@@ -647,81 +734,27 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
     userId?: string,
   ): Promise<S[K]> {
     await this.ensureReady();
-    this.hlc = hlcNow(this.hlc);
-    const hlcStr = hlcSerialize(this.hlc);
-
-    const columnEntries: Record<string, ColumnEntry> = {};
-    for (const [key, value] of Object.entries(columns)) {
-      columnEntries[key] = { value: value as any, hlc: hlcStr };
-    }
-
-    const op: UpsertOp = { type: 'upsert', table, rowId, columns: columnEntries };
-    await this.ensureRowsCached([op]);
-    const row = applyOp(this.tables, op, this.manifest?.schema ?? 1, this.schema)!;
-    this.knownTables.add(table);
-
-    await this.local.putRow(row);
-    await this.local.setMeta('hlc', hlcSerialize(this.hlc));
-
-    const entry: ChangeEntry = {
-      id: generateId('chg'),
-      ts: Date.now(),
-      device: this.deviceId,
-      user: userId,
-      hlc: hlcStr,
-      ops: [op],
-    };
-    await this.local.pushOutbox(entry);
-
-    this.emit({ type: 'change', table, rowId, row });
-    this.scheduleFlush();
-    return row as unknown as S[K];
+    return this.putNow(table, rowId, columns, userId);
   }
 
   async delete<K extends keyof S & string>(table: K, rowId: string, userId?: string): Promise<void> {
     await this.ensureReady();
-    this.hlc = hlcNow(this.hlc);
-    const hlcStr = hlcSerialize(this.hlc);
-
-    const op: Op = { type: 'delete', table, rowId, hlc: hlcStr };
-    await this.ensureRowsCached([op]);
-    applyOp(this.tables, op, this.manifest?.schema ?? 1, this.schema);
-
-    const row = this.tables[table]?.[rowId];
-    if (row) await this.local.putRow(row);
-    await this.local.setMeta('hlc', hlcSerialize(this.hlc));
-
-    const entry: ChangeEntry = {
-      id: generateId('chg'),
-      ts: Date.now(),
-      device: this.deviceId,
-      user: userId,
-      hlc: hlcStr,
-      ops: [op],
-    };
-    await this.local.pushOutbox(entry);
-
-    this.emit({ type: 'delete', table, rowId });
-    this.scheduleFlush();
+    return this.deleteNow(table, rowId, userId);
   }
-
-  // ── Read ───────────────────────────────────────────────────────────
 
   async get<K extends keyof S & string>(table: K, rowId: string): Promise<S[K] | undefined> {
     await this.ensureReady();
-    const row = await this.local.getRow(table, rowId);
-    if (!row || row._deleted) return undefined;
-    return row as unknown as S[K];
+    return this.getNow(table, rowId);
   }
 
   async query<K extends keyof S & string>(table: K): Promise<S[K][]> {
     await this.ensureReady();
-    return this.local.getTable(table) as unknown as S[K][];
+    return this.queryNow(table);
   }
 
   async queryWhere<K extends keyof S & string>(table: K, clause: WhereClause): Promise<S[K][]> {
     await this.ensureReady();
-    return this.local.queryWhere(table, clause) as unknown as S[K][];
+    return this.queryWhereNow(table, clause);
   }
 
   async tableNames(): Promise<string[]> {

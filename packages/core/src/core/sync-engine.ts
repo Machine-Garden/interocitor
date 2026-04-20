@@ -45,10 +45,12 @@ import { compact as doCompact, rehydrate as doRehydrate } from './compaction.ts'
 // ─── Config ──────────────────────────────────────────────────────────
 
 type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> =
-  Omit<Required<SyncConfig<S>>, 'schema' | 'replicas' | 'passphrase' | 'encrypted' | 'deviceId' | 'credentialStore' | 'appName' | 'onInit'> & {
+  Omit<Required<SyncConfig<S>>, 'schema' | 'replicas' | 'passphrase' | 'encrypted' | 'deviceId' | 'deviceName' | 'deviceType' | 'credentialStore' | 'appName' | 'onInit'> & {
     schema?: DatabaseSchemaDefinition<S>;
     replicas: ReplicaConfig[];
     onInit?: SyncConfig<S>['onInit'];
+    deviceName?: string;
+    deviceType?: import('./types.ts').DeviceType;
   };
 
 // ─── Sync Engine ─────────────────────────────────────────────────────
@@ -207,6 +209,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
     }
     row._deleted = false;
     row._deletedHlc = undefined;
+    row._owner = this.deviceId;
 
     await this.local.putRow(row);
     this.knownTables.add(tableName);
@@ -629,7 +632,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
       throw err;
     }
 
-    await upsertDeviceMetadata(adapter, this.config.remotePath, this.deviceId);
+    await upsertDeviceMetadata(adapter, this.config.remotePath, this.deviceId, {
+      displayName: this.config.deviceName,
+      deviceType: this.config.deviceType,
+    });
 
     const localEpochRaw = await this.local.getMeta('epoch');
     const localEpoch = typeof localEpochRaw === 'number' ? localEpochRaw : 0;

@@ -82,7 +82,7 @@ export interface ScheduledControllerLike {
 }
 
 /** Minimal Worker shape — both `fetch` and `scheduled` are optional. */
-export interface WorkerLike<Env extends InterocitorEnv = InterocitorEnv> {
+export interface WorkerLike<Env = unknown> {
   fetch?(request: Request, env: Env, ctx: ExecutionContextLike): Response | Promise<Response>;
   scheduled?(event: ScheduledControllerLike, env: Env, ctx: ExecutionContextLike): unknown;
 }
@@ -126,6 +126,19 @@ export interface InterocitorEnv extends Record<string, unknown> {
   INTEROCITOR_MAX_MAINLINE_BYTES?: string | number;
   /** Max bytes for any other file type. Default 8 MiB. */
   INTEROCITOR_MAX_GENERIC_FILE_BYTES?: string | number;
+  /**
+   * HMAC secret for issuing and validating mesh/team IDs.
+   *
+   * Worker uses this to mint mesh IDs via `issueMeshId()` and to verify
+   * incoming mesh IDs via `isValidMeshId()`.
+   *
+   * Default: `'interocitor'`.
+   *
+   * ⚠️  Changing this secret invalidates ALL existing mesh IDs.
+   * Peers will fail to join or sync with previously issued IDs.
+   * Treat this as a permanent, deploy-once value.
+   */
+  INTEROCITOR_MESH_SECRET?: string;
 }
 
 /**
@@ -150,7 +163,19 @@ export interface DatabaseAdapter {
 }
 
 /** Options accepted by {@link createInterocitorMount} and {@link withInterocitor}. */
-export interface InterocitorMountOptions {
+export interface InterocitorRuntimeOptions<Env = unknown> {
+  accessToken?: (env: Env) => string | undefined;
+  systemToken?: (env: Env) => string | undefined;
+  enableScheduledMaintenance?: (env: Env) => string | number | boolean | undefined;
+  pathTtlHours?: (env: Env) => string | number | undefined;
+  maxControlBytes?: (env: Env) => string | number | undefined;
+  maxChangeBytes?: (env: Env) => string | number | undefined;
+  maxMainlineBytes?: (env: Env) => string | number | undefined;
+  maxGenericFileBytes?: (env: Env) => string | number | undefined;
+  meshSecret?: (env: Env) => string | undefined;
+}
+
+export interface InterocitorMountOptions<Env = unknown> {
   /**
    * URL prefix Interocitor will claim, e.g. `'/todo-interocitor'`.
    * Omit or pass `null` to mount at the root (handles all paths).
@@ -164,10 +189,10 @@ export interface InterocitorMountOptions {
    * withInterocitor(appWorker, { mountPrefix: '/sync', db: (env) => env.MY_DB });
    * ```
    *
-   * When omitted, falls back to `env.INTEROCITOR_DB`.
    */
-  db?: (env: InterocitorEnv) => D1Database;
-  /**
+  db: (env: Env) => D1Database;  
+  runtime?: InterocitorRuntimeOptions<Env>;
+    /**
    * Resolve the relay Durable Object namespace from the Worker env at request time.
    *
    * Realtime notify routes are enabled only when this getter is provided.
@@ -175,11 +200,11 @@ export interface InterocitorMountOptions {
    * withInterocitor(appWorker, { mountPrefix: '/sync', relay: (env) => env.MY_RELAY });
    * ```
    */
-  relay?: (env: InterocitorEnv) => DurableObjectNamespace;
+  relay?: (env: Env) => DurableObjectNamespace;
 }
 
 /** A frozen Interocitor mount that can be embedded in any Worker. */
-export interface InterocitorMount<Env extends InterocitorEnv = InterocitorEnv> {
+export interface InterocitorMount<Env = unknown> {
   /** The normalized URL prefix claimed by this mount, e.g. `'/io'`. */
   mountPrefix: string;
   /** Absolute path of the health endpoint. */

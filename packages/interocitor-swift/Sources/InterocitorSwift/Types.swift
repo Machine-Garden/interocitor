@@ -174,16 +174,18 @@ public struct Row: Codable, Sendable {
     public var _deleted: Bool
     public var _deletedHlc: String?
     public var _schemaVersion: Int
+    public var _owner: String?
     public var columns: [String: ColumnEntry]   // user columns
 
     public init(table: String, rowId: String, deleted: Bool = false,
                 deletedHlc: String? = nil, schemaVersion: Int = 1,
-                columns: [String: ColumnEntry] = [:]) {
+                owner: String? = nil, columns: [String: ColumnEntry] = [:]) {
         self._table = table
         self._rowId = rowId
         self._deleted = deleted
         self._deletedHlc = deletedHlc
         self._schemaVersion = schemaVersion
+        self._owner = owner
         self.columns = columns
     }
 }
@@ -313,6 +315,8 @@ public struct DeviceMetadata: Codable, Sendable {
     public var lastSeenAt: String
     public var userId: String?
     public var name: String?
+    public var displayName: String?
+    public var deviceType: String?
     public var retired: Bool?
 }
 

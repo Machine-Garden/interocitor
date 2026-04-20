@@ -95,25 +95,25 @@ const schema = {
         text: types.string,
         done: types.boolean,
         createdAt: types.index(types.date),
-        note: types.optional(types.string),
-        dueAt: types.optional(types.index(types.date)),
+        note: types.string.optional,
       },
     },
   },
 } satisfies DatabaseSchemaDefinition;
 
 // inferred row type:
-// { text: string; done: boolean; createdAt: Date; note?: string; dueAt?: Date }
+// { text: string; done: boolean; createdAt: Date; note?: string }
 ```
 
-`types.optional()` marks property presence, not `T | undefined` value type.
-When present, `dueAt` is still `Date`, not `Date | undefined`.
+`.optional` makes the property optional in the inferred row type.
+Reading `row.note` gives `string | undefined`.
+Indexed/unique fields cannot be optional.
 
-Typed JSON also works:
+Typed JSON:
 
 ```ts
 items: types.typed<ReceiptItem[]>('json')
-metadata: types.optional(types.typed<Record<string, unknown>>('json'))
+metadata: types.typed<Record<string, unknown>>('json').optional
 ```
 
 ## Row IDs
@@ -141,6 +141,63 @@ Every read and write hits the local store. No network required.
 | `table.delete()` | No |
 | `table.get()` / `table.query()` | No |
 | `connect()` | Yes, if adapter configured |
+
+## Device identity
+
+```ts
+const db = new Interocitor({
+  dbName: 'meal-planner',
+  appName: 'Meal Planner',
+  deviceName: "Anton's laptop",
+  deviceType: 'web',
+  schema,
+});
+```
+
+Device IDs are UUIDv7 — sortable, globally unique, auto-generated.
+`deviceName` and `deviceType` are synced to the device manifest so peers can display them.
+
+## Row ownership
+
+Every write stamps `_owner` with the writing device's ID.
+Automatic. Survives compaction. No opt-in needed.
+
+```ts
+const row = await db.table('tasks').get(taskId);
+row._owner; // device ID of last writer
+```
+
+Existing rows without `_owner` are fine — it stays `undefined` until next write.
+
+## Mesh IDs and security
+
+Device IDs are client-generated (UUIDv7). No server needed.
+
+Mesh/team IDs should be worker-issued with an embedded HMAC tag:
+
+```ts
+import { createMeshSecret, issueMeshId, isValidMeshId } from '@interocitor/core';
+
+// Worker holds the secret
+const secret = await createMeshSecret();
+
+// Issue a mesh ID
+const meshId = await issueMeshId(secret);
+// e.g. "0196745e-1234-7abc-9def-567890abcdef.AbCdEfGhIjK"
+
+// Validate before accepting
+const ok = await isValidMeshId(meshId, secret);
+```
+
+Format: `<uuidv7>.<base64url HMAC tag>`. Only workers with the secret can mint valid IDs. Clients validate on join.
+
+ID validators:
+
+```ts
+import { isValidDeviceId } from '@interocitor/core';
+
+isValidDeviceId(id); // true if UUIDv7 format
+```
 
 ## Local-only mode
 

@@ -42,10 +42,14 @@ export function log(level: 'debug' | 'info' | 'warn' | 'error', ...args: unknown
 
 // ─── ID generation ───────────────────────────────────────────────────
 
+import { uuidv7, createDeviceId } from './ids.ts';
+
+/**
+ * Generate a prefixed ID for internal use (change entries, snapshots, etc).
+ * Uses UUIDv7 for sortability.
+ */
 export function generateId(prefix: string): string {
-  const rand = crypto.getRandomValues(new Uint8Array(8));
-  const hex = Array.from(rand).map(b => b.toString(16).padStart(2, '0')).join('');
-  return `${prefix}_${hex}`;
+  return `${prefix}_${uuidv7()}`;
 }
 
 export function getDeviceId(override?: string): string {
@@ -54,7 +58,7 @@ export function getDeviceId(override?: string): string {
   const storage = typeof localStorage !== 'undefined' ? localStorage : null;
   let id = storage?.getItem(KEY) ?? null;
   if (!id) {
-    id = generateId('dev');
+    id = createDeviceId();
     try { storage?.setItem(KEY, id); } catch { /* ok */ }
   }
   return id;
@@ -65,7 +69,7 @@ export function getDeviceId(override?: string): string {
 export const textEncoder = new TextEncoder();
 export const textDecoder = new TextDecoder();
 
-export const ROW_META_KEYS = new Set(['_table', '_rowId', '_deleted', '_deletedHlc', '_schemaVersion']);
+export const ROW_META_KEYS = new Set(['_table', '_rowId', '_deleted', '_deletedHlc', '_schemaVersion', '_owner']);
 
 export function hexFromBytes(bytes: Uint8Array): string {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');

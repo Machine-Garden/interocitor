@@ -105,6 +105,7 @@
  */
 
 import type { StorageAdapter } from '../core/types.ts';
+import { CloudflareAdapter, type CloudflareHandshakeConfig } from '../adapters/cloudflare.ts';
 import {
   encodeQRPayload,
   buildPairUrl,
@@ -276,11 +277,25 @@ export async function generateJoinQR(options: GenerateJoinQROptions): Promise<Ge
   };
 }
 
+function adapterFromPayloadConfig(payload: HandshakeQRPayload): StorageAdapter | null {
+  if (!payload.adapterConfig) return null;
+  try {
+    const cfg = JSON.parse(payload.adapterConfig) as CloudflareHandshakeConfig;
+    if (cfg?.baseUrl) return new CloudflareAdapter({ baseUrl: cfg.baseUrl });
+  } catch {
+    // ignore and fall through
+  }
+  return null;
+}
+
 // ─── handleScannedQR ─────────────────────────────────────────────────
 
 export interface HandleScannedQROptions {
-  /** Storage adapter connected to the shared backend. */
-  adapter: StorageAdapter;
+  /**
+   * Storage adapter connected to the shared backend.
+   * Optional when payload.adapterConfig is present and can reconstruct one.
+   */
+  adapter?: StorageAdapter;
   /**
    * Base path on the backend used for relay files.
    * Must match the relayBase used by the generating device.
@@ -307,7 +322,11 @@ export interface HandleScannedQROptions {
  * because the scanner already has credentials when intent === 'join').
  */
 export async function handleScannedQR(options: HandleScannedQROptions): Promise<HandshakeCredentials | null> {
-  const { adapter, relayBase, payload, ownCredentials, pollIntervalMs, timeoutMs } = options;
+  const { adapter: explicitAdapter, relayBase, payload, ownCredentials, pollIntervalMs, timeoutMs } = options;
+  const adapter = explicitAdapter ?? adapterFromPayloadConfig(payload);
+  if (!adapter) {
+    throw new Error('handleScannedQR: adapter required when payload has no supported adapterConfig');
+  }
 
   if (payload.intent === 'join' && !ownCredentials) {
     throw new Error(

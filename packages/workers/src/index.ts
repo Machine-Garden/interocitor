@@ -19,3 +19,5 @@ export type {
   InterocitorMountOptions,
   WorkerLike,
 } from './types.ts';
+
+export { applySchema, ensureSchema, SCHEMA_STATEMENTS } from './schema.ts';

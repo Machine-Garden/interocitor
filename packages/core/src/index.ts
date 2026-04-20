@@ -41,10 +41,14 @@ export {
   handleScannedQR,
   buildPairUrl,
   parseQRFromUrl,
+  decodeQRPayload,
+  encodeQRPayload,
 } from './handshake/index.ts';
 
 export type {
   HandshakeCredentials,
+  HandshakeQRPayload,
+  HandshakeIntent,
   GenerateShareQROptions,
   GenerateShareQRResult,
   GenerateJoinQROptions,
@@ -70,6 +74,15 @@ export { types } from './core/schema-types.ts';
 
 export { readColumn, rowToPlain } from './core/crdt.ts';
 export { createRowId } from './core/row-id.ts';
+export {
+  uuidv7,
+  createDeviceId,
+  isValidDeviceId,
+  issueMeshId,
+  isValidMeshId,
+  parseMeshId,
+  createMeshSecret,
+} from './core/ids.ts';
 export type { CreateRowIdOptions } from './core/row-id.ts';
 
 // ─── Types ────────────────────────────────────────────────────────────
@@ -120,6 +133,7 @@ export type {
   MeshSnapshotPayload,
   DeviceInfo,
   DeviceMetadata,
+  DeviceType,
   DeviceHead,
   ChangesHead,
   ReplicaConfig,

@@ -47,25 +47,27 @@ Then depend on the `InterocitorSwift` product.
 ```swift
 import InterocitorSwift
 
-let engine = try SyncEngine(
+let config = SyncConfig(
+  remotePath: "/App",
   dbName: "todos.sqlite",
-  schema: [
-    "todos": TableSchema(indexes: ["done", "createdAt"])
-  ],
-  localStore: IndexedSQLiteStore(path: "todos.sqlite"),
-  adapter: nil,
-  passphrase: "correct horse battery staple"
+  deviceName: "My Device",
+  deviceType: "ios"
 )
 
-try engine.initEngine()
-try engine.put("todos", row: [
-  "id": "todo-1",
-  "text": "Ship encrypted sync",
-  "done": false,
-  "createdAt": Date().timeIntervalSince1970
+let db = Interocitor(
+  config: config,
+  localStore: IndexedSQLiteStore(path: "todos.sqlite")
+)
+
+try await db.initialize()
+
+try await db.put("todos", rowId: "todo-1", columns: [
+  "text": .string("Ship encrypted sync"),
+  "done": .bool(false),
+  "createdAt": .number(Date().timeIntervalSince1970)
 ])
 
-let rows = try engine.query("todos")
+let rows = try await db.query("todos")
 ```
 
 ## Adapters
@@ -95,20 +97,20 @@ Use `MemoryLocalStore` for tests and in-process validation.
 ## Core API
 
 ```swift
-try engine.initEngine()
-try engine.put("todos", row: row)
-try engine.delete("todos", id: "todo-1")
-let one = try engine.get("todos", id: "todo-1")
-let many = try engine.query("todos")
-try engine.sync()
+try await db.initialize()
+try await db.put("todos", rowId: "todo-1", columns: columns)
+try await db.delete("todos", rowId: "todo-1")
+let one = try await db.get("todos", rowId: "todo-1")
+let many = try await db.query("todos")
+try await db.flush()
 ```
 
 ## Where clauses
 
 ```swift
-let doneRows = try engine.query(
+let doneRows = try await db.queryWhere(
   "todos",
-  where: .eq("done", true)
+  clause: WhereClause(field: "done", op: .equals, value: true)
 )
 ```
 
@@ -117,18 +119,41 @@ let doneRows = try engine.query(
 Interocitor only works for its intended purpose if the transport never needs plaintext.
 
 ```swift
-let engine = try SyncEngine(
+let config = SyncConfig(
+  remotePath: "/App",
   dbName: "secure.sqlite",
-  schema: schema,
-  localStore: IndexedSQLiteStore(path: "secure.sqlite"),
+  deviceName: "My Device"
+)
+
+let db = Interocitor(
   adapter: adapter,
-  passphrase: "correct horse battery staple"
+  config: config,
+  localStore: IndexedSQLiteStore(path: "secure.sqlite")
 )
 ```
 
 ### Client-side fingerprint verification
 
 As with the JavaScript package, you can expose a key fingerprint in your UI so users can verify device pairing intentionally.
+
+## Device configuration
+
+Pass `deviceName` and `deviceType` in `SyncConfig` to tag this device in the mesh:
+
+```swift
+let config = SyncConfig(
+  remotePath: "/App",
+  dbName: "app.sqlite",
+  deviceName: "Anton's laptop",  // human-readable name
+  deviceType: "desktop"           // 'web' | 'ios' | 'android' | 'desktop' | 'tv' | 'worker'
+)
+```
+
+These are stored in device metadata on the server and visible to all peers.
+
+## Row ownership
+
+Every row written via `put()` automatically sets `_owner` to the current device ID. This allows you to track which device last wrote each row.
 
 ## CRDT strategy
 
@@ -138,7 +163,7 @@ This runtime keeps the same core architecture as the JS package: client-side CRD
 
 ```text
 App
-  -> SyncEngine
+  -> Interocitor
   -> local SQLite
   -> encrypt locally
   -> remote byte transport

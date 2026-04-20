@@ -1,4 +1,5 @@
 import { createDatabaseAdapter } from './db-adapter.ts';
+import { uuidv7 } from './ids.ts';
 import {
   fileNameFromPath,
   normalizePath,
@@ -21,8 +22,18 @@ import type {
   InterocitorEnv,
   InterocitorMount,
   InterocitorMountOptions,
+  InterocitorRuntimeOptions,
   WorkerLike,
 } from './types.ts';
+export type { InterocitorEnv, InterocitorMountOptions, InterocitorRuntimeOptions } from './types.ts';
+
+interface MaintenanceEnv {
+  INTEROCITOR_PATH_TTL_HOURS?: string | number;
+}
+
+function toMaintenanceEnv(runtime: ResolvedRuntimeConfig): MaintenanceEnv {
+  return { INTEROCITOR_PATH_TTL_HOURS: runtime.pathTtlHours };
+} 
 
 const IO_PREFIX = '/io';
 const NOTIFY_PREFIX = '/notify';
@@ -34,6 +45,58 @@ const DEFAULT_GENERIC_FILE_BYTES = 8 * 1024 * 1024;
 
 const textEncoder = new TextEncoder();
 
+function wrapSchemaError(error: unknown): never {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/no such table: (files|folders)/i.test(message)) {
+    throw new Error(
+      'Interocitor D1 schema missing. Seed your database with @interocitor/workers/schema.sql before serving requests. Original error: ' + message,
+    );
+  }
+  throw error instanceof Error ? error : new Error(message);
+}
+
+const DEFAULT_MESH_SECRET = 'interocitor';
+
+interface ResolvedRuntimeConfig {
+  accessToken?: string;
+  systemToken?: string;
+  enableScheduledMaintenance: boolean;
+  pathTtlHours: number;
+  maxControlBytes: number;
+  maxChangeBytes: number;
+  maxMainlineBytes: number;
+  maxGenericFileBytes: number;
+  meshSecret: string;
+}
+
+function parsePositiveInt(value: string | number | undefined, fallback: number): number {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function resolveRuntimeConfig<Env>(env: Env, runtime?: InterocitorRuntimeOptions<Env>): ResolvedRuntimeConfig {
+  return {
+    accessToken: runtime?.accessToken?.(env),
+    systemToken: runtime?.systemToken?.(env),
+    enableScheduledMaintenance: runtime?.enableScheduledMaintenance?.(env) === true || runtime?.enableScheduledMaintenance?.(env) === '1' || runtime?.enableScheduledMaintenance?.(env) === 1,
+    pathTtlHours: parsePositiveInt(runtime?.pathTtlHours?.(env), 0),
+    maxControlBytes: parsePositiveInt(runtime?.maxControlBytes?.(env), DEFAULT_CONTROL_BYTES),
+    maxChangeBytes: parsePositiveInt(runtime?.maxChangeBytes?.(env), DEFAULT_CHANGE_BYTES),
+    maxMainlineBytes: parsePositiveInt(runtime?.maxMainlineBytes?.(env), DEFAULT_MAINLINE_BYTES),
+    maxGenericFileBytes: parsePositiveInt(runtime?.maxGenericFileBytes?.(env), DEFAULT_GENERIC_FILE_BYTES),
+    meshSecret: runtime?.meshSecret?.(env) || DEFAULT_MESH_SECRET,
+  };
+}
+
+function getMeshSecret(secret?: string): string {
+  return secret || DEFAULT_MESH_SECRET;
+}
+
+async function importMeshSecretKey(secret?: string): Promise<CryptoKey> {
+  const raw = new TextEncoder().encode(getMeshSecret(secret));
+  return crypto.subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+}
+
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', textEncoder.encode(input));
   return Array.from(new Uint8Array(digest))
@@ -41,11 +104,7 @@ async function sha256Hex(input: string): Promise<string> {
     .join('');
 }
 
-function fileSizeLimitForPathType(pathType: string, env: InterocitorEnv): number {
-  const parse = (key: keyof InterocitorEnv, fallback: number): number => {
-    const value = Number.parseInt(String(env?.[key] ?? ''), 10);
-    return Number.isFinite(value) && value > 0 ? value : fallback;
-  };
+function fileSizeLimitForPathType(pathType: string, runtime: ResolvedRuntimeConfig): number {
   if (
     [
       PATH_TYPE.MANIFEST_POINTER,
@@ -54,11 +113,41 @@ function fileSizeLimitForPathType(pathType: string, env: InterocitorEnv): number
       PATH_TYPE.DEVICE_HEARTBEAT,
     ].includes(pathType as never)
   ) {
-    return parse('INTEROCITOR_MAX_CONTROL_BYTES', DEFAULT_CONTROL_BYTES);
+    return runtime.maxControlBytes;
   }
-  if (pathType === PATH_TYPE.CHANGE_FILE) return parse('INTEROCITOR_MAX_CHANGE_BYTES', DEFAULT_CHANGE_BYTES);
-  if (pathType === PATH_TYPE.MAINLINE_SNAPSHOT) return parse('INTEROCITOR_MAX_MAINLINE_BYTES', DEFAULT_MAINLINE_BYTES);
-  return parse('INTEROCITOR_MAX_GENERIC_FILE_BYTES', DEFAULT_GENERIC_FILE_BYTES);
+  if (pathType === PATH_TYPE.CHANGE_FILE) return runtime.maxChangeBytes;
+  if (pathType === PATH_TYPE.MAINLINE_SNAPSHOT) return runtime.maxMainlineBytes;
+  return runtime.maxGenericFileBytes;
+}
+
+async function hasAccess(request: Request, runtime: ResolvedRuntimeConfig, prefix: string): Promise<boolean> {
+  const accessSecret = runtime.accessToken;
+  if (!accessSecret) return true;
+  if (!prefix) return false;
+  const auth = request.headers.get('Authorization') || '';
+  const bearerToken = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length).trim() : '';
+  const url = new URL(request.url);
+  const queryToken = url.searchParams.get('access_token') || '';
+  const token = bearerToken || queryToken;
+  if (!token) return false;
+  const expected = await sha256Hex(`${prefix}${accessSecret}`);
+  return token === expected;
+}
+
+function hasSystemAccess(request: Request, runtime: ResolvedRuntimeConfig): boolean {
+  const expected = String(runtime.systemToken || '').trim();
+  if (!expected) return false;
+  const auth = request.headers.get('Authorization') || '';
+  const bearerToken = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length).trim() : '';
+  const headerToken = String(request.headers.get('x-interocitor-system-token') || '').trim();
+  return bearerToken === expected || headerToken === expected;
+}
+
+function resolveDatabase<Env>(
+  env: Env,
+  dbGetter: (env: Env) => D1Database,
+): DatabaseAdapter {
+  return createDatabaseAdapter(dbGetter(env));
 }
 
 function normalizeMountPrefix(prefix = ''): string {
@@ -130,37 +219,6 @@ async function readBytes(request: Request): Promise<Uint8Array | null> {
   }
 }
 
-function resolveDatabase(
-  env: InterocitorEnv,
-  dbGetter?: (env: InterocitorEnv) => D1Database,
-): DatabaseAdapter {
-  const db = dbGetter ? dbGetter(env) : undefined;
-  return db ? createDatabaseAdapter(db) : createDatabaseAdapter(env);
-}
-
-async function hasAccess(request: Request, env: InterocitorEnv, prefix: string): Promise<boolean> {
-  const accessSecret = env?.INTEROCITOR_ACCESS_TOKEN;
-  if (!accessSecret) return true;
-  if (!prefix) return false;
-  const auth = request.headers.get('Authorization') || '';
-  const bearerToken = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length).trim() : '';
-  const url = new URL(request.url);
-  const queryToken = url.searchParams.get('access_token') || '';
-  const token = bearerToken || queryToken;
-  if (!token) return false;
-  const expected = await sha256Hex(`${prefix}${accessSecret}`);
-  return token === expected;
-}
-
-function hasSystemAccess(request: Request, env: InterocitorEnv): boolean {
-  const expected = String(env?.INTEROCITOR_SYSTEM_TOKEN || '').trim();
-  if (!expected) return false;
-  const auth = request.headers.get('Authorization') || '';
-  const bearerToken = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length).trim() : '';
-  const headerToken = String(request.headers.get('x-interocitor-system-token') || '').trim();
-  return bearerToken === expected || headerToken === expected;
-}
-
 async function handleGetFile(db: DatabaseAdapter, prefix: string, path: string): Promise<Response> {
   const pathType = classifyPath(path);
   const result = await opGetFile(db.raw, prefix, path, pathType);
@@ -198,12 +256,12 @@ async function handleWriteFile(
   prefix: string,
   path: string,
   request: Request,
-  env: InterocitorEnv,
+  runtime: ResolvedRuntimeConfig,
 ): Promise<Response> {
   const bytes = await readBytes(request);
   if (!bytes) return jsonResponse({ error: 'Invalid request body' }, 400);
   const pathType = classifyPath(path);
-  const limit = fileSizeLimitForPathType(pathType, env);
+  const limit = fileSizeLimitForPathType(pathType, runtime);
   if (bytes.byteLength > limit) return jsonResponse({ error: 'Payload too large', limit }, 413);
   const remoteRoot = meshRootForPath(path, pathType);
   if (pathType === PATH_TYPE.MANIFEST_POINTER || pathType === PATH_TYPE.HEAD) {
@@ -240,41 +298,76 @@ async function handleSystem(
   db: DatabaseAdapter,
   request: Request,
   url: URL,
-  env: InterocitorEnv,
+  runtime: ResolvedRuntimeConfig,
 ): Promise<Response> {
-  if (!hasSystemAccess(request, env)) return jsonResponse({ error: 'Unauthorized' }, 401);
-  const rest = url.pathname.slice(`${SYSTEM_PREFIX}/`.length);
-  const prefix = decodeURIComponent(rest.split('/').filter(Boolean)[0] || '');
-  const body = await readJsonBody(request);
-  const op = String(body?.op || '');
-  if (!prefix || !op) return jsonResponse({ error: 'Missing prefix or op' }, 400);
-  if (op === 'prune-compacted-changes' || op === 'compact') {
-    const remotePath = normalizePath(String(body?.remotePath || '/'));
-    const watermarkHlc = String(body?.watermarkHlc || '');
-    return jsonResponse(await opPruneCompacted(db.raw, prefix, remotePath, watermarkHlc), 200);
+  try {
+    if (!hasSystemAccess(request, runtime)) return jsonResponse({ error: 'Unauthorized' }, 401);
+    const maintenanceEnv = toMaintenanceEnv(runtime) as InterocitorEnv;
+    const meshSecret = runtime.meshSecret;
+    const rest = url.pathname.slice(`${SYSTEM_PREFIX}/`.length);
+    const prefix = decodeURIComponent(rest.split('/').filter(Boolean)[0] || '');
+    const body = await readJsonBody(request);
+    const op = String(body?.op || '');
+    if (!prefix || !op) return jsonResponse({ error: 'Missing prefix or op' }, 400);
+    if (op === 'prune-compacted-changes' || op === 'compact') {
+      const remotePath = normalizePath(String(body?.remotePath || '/'));
+      const watermarkHlc = String(body?.watermarkHlc || '');
+      return jsonResponse(await opPruneCompacted(db.raw, prefix, remotePath, watermarkHlc), 200);
+    }
+    if (op === 'reconcile-metrics') {
+      const remotePath = normalizePath(String(body?.remotePath || '/'));
+      return jsonResponse(await opReconcileMetrics(db.raw, prefix, remotePath), 200);
+    }
+    if (op === 'run-maintenance') {
+      return jsonResponse(await runMaintenance(db, maintenanceEnv, prefix), 200);
+    }
+    if (op === 'maintenance-status') {
+      const remotePath = normalizePath(String(body?.remotePath || '/'));
+      return jsonResponse(await getMaintenanceStatus(db, prefix, remotePath), 200);
+    }
+    if (op === 'issue-mesh-id') {
+      const secret = await importMeshSecretKey(meshSecret);
+      const id = uuidv7();
+      const sig = await crypto.subtle.sign('HMAC', secret, textEncoder.encode(id));
+      const tagBytes = new Uint8Array(sig, 0, 8);
+      let binary = '';
+      for (let i = 0; i < tagBytes.length; i++) binary += String.fromCharCode(tagBytes[i]);
+      const tag = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      return jsonResponse({ meshId: `${id}.${tag}` });
+    }
+    if (op === 'validate-mesh-id') {
+      const meshId = String(body?.meshId || '');
+      if (!meshId) return jsonResponse({ error: 'Missing meshId' }, 400);
+      const dot = meshId.lastIndexOf('.');
+      if (dot === -1) return jsonResponse({ valid: false });
+      const uuid = meshId.slice(0, dot);
+      const tag = meshId.slice(dot + 1);
+      const secret = await importMeshSecretKey(meshSecret);
+      const sig = await crypto.subtle.sign('HMAC', secret, textEncoder.encode(uuid));
+      const expectedBytes = new Uint8Array(sig, 0, 8);
+      let binary = '';
+      for (let i = 0; i < expectedBytes.length; i++) binary += String.fromCharCode(expectedBytes[i]);
+      const expected = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      let result = 0;
+      if (tag.length !== expected.length) return jsonResponse({ valid: false });
+      for (let i = 0; i < tag.length; i++) result |= tag.charCodeAt(i) ^ expected.charCodeAt(i);
+      return jsonResponse({ valid: result === 0 });
+    }
+    return jsonResponse({ error: 'Unknown op' }, 404);
+  } catch (error) {
+    wrapSchemaError(error);
   }
-  if (op === 'reconcile-metrics') {
-    const remotePath = normalizePath(String(body?.remotePath || '/'));
-    return jsonResponse(await opReconcileMetrics(db.raw, prefix, remotePath), 200);
-  }
-  if (op === 'run-maintenance') {
-    return jsonResponse(await runMaintenance(db, env, prefix), 200);
-  }
-  if (op === 'maintenance-status') {
-    const remotePath = normalizePath(String(body?.remotePath || '/'));
-    return jsonResponse(await getMaintenanceStatus(db, prefix, remotePath), 200);
-  }
-  return jsonResponse({ error: 'Unknown op' }, 404);
 }
 
-async function handleWsUpgrade(
+async function handleWsUpgrade<Env>(
   request: Request,
-  env: InterocitorEnv,
+  env: Env,
+  runtime: ResolvedRuntimeConfig,
   _ctx: ExecutionContextLike,
   prefix: string,
-  relayGetter?: (env: InterocitorEnv) => DurableObjectNamespace,
+  relayGetter?: (env: Env) => DurableObjectNamespace,
 ): Promise<Response> {
-  if (!(await hasAccess(request, env, prefix))) {
+  if (!(await hasAccess(request, runtime, prefix))) {
     return new Response('Unauthorized', { status: 401 });
   }
   if (request.headers.get('Upgrade') !== 'websocket') {
@@ -288,17 +381,18 @@ async function handleWsUpgrade(
   return stub.fetch(new Request(connectUrl.toString(), request));
 }
 
-async function handleIoRequest(
+async function handleIoRequest<Env>(
   request: Request,
-  env: InterocitorEnv,
+  env: Env,
+  runtime: ResolvedRuntimeConfig,
   url: URL,
-  dbGetter?: (env: InterocitorEnv) => D1Database,
+  dbGetter: (env: Env) => D1Database,
 ): Promise<Response> {
   const db = resolveDatabase(env, dbGetter);
   const method = request.method.toUpperCase();
   const { prefix, op } = parseIo(url);
   if (!prefix) return jsonResponse({ error: 'Missing prefix' }, 400);
-  if (!(await hasAccess(request, env, prefix))) return jsonResponse({ error: 'Unauthorized' }, 401);
+  if (!(await hasAccess(request, runtime, prefix))) return jsonResponse({ error: 'Unauthorized' }, 401);
 
   if (op === 'health' && method === 'GET') {
     return withCors(new Response('interocitor cloudflare worker\n', { status: 200 }));
@@ -306,7 +400,7 @@ async function handleIoRequest(
   if (op === 'file') {
     const path = normalizePath(url.searchParams.get('path') || '/');
     if (method === 'GET') return handleGetFile(db, prefix, path);
-    if (method === 'PUT') return handleWriteFile(db, prefix, path, request, env);
+    if (method === 'PUT') return handleWriteFile(db, prefix, path, request, runtime);
     if (method === 'DELETE') return handleDelete(db, prefix, path);
   }
   if (op === 'metadata' && method === 'POST') {
@@ -330,9 +424,10 @@ async function handleIoRequest(
  * Create a self-contained Interocitor mount that handles all IO, notify, and
  * system requests under a single URL prefix.
  */
-export function createInterocitorMount<Env extends InterocitorEnv = InterocitorEnv>(
-  options: InterocitorMountOptions = {},
+export function createInterocitorMount<Env = unknown>(
+  options: InterocitorMountOptions<Env>,
 ): InterocitorMount<Env> {
+  const runtimeOptions = options.runtime;
   const mountPrefix = normalizeMountPrefix(options.mountPrefix ?? '');
   const dbGetter = options.db;
   const relayGetter = options.relay;
@@ -356,26 +451,23 @@ export function createInterocitorMount<Env extends InterocitorEnv = InterocitorE
     const strippedPath = stripMountPrefix(url.pathname, mountPrefix);
     if (strippedPath === null) return new Response('Not found', { status: 404 });
     url.pathname = strippedPath;
-    return interocitorWorker.fetch(new Request(url.toString(), request), env as InterocitorEnv, ctx, dbGetter, relayGetter);
+    return interocitorWorker.fetch(new Request(url.toString(), request), env, ctx, dbGetter, relayGetter, runtimeOptions);
   }
 
   return Object.freeze({ mountPrefix, healthPath, ioBase, notifyBase, systemBase, matches, fetch });
 }
 
-export interface WithInterocitorOptions {
-  mountPrefix: string;
-  db?: (env: InterocitorEnv) => D1Database;
-  relay?: (env: InterocitorEnv) => DurableObjectNamespace;
-}
+export interface WithInterocitorOptions<Env = unknown> extends InterocitorMountOptions<Env> {}
 
 const EMPTY_WORKER: WorkerLike = {};
 
-export function withInterocitor<Env extends InterocitorEnv = InterocitorEnv>(
+export function withInterocitor<Env = unknown>(
   worker: WorkerLike<Env> = EMPTY_WORKER as WorkerLike<Env>,
-  options: WithInterocitorOptions,
+  options: WithInterocitorOptions<Env>,
 ): WorkerLike<Env> {
-  const { mountPrefix, db, relay } = options;
-  const interocitor = createInterocitorMount<Env>({ mountPrefix, db, relay });
+  const { mountPrefix, db, relay, runtime } = options;
+  const interocitor = createInterocitorMount<Env>({ mountPrefix, db, relay, runtime });
+  const runtimeOptions = runtime;  
   const baseWorker = worker ?? (EMPTY_WORKER as WorkerLike<Env>);
 
   return {
@@ -388,21 +480,25 @@ export function withInterocitor<Env extends InterocitorEnv = InterocitorEnv>(
     },
     async scheduled(event, env, ctx) {
       if (typeof baseWorker.scheduled === 'function') await baseWorker.scheduled(event, env, ctx);
-      if ((env as InterocitorEnv)?.INTEROCITOR_ENABLE_SCHEDULED_MAINTENANCE === '1') {
-        await runMaintenance(resolveDatabase(env as InterocitorEnv, db), env as InterocitorEnv, null);
+      const runtime = resolveRuntimeConfig(env, runtimeOptions);
+      if (runtime.enableScheduledMaintenance) {
+        runMaintenance(resolveDatabase(env, db), toMaintenanceEnv(runtime) as InterocitorEnv, null);
       }
     },
   };
 }
 
 export const interocitorWorker = {
-  async fetch(
+  async fetch<Env = unknown>(
     request: Request,
-    env: InterocitorEnv,
+    env: Env,
     ctx: ExecutionContextLike,
-    dbGetter?: (env: InterocitorEnv) => D1Database,
-    relayGetter?: (env: InterocitorEnv) => DurableObjectNamespace,
+    dbGetter: (env: Env) => D1Database,
+      relayGetter?: (env: Env) => DurableObjectNamespace,
+    runtimeOptions?: InterocitorRuntimeOptions<Env>,
   ): Promise<Response> {
+    const runtime = resolveRuntimeConfig(env, runtimeOptions);
+    const db = dbGetter;
     const url = new URL(request.url);
     const method = request.method.toUpperCase();
 
@@ -412,13 +508,13 @@ export const interocitorWorker = {
     }
     if (url.pathname.startsWith(`${NOTIFY_PREFIX}/`)) {
       const prefix = decodeURIComponent(url.pathname.slice(`${NOTIFY_PREFIX}/`.length).split('/')[0] || '');
-      return handleWsUpgrade(request, env, ctx, prefix, relayGetter);
+      return handleWsUpgrade(request, env, runtime, ctx, prefix, relayGetter);
     }
     if (url.pathname.startsWith(`${IO_PREFIX}/`)) {
-      return handleIoRequest(request, env, url, dbGetter);
+      return handleIoRequest(request, env, runtime, url, db);
     }
     if (url.pathname.startsWith(`${SYSTEM_PREFIX}/`)) {
-      return handleSystem(resolveDatabase(env, dbGetter), request, url, env);
+      return handleSystem(resolveDatabase(env, db), request, url, runtime);
     }
     return withCors(new Response('Not found', { status: 404 }));
   },

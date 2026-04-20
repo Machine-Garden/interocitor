@@ -120,18 +120,51 @@ const schema = {
         text: types.string,
         done: types.boolean,
         createdAt: types.index(types.date),
-        note: types.optional(types.string),
-        dueAt: types.optional(types.index(types.date)),
+        note: types.string.optional,
       },
     },
   },
 } satisfies DatabaseSchemaDefinition;
 
 // inferred row type:
-// { text: string; done: boolean; createdAt: Date; note?: string; dueAt?: Date }
+// { text: string; done: boolean; createdAt: Date; note?: string }
 ```
 
-`types.optional()` marks property presence, not `T | undefined` value type.
+`.optional` makes the property optional in the inferred row type. Indexed/unique fields cannot be optional.
+
+## Device identity
+
+Devices self-identify with UUIDv7 IDs — sortable, globally unique. Optional naming:
+
+```ts
+const db = new Interocitor({
+  schema,
+  dbName: 'my-app',
+  appName: 'My App',
+  deviceName: "Anton's laptop",
+  deviceType: 'web',
+});
+```
+
+## Row ownership
+
+Every write stamps `_owner` with the current device ID. Automatic. Survives compaction.
+
+```ts
+const row = await db.table('tasks').get(taskId);
+row._owner; // device ID of last writer
+```
+
+## Mesh IDs
+
+Worker-issued with HMAC tag. See `@interocitor/core` README for details.
+
+```ts
+import { createMeshSecret, issueMeshId, isValidMeshId } from '@interocitor/core';
+const secret = await createMeshSecret();
+const meshId = await issueMeshId(secret);
+await isValidMeshId(meshId, secret); // true
+```
 
 ## Row IDs
 

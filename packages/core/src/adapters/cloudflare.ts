@@ -66,23 +66,34 @@ export class CloudflareAdapter implements StorageAdapter {
     return { ...base, ...extra };
   }
 
-  private get ioBaseUrl(): string {
-    const u = new URL(this.config.baseUrl);
+  private parseBaseUrl(): URL {
+    const base = /^https?:\/\//i.test(this.config.baseUrl)
+      ? this.config.baseUrl
+      : new URL(this.config.baseUrl, 'http://interocitor').toString();
+    const u = new URL(base);
     if (!u.pathname.includes('/io/')) {
       throw new Error('CloudflareAdapter baseUrl must include /io/<prefix>');
+    }
+    return u;
+  }
+
+  private get ioBaseUrl(): string {
+    const u = this.parseBaseUrl();
+    if (!/^https?:\/\//i.test(this.config.baseUrl)) {
+      return `${u.pathname}${u.search}${u.hash}`.replace(/\/$/, '');
     }
     return u.toString().replace(/\/$/, '');
   }
 
   private get notifyUrl(): string {
-    const u = new URL(this.config.baseUrl);
-    if (!u.pathname.includes('/io/')) {
-      throw new Error('CloudflareAdapter baseUrl must include /io/<prefix>');
-    }
+    const u = this.parseBaseUrl();
     u.pathname = u.pathname.replace('/io/', '/notify/');
     u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
     if (this.config.token) {
       u.searchParams.set('access_token', this.config.token);
+    }
+    if (!/^https?:\/\//i.test(this.config.baseUrl)) {
+      return `${u.pathname}${u.search}${u.hash}`.replace(/\/$/, '');
     }
     return u.toString().replace(/\/$/, '');
   }

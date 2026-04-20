@@ -80,6 +80,8 @@ export interface Row {
   _deleted: boolean;
   _deletedHlc?: string;
   _schemaVersion: number;
+  /** Device ID that last wrote this row. Set automatically on every write. */
+  _owner?: string;
   [column: string]: ColumnEntry | string | boolean | number | undefined;
 }
 
@@ -359,9 +361,15 @@ export interface Manifest {
   deltaPath: string | null;
 }
 
+export type DeviceType = 'web' | 'ios' | 'android' | 'worker' | 'desktop' | 'tv';
+
 export interface DeviceMetadata extends DeviceInfo {
   registeredAt: string;
   lastSeenAt: string;
+  /** Human-readable device name, e.g. "Anton's laptop" */
+  displayName?: string;
+  /** Device class */
+  deviceType?: DeviceType;
   retired?: boolean;
 }
 
@@ -508,6 +516,10 @@ export interface SyncConfig<
    * and persists a unique ID per origin automatically.
    */
   deviceId?: string;
+  /** Human-readable device name, e.g. "Anton's laptop", "Val's phone" */
+  deviceName?: string;
+  /** Device class — used in device manifest for peer discovery */
+  deviceType?: DeviceType;
   /** If true, only serverId may publish manifests/compaction */
   serverManaged?: boolean;
   /** Authorized writer identity when serverManaged=true */

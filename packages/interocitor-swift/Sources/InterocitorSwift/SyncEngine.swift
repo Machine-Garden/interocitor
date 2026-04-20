@@ -1,5 +1,5 @@
 /**
- * SyncEngine — Swift native Interocitor sync orchestrator
+ * Interocitor — Swift native Interocitor sync orchestrator
  *
  * Mirrors packages/interocitor/src/core/sync-engine.ts
  *
@@ -59,6 +59,8 @@ public struct SyncConfig: Sendable {
     public var flushDebounce: TimeInterval
     public var flushThreshold: Int
     public var dbName: String
+    public var deviceName: String?
+    public var deviceType: String?
     public var replicas: [ReplicaConfig]
 
     public init(
@@ -69,6 +71,8 @@ public struct SyncConfig: Sendable {
         flushDebounce: TimeInterval = 2,
         flushThreshold: Int = 50,
         dbName: String = "interocitor",
+        deviceName: String? = nil,
+        deviceType: String? = nil,
         replicas: [ReplicaConfig] = []
     ) {
         self.remotePath = remotePath
@@ -78,14 +82,16 @@ public struct SyncConfig: Sendable {
         self.flushDebounce = flushDebounce
         self.flushThreshold = flushThreshold
         self.dbName = dbName
+        self.deviceName = deviceName
+        self.deviceType = deviceType
         self.replicas = replicas
     }
 }
 
-// MARK: - SyncEngine
+// MARK: - Interocitor
 
 /// The main sync engine actor.  All public methods are async-safe.
-public actor SyncEngine {
+public actor Interocitor {
 
     private let config: SyncConfig
     private var adapter: (any StorageAdapter)?
@@ -123,7 +129,7 @@ public actor SyncEngine {
     public init(config: SyncConfig, localStore: (any LocalStoreAdapter)? = nil) {
         self.config = config
         self.adapter = nil
-        self.deviceId = SyncEngine.loadOrCreateDeviceId(dbName: config.dbName)
+        self.deviceId = Interocitor.loadOrCreateDeviceId(dbName: config.dbName)
         self.hlc = hlcInit(nodeId: deviceId)
         self.local = localStore ?? MemoryLocalStore()
     }
@@ -132,7 +138,7 @@ public actor SyncEngine {
     public init(adapter: any StorageAdapter, config: SyncConfig, localStore: (any LocalStoreAdapter)? = nil) {
         self.config = config
         self.adapter = adapter
-        self.deviceId = SyncEngine.loadOrCreateDeviceId(dbName: config.dbName)
+        self.deviceId = Interocitor.loadOrCreateDeviceId(dbName: config.dbName)
         self.hlc = hlcInit(nodeId: deviceId)
         self.local = localStore ?? MemoryLocalStore()
     }
@@ -239,14 +245,15 @@ public actor SyncEngine {
 
         let op = UpsertOp(table: table, rowId: rowId, columns: columnEntries)
         try await ensureRowsCached(ops: [.upsert(op)])
-        let row = applyOp(tables: &tables, op: .upsert(op), schemaVersion: manifest?.schema ?? 1)!
+        var row = applyOp(tables: &tables, op: .upsert(op), schemaVersion: manifest?.schema ?? 1)!
+        row._owner = deviceId
         knownTables.insert(table)
 
         try await local.putRow(row)
         try await local.setMeta(key: "hlc", value: AnyCodable.string(hlcSerialize(hlc)))
 
         let entry = ChangeEntry(
-            id: "chg_\(SyncEngine.randomHex(8))",
+            id: "chg_\(Interocitor.randomHex(8))",
             ts: Int64(Date().timeIntervalSince1970 * 1000),
             device: deviceId,
             user: userId,
@@ -272,7 +279,7 @@ public actor SyncEngine {
         try await local.setMeta(key: "hlc", value: AnyCodable.string(hlcSerialize(hlc)))
 
         let entry = ChangeEntry(
-            id: "chg_\(SyncEngine.randomHex(8))",
+            id: "chg_\(Interocitor.randomHex(8))",
             ts: Int64(Date().timeIntervalSince1970 * 1000),
             device: deviceId,
             user: userId,
@@ -573,7 +580,7 @@ public actor SyncEngine {
         }
 
         let snapshot = Snapshot(
-            snapshotId: "snap_\(SyncEngine.randomHex(8))",
+            snapshotId: "snap_\(Interocitor.randomHex(8))",
             timestamp: now,
             hlc: hlcSerialize(hlc),
             epoch: nextEpoch,
@@ -779,7 +786,7 @@ public actor SyncEngine {
             let hlcStr = getRowHlc(row)
             guard !hlcStr.isEmpty else { continue }
             let entry = ChangeEntry(
-                id: "chg_\(SyncEngine.randomHex(8))",
+                id: "chg_\(Interocitor.randomHex(8))",
                 ts: Int64(Date().timeIntervalSince1970 * 1000),
                 device: deviceId,
                 hlc: hlcStr,
@@ -838,7 +845,7 @@ public actor SyncEngine {
             writtenAt: now,
             contentHash: "",
             version: 3,
-            meshId: "mesh_\(SyncEngine.randomHex(8))",
+            meshId: "mesh_\(Interocitor.randomHex(8))",
             schema: 1,
             encrypted: false,
             server: ServerConfig(managed: config.serverManaged, relayUrl: nil, serverId: config.serverId),

@@ -4,14 +4,14 @@
   </a>
 </p>
 
-# interocitor-workers
+# @interocitor/workers
 
 Cloudflare Workers runtime for [Interocitor](https://github.com/TheUiTeam/interocitor). Handles storage, sync, and optional realtime relay — all behind a single URL prefix in your existing Worker.
 
 ## Quick start
 
 ```ts
-import { InterocitorRelayDurableObject, withInterocitor } from 'interocitor-workers';
+import { InterocitorRelayDurableObject, withInterocitor } from '@interocitor/workers';
 
 const appWorker = {
   async fetch(request: Request) {
@@ -24,11 +24,20 @@ const appWorker = {
 
 export { InterocitorRelayDurableObject };
 
-export default withInterocitor(appWorker, {
+export default withInterocitor<Env>(appWorker, {
   mountPrefix: '/sync',
   db: (env) => env.MY_DB,
   relay: (env) => env.MY_RELAY,
+  runtime: {
+    accessToken: (env) => env.INTEROCITOR_ACCESS_TOKEN,
+    systemToken: (env) => env.INTEROCITOR_SYSTEM_TOKEN,
+    meshSecret: (env) => env.INTEROCITOR_MESH_SECRET,
+    enableScheduledMaintenance: (env) => env.INTEROCITOR_ENABLE_SCHEDULED_MAINTENANCE,
+    pathTtlHours: (env) => env.INTEROCITOR_PATH_TTL_HOURS,
+  },
 });
+
+Interocitor does not constrain your `Env` type. You own your env shape. Pass only the bindings and settings it needs via getters.
 ```
 
 Interocitor claims `/<prefix>/io/*`, `/<prefix>/notify/*`, `/<prefix>/__interocitor/*`, and `/<prefix>/health`. Everything else goes to your app.
@@ -58,15 +67,20 @@ Binding names are yours. Pass them to `withInterocitor(...)` via getters.
 If you need manual routing instead of wrapping the whole worker:
 
 ```ts
-import { createInterocitorMount } from 'interocitor-workers';
+import { createInterocitorMount } from '@interocitor/workers';
 
-const mount = createInterocitorMount({
+const mount = createInterocitorMount<Env>({
   mountPrefix: '/sync',
   db: (env) => env.MY_DB,
   relay: (env) => env.MY_RELAY,
+  runtime: {
+    accessToken: (env) => env.INTEROCITOR_ACCESS_TOKEN,
+    systemToken: (env) => env.INTEROCITOR_SYSTEM_TOKEN,
+    meshSecret: (env) => env.INTEROCITOR_MESH_SECRET,
+  },
 });
 
-export { InterocitorRelayDurableObject } from 'interocitor-workers';
+export { InterocitorRelayDurableObject } from '@interocitor/workers';
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
@@ -77,18 +91,57 @@ export default {
 };
 ```
 
-## Environment
+## Runtime getters
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `INTEROCITOR_ACCESS_TOKEN` | no | open | Shared secret for per-prefix HMAC tokens |
-| `INTEROCITOR_SYSTEM_TOKEN` | no | disabled | Bearer token for system ops |
-| `INTEROCITOR_ENABLE_SCHEDULED_MAINTENANCE` | no | `''` | Set `'1'` to run TTL sweeps in `scheduled` |
-| `INTEROCITOR_PATH_TTL_HOURS` | no | `0` | Hours before inactive paths are deleted |
-| `INTEROCITOR_MAX_CONTROL_BYTES` | no | `262144` | Max bytes for manifest/head/heartbeat files |
-| `INTEROCITOR_MAX_CHANGE_BYTES` | no | `8388608` | Max bytes for change files |
-| `INTEROCITOR_MAX_MAINLINE_BYTES` | no | `16777216` | Max bytes for mainline snapshots |
-| `INTEROCITOR_MAX_GENERIC_FILE_BYTES` | no | `8388608` | Max bytes for other files |
+Interocitor no longer reads magic env variable names by itself. You pass everything explicitly through getters.
+
+```ts
+runtime: {
+  accessToken: (env) => env.INTEROCITOR_ACCESS_TOKEN,
+  systemToken: (env) => env.INTEROCITOR_SYSTEM_TOKEN,
+  meshSecret: (env) => env.INTEROCITOR_MESH_SECRET,
+  enableScheduledMaintenance: (env) => env.INTEROCITOR_ENABLE_SCHEDULED_MAINTENANCE,
+  pathTtlHours: (env) => env.INTEROCITOR_PATH_TTL_HOURS,
+  maxControlBytes: (env) => env.INTEROCITOR_MAX_CONTROL_BYTES,
+  maxChangeBytes: (env) => env.INTEROCITOR_MAX_CHANGE_BYTES,
+  maxMainlineBytes: (env) => env.INTEROCITOR_MAX_MAINLINE_BYTES,
+  maxGenericFileBytes: (env) => env.INTEROCITOR_MAX_GENERIC_FILE_BYTES,
+}
+```
+
+Only `db` is required. Everything else is optional.
+
+## Mesh IDs
+
+Workers issue and validate mesh/team IDs. Each ID is a UUIDv7 with an embedded HMAC tag — only the worker with the secret can mint valid IDs.
+
+### System ops
+
+Issue a mesh ID (requires `INTEROCITOR_SYSTEM_TOKEN`):
+
+```bash
+curl -X POST https://your-worker/sync/__interocitor/my-prefix \
+  -H "Authorization: Bearer $SYSTEM_TOKEN" \
+  -d '{"op": "issue-mesh-id"}'
+# → { "meshId": "0196745e-...-7abc-...AbCdEfGhIjK" }
+```
+
+Validate a mesh ID:
+
+```bash
+curl -X POST https://your-worker/sync/__interocitor/my-prefix \
+  -H "Authorization: Bearer $SYSTEM_TOKEN" \
+  -d '{"op": "validate-mesh-id", "meshId": "0196745e-...AbCdEfGhIjK"}'
+# → { "valid": true }
+```
+
+### Secret management
+
+Set `INTEROCITOR_MESH_SECRET` in your Worker environment (wrangler secret or `.dev.vars`).
+
+Default value is `'interocitor'` — fine for development, **change it in production**.
+
+⚠️ **Changing this secret invalidates ALL existing mesh IDs.** Peers with previously issued IDs will fail validation. Treat it as permanent.
 
 ## License
 

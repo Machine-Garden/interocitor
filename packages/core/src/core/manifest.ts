@@ -140,6 +140,7 @@ export async function upsertDeviceMetadata(
   adapter: StorageAdapter,
   remotePath: string,
   deviceId: string,
+  opts?: { displayName?: string; deviceType?: import('./types.ts').DeviceType },
 ): Promise<void> {
   const p = paths(remotePath);
   const now = new Date().toISOString();
@@ -150,6 +151,8 @@ export async function upsertDeviceMetadata(
     lastSeenAt: now,
     userId: existing?.userId,
     name: existing?.name,
+    displayName: opts?.displayName ?? existing?.displayName,
+    deviceType: opts?.deviceType ?? existing?.deviceType,
     retired: existing?.retired,
   };
   await writeJson(adapter, p.deviceFile(deviceId), next);

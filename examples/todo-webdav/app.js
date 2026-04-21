@@ -105,7 +105,7 @@ async function createSession() {
 }
 
 async function connect() {
-  const { SyncEngine } = await import('/packages/core/dist/index.js');
+  const { Interocitor } = await import('/packages/core/dist/index.js');
   const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
   const session = readSessionFromUi();
@@ -120,7 +120,7 @@ async function connect() {
     auth: { username: 'demo', password: 'demo' },
   });
 
-  const engine = new SyncEngine(adapter, {
+  const engine = new Interocitor(adapter, {
     remotePath: session.remotePath,
     dbName,
     deviceId: tabDeviceId,

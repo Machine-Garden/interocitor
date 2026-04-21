@@ -155,7 +155,7 @@ const db = new Interocitor({
 Every write stamps `_owner` with the current device ID. Automatic. Survives compaction.
 
 ```ts
-const row = await db.table('tasks').get(taskId);
+const row = await db.table('tasks').row(taskId);
 row._owner; // device ID of last writer
 ```
 

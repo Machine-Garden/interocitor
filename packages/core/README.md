@@ -79,7 +79,7 @@ await db.init();
 await db.table('tasks').add({ title: 'Ship it', done: false }, { prefix: 'task' });
 await db.table('tasks').patch(taskId, { done: true });
 await db.table('tasks').replace(taskId, fullTask);
-await db.table('tasks').get(taskId);
+await db.table('tasks').row(taskId);          // single-row handle (await for async fetch)
 await db.table('tasks').query();
 await db.table('tasks').where('done').equals(false).orderBy('title');
 
@@ -151,7 +151,7 @@ Every read and write hits the local store. No network required.
 | `table.add()` | No |
 | `table.patch()` / `table.replace()` | No |
 | `table.delete()` | No |
-| `table.get()` / `table.query()` | No |
+| `table.row()` / `table.query()` | No |
 | `connect()` | Yes, if adapter configured |
 
 ## Device identity
@@ -175,8 +175,8 @@ Every write stamps `_owner` with the writing device's ID.
 Automatic. Survives compaction. No opt-in needed.
 
 ```ts
-const row = await db.table('tasks').get(taskId);
-row._owner; // device ID of last writer
+const row = await db.table('tasks').row(taskId);
+row?._owner; // device ID of last writer
 ```
 
 Existing rows without `_owner` are fine — it stays `undefined` until next write.

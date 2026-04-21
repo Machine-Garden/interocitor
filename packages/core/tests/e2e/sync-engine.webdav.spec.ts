@@ -55,9 +55,9 @@ test('WebDAV adapter supports authenticate, CRUD, listing, and metadata', async 
   expect(result.afterDelete).toBeNull();
 });
 
-test('SyncEngine writes file-per-change paths and syncs rows through WebDAV', async ({ page }) => {
+test('Interocitor writes file-per-change paths and syncs rows through WebDAV', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { SyncEngine, rowToPlain, readColumn } = await import('/packages/core/dist/index.js');
+    const { Interocitor, rowToPlain, readColumn } = await import('/packages/core/dist/index.js');
     const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
     const makeEngine = (deviceId: string) => {
@@ -65,7 +65,7 @@ test('SyncEngine writes file-per-change paths and syncs rows through WebDAV', as
         baseUrl: `${location.origin}/__webdav__`,
         auth: { username: 'u', password: 'p' },
       });
-      return new SyncEngine(adapter, {
+      return new Interocitor(adapter, {
         deviceId,
         remotePath: '/Interocitor',
         pollInterval: 60_000,
@@ -94,7 +94,7 @@ test('SyncEngine writes file-per-change paths and syncs rows through WebDAV', as
     await engineB.init();
     await engineB.connect();
 
-    const row = await engineB.get('tasks', 'task_1');
+    const row = await engineB.loadRow({ table: 'tasks', rowId: 'task_1' });
     const plain = row ? rowToPlain(row) : null;
     const title = row ? (readColumn(row, 'title') as string) : null;
     const rowsFromQuery = (await engineB.query('tasks')).length;
@@ -128,7 +128,7 @@ test('rejects unauthorized writer manifests over WebDAV', async ({ page }) => {
       const hex = Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
       return `sha256:${hex}`;
     }
-    const { SyncEngine } = await import('/packages/core/dist/index.js');
+    const { Interocitor } = await import('/packages/core/dist/index.js');
     const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
     const now = new Date().toISOString();
 
@@ -161,7 +161,7 @@ test('rejects unauthorized writer manifests over WebDAV', async ({ page }) => {
     }));
     await adapter.writeFile('/BadWeb/manifest.json', JSON.stringify({ currentGeneration: 1, file: 'manifest-1.json' }));
 
-    const engine = new SyncEngine(
+    const engine = new Interocitor(
       new WebDAVAdapter({ baseUrl: `${location.origin}/__webdav__`, auth: { username: 'u', password: 'p' } }),
       { deviceId: 'dev_bad', remotePath: '/BadWeb', pollInterval: 60_000 }
     );
@@ -180,7 +180,7 @@ test('rejects unauthorized writer manifests over WebDAV', async ({ page }) => {
 
 test('encrypted sync over WebDAV keeps cloud payload opaque', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { SyncEngine, readColumn } = await import('/packages/core/dist/index.js');
+    const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
     const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
     const { generateKey, keyToPassphrase } = await import('/packages/core/dist/crypto/keys.js');
 
@@ -188,7 +188,7 @@ test('encrypted sync over WebDAV keeps cloud payload opaque', async ({ page }) =
     const passphrase = await keyToPassphrase(key);
 
     const makeEngine = (deviceId: string) => {
-      const engine = new SyncEngine(
+      const engine = new Interocitor(
         new WebDAVAdapter({ baseUrl: `${location.origin}/__webdav__`, auth: { username: 'u', password: 'p' } }),
         { deviceId, remotePath: '/Encrypted', passphrase, encrypted: true, pollInterval: 60_000, flushDebounce: 5, flushThreshold: 1 },
       );
@@ -211,7 +211,7 @@ test('encrypted sync over WebDAV keeps cloud payload opaque', async ({ page }) =
     const engineB = makeEngine('dev_b');
     await engineB.init();
     await engineB.connect();
-    const row = await engineB.get('secrets', 's1');
+    const row = await engineB.loadRow({ table: 'secrets', rowId: 's1' });
     await engineB.disconnect();
 
     return {
@@ -226,11 +226,11 @@ test('encrypted sync over WebDAV keeps cloud payload opaque', async ({ page }) =
 
 test('direct-cloud compaction over WebDAV restores clients from snapshot', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const { SyncEngine, readColumn } = await import('/packages/core/dist/index.js');
+    const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
     const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
     const makeEngine = (deviceId: string) => {
-      return new SyncEngine(
+      return new Interocitor(
         new WebDAVAdapter({ baseUrl: `${location.origin}/__webdav__`, auth: { username: 'u', password: 'p' } }),
         { deviceId, remotePath: '/WebCompact', pollInterval: 60_000, flushDebounce: 5, flushThreshold: 1 },
       );
@@ -249,7 +249,7 @@ test('direct-cloud compaction over WebDAV restores clients from snapshot', async
     const clientEngine = makeEngine('dev_client');
     await clientEngine.init();
     await clientEngine.connect();
-    const row = await clientEngine.get('notes', 'n1');
+    const row = await clientEngine.loadRow({ table: 'notes', rowId: 'n1' });
     await clientEngine.disconnect();
 
     return {

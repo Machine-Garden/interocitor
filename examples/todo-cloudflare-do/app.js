@@ -139,7 +139,7 @@ async function autoCreateSession() {
 }
 
 async function connect() {
-  const { SyncEngine } = await import('../../packages/core/dist/index.js');
+  const { Interocitor } = await import('../../packages/core/dist/index.js');
   const { CloudflareAdapter } = await import('../../packages/core/dist/adapters/cloudflare.js');
   const { passphraseToKey } = await import('../../packages/core/dist/crypto/keys.js');
 
@@ -155,7 +155,7 @@ async function connect() {
   sessionStorage.setItem('todo-cf-device-id', tabDeviceId);
   localStorage.setItem('interocitor-device-id', tabDeviceId);
 
-  const engine = new SyncEngine(adapter, {
+  const engine = new Interocitor(adapter, {
     remotePath: session.remotePath,
     dbName: `interocitor-cf-${tabDeviceId}`,
     pollInterval: runtimeOptions.pollInterval,

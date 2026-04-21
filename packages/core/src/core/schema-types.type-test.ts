@@ -192,13 +192,12 @@ const _replaceOk: _ReplaceArg = { title: 'x', status: 'open', priority: 1 };
 const _replaceBad: _ReplaceArg = { title: 'x', status: 'open' };
 void _addOk; void _replaceOk;
 
-// table() returns Table<TaskRow> and concrete row typing propagates through methods.
-
-// table() with known key → Table<{ title: string; status: 'open'|'done'; priority: number }> 
-type _TasksGet = Awaited<ReturnType<typeof tasksTable.get>>;
-// _TasksGet should be { title: string; ... } | undefined — not Record<string,unknown>
-const _checkGet: _TasksGet = { title: 'x', status: 'open', priority: 1 };
-void _checkGet;
+// table() returns Table<TaskRow> and concrete row typing propagates through
+// methods. row() is the single-row handle (replaces the old `get`).
+type _TasksRow = Awaited<ReturnType<typeof tasksTable.row>>;
+// _TasksRow should be { title: string; ... } | undefined — not Record<string,unknown>
+const _checkRow: _TasksRow = { title: 'x', status: 'open', priority: 1 };
+void _checkRow;
 
 // @ts-expect-error — 'nonexistent' is not keyof DB (no fallback overload)
 typedEngine.table('nonexistent');

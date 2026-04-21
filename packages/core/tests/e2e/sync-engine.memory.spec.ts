@@ -21,14 +21,14 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test.describe('SyncEngine protocol (MemoryAdapter)', () => {
+test.describe('Interocitor protocol (MemoryAdapter)', () => {
   test('bootstraps manifests and default direct-cloud mode', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine } = await import('/packages/core/dist/index.js');
+      const { Interocitor } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
 
       const adapter = new MemoryAdapter();
-      const engine = new SyncEngine(adapter, { remotePath: '/MeshBoot', pollInterval: 600_000, deviceId: 'dev_bootstrap' });
+      const engine = new Interocitor(adapter, { remotePath: '/MeshBoot', pollInterval: 600_000, deviceId: 'dev_bootstrap' });
 
       await engine.init();
       await engine.connect();
@@ -48,11 +48,11 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('flush writes one file per change and updates head', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine } = await import('/packages/core/dist/index.js');
+      const { Interocitor } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
 
       const adapter = new MemoryAdapter();
-      const engine = new SyncEngine(adapter, {
+      const engine = new Interocitor(adapter, {
         remotePath: '/MeshFlush',
         pollInterval: 600_000,
         flushThreshold: 999,
@@ -82,12 +82,12 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('two devices converge via change files', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/packages/core/dist/index.js');
+      const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
 
       const shared = new MemoryAdapter();
 
-      const engineA = new SyncEngine(shared, { remotePath: '/MeshSync', pollInterval: 600_000, flushThreshold: 1, deviceId: 'dev_a' });
+      const engineA = new Interocitor(shared, { remotePath: '/MeshSync', pollInterval: 600_000, flushThreshold: 1, deviceId: 'dev_a' });
       await engineA.init();
       await engineA.connect();
       await engineA.put('tasks', 'r1', { title: 'from a' });
@@ -101,10 +101,10 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
         req.onblocked = () => resolve();
       });
 
-      const engineB = new SyncEngine(shared, { remotePath: '/MeshSync', pollInterval: 600_000, deviceId: 'dev_b' });
+      const engineB = new Interocitor(shared, { remotePath: '/MeshSync', pollInterval: 600_000, deviceId: 'dev_b' });
       await engineB.init();
       await engineB.connect();
-      const row = await engineB.get('tasks', 'r1');
+      const row = await engineB.loadRow({ table: 'tasks', rowId: 'r1' });
       await engineB.disconnect();
 
       return row ? readColumn(row, 'title') : null;
@@ -115,11 +115,11 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('supports schema indexes + table.where queries', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine, types } = await import('/packages/core/dist/index.js');
+      const { Interocitor, types } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
 
       const adapter = new MemoryAdapter();
-      const engine = new SyncEngine(adapter, {
+      const engine = new Interocitor(adapter, {
         remotePath: '/MeshWhere',
         pollInterval: 600_000,
         deviceId: 'dev_where',
@@ -169,7 +169,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
         const hex = Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
         return `sha256:${hex}`;
       }
-      const { SyncEngine } = await import('/packages/core/dist/index.js');
+      const { Interocitor } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
 
       const adapter = new MemoryAdapter();
@@ -197,7 +197,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       await adapter.writeFile('/Bad/manifest-1.json', JSON.stringify(globalManifest));
       await adapter.writeFile('/Bad/manifest.json', JSON.stringify({ currentGeneration: 1, file: 'manifest-1.json' }));
 
-      const engine = new SyncEngine(adapter, {
+      const engine = new Interocitor(adapter, {
         remotePath: '/Bad',
         pollInterval: 600_000,
         serverId: 'server_relay_1',
@@ -218,7 +218,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('encrypted change files are mesh-bound and do not leak plaintext', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine } = await import('/packages/core/dist/index.js');
+      const { Interocitor } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
       const { generateKey, keyToPassphrase } = await import('/packages/core/dist/crypto/keys.js');
       const { decryptEntry } = await import('/packages/core/dist/crypto/encryption.js');
@@ -226,7 +226,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       const key = await generateKey();
       const passphrase = await keyToPassphrase(key);
       const adapter = new MemoryAdapter();
-      const engine = new SyncEngine(adapter, {
+      const engine = new Interocitor(adapter, {
         remotePath: '/MeshEnc',
         pollInterval: 600_000,
         flushThreshold: 1,
@@ -267,7 +267,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('encrypted snapshots are mesh-bound and do not leak plaintext', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine } = await import('/packages/core/dist/index.js');
+      const { Interocitor } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
       const { generateKey, keyToPassphrase } = await import('/packages/core/dist/crypto/keys.js');
       const { decryptEntry } = await import('/packages/core/dist/crypto/encryption.js');
@@ -276,7 +276,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       const passphrase = await keyToPassphrase(key);
       const adapter = new MemoryAdapter();
 
-      const engine = new SyncEngine(adapter, {
+      const engine = new Interocitor(adapter, {
         remotePath: '/MeshSnapshotFP',
         dbName: 'mesh-snapshot-fp-db',
         pollInterval: 600_000,
@@ -318,7 +318,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('encrypted wrong-mesh snapshot data poisons the remote and cuts off sync', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine } = await import('/packages/core/dist/index.js');
+      const { Interocitor } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
       const { generateKey, keyToPassphrase } = await import('/packages/core/dist/crypto/keys.js');
 
@@ -326,7 +326,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       const key = await generateKey();
       const passphrase = await keyToPassphrase(key);
 
-      const source = new SyncEngine(adapter, {
+      const source = new Interocitor(adapter, {
         remotePath: '/MeshSnapshotSource',
         dbName: 'mesh-snapshot-source-db',
         pollInterval: 600_000,
@@ -341,7 +341,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       await source.compact();
       await source.disconnect();
 
-      const targetSeed = new SyncEngine(adapter, {
+      const targetSeed = new Interocitor(adapter, {
         remotePath: '/MeshSnapshotTarget',
         dbName: 'mesh-snapshot-target-seed-db',
         pollInterval: 600_000,
@@ -369,7 +369,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
         req.onblocked = () => resolve();
       });
 
-      const target = new SyncEngine(adapter, {
+      const target = new Interocitor(adapter, {
         remotePath: '/MeshSnapshotTarget',
         dbName: 'mesh-snapshot-target-reader-db',
         pollInterval: 600_000,
@@ -417,7 +417,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('encrypted wrong-mesh data poisons the remote and cuts off sync', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine } = await import('/packages/core/dist/index.js');
+      const { Interocitor } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
       const { generateKey, keyToPassphrase } = await import('/packages/core/dist/crypto/keys.js');
 
@@ -425,7 +425,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       const key = await generateKey();
       const passphrase = await keyToPassphrase(key);
 
-      const source = new SyncEngine(adapter, {
+      const source = new Interocitor(adapter, {
         remotePath: '/MeshSource',
         dbName: 'mesh-source-db',
         pollInterval: 600_000,
@@ -440,7 +440,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       await source.flush();
       await source.disconnect();
 
-      const targetSeed = new SyncEngine(adapter, {
+      const targetSeed = new Interocitor(adapter, {
         remotePath: '/MeshTarget',
         dbName: 'mesh-target-seed-db',
         pollInterval: 600_000,
@@ -457,7 +457,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       const poisonedPath = sourceChange[0].replace('/MeshSource/', '/MeshTarget/');
       await adapter.writeFile(poisonedPath, sourceChange[1]);
 
-      const target = new SyncEngine(adapter, {
+      const target = new Interocitor(adapter, {
         remotePath: '/MeshTarget',
         dbName: 'mesh-target-reader-db',
         pollInterval: 600_000,
@@ -505,12 +505,12 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('can start without a remote adapter and sync later', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/packages/core/dist/index.js');
+      const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
 
       const remote = new MemoryAdapter();
 
-      const engine = new SyncEngine({
+      const engine = new Interocitor({
         remotePath: '/MeshLateAttach',
         pollInterval: 600_000,
         flushDebounce: 60_000,
@@ -520,7 +520,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
       await engine.init();
       await engine.put('tasks', 'late_1', { title: 'offline first' });
-      const beforeSync = await engine.get('tasks', 'late_1');
+      const beforeSync = await engine.loadRow({ table: 'tasks', rowId: 'late_1' });
 
       let connectError = '';
       try {
@@ -541,14 +541,14 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
         req.onblocked = () => resolve();
       });
 
-      const reader = new SyncEngine(remote, {
+      const reader = new Interocitor(remote, {
         remotePath: '/MeshLateAttach',
         pollInterval: 600_000,
         deviceId: 'dev_late_reader',
       });
       await reader.init();
       await reader.connect();
-      const synced = await reader.get('tasks', 'late_1');
+      const synced = await reader.loadRow({ table: 'tasks', rowId: 'late_1' });
       const dump = remote.dump();
       await reader.disconnect();
 
@@ -568,13 +568,13 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('setRemoteStorage migrates full local state to a new backend at runtime', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/packages/core/dist/index.js');
+      const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
 
       const remoteA = new MemoryAdapter();
       const remoteB = new MemoryAdapter();
 
-      const engine = new SyncEngine(remoteA, {
+      const engine = new Interocitor(remoteA, {
         remotePath: '/MeshSwap',
         pollInterval: 600_000,
         flushDebounce: 5,
@@ -586,7 +586,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       await engine.put('tasks', 'local_1', { title: 'from primary' });
       await engine.flush();
 
-      const peer = new SyncEngine(remoteA, {
+      const peer = new Interocitor(remoteA, {
         remotePath: '/MeshSwap',
         pollInterval: 600_000,
         flushDebounce: 5,
@@ -612,16 +612,16 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
         req.onblocked = () => resolve();
       });
 
-      const reader = new SyncEngine(remoteB, {
+      const reader = new Interocitor(remoteB, {
         remotePath: '/MeshSwap',
         pollInterval: 600_000,
         deviceId: 'dev_b_reader',
       });
       await reader.init();
       await reader.connect();
-      const localRow = await reader.get('tasks', 'local_1');
-      const peerRow = await reader.get('tasks', 'peer_1');
-      const switchedRow = await reader.get('tasks', 'after_switch');
+      const localRow = await reader.loadRow({ table: 'tasks', rowId: 'local_1' });
+      const peerRow = await reader.loadRow({ table: 'tasks', rowId: 'peer_1' });
+      const switchedRow = await reader.loadRow({ table: 'tasks', rowId: 'after_switch' });
       await reader.disconnect();
 
       const dumpA = remoteA.dump();
@@ -645,13 +645,13 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('can detach from multiple adapters and later rejoin the old adapter with concurrent changes', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/packages/core/dist/index.js');
+      const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
 
       const adapterA = new MemoryAdapter();
       const adapterB = new MemoryAdapter();
 
-      const clientOne = new SyncEngine({
+      const clientOne = new Interocitor({
         remotePath: '/MeshRoundTrip',
         dbName: 'mesh-roundtrip-client-one',
         pollInterval: 600_000,
@@ -674,7 +674,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       const dumpBAfterAttach = adapterB.dump();
       await clientOne.setRemoteStorage(null);
 
-      const clientTwo = new SyncEngine(adapterA, {
+      const clientTwo = new Interocitor(adapterA, {
         remotePath: '/MeshRoundTrip',
         dbName: 'mesh-roundtrip-client-two',
         pollInterval: 600_000,
@@ -689,7 +689,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       await clientTwo.flush();
 
       await clientOne.put('tasks', 'from_one_late', { title: 'from first while detached' });
-      const offlineRow = await clientOne.get('tasks', 'from_one_late');
+      const offlineRow = await clientOne.loadRow({ table: 'tasks', rowId: 'from_one_late' });
 
       await clientOne.setRemoteStorage(adapterA);
       await clientOne.connect();
@@ -731,12 +731,12 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('direct-cloud compaction works and clients rehydrate from snapshot', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/packages/core/dist/index.js');
+      const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
 
       const shared = new MemoryAdapter();
 
-      const serverEngine = new SyncEngine(shared, {
+      const serverEngine = new Interocitor(shared, {
         remotePath: '/MeshCompact',
         pollInterval: 600_000,
         flushThreshold: 1,
@@ -756,14 +756,14 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
         req.onblocked = () => resolve();
       });
 
-      const clientEngine = new SyncEngine(shared, {
+      const clientEngine = new Interocitor(shared, {
         remotePath: '/MeshCompact',
         pollInterval: 600_000,
         deviceId: 'dev_client',
       });
       await clientEngine.init();
       await clientEngine.connect();
-      const row = await clientEngine.get('notes', 'n1');
+      const row = await clientEngine.loadRow({ table: 'notes', rowId: 'n1' });
       const dump = shared.dump();
       await clientEngine.disconnect();
 
@@ -779,10 +779,10 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('non-authorized client compaction is rejected in server-managed mode', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine } = await import('/packages/core/dist/index.js');
+      const { Interocitor } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
 
-      const engine = new SyncEngine(new MemoryAdapter(), {
+      const engine = new Interocitor(new MemoryAdapter(), {
         remotePath: '/MeshCompactReject',
         serverManaged: true,
         serverId: 'server_relay_1',
@@ -807,11 +807,11 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('constructor stays uninitialized until init/connect and lazy mesh config wins', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine, rowToPlain } = await import('/packages/core/dist/index.js');
+      const { Interocitor, rowToPlain } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
 
       const adapter = new MemoryAdapter();
-      const engine = new SyncEngine(adapter, {
+      const engine = new Interocitor(adapter, {
         dbName: 'lazy-config-db',
         appName: 'Test App',
         encrypted: false,
@@ -823,7 +823,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       await engine.connect();
       await engine.put('tasks', 'lazy_1', { title: 'configured before connect' });
       await engine.flush();
-      const row = await engine.get('tasks', 'lazy_1');
+      const row = await engine.loadRow({ table: 'tasks', rowId: 'lazy_1' });
       const deviceId = engine.getDeviceId();
       await engine.disconnect();
 
@@ -843,12 +843,12 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('resolveInitialState can supply mesh settings before first connect', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine, rowToPlain } = await import('/packages/core/dist/index.js');
+      const { Interocitor, rowToPlain } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
 
       const adapter = new MemoryAdapter();
       let calls = 0;
-      const engine = new SyncEngine(adapter, {
+      const engine = new Interocitor(adapter, {
         dbName: 'resolve-initial-db',
         appName: 'Test App',
         logLevel: 'debug',
@@ -861,7 +861,7 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
       await engine.connect();
       await engine.put('tasks', 'resolved_1', { title: 'resolved config' });
       await engine.flush();
-      const row = await engine.get('tasks', 'resolved_1');
+      const row = await engine.loadRow({ table: 'tasks', rowId: 'resolved_1' });
       await engine.disconnect();
 
       return {
@@ -880,10 +880,10 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
   test('configureMesh after init is rejected to prevent stale pairing state', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { SyncEngine } = await import('/packages/core/dist/index.js');
+      const { Interocitor } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
 
-      const engine = new SyncEngine(new MemoryAdapter(), {
+      const engine = new Interocitor(new MemoryAdapter(), {
         remotePath: '/FixedMesh',
         dbName: 'fixed-mesh-db',
         appName: 'Test App',

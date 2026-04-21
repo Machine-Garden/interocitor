@@ -295,6 +295,97 @@ export interface WhereClause {
   upperOpen?: boolean;
 }
 
+export interface QueryOrderBy {
+  field: string;
+  dir: 'asc' | 'desc';
+}
+
+export interface QueryDescriptor {
+  table: string;
+  clause?: WhereClause;
+  orderBy?: QueryOrderBy;
+}
+
+/** Identity of a single-row read. Lives next to QueryDescriptor on purpose. */
+export interface RowDescriptor {
+  table: string;
+  rowId: string;
+}
+
+export interface RowCacheSnapshot {
+  status: 'empty' | 'pending' | 'ready' | 'error';
+  promise: Promise<Row | undefined> | null;
+  /** `null` means "loaded, row absent/deleted". `undefined` means "no rows yet". */
+  row?: Row | null;
+  error?: Error;
+}
+
+export interface RowCacheOwner {
+  getRowCacheKey(descriptor: RowDescriptor): string;
+  loadRow(descriptor: RowDescriptor, options?: QueryExecutionOptions): Promise<Row | undefined>;
+  readRowCache(descriptor: RowDescriptor): RowCacheSnapshot;
+}
+
+export interface QueryExecutionOptions {
+  bypassCache?: boolean;
+}
+
+export interface QueryCacheSnapshot {
+  status: 'empty' | 'pending' | 'ready' | 'error';
+  promise: Promise<Row[]> | null;
+  rows?: Row[];
+  error?: Error;
+}
+
+export interface QueryCacheOwner {
+  getQueryCacheKey(descriptor: QueryDescriptor): string;
+  loadQueryRows(descriptor: QueryDescriptor, options?: QueryExecutionOptions): Promise<Row[]>;
+  readQueryCache(descriptor: QueryDescriptor): QueryCacheSnapshot;
+}
+
+export interface ReadinessAwareQueryExecutor extends QueryCacheOwner, RowCacheOwner {
+  isReady(): boolean;
+}
+
+export type QueryExecutionMode = 'default' | 'cache-first' | 'bypass-cache';
+
+export interface QueryExecutionPolicy {
+  mode?: QueryExecutionMode;
+}
+
+export interface QueryMetadata {
+  descriptor: QueryDescriptor;
+  cacheKey: string;
+}
+
+export interface QueryReadable<T extends Record<string, unknown>> {
+  load(options?: QueryExecutionOptions): Promise<T[]>;
+  peekCache(): T[] | undefined;
+  readonly metadata: QueryMetadata;
+}
+
+export interface QueryReadyReadable<T extends Record<string, unknown>> extends QueryReadable<T> {
+  readForRender(policy?: QueryExecutionPolicy): Promise<T[]> | T[];
+}
+
+export interface QueryRuntime<T extends Record<string, unknown>> {
+  owner: QueryCacheOwner;
+  metadata: QueryMetadata;
+  load: (options?: QueryExecutionOptions) => Promise<T[]>;
+}
+
+export interface QueryReadyRuntime<T extends Record<string, unknown>> extends QueryRuntime<T> {
+  owner: ReadinessAwareQueryExecutor;
+  readForRender: (policy?: QueryExecutionPolicy) => Promise<T[]> | T[];
+}
+
+export interface QuerySubscriber {
+  subscribe(cb: TableEventListener<any>): () => void;
+}
+
+export type QueryLifecycle<T extends Record<string, unknown>> = QueryRuntime<T> & QuerySubscriber;
+export type ReadyQueryLifecycle<T extends Record<string, unknown>> = QueryReadyRuntime<T> & QuerySubscriber;
+
 // ─── Snapshot ────────────────────────────────────────────────────────
 
 /**

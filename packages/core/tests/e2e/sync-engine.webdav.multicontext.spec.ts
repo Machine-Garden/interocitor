@@ -33,10 +33,10 @@ test('two isolated contexts sync via shared WebDAV route mock', async ({ browser
     await clearLocalDb(pageB);
 
     const written = await pageA.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/packages/core/dist/index.js');
+      const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
       const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
-      const engine = new SyncEngine(
+      const engine = new Interocitor(
         new WebDAVAdapter({
           baseUrl: `${location.origin}/__webdav__`,
           auth: { username: 'u', password: 'p' },
@@ -49,7 +49,7 @@ test('two isolated contexts sync via shared WebDAV route mock', async ({ browser
       await engine.put('tasks', 'task_1', { title: 'from context A' });
       await engine.flush();
 
-      const row = await engine.get('tasks', 'task_1');
+      const row = await engine.loadRow({ table: 'tasks', rowId: 'task_1' });
       await engine.disconnect();
 
       return row ? readColumn(row, 'title') : null;
@@ -58,10 +58,10 @@ test('two isolated contexts sync via shared WebDAV route mock', async ({ browser
     expect(written).toBe('from context A');
 
     const readOnB = await pageB.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/packages/core/dist/index.js');
+      const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
       const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
-      const engine = new SyncEngine(
+      const engine = new Interocitor(
         new WebDAVAdapter({
           baseUrl: `${location.origin}/__webdav__`,
           auth: { username: 'u', password: 'p' },
@@ -72,7 +72,7 @@ test('two isolated contexts sync via shared WebDAV route mock', async ({ browser
       await engine.init();
       await engine.connect();
 
-      const row = await engine.get('tasks', 'task_1');
+      const row = await engine.loadRow({ table: 'tasks', rowId: 'task_1' });
       const tableCount = (await engine.query('tasks')).length;
       await engine.disconnect();
 
@@ -114,10 +114,10 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
     await clearLocalDb(pageB);
 
     const firstPhase = await pageA.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/packages/core/dist/index.js');
+      const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
       const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
-      const engine = new SyncEngine({
+      const engine = new Interocitor({
         deviceId: 'ctx_roundtrip_a',
         remotePath: '/RoundTrip',
         dbName: 'roundtrip-a',
@@ -146,7 +146,7 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
       await engine.flush();
       await engine.setRemoteStorage(null);
 
-      const row = await engine.get('tasks', 'seed');
+      const row = await engine.loadRow({ table: 'tasks', rowId: 'seed' });
       await engine.disconnect();
       return row ? readColumn(row, 'title') : null;
     });
@@ -154,10 +154,10 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
     expect(firstPhase).toBe('seed offline');
 
     const secondClientWrite = await pageB.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/packages/core/dist/index.js');
+      const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
       const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
-      const engine = new SyncEngine(
+      const engine = new Interocitor(
         new WebDAVAdapter({
           baseUrl: `${location.origin}/__webdav_a__`,
           auth: { username: 'u', password: 'p' },
@@ -177,7 +177,7 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
       await engine.connect();
       await engine.put('tasks', 'from_two', { title: 'from old adapter' });
       await engine.flush();
-      const row = await engine.get('tasks', 'from_two');
+      const row = await engine.loadRow({ table: 'tasks', rowId: 'from_two' });
       await engine.disconnect();
       return row ? readColumn(row, 'title') : null;
     });
@@ -185,10 +185,10 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
     expect(secondClientWrite).toBe('from old adapter');
 
     const clientOneAfterRejoin = await pageA.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/packages/core/dist/index.js');
+      const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
       const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
-      const engine = new SyncEngine({
+      const engine = new Interocitor({
         deviceId: 'ctx_roundtrip_a',
         remotePath: '/RoundTrip',
         dbName: 'roundtrip-a',
@@ -215,10 +215,10 @@ test('isolated contexts can detach, switch WebDAV backends, and later rejoin the
     });
 
     const clientTwoAfterPull = await pageB.evaluate(async () => {
-      const { SyncEngine, readColumn } = await import('/packages/core/dist/index.js');
+      const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
       const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
-      const engine = new SyncEngine(
+      const engine = new Interocitor(
         new WebDAVAdapter({
           baseUrl: `${location.origin}/__webdav_a__`,
           auth: { username: 'u', password: 'p' },

@@ -70,7 +70,7 @@ export {
   WebAuthnCredentialStore,
   createCredentialStore,
 } from './storage/credential-store.ts';
-export { Table, QueryResult } from './core/table.ts';
+export { Table, QueryResult, RowResult } from './core/table.ts';
 export { types } from './core/schema-types.ts';
 
 // ─── Row utilities ────────────────────────────────────────────────────
@@ -119,6 +119,21 @@ export type {
   MergeFunction,
   MergeContext,
   TableMergeConfig,
+  QueryDescriptor,
+  QueryExecutionOptions,
+  QueryExecutionPolicy,
+  QueryMetadata,
+  QueryReadable,
+  QueryReadyReadable,
+  QueryCacheSnapshot,
+  QueryCacheOwner,
+  ReadinessAwareQueryExecutor,
+  QueryExecutionMode,
+  QueryRuntime,
+  QueryReadyRuntime,
+  RowDescriptor,
+  RowCacheSnapshot,
+  RowCacheOwner,
   WhereClause,
   WherePrimitive,
   WhereOperator,

@@ -27,11 +27,18 @@ import type {
   LocalStoreFactory,
   SyncInitialState,
   LogLevel,
+  QueryDescriptor,
+  QueryExecutionOptions,
+  QueryCacheSnapshot,
+  ReadinessAwareQueryExecutor,
+  RowDescriptor,
+  RowCacheSnapshot,
 } from './types.ts';
 
 import type { HLC } from './types.ts';
 import { hlcInit, hlcNow, hlcSerialize, hlcParse, hlcCompareStr } from './hlc.ts';
-import { Table } from './table.ts';
+import { Table, computeCacheKey } from './table.ts';
+import { readColumn } from './crdt.ts';
 import { LocalStore } from '../storage/local-store.ts';
 
 // Extracted modules
@@ -88,10 +95,10 @@ type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> = {
  *
  * db.table('other'); // TS error — 'other' is not keyof DB
  */
-export interface InterocitorInitContext<S extends Record<string, Record<string, unknown>>> {
+export interface InterocitorInitContext<S extends Record<string, Record<string, unknown>>>
+  extends ReadinessAwareQueryExecutor {
   put<K extends keyof S & string>(table: K, rowId: string, columns: Partial<S[K]>, userId?: string): Promise<S[K]>;
   delete<K extends keyof S & string>(table: K, rowId: string, userId?: string): Promise<void>;
-  get<K extends keyof S & string>(table: K, rowId: string): Promise<S[K] | undefined>;
   query<K extends keyof S & string>(table: K): Promise<S[K][]>;
   queryWhere<K extends keyof S & string>(table: K, clause: WhereClause): Promise<S[K][]>;
   table<K extends keyof S & string>(name: K): Table<S[K]>;
@@ -101,7 +108,41 @@ export interface InterocitorInitContext<S extends Record<string, Record<string, 
   isEncrypted(): boolean;
 }
 
-export class Interocitor<S extends Record<string, Record<string, unknown>>> {
+/**
+ * In-memory async query cache. Keyed by `QueryDescriptor.cacheKey`.
+ *
+ * Lives in core because cache identity is a core concern. React (or any other
+ * binding) only reads/subscribes; it does not own keys, fetches, or
+ * invalidation rules.
+ *
+ * Behavior:
+ *  - first request for a key starts a load and stores the in-flight promise
+ *    so concurrent requests dedupe to one fetch
+ *  - resolved rows are kept until invalidation
+ *  - any local change/delete on the descriptor's table marks all entries for
+ *    that table stale and triggers background revalidation; old rows stay
+ *    visible until the new load resolves (no "flash of absent data")
+ *  - bypassCache forces a fresh load and replaces the snapshot when ready
+ */
+type QueryCacheEntry = {
+  descriptor: QueryDescriptor;
+  status: 'pending' | 'ready' | 'error';
+  rows?: Row[];
+  error?: Error;
+  promise?: Promise<Row[]>;
+};
+
+type RowCacheEntry = {
+  descriptor: RowDescriptor;
+  status: 'pending' | 'ready' | 'error';
+  /** `null` means loaded-but-absent. `undefined` means never loaded. */
+  row?: Row | null;
+  error?: Error;
+  promise?: Promise<Row | undefined>;
+};
+
+export class Interocitor<S extends Record<string, Record<string, unknown>>>
+  implements ReadinessAwareQueryExecutor {
   declare readonly InitContext: InterocitorInitContext<S>;
   private adapter: StorageAdapter | null;
   private config: ResolvedSyncConfig<S>;
@@ -138,6 +179,16 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
   private listeners: Set<SyncEventListener> = new Set();
   private readonly schema?: DatabaseSchemaDefinition<S>;
   private readonly credentialStore: CredentialStore | null;
+
+  // Async query cache. cacheKey -> entry. See QueryCacheEntry doc above.
+  private queryCache: Map<string, QueryCacheEntry> = new Map();
+  // table name -> set of cache keys whose descriptors target that table.
+  private queryCacheByTable: Map<string, Set<string>> = new Map();
+
+  // Single-row cache. Mirrors queryCache 1:1 in shape and lifecycle.
+  // key = `r=table|id=rowId`. Same emit() chokepoint invalidates.
+  private rowCache: Map<string, RowCacheEntry> = new Map();
+  private rowCacheByTable: Map<string, Set<string>> = new Map();
 
   /**
    * Create a sync engine.
@@ -258,12 +309,6 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
     this.scheduleFlush();
   }
 
-  private async getNow<K extends keyof S & string>(table: K, rowId: string): Promise<S[K] | undefined> {
-    const row = await this.local.getRow(table as string, rowId);
-    if (!row || row._deleted) return undefined;
-    return row as unknown as S[K];
-  }
-
   private async queryNow<K extends keyof S & string>(table: K): Promise<S[K][]> {
     return this.local.getTable(table as string) as unknown as S[K][];
   }
@@ -272,11 +317,250 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
     return this.local.queryWhere(table as string, clause) as unknown as S[K][];
   }
 
+  // ── Query cache (async-only, descriptor-keyed) ─────────────────────
+
+  /** Public readiness signal. Used by render-time consumers to decide
+   *  between sync cache reads and awaiting a load. */
+  isReady(): boolean {
+    return this.initialized;
+  }
+
+  /** Stable cache key for a descriptor. Owned by core. */
+  getQueryCacheKey(descriptor: QueryDescriptor): string {
+    return computeCacheKey(descriptor);
+  }
+
+  /** Sync cache snapshot. Never starts a load. Empty/pending/ready/error. */
+  readQueryCache(descriptor: QueryDescriptor): QueryCacheSnapshot {
+    const key = this.getQueryCacheKey(descriptor);
+    const entry = this.queryCache.get(key);
+    if (!entry) return { status: 'empty', promise: null };
+    return {
+      status: entry.status,
+      promise: entry.promise ?? null,
+      rows: entry.rows,
+      error: entry.error,
+    };
+  }
+
+  /**
+   * Load rows through the cache.
+   *
+   * - If a snapshot exists and `bypassCache` is not set, dedupes to the
+   *   in-flight promise (when pending) or starts a refresh that keeps the
+   *   stale rows visible until it resolves.
+   * - When the engine is not yet ready, falls through `ensureReady()`; if
+   *   `bypassCache` is set, never returns the cached rows.
+   */
+  loadQueryRows(descriptor: QueryDescriptor, options?: QueryExecutionOptions): Promise<Row[]> {
+    const key = this.getQueryCacheKey(descriptor);
+    const existing = this.queryCache.get(key);
+
+    if (!options?.bypassCache && existing?.status === 'pending' && existing.promise) {
+      return existing.promise;
+    }
+    if (!options?.bypassCache && existing?.status === 'ready' && existing.rows) {
+      // Fast-path: hand back resolved rows without re-fetch.
+      // Callers that want freshness pass `bypassCache: true`.
+      return Promise.resolve(existing.rows);
+    }
+
+    return this.runQuery(descriptor, key);
+  }
+
+  private runQuery(descriptor: QueryDescriptor, key: string): Promise<Row[]> {
+    const promise = (async () => {
+      await this.ensureReady();
+      const rows = descriptor.clause
+        ? await this.local.queryWhere(descriptor.table, descriptor.clause)
+        : await this.local.getTable(descriptor.table);
+      // Apply deterministic orderBy from descriptor, so cache stores already-
+      // ordered rows. Sync-only `.sort(compareFn)` derivations stay outside
+      // and run after the cache hand-off.
+      if (!descriptor.orderBy) return rows;
+      const { field, dir } = descriptor.orderBy;
+      const sorted = [...rows].sort((a, b) => {
+        const av = readColumn(a, field);
+        const bv = readColumn(b, field);
+        if (av === bv) return 0;
+        const lt = (av as any) < (bv as any) ? -1 : 1;
+        return dir === 'asc' ? lt : -lt;
+      });
+      return sorted;
+    })();
+
+    const previous = this.queryCache.get(key);
+    const entry: QueryCacheEntry = {
+      descriptor,
+      status: 'pending',
+      rows: previous?.rows, // keep stale rows visible while refreshing
+      promise,
+    };
+    this.queryCache.set(key, entry);
+    this.indexCacheByTable(descriptor.table, key);
+
+    promise.then(rows => {
+      const current = this.queryCache.get(key);
+      if (current?.promise !== promise) return; // superseded
+      this.queryCache.set(key, { descriptor, status: 'ready', rows });
+    }).catch(err => {
+      const current = this.queryCache.get(key);
+      if (current?.promise !== promise) return;
+      this.queryCache.set(key, {
+        descriptor,
+        status: 'error',
+        error: err instanceof Error ? err : new Error(String(err)),
+        rows: current.rows,
+      });
+    });
+
+    return promise;
+  }
+
+  private indexCacheByTable(table: string, key: string): void {
+    let set = this.queryCacheByTable.get(table);
+    if (!set) {
+      set = new Set();
+      this.queryCacheByTable.set(table, set);
+    }
+    set.add(key);
+  }
+
+  /**
+   * Mark all cached queries against `table` as stale and refresh them in the
+   * background. Stale rows stay visible. Called from local mutations.
+   */
+  private invalidateQueryCacheForTable(table: string): void {
+    const keys = this.queryCacheByTable.get(table);
+    if (!keys || keys.size === 0) return;
+    for (const key of keys) {
+      const entry = this.queryCache.get(key);
+      if (!entry) continue;
+      this.runQuery(entry.descriptor, key);
+    }
+  }
+
+  // ── Row cache (async-only, descriptor-keyed) ───────────────────────
+  // Same shape and semantics as the query cache. Kept as a separate map so
+  // single-row reads don't compete with table scans.
+
+  /** Stable cache key for a row descriptor. Owned by core. */
+  getRowCacheKey(descriptor: RowDescriptor): string {
+    return `r=${descriptor.table}|id=${descriptor.rowId}`;
+  }
+
+  /** Sync row cache snapshot. Never starts a load. */
+  readRowCache(descriptor: RowDescriptor): RowCacheSnapshot {
+    const key = this.getRowCacheKey(descriptor);
+    const entry = this.rowCache.get(key);
+    if (!entry) return { status: 'empty', promise: null };
+    return {
+      status: entry.status,
+      promise: entry.promise ?? null,
+      row: entry.row,
+      error: entry.error,
+    };
+  }
+
+  /**
+   * Load a row through the cache. Same dedupe + stale-while-revalidate
+   * semantics as `loadQueryRows`.
+   */
+  loadRow(descriptor: RowDescriptor, options?: QueryExecutionOptions): Promise<Row | undefined> {
+    const key = this.getRowCacheKey(descriptor);
+    const existing = this.rowCache.get(key);
+
+    if (!options?.bypassCache && existing?.status === 'pending' && existing.promise) {
+      return existing.promise;
+    }
+    if (!options?.bypassCache && existing?.status === 'ready') {
+      return Promise.resolve(existing.row ?? undefined);
+    }
+
+    return this.runRow(descriptor, key);
+  }
+
+  private runRow(descriptor: RowDescriptor, key: string): Promise<Row | undefined> {
+    const promise = (async () => {
+      await this.ensureReady();
+      const row = await this.local.getRow(descriptor.table, descriptor.rowId);
+      if (!row || row._deleted) return undefined;
+      return row;
+    })();
+
+    const previous = this.rowCache.get(key);
+    const entry: RowCacheEntry = {
+      descriptor,
+      status: 'pending',
+      row: previous?.row, // keep stale row visible while refreshing
+      promise,
+    };
+    this.rowCache.set(key, entry);
+    this.indexRowCacheByTable(descriptor.table, key);
+
+    promise.then(row => {
+      const current = this.rowCache.get(key);
+      if (current?.promise !== promise) return;
+      this.rowCache.set(key, { descriptor, status: 'ready', row: row ?? null });
+    }).catch(err => {
+      const current = this.rowCache.get(key);
+      if (current?.promise !== promise) return;
+      this.rowCache.set(key, {
+        descriptor,
+        status: 'error',
+        error: err instanceof Error ? err : new Error(String(err)),
+        row: current.row,
+      });
+    });
+
+    return promise;
+  }
+
+  private indexRowCacheByTable(table: string, key: string): void {
+    let set = this.rowCacheByTable.get(table);
+    if (!set) {
+      set = new Set();
+      this.rowCacheByTable.set(table, set);
+    }
+    set.add(key);
+  }
+
+  /**
+   * Refresh all cached rows for a table. Called from emit() alongside the
+   * query cache invalidation. Keeps prior row visible while in-flight.
+   *
+   * Table-wide invalidation is intentional: Interocitor targets rare-update
+   * workloads, not realtime state streams. The over-fetch on a write is a
+   * fixed-cost reload of cached rows for that one table — cheap, simple,
+   * and matches the query cache strategy. Finer-grained per-rowId
+   * invalidation can be added later without changing this contract.
+   */
+  private invalidateRowCacheForTable(table: string): void {
+    const keys = this.rowCacheByTable.get(table);
+    if (!keys || keys.size === 0) return;
+    for (const key of keys) {
+      const entry = this.rowCache.get(key);
+      if (!entry) continue;
+      this.runRow(entry.descriptor, key);
+    }
+  }
+
   private get initContext(): InterocitorInitContext<S> {
     return {
       put: this.putNow.bind(this),
       delete: this.deleteNow.bind(this),
-      get: this.getNow.bind(this),
+      // Cache APIs (ReadinessAwareQueryExecutor). Init-time tables need them
+      // because Table constructors and Table.row()/Table.query() resolve
+      // through engine.getQueryCacheKey / readQueryCache / loadQueryRows
+      // (and row equivalents). Without these, onInit handlers calling
+      // ctx.table(x).row(id) crash at construction time.
+      isReady: this.isReady.bind(this),
+      getQueryCacheKey: this.getQueryCacheKey.bind(this),
+      readQueryCache: this.readQueryCache.bind(this),
+      loadQueryRows: this.loadQueryRows.bind(this),
+      getRowCacheKey: this.getRowCacheKey.bind(this),
+      readRowCache: this.readRowCache.bind(this),
+      loadRow: this.loadRow.bind(this),
       query: this.queryNow.bind(this),
       queryWhere: this.queryWhereNow.bind(this),
       table: <K extends keyof S & string>(name: K) => new Table(this.initContext as any, name),
@@ -453,6 +737,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
   }
 
   private emit(event: SyncEvent): void {
+    // Single chokepoint for cache invalidation. Local mutations and remote
+    // pull both flow through emit(); both invalidate query cache for the
+    // affected table the same way. Local mutations also pre-invalidate so
+    // synchronous reads after `put`/`delete` see fresh data.
+    if (event.type === 'change' || event.type === 'delete') {
+      this.invalidateQueryCacheForTable(event.table);
+      this.invalidateRowCacheForTable(event.table);
+    }
     for (const listener of this.listeners) {
       try { listener(event); } catch { /* don't let listener errors break sync */ }
     }
@@ -811,10 +1103,6 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
     return this.deleteNow(table, rowId, userId);
   }
 
-  async get<K extends keyof S & string>(table: K, rowId: string): Promise<S[K] | undefined> {
-    await this.ensureReady();
-    return this.getNow(table, rowId);
-  }
 
   async query<K extends keyof S & string>(table: K): Promise<S[K][]> {
     await this.ensureReady();

@@ -12,7 +12,7 @@
  *
  * Validates:
  *   - deviceId / meshId lifecycle
- *   - passphrase handling via SyncEngine config and credentials
+ *   - passphrase handling via Interocitor config and credentials
  *   - database isolation across meshes (different remotePath + dbName)
  *   - no unintentional data leakage between teams
  *   - passphrase survival across reconnects (lost passphrase == lost data)
@@ -93,7 +93,7 @@ test.describe('Multi-device pairing flow', () => {
       // ──────────────────────────────────────────────────────────────
 
       const step1 = await page1.evaluate(async () => {
-        const { SyncEngine, readColumn } = await import('/packages/core/dist/index.js');
+        const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
         const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
         const adapter = new WebDAVAdapter({
@@ -101,7 +101,7 @@ test.describe('Multi-device pairing flow', () => {
           auth: { username: 'u', password: 'p' },
         });
 
-        const engine = new SyncEngine(adapter, {
+        const engine = new Interocitor(adapter, {
           remotePath: '/TeamAlpha',
           dbName: 'team-alpha',
           deviceId: 'device_1',
@@ -184,7 +184,7 @@ test.describe('Multi-device pairing flow', () => {
         }),
         // Device 2: scan and join.
         page2.evaluate(async (payload: any) => {
-          const { SyncEngine, readColumn, handleScannedQR } =
+          const { Interocitor, readColumn, handleScannedQR } =
             await import('/packages/core/dist/index.js');
           const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
@@ -203,7 +203,7 @@ test.describe('Multi-device pairing flow', () => {
 
           if (!credentials) return { error: 'no credentials' };
 
-          const engine = new SyncEngine(adapter, {
+          const engine = new Interocitor(adapter, {
             remotePath: credentials.remotePath,
             dbName: 'team-alpha',
             deviceId: 'device_2',
@@ -244,7 +244,7 @@ test.describe('Multi-device pairing flow', () => {
 
       // Device 3: setup team-beta + generate share QR
       const step3_qr = await page3.evaluate(async () => {
-        const { SyncEngine, generateShareQR } = await import('/packages/core/dist/index.js');
+        const { Interocitor, generateShareQR } = await import('/packages/core/dist/index.js');
         const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
         const adapter = new WebDAVAdapter({
@@ -252,7 +252,7 @@ test.describe('Multi-device pairing flow', () => {
           auth: { username: 'u', password: 'p' },
         });
 
-        const engine = new SyncEngine(adapter, {
+        const engine = new Interocitor(adapter, {
           remotePath: '/TeamBeta',
           dbName: 'team-beta',
           deviceId: 'device_3',
@@ -294,7 +294,7 @@ test.describe('Multi-device pairing flow', () => {
       const [, step3_device2] = await Promise.all([
         page3.evaluate(async () => { await (window as any).__hsComplete(); }),
         page2.evaluate(async (payload: any) => {
-          const { SyncEngine, readColumn, handleScannedQR } =
+          const { Interocitor, readColumn, handleScannedQR } =
             await import('/packages/core/dist/index.js');
           const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
@@ -314,7 +314,7 @@ test.describe('Multi-device pairing flow', () => {
           if (!credentials) return { error: 'no credentials' };
 
           // DIFFERENT dbName — team-beta is a separate database.
-          const engine = new SyncEngine(adapter, {
+          const engine = new Interocitor(adapter, {
             remotePath: credentials.remotePath,
             dbName: 'team-beta',
             deviceId: 'device_2',
@@ -333,7 +333,7 @@ test.describe('Multi-device pairing flow', () => {
           await engine.disconnect();
 
           // Verify isolation: team-alpha local DB is untouched.
-          const alphaEngine = new SyncEngine(new (await import('/packages/core/dist/adapters/webdav.js')).WebDAVAdapter({
+          const alphaEngine = new Interocitor(new (await import('/packages/core/dist/adapters/webdav.js')).WebDAVAdapter({
             baseUrl: `${location.origin}/__dav_alpha__`,
             auth: { username: 'u', password: 'p' },
           }), {
@@ -371,14 +371,14 @@ test.describe('Multi-device pairing flow', () => {
       // ──────────────────────────────────────────────────────────────
 
       const step4 = await page2.evaluate(async (passArg: string) => {
-        const { SyncEngine, readColumn } = await import('/packages/core/dist/index.js');
+        const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
         const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
         const adapter = new WebDAVAdapter({
           baseUrl: `${location.origin}/__dav_alpha__`,
           auth: { username: 'u', password: 'p' },
         });
-        const engine = new SyncEngine(adapter, {
+        const engine = new Interocitor(adapter, {
           remotePath: '/TeamAlpha',
           dbName: 'team-alpha',
           deviceId: 'device_2',
@@ -408,14 +408,14 @@ test.describe('Multi-device pairing flow', () => {
 
       // Verify Device 1 sees the new row.
       const step4_verify = await page1.evaluate(async (passArg: string) => {
-        const { SyncEngine, readColumn } = await import('/packages/core/dist/index.js');
+        const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
         const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
         const adapter = new WebDAVAdapter({
           baseUrl: `${location.origin}/__dav_alpha__`,
           auth: { username: 'u', password: 'p' },
         });
-        const engine = new SyncEngine(adapter, {
+        const engine = new Interocitor(adapter, {
           remotePath: '/TeamAlpha',
           dbName: 'team-alpha',
           deviceId: 'device_1',
@@ -470,7 +470,7 @@ test.describe('Multi-device pairing flow', () => {
       const [, step5_device4] = await Promise.all([
         page2.evaluate(async () => { await (window as any).__hsComplete(); }),
         page4.evaluate(async (payload: any) => {
-          const { SyncEngine, readColumn, handleScannedQR } =
+          const { Interocitor, readColumn, handleScannedQR } =
             await import('/packages/core/dist/index.js');
           const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
@@ -489,7 +489,7 @@ test.describe('Multi-device pairing flow', () => {
 
           if (!credentials) return { error: 'no credentials' };
 
-          const engine = new SyncEngine(adapter, {
+          const engine = new Interocitor(adapter, {
             remotePath: credentials.remotePath,
             dbName: 'team-alpha',
             deviceId: 'device_4',

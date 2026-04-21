@@ -43,8 +43,8 @@
   "scripts": {
     "build": "rm -rf ./dist && tsc -p tsconfig.json",
     "validate": "node ./dist/index.js",
-    "test:e2e": "yarn exec playwright test -c ./playwright.config.ts",
-    "test:e2e:todo": "yarn exec playwright test -c ./playwright.config.ts tests/e2e/todo-webdav.spec.ts"
+    "test:e2e": "yarn build && yarn exec playwright test -c ./playwright.config.ts",
+    "test:e2e:todo": "yarn build && yarn exec playwright test -c ./playwright.config.ts tests/e2e/todo-webdav.spec.ts"
   },
   "keywords": [
     "local-first",

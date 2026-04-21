@@ -30,17 +30,22 @@ import { Interocitor } from '@interocitor/core';
 import { WebDAVAdapter } from '@interocitor/core/adapters/webdav';
 
 const db = new Interocitor({
-  remotePath: '/MyApp',
   dbName: 'my-app',
   appName: 'My App',
+  logLevel: 'debug',
   // encrypted by default; set encrypted: false to opt out
 });
 
-// local-only usage works immediately
+await db.init();
+
+// local-only usage works after init
 const id = await db.table('todos').add({
   text: 'Ship privacy-first sync',
   done: false,
 }, { prefix: 'todo' });
+
+// configure mesh before first remote connect
+db.configureMesh({ remotePath: '/MyApp', encrypted: true });
 
 // attach transport later, when app/backend is ready
 await db.setRemoteStorage(new WebDAVAdapter({
@@ -69,6 +74,7 @@ flowchart LR
 
 ```ts
 const db = new Interocitor({ dbName: 'my-app', appName: 'My App', schema });
+await db.init();
 
 await db.table('tasks').add({ title: 'Ship it', done: false }, { prefix: 'task' });
 await db.table('tasks').patch(taskId, { done: true });
@@ -80,9 +86,14 @@ await db.table('tasks').where('done').equals(false).orderBy('title');
 await db.connect();
 await db.secureWithBiometrics();
 await db.restoreWithBiometrics();
-```
+``` 
 
-No `await db.init()` — initialization is automatic.
+`init()` is explicit. `connect()` will auto-init if needed, but app code should treat engine setup as:
+
+1. create engine
+2. optionally `configureMesh(...)` or provide `resolveInitialState(...)`
+3. attach remote adapter
+4. `connect()`
 
 ## Schema typing
 
@@ -136,6 +147,7 @@ Every read and write hits the local store. No network required.
 | Operation | Network? |
 | --- | --- |
 | `new Interocitor()` | No |
+| `init()` | No |
 | `table.add()` | No |
 | `table.patch()` / `table.replace()` | No |
 | `table.delete()` | No |
@@ -210,6 +222,7 @@ const db = new Interocitor({
   encrypted: false,
   schema,
 });
+await db.init();
 
 const rows = await db.table('weekPlans').query();
 ```

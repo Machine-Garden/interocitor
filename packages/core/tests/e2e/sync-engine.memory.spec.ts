@@ -804,5 +804,104 @@ test.describe('SyncEngine protocol (MemoryAdapter)', () => {
 
     expect(result).toContain('authorized server writer');
   });
+
+  test('constructor stays uninitialized until init/connect and lazy mesh config wins', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { SyncEngine, rowToPlain } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      const adapter = new MemoryAdapter();
+      const engine = new SyncEngine(adapter, {
+        dbName: 'lazy-config-db',
+        appName: 'Test App',
+        encrypted: false,
+        logLevel: 'debug',
+      });
+
+      const dumpBeforeInit = Object.keys(adapter.dump());
+      engine.configureMesh({ remotePath: '/LazyMesh', encrypted: false, deviceId: 'dev_lazy' });
+      await engine.connect();
+      await engine.put('tasks', 'lazy_1', { title: 'configured before connect' });
+      await engine.flush();
+      const row = await engine.get('tasks', 'lazy_1');
+      const deviceId = engine.getDeviceId();
+      await engine.disconnect();
+
+      return {
+        dumpBeforeInit,
+        dumpAfterConnect: Object.keys(adapter.dump()),
+        deviceId,
+        title: row ? rowToPlain(row).title : null,
+      };
+    });
+
+    expect(result.dumpBeforeInit).toEqual([]);
+    expect(result.dumpAfterConnect).toContain('/LazyMesh/manifest.json');
+    expect(result.deviceId).toBe('dev_lazy');
+    expect(result.title).toBe('configured before connect');
+  });
+
+  test('resolveInitialState can supply mesh settings before first connect', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { SyncEngine, rowToPlain } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      const adapter = new MemoryAdapter();
+      let calls = 0;
+      const engine = new SyncEngine(adapter, {
+        dbName: 'resolve-initial-db',
+        appName: 'Test App',
+        logLevel: 'debug',
+        resolveInitialState: async () => {
+          calls += 1;
+          return { remotePath: '/ResolvedMesh', encrypted: false, deviceId: 'dev_resolved' };
+        },
+      });
+
+      await engine.connect();
+      await engine.put('tasks', 'resolved_1', { title: 'resolved config' });
+      await engine.flush();
+      const row = await engine.get('tasks', 'resolved_1');
+      await engine.disconnect();
+
+      return {
+        calls,
+        files: Object.keys(adapter.dump()),
+        deviceId: engine.getDeviceId(),
+        title: row ? rowToPlain(row).title : null,
+      };
+    });
+
+    expect(result.calls).toBe(1);
+    expect(result.files).toContain('/ResolvedMesh/manifest.json');
+    expect(result.deviceId).toBe('dev_resolved');
+    expect(result.title).toBe('resolved config');
+  });
+
+  test('configureMesh after init is rejected to prevent stale pairing state', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { SyncEngine } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      const engine = new SyncEngine(new MemoryAdapter(), {
+        remotePath: '/FixedMesh',
+        dbName: 'fixed-mesh-db',
+        appName: 'Test App',
+        encrypted: false,
+      });
+
+      await engine.init();
+      try {
+        engine.configureMesh({ remotePath: '/OtherMesh', encrypted: false });
+        return 'no-error';
+      } catch (error: any) {
+        return String(error?.message ?? error);
+      } finally {
+        await engine.disconnect();
+      }
+    });
+
+    expect(result).toContain('Cannot configure mesh after init()');
+  });
 });
 

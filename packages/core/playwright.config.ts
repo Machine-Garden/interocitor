@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 
 const PORT = Number(process.env.PLAYWRIGHT_WEBDAV_PORT || '4174');
-const serverEntry = fileURLToPath(new URL('../interocitor-webdav/server.mjs', import.meta.url));
+const serverEntry = fileURLToPath(new URL('../webdav/server.mjs', import.meta.url));
 
 export default defineConfig({
   testDir: './tests/e2e',

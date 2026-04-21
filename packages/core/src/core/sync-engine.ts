@@ -24,6 +24,9 @@ import type {
   DatabaseSchemaDefinition,
   WhereClause,
   ReplicaConfig,
+  LocalStoreFactory,
+  SyncInitialState,
+  LogLevel,
 } from './types.ts';
 
 import type { HLC } from './types.ts';
@@ -32,7 +35,7 @@ import { Table } from './table.ts';
 import { LocalStore } from '../storage/local-store.ts';
 
 // Extracted modules
-import { paths, log, generateId, getDeviceId, ROW_META_KEYS } from './internals.ts';
+import { paths, logAtLevel, normalizeLogLevel, generateId, getDeviceId, ROW_META_KEYS } from './internals.ts';
 import type { CodecState } from './codec.ts';
 import { loadOrCreateManifest, upsertDeviceMetadata } from './manifest.ts';
 import { generateKey, keyToPassphrase, passphraseToKey } from '../crypto/encryption.ts';
@@ -44,14 +47,22 @@ import { compact as doCompact, rehydrate as doRehydrate } from './compaction.ts'
 
 // ─── Config ──────────────────────────────────────────────────────────
 
-type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> =
-  Omit<Required<SyncConfig<S>>, 'schema' | 'replicas' | 'passphrase' | 'encrypted' | 'deviceId' | 'deviceName' | 'deviceType' | 'credentialStore' | 'appName' | 'onInit'> & {
-    schema?: DatabaseSchemaDefinition<S>;
-    replicas: ReplicaConfig[];
-    onInit?: SyncConfig<S>['onInit'];
-    deviceName?: string;
-    deviceType?: import('./types.ts').DeviceType;
-  };
+type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> = {
+  remotePath?: string;
+  serverManaged: boolean;
+  serverId: string;
+  pollInterval: number;
+  flushDebounce: number;
+  flushThreshold: number;
+  dbName: string;
+  localStoreFactory: LocalStoreFactory;
+  schema?: DatabaseSchemaDefinition<S>;
+  replicas: ReplicaConfig[];
+  onInit?: SyncConfig<S>['onInit'];
+  resolveInitialState?: SyncConfig<S>['resolveInitialState'];
+  deviceName?: string;
+  deviceType?: import('./types.ts').DeviceType;
+};
 
 // ─── Sync Engine ─────────────────────────────────────────────────────
 
@@ -120,7 +131,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
   // Lifecycle state
   private initialized = false;
   private connected = false;
-  private readonly initPromise: Promise<void>;
+  private initPromise: Promise<void> | null = null;
+  private readonly logLevel: LogLevel;
 
   // Event listeners
   private listeners: Set<SyncEventListener> = new Set();
@@ -163,9 +175,11 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
       localStoreFactory: config.localStoreFactory ?? (() => new LocalStore(config.dbName, undefined, config.schema)),
       schema: config.schema,
       replicas: config.replicas ?? [],
-      onInit: config.onInit
+      onInit: config.onInit,
+      resolveInitialState: config.resolveInitialState,
     };
     this.serverId = this.config.serverId;
+    this.logLevel = normalizeLogLevel(config.logLevel);
     this.local = this.config.localStoreFactory();
     this.deviceId = getDeviceId(config.deviceId);
     this.hlc = hlcInit(this.deviceId);
@@ -181,11 +195,16 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
       // Will generate key in doInit() if no persisted key found
     }
 
-    this.initPromise = this.doInit();
+  }
+
+  private log(level: LogLevel, ...args: unknown[]): void {
+    logAtLevel(this.logLevel, level, ...args);
   }
 
   /** Await this before any storage operation. Returns the shared init promise. */
   private ensureReady(): Promise<void> {
+    if (this.initialized) return Promise.resolve();
+    if (!this.initPromise) this.initPromise = this.doInit();
     return this.initPromise;
   }
 
@@ -212,6 +231,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
     row._owner = this.deviceId;
 
     await this.local.putRow(row);
+    const op = this.rowToSyncOp(row);
+    const hlc = this.getRowHlc(row);
+    if (op && hlc) await this.local.pushOutbox(this.buildChangeEntry(op, hlc));
     this.knownTables.add(tableName);
 
     this.emit({ type: 'change', table: tableName, rowId, row });
@@ -229,6 +251,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
     current._deleted = true;
     current._deletedHlc = hlcSerialize(nextHlc);
     await this.local.putRow(current);
+    const op = this.rowToSyncOp(current);
+    const hlc = this.getRowHlc(current);
+    if (op && hlc) await this.local.pushOutbox(this.buildChangeEntry(op, hlc));
     this.emit({ type: 'delete', table: tableName, rowId });
     this.scheduleFlush();
   }
@@ -272,6 +297,11 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
     return this.adapter;
   }
 
+  private requireRemotePath(operation: string): string {
+    if (!this.config.remotePath) throw new Error(`${operation} requires remotePath; configure mesh before connecting`);
+    return this.config.remotePath;
+  }
+
   private get codecState(): CodecState {
     return {
       encryptionKey: this.encryptionKey,
@@ -283,7 +313,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
   private get manifestContext(): ManifestContext {
     return {
       adapter: this.requireAdapter('manifest'),
-      remotePath: this.config.remotePath,
+      remotePath: this.requireRemotePath('manifest'),
       serverId: this.serverId,
       serverManaged: this.config.serverManaged,
       deviceId: this.deviceId,
@@ -468,14 +498,41 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
     await this.persistCredentials();
   }
 
+  private applyInitialState(state: SyncInitialState | null | undefined): void {
+    if (!state) return;
+    if (state.deviceId) {
+      this.deviceId = state.deviceId;
+      this.hlc.nodeId = state.deviceId;
+    }
+    if (state.remotePath !== undefined) {
+      this.config.remotePath = state.remotePath;
+    }
+    if (state.encrypted !== undefined) {
+      this.encrypted = state.encrypted;
+      if (!state.encrypted) {
+        this.passphrase = null;
+        this.encryptionKey = null;
+      }
+    }
+    if (state.passphrase !== undefined) {
+      this.passphrase = state.passphrase;
+      this.encryptionKey = null;
+      if (state.passphrase !== null) this.encrypted = true;
+    }
+  }
+
+  configureMesh(state: SyncInitialState): void {
+    if (this.connected) throw new Error('Cannot configure mesh while connected');
+    if (this.initialized) throw new Error('Cannot configure mesh after init(); create a new engine or configure before connect');
+    this.applyInitialState(state);
+  }
+
   /**
    * Set the mesh encryption passphrase.
    * Call before init() or between disconnect() and init().
    */
   setPassphrase(passphrase: string): void {
-    this.passphrase = passphrase;
-    this.encrypted = true;
-    this.encryptionKey = null; // re-derived in init()
+    this.configureMesh({ passphrase, encrypted: true });
   }
 
   /**
@@ -543,36 +600,39 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
 
   // ── Lifecycle ──────────────────────────────────────────────────────
 
+  async init(): Promise<void> {
+    await this.ensureReady();
+  }
+
   private async doInit(): Promise<void> {
-    log('debug', 'init() — opening local store', { dbName: this.config.dbName, encrypted: this.encrypted });
+    this.log('debug', 'init() — opening local store', { dbName: this.config.dbName, encrypted: this.encrypted, remotePath: this.config.remotePath });
     try {
       await this.local.open();
-    } catch (err) {
-      log('error', 'init() — local store open failed', err);
-      throw err;
-    }
-    if (this.schema) {
-      await this.local.setMeta('schema:version', this.schema.version);
-    }
+      if (this.schema) {
+        await this.local.setMeta('schema:version', this.schema.version);
+      }
 
-    // Recover credentials from the silent primary store only.
-    // No biometric prompt during normal init.
-    await this.restoreCredentials();
+      const initialState = await this.config.resolveInitialState?.();
+      this.applyInitialState(initialState ?? null);
 
-    // Resolve encryption: derive key from passphrase, load persisted, or generate.
-    await this.resolveEncryption();
+      // Recover credentials from the silent primary store only.
+      // No biometric prompt during normal init.
+      await this.restoreCredentials();
 
-    log('debug', 'init() — loading local state (table names, HLC)');
-    try {
+      // Resolve encryption: derive key from passphrase, load persisted, or generate.
+      await this.resolveEncryption();
+
+      this.log('debug', 'init() — loading local state (table names, HLC)');
       await this.loadLocalState();
+      this.log('debug', 'init() — complete', { knownTables: Array.from(this.knownTables) });
+      this.initialized = true;
+      if (this.config.onInit) {
+        await this.config.onInit(this.initContext);
+      }
     } catch (err) {
-      log('error', 'init() — loadLocalState failed', err);
+      this.log('error', 'init() — failed', err);
+      this.initPromise = null;
       throw err;
-    }
-    log('debug', 'init() — complete', { knownTables: Array.from(this.knownTables) });
-    this.initialized = true;
-    if (this.config.onInit) {
-      await this.config.onInit(this.initContext);
     }
   }
 
@@ -599,36 +659,37 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
 
   async connect(): Promise<void> {
     await this.ensureReady();
+    if (!this.config.remotePath) throw new Error('connect() requires remotePath; configure mesh before connecting');
 
     const adapter = this.requireAdapter('connect()');
 
-    log('debug', 'connect() — authenticating with adapter', { adapter: adapter.name });
+    this.log('debug', 'connect() — authenticating with adapter', { adapter: adapter.name });
     if (!adapter.isAuthenticated()) {
       this.emit({ type: 'auth:required' });
       try { await adapter.authenticate(); } catch (err) {
-        log('error', 'connect() — authentication failed', err);
+        this.log('error', 'connect() — authentication failed', err);
         throw err;
       }
       this.emit({ type: 'auth:complete' });
     }
 
     const p = paths(this.config.remotePath);
-    log('debug', 'connect() — ensuring remote folders', { remotePath: this.config.remotePath, deviceId: this.deviceId });
+    this.log('debug', 'connect() — ensuring remote folders', { remotePath: this.config.remotePath, deviceId: this.deviceId });
     for (const folder of [this.config.remotePath, p.devicesFolder, p.mainlineFolder, p.changesFolder]) {
       try {
         await adapter.ensureFolder(folder);
-        log('debug', 'connect() — ensureFolder ok', folder);
+        this.log('debug', 'connect() — ensureFolder ok', folder);
       } catch (err) {
-        log('error', 'connect() — ensureFolder failed', folder, err);
+        this.log('error', 'connect() — ensureFolder failed', folder, err);
         throw err;
       }
     }
 
-    log('debug', 'connect() — loading/creating manifest');
+    this.log('debug', 'connect() — loading/creating manifest');
     try {
       await this.doLoadOrCreateManifest();
     } catch (err) {
-      log('error', 'connect() — loadOrCreateManifest failed', err);
+      this.log('error', 'connect() — loadOrCreateManifest failed', err);
       throw err;
     }
 
@@ -640,20 +701,20 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
     const localEpochRaw = await this.local.getMeta('epoch');
     const localEpoch = typeof localEpochRaw === 'number' ? localEpochRaw : 0;
     const remoteEpoch = this.manifest?.epoch ?? 0;
-    log('debug', 'connect() — epoch check', { localEpoch, remoteEpoch });
+    this.log('debug', 'connect() — epoch check', { localEpoch, remoteEpoch });
 
     if (localEpoch < remoteEpoch) {
-      log('debug', 'connect() — epoch advanced, rehydrating from snapshot');
+      this.log('debug', 'connect() — epoch advanced, rehydrating from snapshot');
       await this.rehydrate();
     } else {
-      log('debug', 'connect() — running initial pull');
+      this.log('debug', 'connect() — running initial pull');
       await this.pull();
     }
     await this.doFlush();
 
     this.startPolling();
     this.connected = true;
-    log('info', 'connect() — connected', { remotePath: this.config.remotePath, deviceId: this.deviceId, pollInterval: this.config.pollInterval });
+    this.log('info', 'connect() — connected', { remotePath: this.config.remotePath, deviceId: this.deviceId, pollInterval: this.config.pollInterval });
 
     if (typeof window !== 'undefined') {
       window.addEventListener('visibilitychange', () => {
@@ -672,11 +733,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
     this.local.close();
     this.connected = false;
     this.initialized = false;
+    this.initPromise = null;
     this.remotePoisonError = null;
   }
 
   async setRemoteStorage(adapter: StorageAdapter | null): Promise<void> {
     await this.ensureReady();
+    this.log('debug', 'setRemoteStorage()', { adapter: adapter?.name ?? null, remotePath: this.config.remotePath });
     const wasConnected = this.connected;
     const hadAdapter = this.adapter !== null;
 
@@ -802,30 +865,30 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
     const entries = await this.local.drainOutbox();
     if (entries.length === 0) return;
 
-    log('debug', 'flush() — start', { entryCount: entries.length });
+    this.log('debug', 'flush() — start', { entryCount: entries.length });
     this.emit({ type: 'flush:start', entryCount: entries.length });
     this.pendingCount = 0;
     this.clearScheduledFlush();
 
     try {
       await this.doLoadOrCreateManifest();
-      await flushToAdapter(this.adapter, this.config.remotePath, entries, true, this.codecState, this.deviceId);
+      await flushToAdapter(this.adapter, this.requireRemotePath('flush()'), entries, true, this.codecState, this.deviceId);
 
       for (const replica of this.config.replicas) {
         try {
-          const replicaRoot = replica.remotePath ?? this.config.remotePath;
+          const replicaRoot = replica.remotePath ?? this.requireRemotePath('flush() replica');
           if (!replica.adapter.isAuthenticated()) await replica.adapter.authenticate();
           await flushToAdapter(replica.adapter, replicaRoot, entries, false, this.codecState, this.deviceId);
         } catch (err) {
-          log('warn', 'flush() — replica write failed', { adapter: replica.adapter.name }, err);
+          this.log('warn', 'flush() — replica write failed', { adapter: replica.adapter.name }, err);
           this.emit({ type: 'replica:error', adapter: replica.adapter.name, error: err as Error });
         }
       }
 
-      log('debug', 'flush() — complete', { entryCount: entries.length });
+      this.log('debug', 'flush() — complete', { entryCount: entries.length });
       this.emit({ type: 'flush:complete' });
     } catch (err) {
-      log('error', 'flush() — failed, re-queuing entries', err);
+      this.log('error', 'flush() — failed, re-queuing entries', err);
       for (const entry of entries) await this.local.pushOutbox(entry);
       throw err;
     }
@@ -839,7 +902,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
     this.hlc = await doPull({
       adapter,
       local: this.local,
-      remotePath: this.config.remotePath,
+      remotePath: this.requireRemotePath('pull()'),
       codecState: this.codecState,
       hlc: this.hlc,
       deviceId: this.deviceId,
@@ -881,7 +944,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> {
     this.manifest = await doCompact({
       adapter,
       local: this.local,
-      remotePath: this.config.remotePath,
+      remotePath: this.requireRemotePath('compact()'),
       manifest: this.manifest,
       codecState: this.codecState,
       hlc: this.hlc,

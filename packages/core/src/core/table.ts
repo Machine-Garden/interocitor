@@ -134,6 +134,11 @@ export class Table<T extends Record<string, unknown>> {
     return rowToTyped<T>(row);
   }
 
+  /** Back-compat alias for older code paths. */
+  async put(rowId: string, data: Partial<T>, userId?: string): Promise<T> {
+    return this.patch(rowId, data, userId);
+  }
+
   /**
    * Replace a record — writes ALL fields in `data`, explicitly nulling any
    * fields present in the existing row but absent from `data`.

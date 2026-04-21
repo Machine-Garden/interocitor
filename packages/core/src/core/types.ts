@@ -493,11 +493,20 @@ export interface ReplicaConfig {
  *
  * Supports both fully local startup and immediate sync with a remote adapter.
  */
+export interface SyncInitialState {
+  remotePath?: string;
+  passphrase?: string | null;
+  encrypted?: boolean;
+  deviceId?: string;
+}
+
+export type LogLevel = import('./internals.ts').LogLevel;
+
 export interface SyncConfig<
   S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>,
 > {
   /** Cloud folder path prefix, e.g. "/Interocitor" */
-  remotePath: string;
+  remotePath?: string;
   /**
    * Base58 passphrase for mesh encryption.
    * When set, the engine derives the AES-256 key internally and persists
@@ -526,6 +535,8 @@ export interface SyncConfig<
   serverId?: string;
   /** Polling interval in ms (default 30000) */
   pollInterval?: number;
+  /** Per-engine log threshold. Default: 'info'. */
+  logLevel?: LogLevel;
   /** Flush debounce in ms (default 2000) */
   flushDebounce?: number;
   /** Max pending ops before forced flush (default 50) */
@@ -546,9 +557,15 @@ export interface SyncConfig<
   schema?: DatabaseSchemaDefinition<S>;
 
   /**
+   * Optional browser-owned bootstrap hook.
+   * Runs during init() before persisted credentials are restored.
+   * Returned values override constructor defaults; persisted storage fills blanks only.
+   */
+  resolveInitialState?: () => SyncInitialState | Promise<SyncInitialState | null> | null;
+
+  /**
    * Called once after the engine has fully initialized (local store open,
    * encryption resolved, local state loaded). Use for migrations.
-   * You do not need to call `engine.init()` — it is called internally.
    *
    * @example
    * onInit: async (engine) => {

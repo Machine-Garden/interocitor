@@ -58,7 +58,10 @@ export type {
 
 // ─── Engine ───────────────────────────────────────────────────────────
 
-export { Interocitor } from './core/sync-engine.ts';
+export {
+  Interocitor,
+  type InterocitorInitContext,
+} from './core/sync-engine.ts';
 export { LocalStore } from './storage/local-store.ts';
 export {
   type CredentialStore,
@@ -98,6 +101,8 @@ export type {
 
   // Engine configuration
   SyncConfig,
+  SyncInitialState,
+  LogLevel,
   DatabaseSchemaDefinition,
   TableSchemaDefinition,
   InferSchemaType,

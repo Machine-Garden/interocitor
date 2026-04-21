@@ -34,11 +34,30 @@ export function paths(root: string): CloudPaths {
 // ─── Logger ──────────────────────────────────────────────────────────
 
 const LOG_PREFIX = '[interocitor]';
+const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
 
-export function log(level: 'debug' | 'info' | 'warn' | 'error', ...args: unknown[]): void {
+export type LogLevel = (typeof LOG_LEVELS)[number];
+
+function shouldLog(currentLevel: LogLevel, messageLevel: LogLevel): boolean {
+  return LOG_LEVELS.indexOf(messageLevel) >= LOG_LEVELS.indexOf(currentLevel);
+}
+
+export function logAtLevel(currentLevel: LogLevel, level: LogLevel, ...args: unknown[]): void {
+  if (!shouldLog(currentLevel, level)) return;
   // eslint-disable-next-line no-console
   console[level](LOG_PREFIX, ...args);
 }
+
+export function log(level: LogLevel, ...args: unknown[]): void {
+  logAtLevel('debug', level, ...args);
+}
+
+export function normalizeLogLevel(level: string | null | undefined): LogLevel {
+  return (LOG_LEVELS as readonly string[]).includes(level ?? '') ? (level as LogLevel) : 'info';
+}
+
+export { LOG_LEVELS };
+
 
 // ─── ID generation ───────────────────────────────────────────────────
 

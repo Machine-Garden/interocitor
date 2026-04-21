@@ -39,17 +39,18 @@ import { Interocitor } from '@interocitor/core';
 import { WebDAVAdapter } from '@interocitor/core/adapters/webdav';
 
 const db = new Interocitor({
-  remotePath: '/MyApp',
   dbName: 'my-app',
   appName: 'My App',
   // encrypted by default; set encrypted: false to opt out
 });
+await db.init();
 
 const id = await db.table('todos').add({
   text: 'Ship privacy-first sync',
   done: false,
 }, { prefix: 'todo' });
 
+db.configureMesh({ remotePath: '/MyApp', encrypted: true });
 await db.setRemoteStorage(new WebDAVAdapter({
   baseUrl: 'https://your-webdav-server.example.com',
   auth: { username: 'user', password: 'pass' },
@@ -78,7 +79,9 @@ Google Drive / WebDAV / Cloudflare / custom]
 
 ## Core API at a glance
 
-- `new Interocitor(config)` — create local-first database; auto-initializes internally
+- `new Interocitor(config)` — create engine only; no hidden init side effects
+- `await db.init()` — explicit local init
+- `db.configureMesh(...)` — apply remotePath/passphrase/device config before connect
 - `await db.table(name).add(data, { prefix? })` — insert with generated row ID
 - `await db.table(name).patch(id, partial)` — patch touched fields only
 - `await db.table(name).replace(id, row)` — full replace
@@ -102,6 +105,7 @@ const db = new Interocitor({
   encrypted: false,
   schema,
 });
+await db.init();
 
 const id = await db.table('tasks').add({ title: 'Buy milk', done: false });
 const rows = await db.table('tasks').query();
@@ -230,10 +234,13 @@ const credentials = await handleScannedQR({
 });
 
 const joiner = new Interocitor({
-  remotePath: credentials.remotePath,
-  passphrase: credentials.passphrase,
   dbName: 'team-alpha',
   appName: 'My App',
+});
+joiner.configureMesh({
+  remotePath: credentials.remotePath,
+  passphrase: credentials.passphrase,
+  encrypted: true,
 });
 await joiner.setRemoteStorage(adapter);
 await joiner.connect();

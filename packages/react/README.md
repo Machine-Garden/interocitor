@@ -8,6 +8,14 @@
 
 React bindings for Interocitor.
 
+Bindings only. React package does not create, init, configure, or connect the engine for you.
+App code owns order:
+- create engine
+- `configureMesh(...)` or `resolveInitialState(...)`
+- `setRemoteStorage(...)`
+- `connect()`
+- provide engine to React
+
 Low-level primitives:
 - typed React context factory
 - live query hook
@@ -42,6 +50,24 @@ const schema = {
 type DB = InferSchemaType<typeof schema>;
 
 export const [InterocitorProvider, useDb] = createInterocitorContext<DB>();
+```
+
+```ts
+import { Interocitor } from '@interocitor/core';
+
+const db = new Interocitor<DB>({
+  appName: 'My App',
+  dbName: 'my-app',
+});
+
+db.configureMesh({
+  remotePath: '/MyApp',
+  passphrase,
+  encrypted: true,
+});
+
+await db.setRemoteStorage(adapter);
+await db.connect();
 ```
 
 ```tsx

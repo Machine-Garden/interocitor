@@ -72,6 +72,12 @@ export async function decodeChangePayload(
   const decoded = await decodeFromCloud(state, data);
   const payload = JSON.parse(decoded) as MeshChangePayload;
 
+  const payloadRecord = payload as unknown as Record<string, unknown>;
+  if ('mesh' in payloadRecord && !('meshId' in payloadRecord)) {
+    throw new Error(`Remote change payload has invalid shape: ${path}`);
+  }
+
+  
   if (payload.kind !== 'change' || !payload.entry) {
     throw new Error(`Remote change payload has invalid shape: ${path}`);
   }
@@ -99,6 +105,12 @@ export async function decodeSnapshotPayload(
   const decoded = await decodeFromCloud(state, data);
   const payload = JSON.parse(decoded) as MeshSnapshotPayload;
 
+  const payloadRecord = payload as unknown as Record<string, unknown>;
+  if ('mesh' in payloadRecord && !('meshId' in payloadRecord)) {
+    throw new Error(`Remote snapshot payload has invalid shape: ${path}`);
+  }
+
+  
   if (payload.kind !== 'snapshot' || !payload.snapshot) {
     throw new Error(`Remote snapshot payload has invalid shape: ${path}`);
   }

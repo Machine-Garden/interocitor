@@ -537,16 +537,18 @@ export async function opDeletePath(
     return true;
   }
 
-  const like = `${normalized}/%`;
+  const subtreeStart = `${normalized}/`;
+  const subtreeEnd = `${normalized}/\uffff`;
   const now = nowIso();
 
+  // Avoid LIKE/GLOB on long/special paths in D1/SQLite; do a lexical prefix range instead.
   const [filesDeleted] = await db.batch([
     db.prepare(
-      'DELETE FROM files WHERE prefix = ?1 AND (path = ?2 OR path LIKE ?3)',
-    ).bind(prefix, normalized, like),
+      'DELETE FROM files WHERE prefix = ?1 AND (path = ?2 OR (path >= ?3 AND path < ?4))',
+    ).bind(prefix, normalized, subtreeStart, subtreeEnd),
     db.prepare(
-      'DELETE FROM folders WHERE prefix = ?1 AND (path = ?2 OR path LIKE ?3)',
-    ).bind(prefix, normalized, like),
+      'DELETE FROM folders WHERE prefix = ?1 AND (path = ?2 OR (path >= ?3 AND path < ?4))',
+    ).bind(prefix, normalized, subtreeStart, subtreeEnd),
   ]);
 
   const deletedCount = filesDeleted?.meta?.changes ?? 0;

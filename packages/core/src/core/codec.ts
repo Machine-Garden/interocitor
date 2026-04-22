@@ -37,6 +37,21 @@ export async function decodeFromCloud(state: CodecState, data: string): Promise<
     // passphrase rotated, two devices bound to same dbName but different
     // passphrases). Caller wraps this in poisonRemote with the file path.
     const reason = err instanceof Error ? err.message : String(err);
+    let keyFingerprint = '<unknown>';
+    try {
+      const raw = await crypto.subtle.exportKey('raw', state.encryptionKey);
+      const hash = await crypto.subtle.digest('SHA-256', raw);
+      const bytes = new Uint8Array(hash);
+      const hex = Array.from(bytes.slice(0, 6)).map(b => b.toString(16).padStart(2, '0')).join('');
+      keyFingerprint = `sha256-${hex}`;
+    } catch { /* ignore */ }
+    console.log('[interocitor:decode] decodeFromCloud() — DECRYPT FAIL', {
+      keyFingerprint,
+      meshId: state.manifest?.meshId,
+      payloadFirst32: data.slice(0, 32),
+      payloadLen: data.length,
+      reason,
+    });
     const e = new Error(`Decryption failed: payload not decryptable with the active mesh key (${reason}). The remote was likely written under a different key/mesh.`);
     (e as any).cause = err;
     throw e;

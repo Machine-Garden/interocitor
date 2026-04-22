@@ -33,6 +33,12 @@ export class WebDAVAdapter implements StorageAdapter {
 
   private config: WebDAVConfig;
   private authenticated = false;
+  // Per-session cache of folders we have already MKCOL'd. WebDAV folders
+  // are stable for the life of the mesh; a caller (Interocitor.connect)
+  // re-runs the same 4-folder ensureFolder loop on every reload, which
+  // costs 4 sequential MKCOL round-trips for no benefit. Cache wipes on
+  // explicit `resetFolderCache()` (mesh swap / poison) or process exit.
+  private ensuredFolders: Set<string> = new Set();
 
   constructor(config: WebDAVConfig) {
     this.config = config;
@@ -89,11 +95,14 @@ export class WebDAVAdapter implements StorageAdapter {
   }
 
   async ensureFolder(path: string): Promise<void> {
+    if (this.ensuredFolders.has(path)) return;
+
     const parts = path.split('/').filter(Boolean);
     let current = '';
 
     for (const part of parts) {
       current += '/' + part;
+      if (this.ensuredFolders.has(current)) continue; // ancestor cached
       const res = await fetch(this.url(current), {
         method: 'MKCOL',
         headers: this.headers(),
@@ -102,7 +111,16 @@ export class WebDAVAdapter implements StorageAdapter {
       if (!res.ok && res.status !== 405) {
         throw new Error(`Failed to create folder ${current}: ${res.status}`);
       }
+      this.ensuredFolders.add(current);
     }
+    this.ensuredFolders.add(path);
+  }
+
+  /** Drop the per-session ensureFolder cache. Call after mesh swap, poison,
+   *  or any state where we cannot trust a previous "this folder exists"
+   *  observation. */
+  resetFolderCache(): void {
+    this.ensuredFolders.clear();
   }
 
   async listFiles(folderPath: string): Promise<FileEntry[]> {

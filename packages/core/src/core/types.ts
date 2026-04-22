@@ -544,6 +544,16 @@ export interface StorageAdapter {
    * only the same adapter class knows how to parse it.
    */
   getHandshakeConfig?(): string;
+
+  /**
+   * Drop the per-session ensureFolder cache. Implementers cache "ensured"
+   * paths to avoid round-tripping a MKCOL/POST per connect; the engine
+   * calls this on mesh swap, transport teardown, and remote poison so the
+   * next connect re-validates folder presence on the new backend.
+   *
+   * Optional. Adapters that do no caching can omit it.
+   */
+  resetFolderCache?(): void;
 }
 
 // ─── Local Storage Adapter ───────────────────────────────────────────

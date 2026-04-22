@@ -33,6 +33,7 @@ export async function flushToAdapter(
   for (const entry of entries) {
     const fileName = `${entry.hlc}-${entry.id}.json`;
     const payload = await encodeChangePayload(codecState, entry);
+    console.log('[interocitor:write] flush.changeFile', { path: p.changeFile(fileName), deviceId, isPrimary, entryId: entry.id, hlc: entry.hlc });
     await adapter.writeFile(p.changeFile(fileName), textEncoder.encode(payload));
 
     if (!lastWrittenHlc || hlcCompareStr(entry.hlc, lastWrittenHlc) > 0) {
@@ -114,6 +115,7 @@ export async function flushToAdapter(
   });
 
   if (!regressed) {
+    console.log('[interocitor:write] flush.head', { path: p.changesHead, deviceId, isPrimary, priorHlc, nextHlc: bestHlc });
     await adapter.writeFile(
       p.changesHead,
       textEncoder.encode(JSON.stringify({ latestHlc: bestHlc } satisfies ChangesHead, null, 2)),

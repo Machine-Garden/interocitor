@@ -58,6 +58,7 @@ export async function validateManifestHash(
 }
 
 export async function writeJson(adapter: StorageAdapter, path: string, value: unknown): Promise<void> {
+  console.log('[interocitor:write] manifest.writeJson', { path, kind: path.endsWith('/manifest.json') ? 'pointer' : path.includes('/manifest-') ? 'manifest' : path.includes('/devices/') ? 'device' : path.includes('/changes/') ? 'changes' : 'other' });
   await adapter.writeFile(path, textEncoder.encode(JSON.stringify(value, null, 2)));
 }
 
@@ -125,7 +126,7 @@ export async function loadOrCreateManifest(
   local: import('./types.ts').LocalStoreAdapter,
   poisonRemote: (error: unknown, path?: string) => Promise<Error>,
   reason: string = 'unknown',
-): Promise<Manifest> {
+): Promise<{ manifest: Manifest; bootstrapped: boolean }> {
   const p = paths(ctx.remotePath);
 
   ctx.emit({ type: 'trace:manifest', op: 'read', reason, path: p.manifestPointer });
@@ -133,7 +134,9 @@ export async function loadOrCreateManifest(
 
   let pointer: ManifestPointer;
   let manifest: Manifest;
+  let bootstrapped = false;
   if (!globalPointer) {
+    bootstrapped = true;
     ctx.emit({ type: 'trace:manifest', op: 'bootstrap-create', reason, path: p.manifestPointer });
     const bootstrap = await createBootstrapManifest(ctx);
     // Skip the read-after-write — we just minted both files in this process,
@@ -180,18 +183,35 @@ export async function loadOrCreateManifest(
     throw new MeshEncryptionMismatchError(manifest.encrypted, ctx.encrypted);
   }
 
-  return manifest;
+  return { manifest, bootstrapped };
 }
 
 export async function upsertDeviceMetadata(
   adapter: StorageAdapter,
   remotePath: string,
   deviceId: string,
-  opts?: { displayName?: string; deviceType?: import('./types.ts').DeviceType },
+  opts?: {
+    displayName?: string;
+    deviceType?: import('./types.ts').DeviceType;
+    /**
+     * When true, skip the read-merge step. Use only when the caller knows
+     * no prior device record exists (e.g. immediately after bootstrap of
+     * a fresh mesh). Saves one round-trip per connect on first run.
+     */
+    bootstrap?: boolean;
+  },
 ): Promise<void> {
   const p = paths(remotePath);
   const now = new Date().toISOString();
-  const existing = await readJsonIfExists<DeviceMetadata>(adapter, p.deviceFile(deviceId));
+
+  // Bootstrap fast-path: caller asserts no prior record. Skip the GET.
+  // Worst case if caller is wrong: we clobber displayName/deviceType the
+  // user set on a different device — which would itself indicate the
+  // bootstrap flag was misused. Sync engine only sets bootstrap=true
+  // when it just minted the manifest in this same connect cycle.
+  const existing = opts?.bootstrap
+    ? null
+    : await readJsonIfExists<DeviceMetadata>(adapter, p.deviceFile(deviceId));
   const next: DeviceMetadata = {
     deviceId,
     registeredAt: existing?.registeredAt ?? now,

@@ -25,6 +25,11 @@ export class MemoryAdapter implements StorageAdapter {
   private files: Map<string, { data: Uint8Array; modifiedTime: string }> = new Map();
   private folders: Set<string> = new Set();
   private authenticated = false;
+  // Mirrors the cloud-adapter convention: cache "ensured" paths so a
+  // re-`ensureFolder` is a no-op. Memory adapter is cheap, but keeping
+  // the same shape lets tests assert call-count parity with the real
+  // adapters (cloudflare, webdav).
+  private ensuredFolders: Set<string> = new Set();
 
   async authenticate(): Promise<void> {
     this.authenticated = true;
@@ -43,7 +48,14 @@ export class MemoryAdapter implements StorageAdapter {
   }
 
   async ensureFolder(path: string): Promise<void> {
+    if (this.ensuredFolders.has(path)) return;
     this.folders.add(path);
+    this.ensuredFolders.add(path);
+  }
+
+  /** Drop the per-session ensureFolder cache. Tests / mesh-swap callers. */
+  resetFolderCache(): void {
+    this.ensuredFolders.clear();
   }
 
   async listFiles(folderPath: string): Promise<FileEntry[]> {

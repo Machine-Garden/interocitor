@@ -757,6 +757,11 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       this.clearScheduledFlush();
       this.connected = false;
       this.connectPromise = null;
+      // Drop the adapter's "ensured folders" cache. After poison we don't
+      // know whether the structure on disk is intact (corrupt manifest may
+      // have been minted while folders were partially created), so the
+      // next connect must re-validate every folder.
+      this.adapter?.resetFolderCache?.();
       this.log('error', 'remote:poisoned — sync halted', {
         dbName: this.dbName,
         remotePath: this.config.remotePath,
@@ -884,6 +889,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   }
 
   private async resolveEncryption(): Promise<void> {
+    console.log('[interocitor:cred] resolveEncryption() — entry', {
+      dbName: this.dbName,
+      encrypted: this.encrypted,
+      hasPassphrase: !!this.passphrase,
+      hasKey: !!this.encryptionKey,
+      passphraseFingerprint: this.passphrase ? `len=${this.passphrase.length} head=${this.passphrase.slice(0, 8)} tail=${this.passphrase.slice(-4)}` : null,
+    });
     if (!this.encrypted) {
       this.log('debug', 'resolveEncryption() — encryption disabled');
       return;
@@ -892,6 +904,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     // 1. Have passphrase (from config, setPassphrase(), or restoreCredentials())
     if (this.passphrase && !this.encryptionKey) {
       this.encryptionKey = await passphraseToKey(this.passphrase);
+      try {
+        const raw = await crypto.subtle.exportKey('raw', this.encryptionKey);
+        const hash = await crypto.subtle.digest('SHA-256', raw);
+        const bytes = new Uint8Array(hash);
+        const hex = Array.from(bytes.slice(0, 6)).map(b => b.toString(16).padStart(2, '0')).join('');
+        console.log('[interocitor:cred] resolveEncryption() — derived key', { dbName: this.dbName, keyFingerprint: `sha256-${hex}` });
+      } catch { /* ignore */ }
       await this.persistCredentials();
       this.log('info', 'resolveEncryption() — derived key from passphrase', { dbName: this.dbName });
       this.emit({ type: 'encryption:resolved', strategy: 'passphrase', dbName: this.dbName, remotePath: this.config.remotePath, encrypted: true });
@@ -1080,13 +1099,28 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
    * Used during normal init(). No biometric prompt.
    */
   private async restoreCredentials(): Promise<void> {
+    console.log('[interocitor:cred] restoreCredentials() — entry', {
+      dbName: this.dbName,
+      activeDeviceId: this.deviceId,
+      activePassphraseFingerprint: this.passphrase ? `len=${this.passphrase.length} head=${this.passphrase.slice(0, 8)} tail=${this.passphrase.slice(-4)}` : null,
+      hasKey: !!this.encryptionKey,
+      encrypted: this.encrypted,
+    });
     let stored: { passphrase: string; deviceId: string; meshId?: string } | null = null;
     try {
       stored = await this.loadPersistedCredentials();
     } catch (err) {
+      console.log('[interocitor:cred] restoreCredentials() — store load failed', { dbName: this.dbName, err: err instanceof Error ? err.message : String(err) });
       this.log('warn', 'restoreCredentials() — silent load failed', err);
       return;
     }
+    console.log('[interocitor:cred] restoreCredentials() — store loaded', {
+      dbName: this.dbName,
+      hasStored: !!stored,
+      storedDeviceId: stored?.deviceId,
+      storedMeshId: stored?.meshId,
+      storedPassphraseFingerprint: stored?.passphrase ? `len=${stored.passphrase.length} head=${stored.passphrase.slice(0, 8)} tail=${stored.passphrase.slice(-4)}` : null,
+    });
     if (!stored) {
       this.log('debug', 'restoreCredentials() — no persisted credentials', { dbName: this.dbName });
       return;
@@ -1173,6 +1207,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
           dbName: this.dbName,
           remotePath: this.config.remotePath,
         });
+        // Reset the local cursor so the upcoming pull cannot use the
+        // skip-listing fast-path. Without this, doFlush()'s post-write
+        // cursor advance under the OLD key hides remote change files
+        // from the new (mismatched) key — the engine would never decode
+        // them and never surface the decode failure that proves the
+        // passphrase is wrong. Conflict surfaces via decode:error +
+        // remote:poisoned on the next pull, instead of silently going.
+        try { await this.local.setMeta('cursor', ''); } catch { /* best-effort */ }
       }
     }
 
@@ -1185,6 +1227,18 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   }
 
   async connect(): Promise<void> {
+    console.log('[interocitor:connect] connect() — entry', {
+      dbName: this.dbName,
+      remotePath: this.config.remotePath,
+      deviceId: this.deviceId,
+      adapter: this.adapter?.name ?? null,
+      encrypted: this.encrypted,
+      hasPassphrase: !!this.passphrase,
+      hasKey: !!this.encryptionKey,
+      meshId: this.manifest?.meshId,
+      connected: this.connected,
+      hasInFlight: !!this.connectPromise,
+    });
     await this.ensureReady();
     if (!this.config.remotePath) throw new Error('connect() requires remotePath; configure mesh before connecting');
 
@@ -1237,8 +1291,16 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
   private async doConnect(): Promise<void> {
     const adapter = this.requireAdapter('connect()');
+    console.log('[interocitor:connect] doConnect() — start', {
+      dbName: this.dbName,
+      remotePath: this.config.remotePath,
+      deviceId: this.deviceId,
+      adapter: adapter.name,
+      meshIdBefore: this.manifest?.meshId,
+    });
     const stage = (s: string, err: unknown): Error => {
       const e = err instanceof Error ? err : new Error(String(err));
+      console.log('[interocitor:connect] doConnect() — STAGE FAIL', { stage: s, dbName: this.dbName, deviceId: this.deviceId, err: e.message });
       this.emit({
         type: 'connect:error',
         error: e,
@@ -1248,6 +1310,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
         deviceId: this.deviceId,
       });
       return e;
+    };
+    const stageOk = (s: string, extra?: Record<string, unknown>) => {
+      console.log('[interocitor:connect] doConnect() — stage ok', { stage: s, dbName: this.dbName, deviceId: this.deviceId, ...(extra ?? {}) });
     };
 
     this.log('debug', 'connect() — authenticating with adapter', { adapter: adapter.name });
@@ -1274,10 +1339,12 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     }
 
     this.log('debug', 'connect() — loading/creating manifest');
+    let bootstrapped = false;
     try {
       // Force on connect: any cached manifest predates the new transport
       // session and may be stale (compaction by another writer, mesh swap).
-      await this.doLoadOrCreateManifest('connect', true);
+      ({ bootstrapped } = await this.doLoadOrCreateManifest('connect', true));
+      stageOk('loadOrCreateManifest', { bootstrapped, meshId: this.manifest?.meshId, generation: this.manifest?.generation });
     } catch (err) {
       this.log('error', 'connect() — loadOrCreateManifest failed', err);
       throw stage('loadOrCreateManifest', err);
@@ -1296,6 +1363,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     // first connect after a fresh install or after `resetRemoteSyncState`.
     try {
       await this.assertCredentialMeshParity();
+      stageOk('credentialMeshParity', { meshId: this.manifest?.meshId });
     } catch (err) {
       this.log('error', 'connect() — credential mesh parity failed', err);
       throw stage('credentialMeshParity', err);
@@ -1306,10 +1374,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     // credential record yet; on reconnect this is a no-op write that
     // keeps the record fresh.
     await this.persistCredentials();
+    stageOk('persistCredentialsPostManifest');
 
     await upsertDeviceMetadata(adapter, remotePath, this.deviceId, {
       displayName: this.config.deviceName,
       deviceType: this.config.deviceType,
+      // Skip the read-merge GET when we just minted the manifest in this
+      // same connect cycle — no prior device record can possibly exist.
+      bootstrap: bootstrapped,
     });
 
     const localEpochRaw = await this.local.getMeta('epoch');
@@ -1376,11 +1448,22 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   }
 
   async setRemoteStorage(adapter: StorageAdapter | null): Promise<void> {
+    console.log('[interocitor:share] setRemoteStorage() — entry', {
+      dbName: this.dbName,
+      newAdapter: adapter?.name ?? null,
+      currentAdapter: this.adapter?.name ?? null,
+      sameByRef: adapter === this.adapter,
+      remotePath: this.config.remotePath,
+      deviceId: this.deviceId,
+      connected: this.connected,
+      meshId: this.manifest?.meshId,
+    });
     await this.ensureReady();
     this.log('debug', 'setRemoteStorage()', { adapter: adapter?.name ?? null, remotePath: this.config.remotePath });
     const wasConnected = this.connected;
     const hadAdapter = this.adapter !== null;
     const switching = adapter !== this.adapter;
+    console.log('[interocitor:share] setRemoteStorage() — decision', { wasConnected, hadAdapter, switching });
 
     // Same-adapter no-op. Callers (auto-reconnect, React StrictMode, etc.)
     // commonly re-attach the same adapter on every reload. Without this
@@ -1408,6 +1491,11 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     this.connected = false;
 
     if (switching && hadAdapter) {
+      // Drop the OLD adapter's folder cache before we let go of it.
+      // Belt-and-braces: even if the old adapter is reattached later (via
+      // resetRemoteSyncState path), we cannot trust prior "this folder
+      // exists" observations against the new mesh layout.
+      this.adapter?.resetFolderCache?.();
       this.emit({
         type: 'transport:teardown',
         dbName: this.dbName,
@@ -1463,10 +1551,15 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
    * Cached path emits `trace:manifest { op: 'cache-hit' }` so test/devtools
    * can assert that the steady-state pipeline does ZERO GETs on flush/pull.
    */
+  /**
+   * Returns whether the manifest was bootstrapped (freshly minted) on this
+   * call. Callers (connect()) use this to skip the device-metadata GET when
+   * we know no prior device record can exist.
+   */
   private async doLoadOrCreateManifest(
     reason: string = 'unknown',
     force: boolean = false,
-  ): Promise<void> {
+  ): Promise<{ bootstrapped: boolean }> {
     if (!force && this.manifest && !this.remotePoisonError) {
       this.emit({
         type: 'trace:manifest',
@@ -1475,9 +1568,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
         generation: this.manifest.generation,
         cached: true,
       });
-      return;
+      return { bootstrapped: false };
     }
-    const manifest = await loadOrCreateManifest(
+    const { manifest, bootstrapped } = await loadOrCreateManifest(
       this.manifestContext,
       this.codecState,
       this.local,
@@ -1486,6 +1579,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     );
     this.manifest = manifest;
     this.encrypted = manifest.encrypted || this.encrypted;
+    return { bootstrapped };
   }
 
   // ── Local writes ───────────────────────────────────────────────────
@@ -1578,6 +1672,29 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
         }
       }
 
+      // Advance the local cursor past our own just-flushed entries.
+      // The cursor is the "we have already merged everything <= X"
+      // marker that pull()'s fast-path uses to short-circuit listing
+      // and reading change files. Without this, a page reload after a
+      // local-only write storm re-lists the changes folder and re-GETs
+      // every file we authored ourselves — re-decoding our own writes
+      // through the CRDT path despite local IDB already being canonical.
+      // Monotonic-forward only: never let cursor go backwards on disk.
+      let highestFlushedHlc = '';
+      for (const entry of entries) {
+        if (!entry.hlc) continue;
+        if (!highestFlushedHlc || hlcCompareStr(entry.hlc, highestFlushedHlc) > 0) {
+          highestFlushedHlc = entry.hlc;
+        }
+      }
+      if (highestFlushedHlc) {
+        const cursorRaw = await this.local.getMeta('cursor');
+        const cursor = typeof cursorRaw === 'string' ? cursorRaw : '';
+        if (!cursor || hlcCompareStr(highestFlushedHlc, cursor) > 0) {
+          await this.local.setMeta('cursor', highestFlushedHlc);
+        }
+      }
+
       this.log('debug', 'flush() — complete', { entryCount: entries.length });
       this.emit({ type: 'flush:complete' });
     } catch (err) {
@@ -1605,7 +1722,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       emit: (e) => this.emit(e),
       ensureRowsCached: (ops) => this.ensureRowsCached(ops),
       poisonRemote: (err, path) => this.poisonRemote(err, path),
-      loadOrCreateManifest: () => this.doLoadOrCreateManifest(),
+      loadOrCreateManifest: async () => { await this.doLoadOrCreateManifest('pull'); },
     });
   }
 

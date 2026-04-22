@@ -53,6 +53,12 @@ export class CloudflareAdapter implements StorageAdapter {
 
   private readonly config: CloudflareAdapterConfig;
   private authenticated = false;
+  // Per-session cache of folders we have already ensured. Cloudflare's
+  // /ensure-folder is idempotent but a POST per folder per connect is
+  // pure round-trip overhead — Interocitor.connect re-runs the same
+  // 4-folder loop on every reload. Cache wipes via `resetFolderCache()`
+  // (mesh swap / poison) or process exit.
+  private ensuredFolders: Set<string> = new Set();
 
   constructor(config: CloudflareAdapterConfig) {
     this.config = { ...config, baseUrl: config.baseUrl.replace(/\/$/, '') };
@@ -200,6 +206,8 @@ export class CloudflareAdapter implements StorageAdapter {
   }
 
   async ensureFolder(path: string): Promise<void> {
+    if (this.ensuredFolders.has(path)) return;
+
     const res = await fetch(this.ioUrl('/ensure-folder'), {
       method: 'POST',
       headers: this.headers({ 'Content-Type': 'application/json; charset=utf-8' }),
@@ -209,6 +217,14 @@ export class CloudflareAdapter implements StorageAdapter {
     if (!res.ok && res.status !== 405) {
       throw new Error(`Failed to ensure folder ${path}: HTTP ${res.status}`);
     }
+    this.ensuredFolders.add(path);
+  }
+
+  /** Drop the per-session ensureFolder cache. Call after mesh swap, poison,
+   *  or any state where a previous "this folder exists" observation must
+   *  not be trusted. */
+  resetFolderCache(): void {
+    this.ensuredFolders.clear();
   }
 
   async listFiles(path: string): Promise<FileEntry[]> {

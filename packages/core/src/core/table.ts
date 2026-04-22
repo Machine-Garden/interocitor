@@ -12,7 +12,7 @@ import type { Interocitor } from './sync-engine.ts';
 // Use a loose engine reference so Table<T> doesn't need to know S
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyEngine = Interocitor<any>;
-import type { Row, ColumnEntry, TableEventListener } from './types.ts';
+import type { Row, TableEventListener } from './types.ts';
 import type {
   QueryDescriptor,
   QueryExecutionOptions,
@@ -343,12 +343,10 @@ export class RowResult<T extends Record<string, unknown>> implements PromiseLike
 }
 
 function rowToTyped<T extends Record<string, unknown>>(row: Row): T {
+  // Project payload only. _meta is engine-private; user types never see it.
   const result: Record<string, unknown> = {};
-  for (const [key, val] of Object.entries(row)) {
-    if (key.startsWith('_')) continue;
-    if (val !== null && val !== undefined && typeof val === 'object' && 'value' in val && 'hlc' in val) {
-      result[key] = (val as ColumnEntry).value;
-    }
+  for (const [key, entry] of Object.entries(row.payload)) {
+    result[key] = entry.value;
   }
   return result as T;
 }
@@ -415,9 +413,13 @@ export class Table<T extends Record<string, unknown>> {
    * Returns the full row.
    */
   async replace(rowId: string, data: T, userId?: string): Promise<T> {
+    // Iterate ONLY existing payload keys. Meta is in a separate namespace
+    // and must never appear as a "field" to be nulled.
     const existing = await this.engine.loadRow({ table: this.name, rowId });
-    const existingKeys = existing ? Object.keys(existing) : [];
-    const nulled = Object.fromEntries(existingKeys.filter(k => !(k in data)).map(k => [k, null]));
+    const existingPayloadKeys = existing ? Object.keys(existing.payload) : [];
+    const nulled = Object.fromEntries(
+      existingPayloadKeys.filter(k => !(k in data)).map(k => [k, null]),
+    );
     const row = await this.engine.put(
       this.name,
       rowId,

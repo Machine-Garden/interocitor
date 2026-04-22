@@ -95,6 +95,166 @@ await db.restoreWithBiometrics();
 3. attach remote adapter
 4. `connect()`
 
+## Setup & reload sequence
+
+The engine pins `encrypted` at mesh bootstrap. **Do not flip the `encrypted`
+flag between sessions** — the first session writes change files in that mode,
+and a later session that connects with a different mode is rejected at
+`connect()` with a typed `MeshEncryptionMismatchError` (the remote is **not**
+poisoned). The recipe below is the supported lifecycle.
+
+```ts
+import { MeshEncryptionMismatchError } from '@interocitor/core';
+
+try {
+  await engine.connect();
+} catch (err) {
+  if (err instanceof MeshEncryptionMismatchError) {
+    // err.code === 'MESH_ENCRYPTION_MISMATCH'
+    // err.expectedMode → mode the remote mesh was bootstrapped with
+    // err.actualMode   → mode the engine was constructed with
+    // Rebuild the engine with `encrypted: err.expectedMode` and supply
+    // the matching passphrase if expectedMode === true.
+  }
+  throw err;
+}
+```
+
+```mermaid
+flowchart TD
+    A[App boot] --> B{Have meshId & passphrase yet?}
+
+    B -- no, first run --> N1[Mint meshId]
+    N1 --> N2[Generate or prompt passphrase]
+    N2 --> N3[Persist passphrase locally<br/>e.g. credential store / biometrics]
+    N3 --> C
+
+    B -- yes, reload --> R1[Load meshId from app state]
+    R1 --> R2[Restore passphrase from credential store<br/>BEFORE constructing engine]
+    R2 --> C
+
+    C[new Interocitor 'encrypted: true,<br/>passphrase, dbName, schema']
+    C --> D[engine.configureMesh 'remotePath, encrypted: true, passphrase']
+    D --> E[engine.init]
+    E --> F[engine.setRemoteStorage 'adapter for meshId']
+    F --> G[engine.connect]
+
+    G --> H{loadOrCreateManifest}
+    H -- remote exists --> H1[Validate manifest.encrypted == ctx.encrypted]
+    H1 -- mismatch --> X1[throw MESH_ENCRYPTION_MISMATCH<br/>remote NOT poisoned]
+    H1 -- match --> P{assertCredentialMeshParity}
+    H -- remote missing --> H2[Bootstrap manifest with ctx.encrypted]
+    H2 --> P
+
+    P -- stored.meshId != active --> X2[throw MESH_CREDENTIAL_MISMATCH<br/>emit credentials:meshMismatch<br/>remote NOT poisoned]
+    P -- ok / no anchor --> P2[persistCredentials anchors record to active meshId]
+    P2 --> I[pull -> doFlush -> startPolling]
+
+    I --> Z[Connected. App reads/writes via db.table]
+
+    style X1 fill:#fee,stroke:#c00,color:#900
+    style X2 fill:#fee,stroke:#c00,color:#900
+    style Z fill:#efe,stroke:#070,color:#070
+```
+
+**Rules to avoid the mismatch trap:**
+
+- Decide `encrypted` once per `dbName` and never change it. Recommendation:
+  always `encrypted: true`. The engine handles fresh-key generation, passphrase
+  derivation, and credential restore on subsequent loads.
+- Resolve the passphrase **before** constructing the engine on reload. If the
+  passphrase is restored asynchronously (e.g. biometrics) after `init()`,
+  prefer `restoreWithBiometrics()` / `setPassphrase()` *before* `connect()`,
+  not after a write.
+- One `dbName` ↔ one mesh ↔ one key. Listen for `credentials:conflict`,
+  `credentials:meshMismatch`, and `remote:poisoned` events to surface real
+  corruption to the user.
+- On meshId switch, call `setRemoteStorage(newAdapter)` — the engine tears
+  down the old transport before swapping. Do **not** rebuild the engine just
+  to change adapters.
+
+### MeshCredentialMismatchError
+
+`connect()` throws this when the credential store has a record under the
+engine's `dbName` whose `meshId` differs from the live mesh. Typical cause:
+the app reused the same `dbName` for "create new mesh" and the old key is
+still cached. The remote is **not** poisoned — the local credential record
+is stale.
+
+```ts
+import { MeshCredentialMismatchError } from '@interocitor/core';
+
+try {
+  await engine.connect();
+} catch (err) {
+  if (err instanceof MeshCredentialMismatchError) {
+    // err.code === 'MESH_CREDENTIAL_MISMATCH'
+    // err.dbName, err.storedMeshId, err.activeMeshId
+    await engine.clearCredentials(); // drops stale record, keeps deviceId
+    // ...then retry connect, or use a different dbName per mesh
+  }
+  throw err;
+}
+```
+
+### Credential store (LocalStorageCredentialStore) — TL;DR
+
+- One JSON record per `dbName` at `localStorage["interocitor-creds:<dbName>"]`
+  containing `{passphrase, deviceId, meshId}`. The engine wires this up
+  automatically — apps almost never construct it directly.
+- The engine writes `meshId` after the manifest is known. On the next load
+  the engine compares stored `meshId` against the live `meshId` and refuses
+  to silently reuse a stale key (throws `MeshCredentialMismatchError`).
+- Reads still accept the legacy two-key format
+  (`interocitor-key:<dbName>` + global `interocitor-device-id`); writes
+  always upgrade to the new JSON record and drop the legacy keys.
+- **`dbName` is the local DB name. Keep it stable.** One record per DB,
+  forever. The mesh identity lives *inside* the record (`meshId` field), not
+  in the key. Embedding `meshId` into `dbName` would pollute `localStorage`
+  with one orphan record per mesh recreate — exactly the trap this design
+  avoids.
+- Re-pairing under the same `dbName` is supported: on `connect()` the engine
+  detects the stale `meshId`, throws `MeshCredentialMismatchError`, and the
+  app calls `engine.clearCredentials()` to overwrite the single record with
+  the new mesh's anchor.
+
+```ts
+import { LocalStorageCredentialStore } from '@interocitor/core';
+
+// Default: engine creates one for you. Override only for tests or to
+// disable persistence (`credentialStore: null` in the engine config).
+const store = new LocalStorageCredentialStore('meal-planner');
+
+await store.save({
+  passphrase: 'base58-passphrase',
+  deviceId: 'dev_xyz',
+  meshId: 'mesh_abc',         // optional but strongly recommended
+});
+
+const creds = await store.load();
+// → { passphrase, deviceId, meshId? } or null
+
+await store.clear(); // drops the record; deviceId global is intentionally kept
+```
+
+Disable persistence entirely:
+
+```ts
+const engine = new Interocitor(adapter, {
+  dbName: 'meal-planner',
+  credentialStore: null,      // no localStorage writes; passphrase lives in memory
+});
+```
+
+Override with a custom backend:
+
+```ts
+const engine = new Interocitor(adapter, {
+  dbName: 'meal-planner',
+  credentialStore: new MyCustomStore(),  // implements CredentialStore
+});
+```
+
 ## Schema typing
 
 ```ts

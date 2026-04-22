@@ -20,6 +20,20 @@ export interface StoredCredentials {
   passphrase: string;
   /** Stable device identifier. */
   deviceId: string;
+  /**
+   * MeshId the credentials were minted for.
+   *
+   * Optional only for backward compatibility with records persisted by
+   * older versions. New writes always include it; readers must treat
+   * `undefined` as "legacy / unverified" and validate before use.
+   *
+   * The credential store keeps ONE record per `dbName`. The engine uses
+   * `meshId` to detect when the persisted record belongs to a previous
+   * mesh that happened to share the same `dbName` (e.g. user clicked
+   * "create new mesh" twice) and refuses to silently reuse the wrong
+   * key.
+   */
+  meshId?: string;
 }
 
 export interface CredentialStore {
@@ -50,26 +64,66 @@ export interface CredentialStore {
 export class LocalStorageCredentialStore implements CredentialStore {
   constructor(private readonly dbName: string) {}
 
-  private keyKey(): string { return `interocitor-key:${this.dbName}`; }
-  private get deviceKey(): string { return 'interocitor-device-id'; }
+  /**
+   * Single record per dbName. JSON-encoded `{passphrase, deviceId, meshId}`.
+   *
+   * The engine validates `meshId` against the active mesh on load and
+   * refuses to silently swap keys when they differ — preventing the
+   * "create new mesh under same dbName then reload" bug from reusing
+   * the previous mesh's passphrase.
+   */
+  private recordKey(): string { return `interocitor-creds:${this.dbName}`; }
+
+  // Legacy format (pre-meshId): raw passphrase under one key, device-id
+  // global. Read-only — `save()` always writes the new JSON record.
+  private legacyKeyKey(): string { return `interocitor-key:${this.dbName}`; }
+  private get legacyDeviceKey(): string { return 'interocitor-device-id'; }
 
   async save(creds: StoredCredentials): Promise<void> {
     if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(this.keyKey(), creds.passphrase);
-    localStorage.setItem(this.deviceKey, creds.deviceId);
+    const payload: StoredCredentials = {
+      passphrase: creds.passphrase,
+      deviceId: creds.deviceId,
+      // Persist meshId when supplied. Older callers that omit it write a
+      // legacy-shaped record; the engine surfaces this as a conflict on
+      // the next load if the live mesh is known.
+      ...(creds.meshId ? { meshId: creds.meshId } : {}),
+    };
+    localStorage.setItem(this.recordKey(), JSON.stringify(payload));
+    // Drop the legacy keys to prevent stale reads after a re-pair under
+    // the same dbName.
+    localStorage.removeItem(this.legacyKeyKey());
   }
 
   async load(): Promise<StoredCredentials | null> {
     if (typeof localStorage === 'undefined') return null;
-    const passphrase = localStorage.getItem(this.keyKey());
-    const deviceId = localStorage.getItem(this.deviceKey);
+
+    // New format first.
+    const raw = localStorage.getItem(this.recordKey());
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as StoredCredentials;
+        if (typeof parsed?.passphrase === 'string' && typeof parsed?.deviceId === 'string') {
+          return {
+            passphrase: parsed.passphrase,
+            deviceId: parsed.deviceId,
+            ...(typeof parsed.meshId === 'string' && parsed.meshId ? { meshId: parsed.meshId } : {}),
+          };
+        }
+      } catch { /* fall through to legacy */ }
+    }
+
+    // Legacy fallback. No meshId — caller must treat as unverified.
+    const passphrase = localStorage.getItem(this.legacyKeyKey());
+    const deviceId = localStorage.getItem(this.legacyDeviceKey);
     if (!passphrase || !deviceId) return null;
     return { passphrase, deviceId };
   }
 
   async clear(): Promise<void> {
     if (typeof localStorage === 'undefined') return;
-    localStorage.removeItem(this.keyKey());
+    localStorage.removeItem(this.recordKey());
+    localStorage.removeItem(this.legacyKeyKey());
     // Device ID intentionally kept — shared across meshes, survives credential clear.
   }
 }

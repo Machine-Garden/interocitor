@@ -39,7 +39,9 @@ function schemaIndexName(table: string, indexName: string): string {
 }
 
 function schemaIndexKeyPath(field: string): string[] {
-  return ['_table', `${field}.value`];
+  // Index key is composite: [table, payload-field-value]. Both live under
+  // namespaced parents now. ColumnEntry stores the user value under `.value`.
+  return ['_meta.table', `payload.${field}.value`];
 }
 
 function normalizeSchema(schema?: DatabaseSchemaDefinition): DatabaseSchemaDefinition | undefined {
@@ -90,11 +92,9 @@ function normalizeFieldInput(input: SchemaField<unknown>): { index: boolean; uni
 }
 
 function readColumnValue(row: Row, field: string): unknown {
-  const raw = row[field] as unknown;
-  if (raw !== null && raw !== undefined && typeof raw === 'object' && 'value' in (raw as object)) {
-    return (raw as { value: unknown }).value;
-  }
-  return raw;
+  const entry = row.payload?.[field];
+  if (entry === undefined) return undefined;
+  return entry.value;
 }
 
 function compare(a: WherePrimitive, b: WherePrimitive): number {
@@ -193,8 +193,10 @@ function openDB(dbName: string, dbVersion: number, schema?: DatabaseSchemaDefini
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORES.rows)) {
-        const rows = db.createObjectStore(STORES.rows, { keyPath: '_key' });
-        rows.createIndex('by_table', '_table', { unique: false });
+        // keyPath uses dotted path into the new namespaced row shape.
+        // IndexedDB resolves "_meta.key" against the stored object.
+        const rows = db.createObjectStore(STORES.rows, { keyPath: '_meta.key' });
+        rows.createIndex('by_table', '_meta.table', { unique: false });
       }
       if (!db.objectStoreNames.contains(STORES.outbox)) {
         db.createObjectStore(STORES.outbox, { autoIncrement: true });
@@ -308,12 +310,20 @@ export class LocalStore implements LocalStoreAdapter {
     return result as Row | undefined;
   }
 
+  /** Stamp the composite IndexedDB key into row._meta.key. Pure. */
+  private withKey(row: Row): Row {
+    return {
+      ...row,
+      _meta: { ...row._meta, key: this.rowKey(row._meta.table, row._meta.rowId) },
+      payload: row.payload,
+    };
+  }
+
   async putRow(row: Row): Promise<void> {
     const db = this.ensureDB();
     const t = tx(db, STORES.rows, 'readwrite');
     const store = t.objectStore(STORES.rows);
-    const record = { ...row, _key: this.rowKey(row._table, row._rowId) };
-    store.put(record);
+    store.put(this.withKey(row));
     await txComplete(t);
   }
 
@@ -323,8 +333,7 @@ export class LocalStore implements LocalStoreAdapter {
     const t = tx(db, STORES.rows, 'readwrite');
     const store = t.objectStore(STORES.rows);
     for (const row of rows) {
-      const record = { ...row, _key: this.rowKey(row._table, row._rowId) };
-      store.put(record);
+      store.put(this.withKey(row));
     }
     await txComplete(t);
   }
@@ -335,7 +344,7 @@ export class LocalStore implements LocalStoreAdapter {
     const store = t.objectStore(STORES.rows);
     const index = store.index('by_table');
     const results = await reqToPromise(index.getAll(table));
-    return (results as Row[]).filter(r => !r._deleted);
+    return (results as Row[]).filter(r => !r._meta.deleted);
   }
 
   async queryWhere(table: string, clause: WhereClause): Promise<Row[]> {
@@ -357,8 +366,8 @@ export class LocalStore implements LocalStoreAdapter {
       for (const value of values) {
         const matches = await reqToPromise(index.getAll(IDBKeyRange.only([table, value])));
         for (const row of matches as Row[]) {
-          if (!row._deleted) {
-            merged.set(`${row._table}/${row._rowId}`, row);
+          if (!row._meta.deleted) {
+            merged.set(`${row._meta.table}/${row._meta.rowId}`, row);
           }
         }
       }
@@ -367,7 +376,7 @@ export class LocalStore implements LocalStoreAdapter {
 
     const range = rangeForClause(table, clause);
     const results = await reqToPromise(index.getAll(range ?? undefined));
-    return (results as Row[]).filter(row => !row._deleted);
+    return (results as Row[]).filter(row => !row._meta.deleted);
   }
 
   async getTableNames(): Promise<string[]> {
@@ -380,7 +389,8 @@ export class LocalStore implements LocalStoreAdapter {
     const all = await reqToPromise(store.getAll()) as Row[];
     const names = new Set<string>();
     for (const row of all) {
-      if (row._table) names.add(row._table);
+      const table = row._meta?.table;
+      if (table) names.add(table);
     }
     return Array.from(names);
   }

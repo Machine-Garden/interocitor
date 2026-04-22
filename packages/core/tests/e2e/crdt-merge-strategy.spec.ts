@@ -431,7 +431,7 @@ test.describe('merge strategy — deletes', () => {
         hlc: '000003000000000000-0000-dev_b',
       }, 1, schema);
 
-      return tables.t.r1._deleted;
+      return tables.t.r1._meta.deleted;
     });
     expect(result).toBe(true);
   });

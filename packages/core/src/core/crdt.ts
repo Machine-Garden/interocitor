@@ -10,6 +10,10 @@
  *  - custom function  — `(local, remote, ctx) => ColumnEntry`
  *
  * Deletes are soft (tombstone with HLC) and always use LWW.
+ *
+ * Row shape (`{_meta, payload}`) keeps user payload fully isolated from
+ * engine metadata. The merge loop only touches `row.payload`; `row._meta`
+ * is never indexed by user-controlled keys.
  */
 
 import type {
@@ -22,9 +26,6 @@ import type {
   TableMergeConfig,
 } from './types.ts';
 import { hlcCompareStr } from './hlc.ts';
-
-/** Reserved keys that are not user columns */
-const META_KEYS = new Set(['_table', '_rowId', '_deleted', '_deletedHlc', '_schemaVersion']);
 
 /**
  * Resolve the merge strategy for a specific column.
@@ -41,17 +42,13 @@ function resolveStrategy(
   if (tableDef?.merge) {
     const m = tableDef.merge;
     if (typeof m === 'object' && 'fields' in m) {
-      // TableMergeConfig
       const config = m as TableMergeConfig;
       if (config.fields?.[field]) return config.fields[field];
       if (config.strategy) return config.strategy;
     } else {
-      // bare MergeStrategy (string or function) on the table
       return m as MergeStrategy;
     }
   }
-  // No schema at all → LWW (backwards compat for raw applyOp callers).
-  // Schema present but no mergeStrategy → remote-wins (sensible default).
   if (!schema) return 'lww';
   return schema.mergeStrategy ?? 'remote-wins';
 }
@@ -70,28 +67,29 @@ function mergeColumn(
   rowId: string,
   field: string,
 ): ColumnEntry | null {
-  // No local value → accept remote unconditionally
   if (!local || !local.hlc) return remote;
 
   if (typeof strategy === 'function') {
     const result = strategy(local, remote, { table, rowId, field });
-    // Only count as changed if the result differs from local
     return result.hlc !== local.hlc || result.value !== local.value ? result : null;
   }
 
   switch (strategy) {
     case 'remote-wins':
       return remote;
-
     case 'local-wins':
-      // Only accept remote if it's strictly newer (no conflict — local
-      // hasn't written this column yet at this HLC).
-      // When both have values, local keeps its value.
       return null;
-
     default:
       return hlcCompareStr(remote.hlc, local.hlc) > 0 ? remote : null;
   }
+}
+
+/** Build a fresh row stub. */
+function blankRow(table: string, rowId: string, schemaVersion: number, deleted = false, deletedHlc?: string): Row {
+  return {
+    _meta: { table, rowId, deleted, deletedHlc, schemaVersion },
+    payload: {},
+  };
 }
 
 /**
@@ -112,68 +110,55 @@ export function applyOp(
   if (op.type === 'delete') {
     const existing = table[op.rowId];
     if (existing) {
-      // Only apply delete if its HLC is newer than all column HLCs
-      if (existing._deletedHlc && hlcCompareStr(op.hlc, existing._deletedHlc) <= 0) {
-        return null; // stale delete
+      // Stale delete (older than current tombstone)?
+      if (existing._meta.deletedHlc && hlcCompareStr(op.hlc, existing._meta.deletedHlc) <= 0) {
+        return null;
       }
-      // Check if any column has a newer HLC than this delete
-      const hasNewerColumn = Object.entries(existing).some(([key, val]) => {
-        if (META_KEYS.has(key)) return false;
-        const entry = val as ColumnEntry;
+      // Any payload column newer than this delete? Then delete loses.
+      const hasNewerColumn = Object.values(existing.payload).some(entry => {
         return entry?.hlc && hlcCompareStr(entry.hlc, op.hlc) > 0;
       });
       if (hasNewerColumn) return null;
 
-      existing._deleted = true;
-      existing._deletedHlc = op.hlc;
+      existing._meta.deleted = true;
+      existing._meta.deletedHlc = op.hlc;
       return existing;
     }
-      // Tombstone for a row we haven't seen — create it
-      const row: Row = {
-        _table: op.table,
-        _rowId: op.rowId,
-        _deleted: true,
-        _deletedHlc: op.hlc,
-        _schemaVersion: schemaVersion,
-      };
-      table[op.rowId] = row;
-      return row;
-    
+    // Tombstone for unseen row.
+    const row = blankRow(op.table, op.rowId, schemaVersion, true, op.hlc);
+    table[op.rowId] = row;
+    return row;
   }
 
-  // Upsert
+  // Upsert.
   let row = table[op.rowId];
   let changed = false;
 
   if (!row) {
-    row = {
-      _table: op.table,
-      _rowId: op.rowId,
-      _deleted: false,
-      _schemaVersion: schemaVersion,
-    };
+    row = blankRow(op.table, op.rowId, schemaVersion);
     table[op.rowId] = row;
     changed = true;
   }
 
   for (const [col, entry] of Object.entries(op.columns)) {
-    const existing = row[col] as ColumnEntry | undefined;
+    const existing = row.payload[col];
     const strategy = resolveStrategy(schema, op.table, col);
     const winner = mergeColumn(existing, entry, strategy, op.table, op.rowId, col);
     if (winner) {
-      row[col] = winner;
+      row.payload[col] = winner;
       changed = true;
     }
   }
 
-  // An upsert that's newer than a delete revives the row
-  if (row._deleted && row._deletedHlc) {
+  // Resurrection: upsert with HLC newer than tombstone revives the row.
+  if (row._meta.deleted && row._meta.deletedHlc) {
     const newestOpHlc = Object.values(op.columns).reduce((max, entry) => {
       return !max || hlcCompareStr(entry.hlc, max) > 0 ? entry.hlc : max;
     }, '' as string);
 
-    if (newestOpHlc && hlcCompareStr(newestOpHlc, row._deletedHlc) > 0) {
-      row._deleted = false;
+    if (newestOpHlc && hlcCompareStr(newestOpHlc, row._meta.deletedHlc) > 0) {
+      row._meta.deleted = false;
+      row._meta.deletedHlc = undefined;
       changed = true;
     }
   }
@@ -199,31 +184,24 @@ export function applyChangeEntry(
   return affected;
 }
 
-/**
- * Read a column value from a row, unwrapping the ColumnEntry.
- */
+/** Read a column value from a row, unwrapping the ColumnEntry. */
 export function readColumn(row: Row, column: string): unknown {
-  const entry = row[column];
-  if (entry && typeof entry === 'object' && 'value' in entry && 'hlc' in entry) {
-    return (entry as ColumnEntry).value;
-  }
-  return undefined;
+  const entry = row.payload?.[column];
+  return entry?.value;
 }
 
 /**
  * Build a plain object from a row (strip HLC metadata).
+ * Returns user-facing fields with `_meta` projection (table, rowId, deleted).
  */
 export function rowToPlain(row: Row): Record<string, unknown> {
   const result: Record<string, unknown> = {
-    _table: row._table,
-    _rowId: row._rowId,
-    _deleted: row._deleted,
+    _table: row._meta.table,
+    _rowId: row._meta.rowId,
+    _deleted: row._meta.deleted,
   };
-  for (const [key, val] of Object.entries(row)) {
-    if (META_KEYS.has(key)) continue;
-    if (val && typeof val === 'object' && 'value' in val && 'hlc' in val) {
-      result[key] = (val as ColumnEntry).value;
-    }
+  for (const [key, entry] of Object.entries(row.payload)) {
+    result[key] = entry.value;
   }
   return result;
 }

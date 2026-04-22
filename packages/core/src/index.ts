@@ -73,6 +73,13 @@ export {
 export { Table, QueryResult, RowResult } from './core/table.ts';
 export { types } from './core/schema-types.ts';
 
+// ─── Typed errors ─────────────────────────────────────────────────────
+
+export {
+  MeshEncryptionMismatchError,
+  MeshCredentialMismatchError,
+} from './core/errors.ts';
+
 // ─── Row utilities ────────────────────────────────────────────────────
 
 export { readColumn, rowToPlain } from './core/crdt.ts';

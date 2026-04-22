@@ -88,8 +88,6 @@ export function getDeviceId(override?: string): string {
 export const textEncoder = new TextEncoder();
 export const textDecoder = new TextDecoder();
 
-export const ROW_META_KEYS = new Set(['_table', '_rowId', '_deleted', '_deletedHlc', '_schemaVersion', '_owner']);
-
 export function hexFromBytes(bytes: Uint8Array): string {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }

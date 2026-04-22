@@ -21,16 +21,15 @@ test.describe('applyOp — upsert', () => {
       }, 1);
 
       return {
-        row,
+        rowMeta: row?._meta,
         title: row ? readColumn(row, 'title') : null,
         tableExists: 'tasks' in tables,
         rowInTable: tables.tasks?.task_1 !== null && tables.tasks?.task_1 !== undefined,
       };
     });
 
-    expect(result.row).not.toBeNull();
+    expect(result.rowMeta).toMatchObject({ table: 'tasks', rowId: 'task_1', deleted: false });
     expect(result.title).toBe('Hello');
-    expect(result.row._deleted).toBe(false);
     expect(result.tableExists).toBe(true);
     expect(result.rowInTable).toBe(true);
   });
@@ -75,7 +74,7 @@ test.describe('applyOp — upsert', () => {
     });
 
     expect(result.value).toBe('winner');
-    expect(result.changed).toBeNull(); // no change applied
+    expect(result.changed).toBeNull();
   });
 
   test('merges independent columns from different devices', async ({ page }) => {
@@ -122,7 +121,7 @@ test.describe('applyOp — delete', () => {
         hlc: '000002000000000000-0000-dev_a',
       }, 1);
 
-      return { deleted: deleted?._deleted, hlc: deleted?._deletedHlc };
+      return { deleted: deleted?._meta.deleted, hlc: deleted?._meta.deletedHlc };
     });
 
     expect(result.deleted).toBe(true);
@@ -144,7 +143,7 @@ test.describe('applyOp — delete', () => {
         hlc: '000001000000000000-0000-dev_b',
       }, 1);
 
-      return { changeApplied: deleted, isDeleted: tables.t.r1._deleted };
+      return { changeApplied: deleted, isDeleted: tables.t.r1._meta.deleted };
     });
 
     expect(result.changeApplied).toBeNull();
@@ -163,7 +162,7 @@ test.describe('applyOp — delete', () => {
 
       return {
         created: row !== null && row !== undefined,
-        deleted: row?._deleted,
+        deleted: row?._meta.deleted,
         inTable: tables.t?.r_unknown !== null && tables.t?.r_unknown !== undefined,
       };
     });
@@ -194,7 +193,7 @@ test.describe('applyOp — delete', () => {
       }, 1);
 
       return {
-        deleted: revived?._deleted,
+        deleted: revived?._meta.deleted,
         value: revived ? readColumn(revived, 'x') : null,
       };
     });
@@ -218,13 +217,12 @@ test.describe('applyOp — delete', () => {
         hlc: '000005000000000000-0000-dev_a',
       }, 1);
 
-      // Upsert arrives with HLC between original write and delete
       applyOp(tables, {
         type: 'upsert', table: 't', rowId: 'r1',
         columns: { x: { value: 'stale', hlc: '000003000000000000-0000-dev_b' } },
       }, 1);
 
-      return { deleted: tables.t.r1._deleted };
+      return { deleted: tables.t.r1._meta.deleted };
     });
 
     expect(result.deleted).toBe(true);
@@ -298,8 +296,8 @@ test.describe('readColumn / rowToPlain', () => {
     const result = await page.evaluate(async () => {
       const { readColumn } = await import('/packages/core/dist/core/crdt.js');
       const row = {
-        _table: 't', _rowId: 'r', _deleted: false, _schemaVersion: 1,
-        name: { value: 'Alice', hlc: '000001000000000000-0000-dev_a' },
+        _meta: { table: 't', rowId: 'r', deleted: false, schemaVersion: 1 },
+        payload: { name: { value: 'Alice', hlc: '000001000000000000-0000-dev_a' } },
       };
       return readColumn(row, 'name');
     });
@@ -310,7 +308,7 @@ test.describe('readColumn / rowToPlain', () => {
   test('readColumn returns undefined for non-existent column', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { readColumn } = await import('/packages/core/dist/core/crdt.js');
-      const row = { _table: 't', _rowId: 'r', _deleted: false, _schemaVersion: 1 };
+      const row = { _meta: { table: 't', rowId: 'r', deleted: false, schemaVersion: 1 }, payload: {} };
       return readColumn(row, 'missing');
     });
 
@@ -321,9 +319,11 @@ test.describe('readColumn / rowToPlain', () => {
     const result = await page.evaluate(async () => {
       const { rowToPlain } = await import('/packages/core/dist/core/crdt.js');
       const row = {
-        _table: 'tasks', _rowId: 't1', _deleted: false, _schemaVersion: 1,
-        title: { value: 'Do stuff', hlc: '000001000000000000-0000-dev_a' },
-        status: { value: 'open', hlc: '000001000000000001-0000-dev_a' },
+        _meta: { table: 'tasks', rowId: 't1', deleted: false, schemaVersion: 1 },
+        payload: {
+          title: { value: 'Do stuff', hlc: '000001000000000000-0000-dev_a' },
+          status: { value: 'open', hlc: '000001000000000001-0000-dev_a' },
+        },
       };
       return rowToPlain(row);
     });
@@ -340,10 +340,12 @@ test.describe('readColumn / rowToPlain', () => {
   test('rowToPlain handles a row with no user columns', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { rowToPlain } = await import('/packages/core/dist/core/crdt.js');
-      return rowToPlain({ _table: 't', _rowId: 'r', _deleted: true, _schemaVersion: 1 });
+      return rowToPlain({
+        _meta: { table: 't', rowId: 'r', deleted: true, schemaVersion: 1 },
+        payload: {},
+      });
     });
 
     expect(result).toEqual({ _table: 't', _rowId: 'r', _deleted: true });
   });
 });
-

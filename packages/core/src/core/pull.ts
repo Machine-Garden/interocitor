@@ -43,11 +43,11 @@ function emitAffectedRows(
   emit: (event: SyncEvent) => void,
 ): void {
   for (const row of affected) {
-    knownTables.add(row._table);
-    if (row._deleted) {
-      emit({ type: 'delete', table: row._table, rowId: row._rowId });
+    knownTables.add(row._meta.table);
+    if (row._meta.deleted) {
+      emit({ type: 'delete', table: row._meta.table, rowId: row._meta.rowId });
     } else {
-      emit({ type: 'change', table: row._table, rowId: row._rowId, row });
+      emit({ type: 'change', table: row._meta.table, rowId: row._meta.rowId, row });
     }
   }
 }
@@ -69,8 +69,23 @@ export async function pull(ctx: PullContext): Promise<HLC> {
 
     // Fast path: if global head hasn't advanced past cursor, skip listing.
     const head = await readJsonIfExists<ChangesHead>(adapter, p.changesHead);
+    emit({
+      type: 'trace:head',
+      op: 'read',
+      reason: 'pull-fast-path',
+      path: p.changesHead,
+      priorHlc: head?.latestHlc ?? null,
+    });
     if (head?.latestHlc && cursor && hlcCompareStr(head.latestHlc, cursor) <= 0) {
       log('debug', 'pull() — head unchanged, skipping');
+      emit({
+        type: 'trace:head',
+        op: 'skip-no-change',
+        reason: 'pull-fast-path',
+        path: p.changesHead,
+        priorHlc: head.latestHlc,
+        nextHlc: cursor,
+      });
       emit({ type: 'sync:complete', entriesMerged: 0 });
       return hlc;
     }
@@ -117,6 +132,7 @@ export async function pull(ctx: PullContext): Promise<HLC> {
           latestMergedHlc = entry.hlc;
         }
       } catch (err) {
+        emit({ type: 'decode:error', error: err instanceof Error ? err : new Error(String(err)), path: file.path, context: { stage: 'pull', name: file.name } });
         throw await ctx.poisonRemote(err, file.path);
       }
     }

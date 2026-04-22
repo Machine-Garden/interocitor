@@ -22,10 +22,7 @@ test.describe('LocalStore — row operations', () => {
       const store = new LocalStore();
       await store.open();
 
-      const row = {
-        _table: 'tasks', _rowId: 't1', _deleted: false, _schemaVersion: 1,
-        title: { value: 'Test', hlc: '000001000000000000-0000-dev_a' },
-      };
+      const row = { _meta: { table: 'tasks', rowId: 't1', deleted: false, schemaVersion: 1 }, payload: { title: { value: 'Test', hlc: '000001000000000000-0000-dev_a' } } };
       await store.putRow(row);
       const retrieved = await store.getRow('tasks', 't1');
 
@@ -34,9 +31,9 @@ test.describe('LocalStore — row operations', () => {
     });
 
     expect(result).toBeTruthy();
-    expect(result._table).toBe('tasks');
-    expect(result._rowId).toBe('t1');
-    expect(result.title.value).toBe('Test');
+    expect(result._meta.table).toBe('tasks');
+    expect(result._meta.rowId).toBe('t1');
+    expect(result.payload.title.value).toBe('Test');
   });
 
   test('getRow returns undefined for missing row', async ({ page }) => {
@@ -59,9 +56,9 @@ test.describe('LocalStore — row operations', () => {
       await store.open();
 
       await store.putRows([
-        { _table: 't', _rowId: 'r1', _deleted: false, _schemaVersion: 1 },
-        { _table: 't', _rowId: 'r2', _deleted: false, _schemaVersion: 1 },
-        { _table: 't', _rowId: 'r3', _deleted: false, _schemaVersion: 1 },
+        { _meta: { table: 't', rowId: 'r1', deleted: false, schemaVersion: 1 }, payload: {} },
+        { _meta: { table: 't', rowId: 'r2', deleted: false, schemaVersion: 1 }, payload: {} },
+        { _meta: { table: 't', rowId: 'r3', deleted: false, schemaVersion: 1 }, payload: {} },
       ]);
       const all = await store.getAllRows();
       store.close();
@@ -78,9 +75,9 @@ test.describe('LocalStore — row operations', () => {
       await store.open();
 
       await store.putRows([
-        { _table: 'meals', _rowId: 'm1', _deleted: false, _schemaVersion: 1 },
-        { _table: 'meals', _rowId: 'm2', _deleted: true, _schemaVersion: 1 },
-        { _table: 'tasks', _rowId: 't1', _deleted: false, _schemaVersion: 1 },
+        { _meta: { table: 'meals', rowId: 'm1', deleted: false, schemaVersion: 1 }, payload: {} },
+        { _meta: { table: 'meals', rowId: 'm2', deleted: true, schemaVersion: 1 }, payload: {} },
+        { _meta: { table: 'tasks', rowId: 't1', deleted: false, schemaVersion: 1 }, payload: {} },
       ]);
 
       const meals = await store.getTable('meals');
@@ -99,7 +96,7 @@ test.describe('LocalStore — row operations', () => {
       const store = new LocalStore();
       await store.open();
 
-      await store.putRow({ _table: 't', _rowId: 'r1', _deleted: false, _schemaVersion: 1 });
+      await store.putRow({ _meta: { table: 't', rowId: 'r1', deleted: false, schemaVersion: 1 }, payload: {} });
       await store.setMeta('key', 'value');
       await store.clearRows();
 
@@ -130,21 +127,9 @@ test.describe('LocalStore — row operations', () => {
       await store.open();
 
       await store.putRows([
-        {
-          _table: 'tasks', _rowId: 't1', _deleted: false, _schemaVersion: 1,
-          status: { value: 'open', hlc: '0' },
-          priority: { value: 1, hlc: '0' },
-        },
-        {
-          _table: 'tasks', _rowId: 't2', _deleted: false, _schemaVersion: 1,
-          status: { value: 'done', hlc: '0' },
-          priority: { value: 3, hlc: '0' },
-        },
-        {
-          _table: 'tasks', _rowId: 't3', _deleted: false, _schemaVersion: 1,
-          status: { value: 'open', hlc: '0' },
-          priority: { value: 2, hlc: '0' },
-        },
+        { _meta: { table: 'tasks', rowId: 't1', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'open', hlc: '0' }, priority: { value: 1, hlc: '0' } } },
+        { _meta: { table: 'tasks', rowId: 't2', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'done', hlc: '0' }, priority: { value: 3, hlc: '0' } } },
+        { _meta: { table: 'tasks', rowId: 't3', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'open', hlc: '0' }, priority: { value: 2, hlc: '0' } } },
       ] as any);
 
       const open = await store.queryWhere('tasks', { field: 'status', op: 'equals', value: 'open' } as any);
@@ -157,8 +142,8 @@ test.describe('LocalStore — row operations', () => {
 
       store.close();
       return {
-        open: open.map(r => r._rowId).toSorted(),
-        range: range.map(r => r._rowId).toSorted(),
+        open: open.map(r => r._meta.rowId).toSorted(),
+        range: range.map(r => r._meta.rowId).toSorted(),
       };
     });
 
@@ -182,14 +167,8 @@ test.describe('LocalStore — row operations', () => {
       await store.open();
 
       await store.putRows([
-        {
-          _table: 'tasks', _rowId: 't1', _deleted: false, _schemaVersion: 1,
-          title: { value: 'alpha', hlc: '0' },
-        },
-        {
-          _table: 'tasks', _rowId: 't2', _deleted: false, _schemaVersion: 1,
-          title: { value: 'beta', hlc: '0' },
-        },
+        { _meta: { table: 'tasks', rowId: 't1', deleted: false, schemaVersion: 1 }, payload: { title: { value: 'alpha', hlc: '0' } } },
+        { _meta: { table: 'tasks', rowId: 't2', deleted: false, schemaVersion: 1 }, payload: { title: { value: 'beta', hlc: '0' } } },
       ] as any);
 
       const startsWithA = await store.queryWhere('tasks', {
@@ -199,7 +178,7 @@ test.describe('LocalStore — row operations', () => {
       } as any);
 
       store.close();
-      return startsWithA.map(r => r._rowId);
+      return startsWithA.map(r => r._meta.rowId);
     });
 
     expect(result).toEqual(['t1']);
@@ -219,13 +198,13 @@ test.describe('LocalStore — row operations', () => {
       await store.open();
 
       await store.putRows([
-        { _table: 'tasks', _rowId: 't1', _deleted: false, _schemaVersion: 1, status: { value: 'open', hlc: '0' } },
-        { _table: 'tasks', _rowId: 't2', _deleted: false, _schemaVersion: 1, status: { value: 'done', hlc: '0' } },
+        { _meta: { table: 'tasks', rowId: 't1', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'open', hlc: '0' } } },
+        { _meta: { table: 'tasks', rowId: 't2', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'done', hlc: '0' } } },
       ] as any);
 
       const open = await store.queryWhere('tasks', { field: 'status', op: 'equals', value: 'open' } as any);
       store.close();
-      return open.map(row => row._rowId);
+      return open.map(row => row._meta.rowId);
     });
 
     expect(result).toEqual(['t1']);
@@ -362,7 +341,7 @@ test.describe('LocalStore — clearAll', () => {
       const store = new LocalStore();
       await store.open();
 
-      await store.putRow({ _table: 't', _rowId: 'r', _deleted: false, _schemaVersion: 1 });
+      await store.putRow({ _meta: { table: 't', rowId: 'r', deleted: false, schemaVersion: 1 }, payload: {} });
       await store.pushOutbox({ id: 'x', ts: 0, device: 'd', hlc: '0', ops: [] } as any);
       await store.setCursor('dev_a', 5);
       await store.setMeta('k', 'v');

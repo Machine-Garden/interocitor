@@ -69,20 +69,34 @@ export interface ChangeEntry {
 // ─── Row (as stored in local DB) ─────────────────────────────────────
 
 /**
+ * CRDT row metadata. Lives under `Row._meta` and is fully isolated from
+ * user payload. Engine never reads or writes user-controlled fields here.
+ */
+export interface RowMeta {
+  table: string;
+  rowId: string;
+  deleted: boolean;
+  deletedHlc?: string;
+  schemaVersion: number;
+  /** Device ID that last wrote this row. Set automatically on every write. */
+  owner?: string;
+  /** Composite IndexedDB key. Computed by local-store on putRow. */
+  key?: string;
+}
+
+/**
  * Row representation as stored in the local CRDT cache.
  *
- * Public table APIs usually return plain objects rather than this internal
- * metadata-rich shape.
+ * Two namespaces:
+ *  - `_meta` — engine-owned metadata. Reserved.
+ *  - `payload` — user columns, each wrapped in a `ColumnEntry` ({value, hlc}).
+ *
+ * Public table APIs return plain typed objects (see `rowToTyped` in table.ts);
+ * this shape is for internal consumers (CRDT merge, flush, compaction, events).
  */
 export interface Row {
-  _table: string;
-  _rowId: string;
-  _deleted: boolean;
-  _deletedHlc?: string;
-  _schemaVersion: number;
-  /** Device ID that last wrote this row. Set automatically on every write. */
-  _owner?: string;
-  [column: string]: ColumnEntry | string | boolean | number | undefined;
+  _meta: RowMeta;
+  payload: Record<string, ColumnEntry>;
 }
 
 // ─── Schema / Indexes ─────────────────────────────────────────────────
@@ -698,7 +712,18 @@ export type SyncEvent =
   | { type: 'sync:start' }
   | { type: 'sync:complete'; entriesMerged: number }
   | { type: 'sync:error'; error: Error }
-  | { type: 'remote:poisoned'; error: Error; path?: string }
+  | { type: 'credentials:restored'; source: 'silent-store' | 'biometric'; deviceIdChanged: boolean; hadPassphrase: boolean }
+  | { type: 'remote:poisoned'; error: Error; path?: string; context?: Record<string, unknown> }
+  | { type: 'decode:error'; error: Error; path?: string; context?: Record<string, unknown> }
+  | { type: 'credentials:conflict'; storedDeviceId: string; activeDeviceId: string; dbName: string; remotePath?: string }
+  | { type: 'credentials:meshMismatch'; dbName: string; remotePath?: string; storedMeshId: string; activeMeshId: string }
+  | { type: 'credentials:persisted'; dbName: string; remotePath?: string; deviceId: string; encrypted: boolean }
+  | { type: 'encryption:resolved'; strategy: 'passphrase' | 'existing-key' | 'generated'; dbName: string; remotePath?: string; encrypted: boolean }
+  | { type: 'mesh:configured'; dbName: string; remotePath?: string; deviceId: string; encrypted: boolean; hadPassphrase: boolean }
+  | { type: 'connect:state'; dbName: string; remotePath?: string; deviceId: string; localEpoch?: number; remoteEpoch?: number; meshId?: string; encrypted: boolean }
+  | { type: 'connect:noop'; dbName: string; remotePath?: string; deviceId: string; reason: 'already-connected' }
+  | { type: 'connect:error'; error: Error; stage: string; dbName: string; remotePath?: string; deviceId: string }
+  | { type: 'transport:teardown'; dbName: string; remotePath?: string; deviceId: string; reason: 'switch-adapter' | 'disconnect' | 'detach' }
   | { type: 'flush:start'; entryCount: number }
   | { type: 'flush:complete' }
   | { type: 'flush:error'; error: Error }
@@ -709,7 +734,28 @@ export type SyncEvent =
   | { type: 'auth:required' }
   | { type: 'auth:complete' }
   | { type: 'schema:mismatch'; local: number; remote: number }
-  | { type: 'replica:error'; adapter: string; error: Error };
+  | { type: 'replica:error'; adapter: string; error: Error }
+  // ── Trace events ───────────────────────────────────────────────
+  // High-volume diagnostics. NOT a public API contract; consumers
+  // (devtools, tests) opt in. Engine fires these unconditionally.
+  // Use to answer "why is my head/manifest being rewritten?".
+  | {
+      type: 'trace:manifest';
+      op: 'read' | 'write' | 'cache-hit' | 'bootstrap-create';
+      reason: string;            // free-form caller tag, e.g. 'connect', 'flush', 'pull', 'compact'
+      generation?: number;
+      path?: string;
+      cached?: boolean;          // true when a read was served from in-memory cache
+    }
+  | {
+      type: 'trace:head';
+      op: 'read' | 'write' | 'skip-no-change';
+      reason: string;            // 'flush', 'pull-fast-path'
+      path?: string;
+      priorHlc?: string | null;  // HLC currently in head.json (or local cache)
+      nextHlc?: string | null;   // HLC about to be written
+      regressed?: boolean;       // true when caller tried to write an HLC older than priorHlc (BUG signal)
+    };
 
 /**
  * Listener callback registered with {@link Interocitor.on}.

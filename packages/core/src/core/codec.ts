@@ -28,7 +28,19 @@ export async function encodeForCloud(state: CodecState, plaintext: string): Prom
 
 export async function decodeFromCloud(state: CodecState, data: string): Promise<string> {
   if (!state.encrypted || !state.encryptionKey) return data;
-  return decryptEntry(state.encryptionKey, data);
+  try {
+    return await decryptEntry(state.encryptionKey, data);
+  } catch (err) {
+    // Re-throw with explicit context. Decode errors at this layer mean the
+    // active key cannot decrypt this payload — either the wrong key was
+    // loaded, or the payload was written under a different key (mesh swap,
+    // passphrase rotated, two devices bound to same dbName but different
+    // passphrases). Caller wraps this in poisonRemote with the file path.
+    const reason = err instanceof Error ? err.message : String(err);
+    const e = new Error(`Decryption failed: payload not decryptable with the active mesh key (${reason}). The remote was likely written under a different key/mesh.`);
+    (e as any).cause = err;
+    throw e;
+  }
 }
 
 export async function assertExpectedMeshId(

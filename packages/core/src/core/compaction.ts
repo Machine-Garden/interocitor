@@ -54,8 +54,9 @@ export async function compact(ctx: CompactContext): Promise<Manifest> {
   const allRows = await local.getAllRows();
   const snapshotTables: Record<string, Record<string, Row>> = {};
   for (const row of allRows) {
-    if (!snapshotTables[row._table]) snapshotTables[row._table] = {};
-    snapshotTables[row._table][row._rowId] = row;
+    const t = row._meta.table;
+    if (!snapshotTables[t]) snapshotTables[t] = {};
+    snapshotTables[t][row._meta.rowId] = row;
   }
 
   const snapshot: Snapshot = {
@@ -178,6 +179,7 @@ export async function rehydrate(ctx: RehydrateContext): Promise<HLC> {
     await ctx.local.setMeta('epoch', snapshot.epoch);
     ctx.emit({ type: 'rehydrate:complete', rowCount });
   } catch (err) {
+    ctx.emit({ type: 'decode:error', error: err instanceof Error ? err : new Error(String(err)), path: snapshotPath, context: { stage: 'rehydrate' } });
     const poisoned = await ctx.poisonRemote(err, snapshotPath);
     ctx.emit({ type: 'sync:error', error: poisoned });
     throw poisoned;

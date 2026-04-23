@@ -1,6 +1,13 @@
 /**
  * Compaction — snapshot + manifest rotation + change file pruning.
  *
+ * Concurrency note:
+ * - No built-in lock or CAS on manifest pointer.
+ * - Concurrent compaction can race and overwrite the pointer.
+ * - Recommended: acquire a remote lease (e.g. mainline/compact-lock.json)
+ *   and abort if another compactor is active, or if manifest generation
+ *   changes after the lease is acquired.
+ *
  * Extracted from Interocitor. Not part of the public API.
  */
 

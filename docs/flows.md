@@ -88,21 +88,33 @@ sequenceDiagram
     participant E as SyncEngine (compactor)
     participant C as Cloud
 
-    E->>E: pull() — merge all remote changes first
-    E->>E: getAllRows() — full IDB scan
+    E->>C: GET mainline/compact-lock.json
+    C-->>E: 404 / expired / active
+    alt lock active
+        E-->>E: abort compaction
+    else lock available
+        E->>C: PUT mainline/compact-lock.json (owner + expiresAt)
+        E->>C: GET mainline/compact-lock.json
+        alt lock owned by other
+            E-->>E: abort compaction
+        else lock owned by self
+            E->>E: pull() — merge all remote changes first
+            E->>E: getAllRows() — full IDB scan
+            E->>C: PUT mainline/snapshot-{epoch}-{writer}.json
+            E->>C: PUT manifest-{gen}.json (epoch, watermarkHlc, snapshotPath)
+            E->>C: PUT manifest.json { currentGeneration, file }
+            Note over C: pointer switches — other devices see new epoch on next connect/pull
 
-    E->>C: PUT mainline/snapshot-{epoch}-{writer}.json
-    E->>C: PUT manifest-{gen}.json (epoch, watermarkHlc, snapshotPath)
-    E->>C: PUT manifest.json { currentGeneration, file }
-    Note over C: pointer switches — other devices see new epoch on next connect/pull
+            E->>E: setMeta epoch ← nextEpoch
 
-    E->>E: setMeta epoch ← nextEpoch
-
-    E->>C: list changes/ (all files)
-    loop each change file with HLC ≤ watermarkHlc
-        E->>C: DELETE {hlc}-{changeId}.json
+            E->>C: list changes/ (all files)
+            loop each change file with HLC ≤ watermarkHlc
+                E->>C: DELETE {hlc}-{changeId}.json
+            end
+            Note over E,C: changes/ now contains only post-watermark files
+            E->>C: DELETE mainline/compact-lock.json
+        end
     end
-    Note over E,C: changes/ now contains only post-watermark files
 ```
 
 **Write ordering:** snapshot → manifest file → manifest pointer.

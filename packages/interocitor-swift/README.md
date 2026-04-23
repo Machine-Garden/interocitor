@@ -103,6 +103,67 @@ try await db.delete("todos", rowId: "todo-1")
 let one = try await db.get("todos", rowId: "todo-1")
 let many = try await db.query("todos")
 try await db.flush()
+try await db.compact()
+```
+
+`compact()` is a manual maintenance call. It is not part of normal sync.
+Use it to write a fresh snapshot and prune old remote change files.
+
+```swift
+try await db.flush()
+try await db.compact()
+```
+
+### Compaction policy
+
+Compact only when all are true:
+
+- device idle **> 1 min**
+- last successful pull **< 30 min** ago
+- remote churn **> 20 changes** since last compaction
+- engine connected and healthy
+- no compaction already in progress
+
+### Compaction coordination
+
+`compact()` has no built-in distributed lock. Two clients can race and overwrite the manifest pointer.
+Recommended: coordinate with a remote lease file such as `mainline/compact-lock.json`.
+
+Recommended protocol:
+
+1. Read lock. If present and not expired → skip compaction.
+2. Write lock for self with short TTL.
+3. Re-read lock. If not owned by self → abort.
+4. Re-read manifest/head. If generation changed since lock acquisition → abort.
+5. Run `compact()`.
+6. Delete lock on success, or rely on TTL on crash.
+
+For repo-level diagrams and monorepo context, see the project root: `https://github.com/TheUiTeam/interocitor`.
+
+```mermaid
+sequenceDiagram
+    participant E as SyncEngine (compactor)
+    participant C as Cloud
+
+    E->>C: GET mainline/compact-lock.json
+    C-->>E: 404 / expired / active
+    alt lock active
+        E-->>E: abort compaction
+    else lock available
+        E->>C: PUT mainline/compact-lock.json (owner + expiresAt)
+        E->>C: GET mainline/compact-lock.json
+        alt lock owned by other
+            E-->>E: abort compaction
+        else lock owned by self
+            E->>E: pull() — merge all remote changes first
+            E->>E: build snapshot from local state
+            E->>C: PUT snapshot
+            E->>C: PUT manifest generation file
+            E->>C: PUT manifest pointer
+            E->>C: DELETE old change files ≤ watermarkHlc
+            E->>C: DELETE mainline/compact-lock.json
+        end
+    end
 ```
 
 ## Where clauses

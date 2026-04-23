@@ -656,6 +656,16 @@ export interface SyncConfig<
   flushDebounce?: number;
   /** Max pending ops before forced flush (default 50) */
   flushThreshold?: number;
+  /** Warn once queued local changes reach this count (default 50). */
+  compactWarnThreshold?: number;
+  /** Consider sampled self-compaction once queued local changes reach this count (default 50). */
+  compactAutoThreshold?: number;
+  /** Sampling numerator for automatic compact. Chance = numerator / estimated device count. Default 10. */
+  compactAutoSampleNumerator?: number;
+  /** Estimated device count used to scale automatic compact sampling. Default 1. */
+  compactAutoDeviceCount?: number;
+  /** Enable sampled automatic compact after large churn. Default true. */
+  autoCompact?: boolean;
   /**
    * Local database name for this engine's local cache.
    * Use distinct names to isolate multiple engine instances on the same origin.
@@ -737,6 +747,11 @@ export type SyncEvent =
   | { type: 'flush:start'; entryCount: number }
   | { type: 'flush:complete' }
   | { type: 'flush:error'; error: Error }
+  | { type: 'compact:warning'; queuedChangeCount: number; threshold: number; autoCompactThreshold: number; remotePath?: string; deviceId: string }
+  | { type: 'compact:auto:start'; queuedChangeCount: number; threshold: number; sampleRoll: number; sampleWindow: number; remotePath?: string; deviceId: string }
+  | { type: 'compact:auto:skip'; queuedChangeCount: number; threshold: number; sampleRoll: number; sampleWindow: number; remotePath?: string; deviceId: string; reason: 'sampling' | 'disabled' | 'not-connected' | 'already-running' | 'poisoned' | 'missing-remote' }
+  | { type: 'compact:auto:complete'; queuedChangeCount: number; threshold: number; remotePath?: string; deviceId: string }
+  | { type: 'compact:auto:error'; queuedChangeCount: number; threshold: number; remotePath?: string; deviceId: string; error: Error }
   | { type: 'change'; table: string; rowId: string; row: Row }
   | { type: 'delete'; table: string; rowId: string }
   | { type: 'rehydrate:start' }

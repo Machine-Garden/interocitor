@@ -84,9 +84,92 @@ await db.table('tasks').query();
 await db.table('tasks').where('done').equals(false).orderBy('title');
 
 await db.connect();
+await db.compact();
 await db.secureWithBiometrics();
 await db.restoreWithBiometrics();
 ``` 
+
+`compact()` is a manual maintenance call. It is not part of normal `sync()`.
+Use it to write a fresh snapshot and prune old remote change files.
+
+```ts
+await db.connect();
+await db.compact();
+```
+
+If your app wraps the engine, the same call may appear as:
+
+```ts
+await runtime.engine.compact();
+```
+
+`compact()` requires a configured remote adapter and remotePath.
+
+### Compaction policy
+
+Compact only when all are true:
+
+- device idle **> 1 min**
+- last successful pull **< 30 min** ago
+- remote churn **> 20 changes** since last compaction
+- engine connected and healthy
+- no compaction already in progress
+
+If you do not call `compact()`, sync still works. Remote change files keep accumulating until some client compacts.
+
+### Compaction coordination
+
+`compact()` has no built-in distributed lock. Two clients can race and overwrite the manifest pointer.
+Recommended: coordinate with a remote lease file such as `mainline/compact-lock.json`.
+
+Example lease payload:
+
+```json
+{
+  "ownerDeviceId": "dev_x",
+  "generation": 42,
+  "headHlc": "2026-04-22T23:00:00.000Z",
+  "startedAt": "2026-04-22T23:00:00.000Z",
+  "expiresAt": "2026-04-22T23:05:00.000Z"
+}
+```
+
+Recommended protocol:
+
+1. Read lock. If present and not expired → skip compaction.
+2. Write lock for self with short TTL.
+3. Re-read lock. If not owned by self → abort.
+4. Re-read manifest/head. If generation changed since lock acquisition → abort.
+5. Run `compact()`.
+6. Delete lock on success, or rely on TTL on crash.
+
+### Compaction flow
+
+```mermaid
+sequenceDiagram
+    participant E as SyncEngine (compactor)
+    participant C as Cloud
+
+    E->>C: GET mainline/compact-lock.json
+    C-->>E: 404 / expired / active
+    alt lock active
+        E-->>E: abort compaction
+    else lock available
+        E->>C: PUT mainline/compact-lock.json (owner + expiresAt)
+        E->>C: GET mainline/compact-lock.json
+        alt lock owned by other
+            E-->>E: abort compaction
+        else lock owned by self
+            E->>E: pull() — merge all remote changes first
+            E->>E: getAllRows() — full local scan
+            E->>C: PUT snapshot
+            E->>C: PUT manifest generation file
+            E->>C: PUT manifest pointer
+            E->>C: DELETE old change files ≤ watermarkHlc
+            E->>C: DELETE mainline/compact-lock.json
+        end
+    end
+```
 
 `init()` is explicit. `connect()` will auto-init if needed, but app code should treat engine setup as:
 

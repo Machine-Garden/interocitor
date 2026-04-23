@@ -62,6 +62,11 @@ type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> = {
   pollInterval: number;
   flushDebounce: number;
   flushThreshold: number;
+  compactWarnThreshold: number;
+  compactAutoThreshold: number;
+  compactAutoSampleNumerator: number;
+  compactAutoDeviceCount: number;
+  autoCompact: boolean;
   dbName: string;
   localStoreFactory: LocalStoreFactory;
   schema?: DatabaseSchemaDefinition<S>;
@@ -71,6 +76,11 @@ type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> = {
   deviceName?: string;
   deviceType?: import('./types.ts').DeviceType;
 };
+
+const DEFAULT_COMPACT_WARNING_THRESHOLD = 50;
+const DEFAULT_COMPACT_AUTO_THRESHOLD = 50;
+const DEFAULT_COMPACT_AUTO_SAMPLE_NUMERATOR = 10;
+const DEFAULT_COMPACT_AUTO_DEVICE_COUNT = 1;
 
 // ─── Sync Engine ─────────────────────────────────────────────────────
 
@@ -166,6 +176,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   // Flush management
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingCount = 0;
+  private compactWarningEmitted = false;
+  private compactInFlight: Promise<void> | null = null;
 
   // Poll management
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -230,6 +242,11 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       pollInterval: config.pollInterval ?? 30_000,
       flushDebounce: config.flushDebounce ?? 2_000,
       flushThreshold: config.flushThreshold ?? 50,
+      compactWarnThreshold: config.compactWarnThreshold ?? DEFAULT_COMPACT_WARNING_THRESHOLD,
+      compactAutoThreshold: config.compactAutoThreshold ?? DEFAULT_COMPACT_AUTO_THRESHOLD,
+      compactAutoSampleNumerator: config.compactAutoSampleNumerator ?? DEFAULT_COMPACT_AUTO_SAMPLE_NUMERATOR,
+      compactAutoDeviceCount: Math.max(1, Math.floor(config.compactAutoDeviceCount ?? DEFAULT_COMPACT_AUTO_DEVICE_COUNT)),
+      autoCompact: config.autoCompact ?? true,
       dbName: config.dbName ?? 'interocitor',
       localStoreFactory: config.localStoreFactory ?? (() => new LocalStore(config.dbName, undefined, config.schema)),
       schema: config.schema,

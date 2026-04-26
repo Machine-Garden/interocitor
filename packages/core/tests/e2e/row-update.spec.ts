@@ -201,6 +201,7 @@ test.describe('Outbox accounting', () => {
       const engine = new Interocitor(new MemoryAdapter(), {
         remotePath: '/U7', pollInterval: 600_000, deviceId: 'dev_a',
         localStoreFactory: () => local,
+        batchWindowMs: 0,
       });
       await engine.init();
       await engine.connect();

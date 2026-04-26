@@ -63,7 +63,7 @@ test('concurrent connect() calls run the pipeline once and produce one change fi
     });
 
     const engine = new Interocitor(counting as any, {
-      remotePath: '/Concurrent',
+      batchWindowMs: 0, remotePath: '/Concurrent',
       dbName: 'connect-concurrent-test',
       pollInterval: 600_000,    // disable polling so it can't skew counts
       flushDebounce: 600_000,   // disable auto-flush; drive flushes explicitly
@@ -211,7 +211,7 @@ test('reload + fresh-client read budget: own writes not re-read on reload; fresh
     await wipeIdb('reload-orig');
     currentReads = [];
     const e1 = new Interocitor(counting as any, {
-      ...baseConfig,
+      batchWindowMs: 0, ...baseConfig,
       dbName: 'reload-orig',
       deviceId: 'dev_orig',
     });
@@ -233,7 +233,7 @@ test('reload + fresh-client read budget: own writes not re-read on reload; fresh
     //    same adapter. Must NOT GET its own change files. ────────────
     currentReads = [];
     const e1Reload = new Interocitor(counting as any, {
-      ...baseConfig,
+      batchWindowMs: 0, ...baseConfig,
       dbName: 'reload-orig',
       deviceId: 'dev_orig',
     });
@@ -249,7 +249,7 @@ test('reload + fresh-client read budget: own writes not re-read on reload; fresh
     await wipeIdb('reload-peer');
     currentReads = [];
     const e2 = new Interocitor(counting as any, {
-      ...baseConfig,
+      batchWindowMs: 0, ...baseConfig,
       dbName: 'reload-peer',
       deviceId: 'dev_peer',
     });
@@ -264,7 +264,7 @@ test('reload + fresh-client read budget: own writes not re-read on reload; fresh
     //    MUST NOT re-read the change files. ──────────────────────────
     currentReads = [];
     const e2Reload = new Interocitor(counting as any, {
-      ...baseConfig,
+      batchWindowMs: 0, ...baseConfig,
       dbName: 'reload-peer',
       deviceId: 'dev_peer',
     });
@@ -357,7 +357,7 @@ test('setRemoteStorage with the same adapter is a no-op (no rebuild, no reflush)
     });
 
     const engine = new Interocitor(counting as any, {
-      remotePath: '/SameAdapter',
+      batchWindowMs: 0, remotePath: '/SameAdapter',
       dbName: 'connect-concurrent-test',
       pollInterval: 600_000,
       flushDebounce: 5,
@@ -430,7 +430,7 @@ test('disconnect+reconnect on same adapter: ensureFolder is cached, manifest cac
     });
 
     const engine = new Interocitor(counting as any, {
-      remotePath: '/Reconnect',
+      batchWindowMs: 0, remotePath: '/Reconnect',
       dbName: 'connect-concurrent-test',
       pollInterval: 600_000,
       flushDebounce: 600_000,

@@ -67,6 +67,12 @@ type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> = {
   compactAutoSampleNumerator: number;
   compactAutoDeviceCount: number;
   autoCompact: boolean;
+  firstCompactDelayMs: number;
+  firstCompactDelayJitterMs: number;
+  secondCompactDelayMs: number;
+  secondCompactDelayJitterMs: number;
+  compactRemoteChangeThreshold: number;
+  batchWindowMs: number;
   dbName: string;
   localStoreFactory: LocalStoreFactory;
   schema?: DatabaseSchemaDefinition<S>;
@@ -81,6 +87,12 @@ const DEFAULT_COMPACT_WARNING_THRESHOLD = 50;
 const DEFAULT_COMPACT_AUTO_THRESHOLD = 50;
 const DEFAULT_COMPACT_AUTO_SAMPLE_NUMERATOR = 10;
 const DEFAULT_COMPACT_AUTO_DEVICE_COUNT = 1;
+const DEFAULT_FIRST_COMPACT_DELAY_MS = 10 * 60_000;
+const DEFAULT_FIRST_COMPACT_DELAY_JITTER_MS = 5 * 60_000;
+const DEFAULT_SECOND_COMPACT_DELAY_MS = 15 * 60_000;
+const DEFAULT_SECOND_COMPACT_DELAY_JITTER_MS = 5 * 60_000;
+const DEFAULT_COMPACT_REMOTE_CHANGE_THRESHOLD = 2;
+const DEFAULT_BATCH_WINDOW_MS = 1_000;
 
 // ─── Sync Engine ─────────────────────────────────────────────────────
 
@@ -178,6 +190,11 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   private pendingCount = 0;
   private compactWarningEmitted = false;
   private compactInFlight: Promise<void> | null = null;
+  private compactScheduleVersion = 0;
+  private compactCheckTimer: ReturnType<typeof setTimeout> | null = null;
+  private compactRunTimer: ReturnType<typeof setTimeout> | null = null;
+  private batchTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingBatch: ChangeEntry | null = null;
 
   // Poll management
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -247,6 +264,12 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       compactAutoSampleNumerator: config.compactAutoSampleNumerator ?? DEFAULT_COMPACT_AUTO_SAMPLE_NUMERATOR,
       compactAutoDeviceCount: Math.max(1, Math.floor(config.compactAutoDeviceCount ?? DEFAULT_COMPACT_AUTO_DEVICE_COUNT)),
       autoCompact: config.autoCompact ?? true,
+      firstCompactDelayMs: config.firstCompactDelayMs ?? DEFAULT_FIRST_COMPACT_DELAY_MS,
+      firstCompactDelayJitterMs: config.firstCompactDelayJitterMs ?? DEFAULT_FIRST_COMPACT_DELAY_JITTER_MS,
+      secondCompactDelayMs: config.secondCompactDelayMs ?? DEFAULT_SECOND_COMPACT_DELAY_MS,
+      secondCompactDelayJitterMs: config.secondCompactDelayJitterMs ?? DEFAULT_SECOND_COMPACT_DELAY_JITTER_MS,
+      compactRemoteChangeThreshold: config.compactRemoteChangeThreshold ?? DEFAULT_COMPACT_REMOTE_CHANGE_THRESHOLD,
+      batchWindowMs: config.batchWindowMs ?? DEFAULT_BATCH_WINDOW_MS,
       dbName: config.dbName ?? 'interocitor',
       localStoreFactory: config.localStoreFactory ?? (() => new LocalStore(config.dbName, undefined, config.schema)),
       schema: config.schema,
@@ -318,11 +341,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     await this.local.putRow(row);
     const op = this.rowToSyncOp(row);
     const hlc = this.getRowHlc(row);
-    if (op && hlc) await this.local.pushOutbox(this.buildChangeEntry(op, hlc));
+    if (op && hlc) await this.queueOpForBatchedFlush(op, hlc);
     this.knownTables.add(tableName);
 
     this.emit({ type: 'change', table: tableName, rowId, row });
-    this.scheduleFlush();
     return row as unknown as S[K];
   }
 
@@ -339,9 +361,24 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     await this.local.putRow(current);
     const op = this.rowToSyncOp(current);
     const hlc = this.getRowHlc(current);
-    if (op && hlc) await this.local.pushOutbox(this.buildChangeEntry(op, hlc));
+    if (op && hlc) await this.queueOpForBatchedFlush(op, hlc);
     this.emit({ type: 'delete', table: tableName, rowId });
-    this.scheduleFlush();
+  }
+
+  /**
+   * Append the op to the in-flight batch. If we are inside a `batch()` block,
+   * the op stays buffered until the block ends. Otherwise it joins an
+   * implicit window of `batchWindowMs`. Either way the result is one
+   * ChangeEntry per batch instead of one per write.
+   */
+  private async queueOpForBatchedFlush(op: Op, hlc: string): Promise<void> {
+    this.appendOpToPendingBatch(op, hlc);
+    if (this.isBatching()) return;
+    if (this.config.batchWindowMs <= 0) {
+      await this.flushPendingBatch();
+      return;
+    }
+    this.armImplicitBatchTimer();
   }
 
   private async queryNow<K extends keyof S & string>(table: K): Promise<S[K][]> {
@@ -651,6 +688,21 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     }
   }
 
+  private clearCompactTimers(): void {
+    if (this.compactCheckTimer) clearTimeout(this.compactCheckTimer);
+    if (this.compactRunTimer) clearTimeout(this.compactRunTimer);
+    this.compactCheckTimer = null;
+    this.compactRunTimer = null;
+    this.compactScheduleVersion += 1;
+  }
+
+  private jitterDelay(baseMs: number, jitterMs: number): number {
+    if (jitterMs <= 0) return Math.max(0, baseMs);
+    const min = Math.max(0, baseMs - jitterMs);
+    const max = baseMs + jitterMs;
+    return Math.floor(min + Math.random() * (max - min + 1));
+  }
+
   private stopPolling(): void {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
@@ -666,32 +718,6 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   }
 
   // ── State helpers ──────────────────────────────────────────────────
-
-  private async resetRemoteSyncState(): Promise<void> {
-    this.manifest = null;
-    this.remotePoisonError = null;
-    this.connected = false;
-    await this.local.setMeta('cursor', '');
-    await this.local.setMeta('epoch', 0);
-    await this.local.setMeta('meshId', '');
-    // Drop the credential meshId anchor too. The caller is intentionally
-    // detaching from the previous mesh (setRemoteStorage / re-pair); the
-    // next connect will mint or load a fresh manifest and re-anchor.
-    // Without this, `assertCredentialMeshParity` would block reconnect
-    // against the new backend.
-    await this.unbindCredentialMeshAnchor();
-  }
-
-  /** Strip the meshId field from the persisted credential record while
-   *  keeping passphrase and deviceId intact. */
-  private async unbindCredentialMeshAnchor(): Promise<void> {
-    if (!this.credentialStore) return;
-    try {
-      const existing = await this.credentialStore.load();
-      if (!existing?.meshId) return;
-      await this.credentialStore.save({ passphrase: existing.passphrase, deviceId: existing.deviceId });
-    } catch { /* best-effort */ }
-  }
 
   private getRowHlc(row: Row): string {
     let latest = row._meta.deletedHlc ?? '';
@@ -715,31 +741,6 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     }
     if (Object.keys(columns).length === 0) return null;
     return { type: 'upsert', table: row._meta.table, rowId: row._meta.rowId, columns };
-  }
-
-  private buildChangeEntry(op: Op, hlc: string): ChangeEntry {
-    return {
-      id: generateId('chg'),
-      ts: Date.now(),
-      device: this.deviceId,
-      hlc,
-      ops: [op],
-    };
-  }
-
-  private async rebuildOutboxFromLocalState(): Promise<number> {
-    await this.local.drainOutbox();
-    const rows = await this.local.getAllRows();
-    let queued = 0;
-    for (const row of rows) {
-      const op = this.rowToSyncOp(row);
-      const hlc = this.getRowHlc(row);
-      if (!op || !hlc) continue;
-      await this.local.pushOutbox(this.buildChangeEntry(op, hlc));
-      queued++;
-    }
-    this.pendingCount = queued;
-    return queued;
   }
 
   private async loadLocalState(): Promise<void> {
@@ -1306,6 +1307,54 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     return this.connectPromise;
   }
 
+  private async tryConnectFastPath(adapter: StorageAdapter): Promise<boolean> {
+    const cursorRaw = await this.local.getMeta('cursor');
+    const cursor = typeof cursorRaw === 'string' ? cursorRaw : '';
+    if (!cursor) return false;
+    if (await this.local.outboxSize() > 0) return false;
+
+    const remotePath = this.requireRemotePath('connect() fast-path');
+    const p = paths(remotePath);
+    try {
+      const headRaw = await adapter.readFile(p.changesHead);
+      const head = JSON.parse(new TextDecoder().decode(headRaw)) as { latestHlc?: string };
+      this.emit({
+        type: 'trace:head',
+        op: 'read',
+        reason: 'connect-fast-path',
+        path: p.changesHead,
+        priorHlc: head.latestHlc ?? null,
+      });
+      if (head.latestHlc && hlcCompareStr(head.latestHlc, cursor) <= 0) {
+        this.emit({
+          type: 'trace:head',
+          op: 'skip-no-change',
+          reason: 'connect-fast-path',
+          path: p.changesHead,
+          priorHlc: head.latestHlc,
+          nextHlc: cursor,
+        });
+        this.emit({
+          type: 'connect:state',
+          dbName: this.dbName,
+          remotePath: this.config.remotePath,
+          deviceId: this.deviceId,
+          meshId: this.manifest?.meshId,
+          encrypted: this.encrypted,
+        });
+        this.emit({ type: 'sync:complete', entriesMerged: 0 });
+        this.startPolling();
+        this.connected = true;
+        return true;
+      }
+    } catch {
+      // Missing or malformed head means this is not a safe fast path.
+      // Fall back to the full connect pipeline, which validates manifest,
+      // folders, credentials, epoch, and then pulls.
+    }
+    return false;
+  }
+
   private async doConnect(): Promise<void> {
     const adapter = this.requireAdapter('connect()');
     console.log('[interocitor:connect] doConnect() — start', {
@@ -1342,6 +1391,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       this.emit({ type: 'auth:complete' });
     }
 
+    // Reload steady-state fast path: local IDB has a cursor, there is no
+    // pending outbox, and remote head has not advanced. In that case the
+    // client has nothing to publish or merge. After the minimal auth check,
+    // probe head and stop — no folder creation, manifest reads, device
+    // metadata writes, listFiles, or change-file reads. This covers clients
+    // that recreate the adapter on reload before calling setRemoteStorage().
+    if (await this.tryConnectFastPath(adapter)) return;
+
     const remotePath = this.requireRemotePath('connect()');
     const p = paths(remotePath);
     this.log('debug', 'connect() — ensuring remote folders', { remotePath, deviceId: this.deviceId });
@@ -1377,7 +1434,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     //
     // The restoreCredentials() check covers reloads where the local
     // store already remembers the active meshId; this branch covers the
-    // first connect after a fresh install or after `resetRemoteSyncState`.
+    // first connect after a fresh install.
     try {
       await this.assertCredentialMeshParity();
       stageOk('credentialMeshParity', { meshId: this.manifest?.meshId });
@@ -1444,6 +1501,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     // poll/flush touches the adapter while we are killing the session.
     this.stopPolling();
     this.clearScheduledFlush();
+    this.clearCompactTimers();
+    this.clearBatchTimer();
+    await this.flushPendingBatch();
     if (!this.remotePoisonError) {
       try { await this.doFlush(); } catch (err) {
         this.log('warn', 'disconnect() — flush before close failed (continuing)', err);
@@ -1509,9 +1569,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
     if (switching && hadAdapter) {
       // Drop the OLD adapter's folder cache before we let go of it.
-      // Belt-and-braces: even if the old adapter is reattached later (via
-      // resetRemoteSyncState path), we cannot trust prior "this folder
-      // exists" observations against the new mesh layout.
+      // Belt-and-braces: if the old adapter is reattached later, we cannot
+      // trust prior "this folder exists" observations against a potentially
+      // different mesh layout.
       this.adapter?.resetFolderCache?.();
       this.emit({
         type: 'transport:teardown',
@@ -1523,8 +1583,19 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     }
 
     if (this.initialized) {
-      await this.resetRemoteSyncState();
-      if (adapter) await this.rebuildOutboxFromLocalState();
+      // Transport swaps are not semantic local-state resets. Preserve cursor,
+      // epoch, meshId, rows, and any genuine unsent outbox entries. The next
+      // connect will re-read/validate the manifest for the newly attached
+      // adapter and pull only if its head is ahead of the preserved cursor.
+      //
+      // The previous code called resetRemoteSyncState() and then
+      // rebuildOutboxFromLocalState(), which converted every canonical local
+      // row back into a pending outbound write. That made reload/adapter attach
+      // self-feed: already-synced rows became fresh change files for no reason.
+      this.manifest = null;
+      this.remotePoisonError = null;
+      this.connected = false;
+      this.pendingCount = await this.local.outboxSize();
     } else {
       this.manifest = null;
     }
@@ -1636,10 +1707,82 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     return new Table(this, name);
   }
 
+  // ── Batched writes ─────────────────────────────────────────────────
+  // All writes performed inside `fn` are merged into ONE ChangeEntry.
+  // Implicit batching also happens automatically: writes within the
+  // configured batchWindowMs window are flushed into a single ChangeEntry.
+
+  private batchDepth = 0;
+
+  /**
+   * Group a sequence of writes into a single ChangeEntry. The entry
+   * carries every op as one atomic unit, producing one remote file
+   * instead of one per write.
+   *
+   * Nested batch() calls join the outer batch.
+   */
+  async batch<R>(fn: () => Promise<R> | R): Promise<R> {
+    await this.ensureReady();
+    this.batchDepth += 1;
+    try {
+      const result = await fn();
+      return result;
+    } finally {
+      this.batchDepth -= 1;
+      if (this.batchDepth === 0) await this.flushPendingBatch();
+    }
+  }
+
+  private isBatching(): boolean {
+    return this.batchDepth > 0;
+  }
+
+  private clearBatchTimer(): void {
+    if (!this.batchTimer) return;
+    clearTimeout(this.batchTimer);
+    this.batchTimer = null;
+  }
+
+  private appendOpToPendingBatch(op: Op, hlc: string): void {
+    if (!this.pendingBatch) {
+      this.pendingBatch = {
+        id: generateId('chg'),
+        ts: Date.now(),
+        device: this.deviceId,
+        hlc,
+        ops: [op],
+      };
+    } else {
+      this.pendingBatch.ops.push(op);
+      // Carry the highest HLC seen in this batch
+      if (hlcCompareStr(hlc, this.pendingBatch.hlc) > 0) this.pendingBatch.hlc = hlc;
+    }
+  }
+
+  private armImplicitBatchTimer(): void {
+    if (this.isBatching()) return;
+    if (this.batchTimer) return;
+    this.batchTimer = setTimeout(() => {
+      this.batchTimer = null;
+      void this.flushPendingBatch();
+    }, this.config.batchWindowMs);
+  }
+
+  private async flushPendingBatch(): Promise<void> {
+    const pending = this.pendingBatch;
+    this.pendingBatch = null;
+    this.clearBatchTimer();
+    if (!pending) return;
+    await this.local.pushOutbox(pending);
+    this.scheduleFlush();
+  }
+
   // ── Flush (local → cloud) ──────────────────────────────────────────
 
   private scheduleFlush(): void {
     this.pendingCount++;
+    this.maybeEmitCompactWarning();
+    this.armDelayedCompactAfterChange();
     if (this.pendingCount >= this.config.flushThreshold) {
       this.doFlush().catch(err => this.emit({ type: 'flush:error', error: err }));
       return;
@@ -1650,9 +1793,264 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     }, this.config.flushDebounce);
   }
 
+  private maybeEmitCompactWarning(): void {
+    if (this.compactWarningEmitted) return;
+    if (this.pendingCount < this.config.compactWarnThreshold) return;
+    this.compactWarningEmitted = true;
+    this.emit({
+      type: 'compact:warning',
+      queuedChangeCount: this.pendingCount,
+      threshold: this.config.compactWarnThreshold,
+      autoCompactThreshold: this.config.compactAutoThreshold,
+      remotePath: this.config.remotePath,
+      deviceId: this.deviceId,
+    });
+  }
+
+  private resetCompactWarning(): void {
+    if (this.pendingCount !== 0) return;
+    this.compactWarningEmitted = false;
+  }
+
+  private async maybeAutoCompact(triggerQueuedChangeCount: number): Promise<void> {
+    if (triggerQueuedChangeCount < this.config.compactAutoThreshold) return;
+
+    const sampleWindow = Math.max(1, Math.floor(this.config.compactAutoDeviceCount / Math.max(1, this.config.compactAutoSampleNumerator)));
+    const sampleRoll = Math.floor(Math.random() * sampleWindow);
+    const baseEvent = {
+      queuedChangeCount: triggerQueuedChangeCount,
+      threshold: this.config.compactAutoThreshold,
+      sampleRoll,
+      sampleWindow,
+      trigger: 'immediate' as const,
+      remotePath: this.config.remotePath,
+      deviceId: this.deviceId,
+    };
+
+    if (!this.config.autoCompact) {
+      this.emit({ type: 'compact:auto:skip', ...baseEvent, reason: 'disabled' });
+      return;
+    }
+    if (!this.adapter || !this.config.remotePath) {
+      this.emit({ type: 'compact:auto:skip', ...baseEvent, reason: 'missing-remote' });
+      return;
+    }
+    if (!this.connected) {
+      this.emit({ type: 'compact:auto:skip', ...baseEvent, reason: 'not-connected' });
+      return;
+    }
+    if (this.remotePoisonError) {
+      this.emit({ type: 'compact:auto:skip', ...baseEvent, reason: 'poisoned' });
+      return;
+    }
+    if (this.compactInFlight) {
+      this.emit({ type: 'compact:auto:skip', ...baseEvent, reason: 'already-running' });
+      return;
+    }
+    if (sampleRoll !== 0) {
+      this.emit({ type: 'compact:auto:skip', ...baseEvent, reason: 'sampling' });
+      return;
+    }
+
+    this.emit({ type: 'compact:auto:start', ...baseEvent });
+    const run = this.compact().then(() => {
+      this.emit({
+        type: 'compact:auto:complete',
+        queuedChangeCount: triggerQueuedChangeCount,
+        threshold: this.config.compactAutoThreshold,
+        trigger: 'immediate',
+        remotePath: this.config.remotePath,
+        deviceId: this.deviceId,
+      });
+    }).catch((error: Error) => {
+      this.emit({
+        type: 'compact:auto:error',
+        queuedChangeCount: triggerQueuedChangeCount,
+        threshold: this.config.compactAutoThreshold,
+        trigger: 'immediate',
+        remotePath: this.config.remotePath,
+        deviceId: this.deviceId,
+        error,
+      });
+    }).finally(() => {
+      if (this.compactInFlight === run) this.compactInFlight = null;
+    });
+    this.compactInFlight = run;
+    await run;
+  }
+
+  // ── Delayed compact support (secondary path) ────────────────────────
+  // Independent from the immediate sampled auto-compact above. Both paths
+  // can co-exist: any single compact() call is deduped via compactInFlight.
+  // Helps lazy clients eventually compact even when sampling never fires.
+
+  private armDelayedCompactAfterChange(): void {
+    if (!this.config.autoCompact) return;
+    if (!this.config.remotePath) return;
+
+    const delayMs = this.jitterDelay(this.config.firstCompactDelayMs, this.config.firstCompactDelayJitterMs);
+    this.compactScheduleVersion += 1;
+    const version = this.compactScheduleVersion;
+
+    if (this.compactCheckTimer) clearTimeout(this.compactCheckTimer);
+    this.emit({
+      type: 'compact:delayed:scheduled',
+      queuedChangeCount: this.pendingCount,
+      delayMs,
+      phase: 'check',
+      remotePath: this.config.remotePath,
+      deviceId: this.deviceId,
+    });
+    this.compactCheckTimer = setTimeout(() => {
+      this.compactCheckTimer = null;
+      this.runDelayedCompactCheck(version).catch(() => {});
+    }, delayMs);
+  }
+
+  private async runDelayedCompactCheck(version: number): Promise<void> {
+    if (version !== this.compactScheduleVersion) return;
+    if (!this.config.autoCompact || !this.connected || !this.adapter || !this.config.remotePath) return;
+    if (this.remotePoisonError) return;
+
+    let remoteChangeFileCount = 0;
+    try {
+      const adapter = this.adapter;
+      const remoteRoot = this.config.remotePath;
+      const list = await adapter.listFiles(`${remoteRoot}/changes`).catch(() => [] as { path: string }[]);
+      remoteChangeFileCount = list.filter(f => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(f.path)).length;
+    } catch { /* best-effort */ }
+
+    this.emit({
+      type: 'compact:delayed:check',
+      queuedChangeCount: this.pendingCount,
+      remoteChangeFileCount,
+      threshold: this.config.compactRemoteChangeThreshold,
+      remotePath: this.config.remotePath,
+      deviceId: this.deviceId,
+    });
+
+    if (remoteChangeFileCount <= this.config.compactRemoteChangeThreshold) {
+      this.emit({
+        type: 'compact:auto:skip',
+        queuedChangeCount: this.pendingCount,
+        threshold: this.config.compactAutoThreshold,
+        trigger: 'delayed',
+        remotePath: this.config.remotePath,
+        deviceId: this.deviceId,
+        reason: 'below-remote-threshold',
+      });
+      return;
+    }
+
+    const delayMs = this.jitterDelay(this.config.secondCompactDelayMs, this.config.secondCompactDelayJitterMs);
+    if (this.compactRunTimer) clearTimeout(this.compactRunTimer);
+    this.emit({
+      type: 'compact:delayed:scheduled',
+      queuedChangeCount: this.pendingCount,
+      delayMs,
+      phase: 'compact',
+      remotePath: this.config.remotePath,
+      deviceId: this.deviceId,
+    });
+    const triggerQueuedChangeCount = this.pendingCount;
+    this.compactRunTimer = setTimeout(() => {
+      this.compactRunTimer = null;
+      this.runDelayedCompact(version, triggerQueuedChangeCount, remoteChangeFileCount).catch(() => {});
+    }, delayMs);
+  }
+
+  private async runDelayedCompact(version: number, queuedChangeCount: number, remoteChangeFileCount: number): Promise<void> {
+    if (version !== this.compactScheduleVersion) {
+      this.emit({
+        type: 'compact:auto:skip',
+        queuedChangeCount,
+        threshold: this.config.compactAutoThreshold,
+        trigger: 'delayed',
+        remotePath: this.config.remotePath,
+        deviceId: this.deviceId,
+        reason: 'superseded',
+      });
+      return;
+    }
+    if (!this.config.autoCompact || !this.connected || !this.adapter || !this.config.remotePath) {
+      this.emit({
+        type: 'compact:auto:skip',
+        queuedChangeCount,
+        threshold: this.config.compactAutoThreshold,
+        trigger: 'delayed',
+        remotePath: this.config.remotePath,
+        deviceId: this.deviceId,
+        reason: !this.connected ? 'not-connected' : !this.config.autoCompact ? 'disabled' : 'missing-remote',
+      });
+      return;
+    }
+    if (this.remotePoisonError) {
+      this.emit({
+        type: 'compact:auto:skip',
+        queuedChangeCount,
+        threshold: this.config.compactAutoThreshold,
+        trigger: 'delayed',
+        remotePath: this.config.remotePath,
+        deviceId: this.deviceId,
+        reason: 'poisoned',
+      });
+      return;
+    }
+    if (this.compactInFlight) {
+      this.emit({
+        type: 'compact:auto:skip',
+        queuedChangeCount,
+        threshold: this.config.compactAutoThreshold,
+        trigger: 'delayed',
+        remotePath: this.config.remotePath,
+        deviceId: this.deviceId,
+        reason: 'already-running',
+      });
+      return;
+    }
+
+    this.emit({
+      type: 'compact:auto:start',
+      queuedChangeCount,
+      threshold: this.config.compactAutoThreshold,
+      trigger: 'delayed',
+      remoteChangeFileCount,
+      remotePath: this.config.remotePath,
+      deviceId: this.deviceId,
+    });
+
+    const run = this.compact().then(() => {
+      this.emit({
+        type: 'compact:auto:complete',
+        queuedChangeCount,
+        threshold: this.config.compactAutoThreshold,
+        trigger: 'delayed',
+        remoteChangeFileCount,
+        remotePath: this.config.remotePath,
+        deviceId: this.deviceId,
+      });
+    }).catch((error: Error) => {
+      this.emit({
+        type: 'compact:auto:error',
+        queuedChangeCount,
+        threshold: this.config.compactAutoThreshold,
+        trigger: 'delayed',
+        remoteChangeFileCount,
+        remotePath: this.config.remotePath,
+        deviceId: this.deviceId,
+        error,
+      });
+    });
+    await run;
+  }
+
   /** Public flush — waits for init. Safe to call from user code. */
   async flush(): Promise<void> {
     await this.ensureReady();
+    // Drain any pending implicit batch first so its ops reach the outbox
+    // before we read it. Without this, flush() called from user code right
+    // after a write inside the batch window would skip those writes.
+    await this.flushPendingBatch();
     return this.doFlush();
   }
 
@@ -1663,12 +2061,18 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       return;
     }
 
+    const triggerQueuedChangeCount = this.pendingCount;
     const entries = await this.local.drainOutbox();
-    if (entries.length === 0) return;
+    if (entries.length === 0) {
+      this.pendingCount = 0;
+      this.resetCompactWarning();
+      return;
+    }
 
     this.log('debug', 'flush() — start', { entryCount: entries.length });
     this.emit({ type: 'flush:start', entryCount: entries.length });
     this.pendingCount = 0;
+    this.resetCompactWarning();
     this.clearScheduledFlush();
 
     try {
@@ -1714,9 +2118,12 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
       this.log('debug', 'flush() — complete', { entryCount: entries.length });
       this.emit({ type: 'flush:complete' });
+      await this.maybeAutoCompact(triggerQueuedChangeCount);
     } catch (err) {
       this.log('error', 'flush() — failed, re-queuing entries', err);
       for (const entry of entries) await this.local.pushOutbox(entry);
+      this.pendingCount = entries.length;
+      this.maybeEmitCompactWarning();
       throw err;
     }
   }
@@ -1765,21 +2172,27 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
   async compact(): Promise<void> {
     await this.ensureReady();
-    const adapter = this.requireAdapter('compact()');
-    if (!this.manifest) throw new Error('Engine is not connected');
-
-    this.manifest = await doCompact({
-      adapter,
-      local: this.local,
-      remotePath: this.requireRemotePath('compact()'),
-      manifest: this.manifest,
-      codecState: this.codecState,
-      hlc: this.hlc,
-      deviceId: this.deviceId,
-      serverId: this.serverId,
-      emit: (e) => this.emit(e),
-      pull: () => this.pull(),
+    if (this.compactInFlight) return this.compactInFlight;
+    const run = (async () => {
+      const adapter = this.requireAdapter('compact()');
+      if (!this.manifest) throw new Error('Engine is not connected');
+      this.manifest = await doCompact({
+        adapter,
+        local: this.local,
+        remotePath: this.requireRemotePath('compact()'),
+        manifest: this.manifest,
+        codecState: this.codecState,
+        hlc: this.hlc,
+        deviceId: this.deviceId,
+        serverId: this.serverId,
+        emit: (e) => this.emit(e),
+        pull: () => this.pull(),
+      });
+    })().finally(() => {
+      if (this.compactInFlight === run) this.compactInFlight = null;
     });
+    this.compactInFlight = run;
+    return run;
   }
 
   // ── Mesh management ────────────────────────────────────────────────

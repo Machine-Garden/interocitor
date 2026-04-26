@@ -1,346 +1,297 @@
 <p align="center">
   <a href="https://github.com/TheUiTeam/interocitor">
-    <img src="https://raw.githubusercontent.com/TheUiTeam/interocitor/main/docs/assets/hero.svg" alt="interocitor" width="560"/>
+    <img src="../../docs/assets/hero.svg" alt="Interocitor" width="640" />
   </a>
 </p>
 
 <p align="center">
-  <strong>The JavaScript mailbox that can't read your mail.</strong>
+  <em>Encrypted local-first CRDT sync for browser apps.</em>
 </p>
 
 # @interocitor/core
 
-Encrypted local-first CRDT sync for browser apps.
+End‑to‑end encrypted, local‑first sync over a remote folder you already
+own (Google Drive, WebDAV, Cloudflare R2, your own server). The cloud is
+a mailbox; merge happens on the device.
+
+## What it is
+
+- A sync engine, not a database. Local reads/writes go through an embedded
+  store (IndexedDB in the browser). The engine ships diffs, not queries.
+- A CRDT over per‑column HLC values. Every device converges to the same
+  state without a central merge authority.
+- An end‑to‑end encryption layer. The remote sees ciphertext blobs and
+  enough metadata to route them; nothing else.
+- A pluggable transport. Any backend that can list/read/write/delete
+  files works. See `docs/adapter-contract.md`.
 
 ## Why
 
-Interocitor is your app's __personal keychain__.
-Your devices hold the key. The cloud is only a mailbox. It carries encrypted sync artifacts and cannot read your mail.
-
-What this means:
-- encryption on by default
-- reads and writes are local-first
-- sync uses a remote mailbox, not a trusted database
-- restore is explicit app UI, not automatic magic
+- **Offline‑first by construction.** Every read and write hits a local
+  store. Network is needed only to share state with other devices.
+- **No server you have to operate.** The remote is dumb storage. You can
+  run the engine against a user's own Google Drive and ship zero
+  backend.
+- **End‑to‑end encryption by default.** The default config encrypts
+  every change file and snapshot before it leaves the device.
+- **Small, embeddable runtime.** No workers, no background services
+  required.
 
 ## Quick start
 
 ```ts
 import { Interocitor } from '@interocitor/core';
-import { WebDAVAdapter } from '@interocitor/core/adapters/webdav';
+import { GoogleDriveAdapter } from '@interocitor/core/adapters/google-drive';
 
-const db = new Interocitor({
-  dbName: 'my-app',
-  appName: 'My App',
-  logLevel: 'debug',
-  // encrypted by default; set encrypted: false to opt out
+const adapter = new GoogleDriveAdapter({ clientId: 'YOUR_GOOGLE_CLIENT_ID' });
+
+const db = new Interocitor(adapter, {
+  dbName: 'my-app',          // local DB name; keep stable across reloads
+  appName: 'My App',         // shown in biometric prompts / OS keychain
+  remotePath: '/MyApp',      // mesh-scoped folder on the remote
+  encrypted: true,           // E2E encryption (default)
 });
 
 await db.init();
-
-// local-only usage works after init
-const id = await db.table('todos').add({
-  text: 'Ship privacy-first sync',
-  done: false,
-}, { prefix: 'todo' });
-
-// configure mesh before first remote connect
-db.configureMesh({ remotePath: '/MyApp', encrypted: true });
-
-// attach transport later, when app/backend is ready
-await db.setRemoteStorage(new WebDAVAdapter({
-  baseUrl: 'https://your-webdav-server.example.com',
-  auth: { username: 'user', password: 'pass' },
-}));
 await db.connect();
+
+// Write — local-first, no network required
+await db.table('todos').add(
+  { text: 'Ship privacy-first sync', done: false },
+  { prefix: 'todo' },
+);
+
+// Share with another device — see "New device / restore" below
+console.log('Passphrase:', db.getPassphrase());
 ```
 
-## How sync works
+> The constructor accepts either `(adapter, config)` or `(config)` alone.
+> Use the `(config)` form for local‑only mode (no remote). When you
+> attach a remote later, call `setRemoteStorage(adapter)` and then
+> `connect()`.
+
+## Mental model
 
 ```mermaid
 flowchart LR
   A[Browser app] --> B[Interocitor engine]
   B --> C[Local store]
-  B --> D[Encrypt changes locally]
+  B --> D[Encrypt locally]
   D --> E[Adapter]
-  E --> F[Remote mailbox\n(ciphertext only)]
+  E --> F[Remote mailbox<br/>ciphertext only]
   F --> E
-  E --> G[Download ciphertext]
-  G --> H[Decrypt locally]
-  H --> B
+  E --> G[Decrypt locally]
+  G --> B
 ```
 
-## Core API at a glance
+The remote is a mailbox. The engine puts encrypted change files into it
+and pulls down change files from peers. All merging happens on the
+device. There is no server‑side compute.
 
-```ts
-const db = new Interocitor({ dbName: 'my-app', appName: 'My App', schema });
-await db.init();
+Three artifacts live on the remote:
 
-await db.table('tasks').add({ title: 'Ship it', done: false }, { prefix: 'task' });
-await db.table('tasks').patch(taskId, { done: true });
-await db.table('tasks').replace(taskId, fullTask);
-await db.table('tasks').row(taskId);          // single-row handle (await for async fetch)
-await db.table('tasks').query();
-await db.table('tasks').where('done').equals(false).orderBy('title');
+- **change files** — one per write batch, named `<HLC>-chg_<id>.json`;
+- **snapshots** — periodic full state, written by compaction;
+- **a manifest** — pointer to the current generation, plus mesh metadata.
 
-await db.connect();
-await db.compact();
-await db.secureWithBiometrics();
-await db.restoreWithBiometrics();
-``` 
+See `docs/adapter-contract.md` for the full layout.
 
-`compact()` is a manual maintenance call. It is not part of normal `sync()`.
-Use it to write a fresh snapshot and prune old remote change files.
+## Security model
 
-```ts
-await db.connect();
-await db.compact();
+Encryption is on by default (`encrypted: true`). The engine uses
+**AES‑GCM 256** with a key derived from a base58 passphrase.
+
+What it protects:
+
+- Row contents (field names, field values, table names) inside change
+  files and snapshots.
+- Integrity of each entry (AES‑GCM authentication tag).
+
+What it does **not** protect:
+
+- File names (they encode the HLC and a device id).
+- Manifest contents (mesh id, schema version, epoch, encrypted flag,
+  serverId).
+- Sizes, write timing, device count.
+- The local store on the device (IndexedDB / SQLite stores plaintext).
+
+What a malicious remote can still do:
+
+- Drop, withhold, replay, or roll back files.
+- Observe activity timing and device identities.
+
+For the threat model, the metadata table, and full mitigations see
+`docs/security-model.md`.
+
+## Offline guarantees
+
+| Operation | Network? |
+| --- | --- |
+| `new Interocitor()` | No |
+| `init()` | No |
+| `table.add()` / `patch()` / `replace()` / `delete()` | No |
+| `table.row()` / `table.query()` / `table.where()` | No |
+| `connect()` | Yes (if adapter configured) |
+| `flush()` / `pull()` / `compact()` | Yes |
+
+Writes are persisted locally and queued in an outbox. They survive
+reload, crash, and offline periods. On reconnect the engine drains the
+outbox to the remote.
+
+## Sync guarantees
+
+- **Eventual convergence.** Two devices that have seen the same set of
+  change files (in any order) reach byte‑identical local state.
+- **Per‑column merge.** Conflicts are resolved field‑by‑field, not at
+  the row level. Default strategy is `'remote-wins'` — see
+  "Conflict resolution".
+- **Idempotent merge.** Replaying an already‑applied change is a no‑op.
+  Safe to re‑pull, safe to re‑process the same change file twice.
+- **Per‑device HLC monotonicity.** A single device's HLCs strictly
+  increase. Cross‑device order is total but only as wall‑clocks allow.
+- **Restore via snapshot.** A device that joins late (or rehydrates after
+  a long offline) loads the latest snapshot, then applies any change
+  files newer than the snapshot watermark.
+
+What we do **not** guarantee:
+
+- Cross‑device atomicity. A `db.batch()` is one atomic remote file, but
+  two unrelated batches from different devices are independent.
+- Real‑time delivery. The default poll interval is 30 s; some adapters
+  (Cloudflare) layer push notifications on top.
+- Recovery if the remote silently lies (drops writes, rolls back the
+  manifest). See `docs/security-model.md`.
+- Recovery if the passphrase is lost — see "New device / restore".
+
+## Setup lifecycle
+
+```
+new Interocitor(adapter?, config)
+        │
+        ▼
+  configureMesh({...})       ← optional; pin meshId / passphrase upfront
+        │
+        ▼
+       init()                ← opens local store, restores credentials
+        │
+        ▼
+  setRemoteStorage(adapter)  ← only if no adapter passed to ctor
+        │
+        ▼
+     connect()               ← loads/creates manifest, pulls, flushes, polls
 ```
 
-If your app wraps the engine, the same call may appear as:
+`connect()` will auto‑`init()` if needed. App code should still treat
+init as explicit so credential restore happens before any writes.
 
-```ts
-await runtime.engine.compact();
-```
-
-`compact()` requires a configured remote adapter and remotePath.
-
-### Compaction policy
-
-Compact only when all are true:
-
-- device idle **> 1 min**
-- last successful pull **< 30 min** ago
-- remote churn **> 20 changes** since last compaction
-- engine connected and healthy
-- no compaction already in progress
-
-If you do not call `compact()`, sync still works. Remote change files keep accumulating until some client compacts.
-
-### Compaction coordination
-
-`compact()` has no built-in distributed lock. Two clients can race and overwrite the manifest pointer.
-Recommended: coordinate with a remote lease file such as `mainline/compact-lock.json`.
-
-Example lease payload:
-
-```json
-{
-  "ownerDeviceId": "dev_x",
-  "generation": 42,
-  "headHlc": "2026-04-22T23:00:00.000Z",
-  "startedAt": "2026-04-22T23:00:00.000Z",
-  "expiresAt": "2026-04-22T23:05:00.000Z"
-}
-```
-
-Recommended protocol:
-
-1. Read lock. If present and not expired → skip compaction.
-2. Write lock for self with short TTL.
-3. Re-read lock. If not owned by self → abort.
-4. Re-read manifest/head. If generation changed since lock acquisition → abort.
-5. Run `compact()`.
-6. Delete lock on success, or rely on TTL on crash.
-
-### Compaction flow
-
-```mermaid
-sequenceDiagram
-    participant E as SyncEngine (compactor)
-    participant C as Cloud
-
-    E->>C: GET mainline/compact-lock.json
-    C-->>E: 404 / expired / active
-    alt lock active
-        E-->>E: abort compaction
-    else lock available
-        E->>C: PUT mainline/compact-lock.json (owner + expiresAt)
-        E->>C: GET mainline/compact-lock.json
-        alt lock owned by other
-            E-->>E: abort compaction
-        else lock owned by self
-            E->>E: pull() — merge all remote changes first
-            E->>E: getAllRows() — full local scan
-            E->>C: PUT snapshot
-            E->>C: PUT manifest generation file
-            E->>C: PUT manifest pointer
-            E->>C: DELETE old change files ≤ watermarkHlc
-            E->>C: DELETE mainline/compact-lock.json
-        end
-    end
-```
-
-`init()` is explicit. `connect()` will auto-init if needed, but app code should treat engine setup as:
-
-1. create engine
-2. optionally `configureMesh(...)` or provide `resolveInitialState(...)`
-3. attach remote adapter
-4. `connect()`
-
-## Setup & reload sequence
-
-The engine pins `encrypted` at mesh bootstrap. **Do not flip the `encrypted`
-flag between sessions** — the first session writes change files in that mode,
-and a later session that connects with a different mode is rejected at
-`connect()` with a typed `MeshEncryptionMismatchError` (the remote is **not**
-poisoned). The recipe below is the supported lifecycle.
+The `encrypted` flag is **pinned at mesh bootstrap** and cannot change
+between sessions for the same `dbName`. Reconnecting with a different
+mode throws a typed `MeshEncryptionMismatchError`.
 
 ```ts
 import { MeshEncryptionMismatchError } from '@interocitor/core';
 
 try {
-  await engine.connect();
+  await db.connect();
 } catch (err) {
   if (err instanceof MeshEncryptionMismatchError) {
-    // err.code === 'MESH_ENCRYPTION_MISMATCH'
-    // err.expectedMode → mode the remote mesh was bootstrapped with
-    // err.actualMode   → mode the engine was constructed with
-    // Rebuild the engine with `encrypted: err.expectedMode` and supply
-    // the matching passphrase if expectedMode === true.
+    // err.expectedMode is the mode the remote was bootstrapped with
   }
   throw err;
 }
 ```
 
-```mermaid
-flowchart TD
-    A[App boot] --> B{Have meshId & passphrase yet?}
+## New device / restore
 
-    B -- no, first run --> N1[Mint meshId]
-    N1 --> N2[Generate or prompt passphrase]
-    N2 --> N3[Persist passphrase locally<br/>e.g. credential store / biometrics]
-    N3 --> C
+Joining a new device to an existing mesh requires three things:
 
-    B -- yes, reload --> R1[Load meshId from app state]
-    R1 --> R2[Restore passphrase from credential store<br/>BEFORE constructing engine]
-    R2 --> C
+1. The **`meshId`** of the existing mesh.
+2. The **passphrase** that decrypts the mesh.
+3. Access to the same **remote mailbox** (the same `remotePath` on a
+   storage backend the new device can reach).
 
-    C[new Interocitor 'encrypted: true,<br/>passphrase, dbName, schema']
-    C --> D[engine.configureMesh 'remotePath, encrypted: true, passphrase']
-    D --> E[engine.init]
-    E --> F[engine.setRemoteStorage 'adapter for meshId']
-    F --> G[engine.connect]
-
-    G --> H{loadOrCreateManifest}
-    H -- remote exists --> H1[Validate manifest.encrypted == ctx.encrypted]
-    H1 -- mismatch --> X1[throw MESH_ENCRYPTION_MISMATCH<br/>remote NOT poisoned]
-    H1 -- match --> P{assertCredentialMeshParity}
-    H -- remote missing --> H2[Bootstrap manifest with ctx.encrypted]
-    H2 --> P
-
-    P -- stored.meshId != active --> X2[throw MESH_CREDENTIAL_MISMATCH<br/>emit credentials:meshMismatch<br/>remote NOT poisoned]
-    P -- ok / no anchor --> P2[persistCredentials anchors record to active meshId]
-    P2 --> I[pull -> doFlush -> startPolling]
-
-    I --> Z[Connected. App reads/writes via db.table]
-
-    style X1 fill:#fee,stroke:#c00,color:#900
-    style X2 fill:#fee,stroke:#c00,color:#900
-    style Z fill:#efe,stroke:#070,color:#070
-```
-
-**Rules to avoid the mismatch trap:**
-
-- Decide `encrypted` once per `dbName` and never change it. Recommendation:
-  always `encrypted: true`. The engine handles fresh-key generation, passphrase
-  derivation, and credential restore on subsequent loads.
-- Resolve the passphrase **before** constructing the engine on reload. If the
-  passphrase is restored asynchronously (e.g. biometrics) after `init()`,
-  prefer `restoreWithBiometrics()` / `setPassphrase()` *before* `connect()`,
-  not after a write.
-- One `dbName` ↔ one mesh ↔ one key. Listen for `credentials:conflict`,
-  `credentials:meshMismatch`, and `remote:poisoned` events to surface real
-  corruption to the user.
-- On meshId switch, call `setRemoteStorage(newAdapter)` — the engine tears
-  down the old transport before swapping. Do **not** rebuild the engine just
-  to change adapters.
-
-### MeshCredentialMismatchError
-
-`connect()` throws this when the credential store has a record under the
-engine's `dbName` whose `meshId` differs from the live mesh. Typical cause:
-the app reused the same `dbName` for "create new mesh" and the old key is
-still cached. The remote is **not** poisoned — the local credential record
-is stale.
+The pairing flow ships these three over an ECDH relay handshake (see
+`generateShareQR` / `handleScannedQR` in the handshake module). After
+the handshake the new device:
 
 ```ts
-import { MeshCredentialMismatchError } from '@interocitor/core';
-
-try {
-  await engine.connect();
-} catch (err) {
-  if (err instanceof MeshCredentialMismatchError) {
-    // err.code === 'MESH_CREDENTIAL_MISMATCH'
-    // err.dbName, err.storedMeshId, err.activeMeshId
-    await engine.clearCredentials(); // drops stale record, keeps deviceId
-    // ...then retry connect, or use a different dbName per mesh
-  }
-  throw err;
-}
-```
-
-### Credential store (LocalStorageCredentialStore) — TL;DR
-
-- One JSON record per `dbName` at `localStorage["interocitor-creds:<dbName>"]`
-  containing `{passphrase, deviceId, meshId}`. The engine wires this up
-  automatically — apps almost never construct it directly.
-- The engine writes `meshId` after the manifest is known. On the next load
-  the engine compares stored `meshId` against the live `meshId` and refuses
-  to silently reuse a stale key (throws `MeshCredentialMismatchError`).
-- Reads still accept the legacy two-key format
-  (`interocitor-key:<dbName>` + global `interocitor-device-id`); writes
-  always upgrade to the new JSON record and drop the legacy keys.
-- **`dbName` is the local DB name. Keep it stable.** One record per DB,
-  forever. The mesh identity lives *inside* the record (`meshId` field), not
-  in the key. Embedding `meshId` into `dbName` would pollute `localStorage`
-  with one orphan record per mesh recreate — exactly the trap this design
-  avoids.
-- Re-pairing under the same `dbName` is supported: on `connect()` the engine
-  detects the stale `meshId`, throws `MeshCredentialMismatchError`, and the
-  app calls `engine.clearCredentials()` to overwrite the single record with
-  the new mesh's anchor.
-
-```ts
-import { LocalStorageCredentialStore } from '@interocitor/core';
-
-// Default: engine creates one for you. Override only for tests or to
-// disable persistence (`credentialStore: null` in the engine config).
-const store = new LocalStorageCredentialStore('meal-planner');
-
-await store.save({
-  passphrase: 'base58-passphrase',
-  deviceId: 'dev_xyz',
-  meshId: 'mesh_abc',         // optional but strongly recommended
+const db = new Interocitor(adapter, {
+  dbName: 'my-app',
+  appName: 'My App',
+  remotePath: '/MyApp',
+  passphrase: 'base58-from-handshake',
+  encrypted: true,
 });
 
-const creds = await store.load();
-// → { passphrase, deviceId, meshId? } or null
-
-await store.clear(); // drops the record; deviceId global is intentionally kept
+await db.init();
+await db.connect();   // pulls the manifest, rehydrates from snapshot, then catches up
 ```
 
-Disable persistence entirely:
+On `connect()` the engine:
+
+1. Reads `manifest.json` from the remote.
+2. Compares stored `meshId` (from the credential store) against the live
+   one. Mismatch → `MeshCredentialMismatchError`.
+3. If local epoch < remote epoch, calls `rehydrate()` to load the
+   latest snapshot.
+4. Pulls any change files newer than the snapshot watermark.
+5. Starts polling.
+
+> **If the passphrase is lost and no other device holds it, the mesh is
+> unreadable.** The engine has no recovery path — the data is end‑to‑end
+> encrypted and the key is the passphrase. Treat the passphrase as the
+> only thing that matters; back it up out of band (1Password, paper,
+> another device's `WebAuthnCredentialStore`).
+
+For the credential store details (records, anchors, biometric paths)
+see `docs/credential-store.md`.
+
+## Core API
 
 ```ts
-const engine = new Interocitor(adapter, {
-  dbName: 'meal-planner',
-  credentialStore: null,      // no localStorage writes; passphrase lives in memory
+const db = new Interocitor(adapter, {
+  dbName: 'my-app',
+  appName: 'My App',
+  remotePath: '/MyApp',
+  schema,
+});
+await db.init();
+
+await db.table('tasks').add({ title: 'Ship it', done: false }, { prefix: 'task' });
+await db.table('tasks').patch(taskId, { done: true });
+await db.table('tasks').replace(taskId, fullTask);
+await db.table('tasks').delete(taskId);
+
+await db.table('tasks').row(taskId);                          // single row
+await db.table('tasks').query();                              // all rows
+await db.table('tasks').where('done').equals(false).orderBy('title');
+
+await db.connect();                                           // attach + sync
+await db.flush();                                             // force outbox drain
+await db.pull();                                              // force pull
+await db.compact();                                           // see docs/compaction.md
+await db.disconnect();                                        // tear down
+
+// Credentials
+db.getPassphrase();
+db.setPassphrase(passphrase);
+await db.secureWithBiometrics();
+await db.restoreWithBiometrics();
+await db.clearCredentials();
+
+// Batched writes — one ChangeEntry per batch
+await db.batch(async () => {
+  await db.table('todos').add({ title: 'a' });
+  await db.table('todos').patch(otherId, { done: true });
 });
 ```
 
-Override with a custom backend:
+### Schema typing
 
 ```ts
-const engine = new Interocitor(adapter, {
-  dbName: 'meal-planner',
-  credentialStore: new MyCustomStore(),  // implements CredentialStore
-});
-```
+import { types } from '@interocitor/core';
+import type { DatabaseSchemaDefinition } from '@interocitor/core';
 
-## Schema typing
-
-```ts
 const schema = {
   version: 1,
   tables: {
@@ -350,167 +301,182 @@ const schema = {
         done: types.boolean,
         createdAt: types.index(types.date),
         note: types.string.optional,
+        items: types.typed<TodoItem[]>('json'),
       },
     },
   },
 } satisfies DatabaseSchemaDefinition;
 
-// inferred row type:
-// { text: string; done: boolean; createdAt: Date; note?: string }
+// Inferred row type:
+// { text: string; done: boolean; createdAt: Date; note?: string; items: TodoItem[] }
 ```
 
-`.optional` makes the property optional in the inferred row type.
-Reading `row.note` gives `string | undefined`.
-Indexed/unique fields cannot be optional.
+`.optional` makes the field optional in the inferred type. Indexed and
+unique fields cannot be optional. `types.index(...)` marks a field for
+efficient `where`/`orderBy`.
 
-Typed JSON:
+### Conflict resolution
 
-```ts
-items: types.typed<ReceiptItem[]>('json')
-metadata: types.typed<Record<string, unknown>>('json').optional
-```
+Per‑column CRDT with HLC. Default merge strategy: **`'remote-wins'`**.
 
-## Row IDs
+> "Remote‑wins" is per‑column, not per‑row. When two devices write the
+> same column on the same row, the merge keeps the value with the higher
+> HLC. Because HLCs are timestamp‑first, this is "later wall‑clock
+> wins, ties broken by device id". Calling it "remote‑wins" is a
+> historical accident of where the merge runs (during pull); both sides
+> apply the same rule and reach the same answer. Override per database,
+> table, or field if you need `'lww'`, `'local-wins'`, or a custom
+> `MergeFunction`.
 
-Use stable string IDs for synced rows. Do not use auto-increment IDs.
+Available strategies:
 
-Usually app code should not import `createRowId()` directly. Prefer:
+- `'lww'` — last‑write‑wins by HLC. Functionally identical to
+  `'remote-wins'` for this CRDT but keeps semantics explicit.
+- `'remote-wins'` (default).
+- `'local-wins'` — keep local on tie; remote still wins on a strictly
+  greater HLC.
+- `MergeFunction` — `(local, remote, ctx) => result` for custom logic.
 
-```ts
-const id = await db.table('tasks').add({ title: 'Ship it' }, { prefix: 'task' });
-```
+### Deletion semantics
 
-If you need raw ID generation, `createRowId()` still exists and uses platform crypto.
+`delete()` writes a **tombstone**, not an unlink. Tombstones:
 
-## Offline guarantee
+- carry an HLC like any other write;
+- propagate through change files and snapshots like any other change;
+- are needed so that a slower device that re‑syncs an older `add()` is
+  overridden by the newer `delete()` (no resurrection).
 
-Every read and write hits the local store. No network required.
-`connect()` and background sync are the only flows that touch the remote mailbox.
+Compaction collapses tombstones into the snapshot. After compaction:
 
-| Operation | Network? |
-| --- | --- |
-| `new Interocitor()` | No |
-| `init()` | No |
-| `table.add()` | No |
-| `table.patch()` / `table.replace()` | No |
-| `table.delete()` | No |
-| `table.row()` / `table.query()` | No |
-| `connect()` | Yes, if adapter configured |
+- The snapshot still records the row as deleted.
+- The change file is pruned at HLC ≤ watermark.
+- A device that was offline before the deletion catches up via
+  rehydrate (snapshot first, change files second). The tombstone in
+  the snapshot prevents resurrection.
 
-## Device identity
+A device that was offline **with a local pending re‑add** of the same
+row id will still have its re‑add applied; whether it wins depends on
+HLC ordering. Treat hard‑deleted IDs as burned — generate a fresh row
+id when re‑creating.
 
-```ts
-const db = new Interocitor({
-  dbName: 'meal-planner',
-  appName: 'Meal Planner',
-  deviceName: "Anton's laptop",
-  deviceType: 'web',
-  schema,
-});
-```
+There is no built‑in retention policy ("forget tombstones older than N
+days"). Add one at the app layer if you need it; physically deleting a
+tombstone risks resurrection.
 
-Device IDs are UUIDv7 — sortable, globally unique, auto-generated.
-`deviceName` and `deviceType` are synced to the device manifest so peers can display them.
+### Local store
 
-## Row ownership
-
-Every write stamps `_owner` with the writing device's ID.
-Automatic. Survives compaction. No opt-in needed.
-
-```ts
-const row = await db.table('tasks').row(taskId);
-row?._owner; // device ID of last writer
-```
-
-Existing rows without `_owner` are fine — it stays `undefined` until next write.
-
-## Mesh IDs and security
-
-Device IDs are client-generated (UUIDv7). No server needed.
-
-Mesh/team IDs should be worker-issued with an embedded HMAC tag:
-
-```ts
-import { createMeshSecret, issueMeshId, isValidMeshId } from '@interocitor/core';
-
-// Worker holds the secret
-const secret = await createMeshSecret();
-
-// Issue a mesh ID
-const meshId = await issueMeshId(secret);
-// e.g. "0196745e-1234-7abc-9def-567890abcdef.AbCdEfGhIjK"
-
-// Validate before accepting
-const ok = await isValidMeshId(meshId, secret);
-```
-
-Format: `<uuidv7>.<base64url HMAC tag>`. Only workers with the secret can mint valid IDs. Clients validate on join.
-
-ID validators:
-
-```ts
-import { isValidDeviceId } from '@interocitor/core';
-
-isValidDeviceId(id); // true if UUIDv7 format
-```
-
-## Local-only mode
-
-No adapter. No remote. Just IndexedDB.
-
-```ts
-const db = new Interocitor({
-  dbName: 'meal-planner',
-  appName: 'Meal Planner',
-  encrypted: false,
-  schema,
-});
-await db.init();
-
-const rows = await db.table('weekPlans').query();
-```
-
-You can attach transport later with `setRemoteStorage()`.
+The local store is a pluggable `LocalStoreAdapter`. Browser default is
+IndexedDB. The Swift package ships SQLite. Tests use an in‑memory
+implementation. Reads, writes, queries, and the outbox all go through
+this interface.
 
 ## Adapters
 
-### Google Drive
-For zero new backend infrastructure where Google Drive is acceptable as the encrypted mailbox.
+| Adapter | Use when | Notes |
+| --- | --- | --- |
+| `GoogleDriveAdapter` | You want zero infrastructure | OAuth in the browser; the user owns the data |
+| `WebDAVAdapter` | Self‑hosted (Nextcloud, OwnCloud, custom WebDAV) | Easy to inspect remotely |
+| `CloudflareAdapter` | You operate a worker; want push invalidations | Experimental |
+| `MemoryAdapter` | Tests and demos | No persistence |
 
-### WebDAV
-For self-hosted sync, local demos, and inspectable remote artifacts.
+Implementing your own adapter: see `docs/adapter-contract.md` for
+required semantics, consistency assumptions, and the contract test
+suite.
 
-### Cloudflare (experimental)
-For Interocitor-native transport flows with invalidation fanout and maintenance endpoints while keeping decryption client-side.
+## Remote mailbox layout
 
-### Memory
-For tests and adapter-contract validation.
+For `remotePath: '/MyApp'`:
 
-## Local store
+```
+/MyApp/
+├── manifest.json                           # pointer { currentGeneration, file }
+├── manifest-1.json                         # generation 1
+├── manifest-2.json                         # ...
+├── changes/
+│   ├── head.json                           # { latestHlc } — pull fast path
+│   └── <HLC>-chg_<id>.json                 # encrypted change entries
+├── devices/
+│   └── <deviceId>.json                     # device metadata
+└── mainline/
+    └── snapshot-<epoch>-<serverId>.json    # encrypted snapshot
+```
 
-Interocitor is a sync engine, not a database. The local store is a pluggable abstraction (`LocalStoreAdapter`). The browser default uses IndexedDB. The Swift package uses SQLite. You don't need to care which — reads, writes, and queries go through the engine API.
+`remotePath` is **mesh‑scoped**. One folder = one mesh = one logical
+database. Two meshes sharing the same folder will fight over the
+manifest and poison the remote.
 
-## CRDT strategy
+## Maintenance / compaction
 
-Interocitor uses per-column CRDTs with hybrid logical clocks (HLC). All merge happens on the client. Remote storage is just a byte pipe.
+Compaction collapses the change log into a snapshot, bumps the manifest,
+and prunes old change files. Sync works without it; the remote folder
+just grows until *some* device compacts.
 
-Conflict default: `'remote-wins'`.
-Override at database, table, or field level.
+Two paths run automatically:
+
+- **Immediate sampled** — after a flush of ≥ `compactAutoThreshold`
+  (default 50) ops, with probability ≈
+  `compactAutoSampleNumerator / compactAutoDeviceCount`.
+- **Delayed two‑phase** — per‑write timer (10 ± 5 min) → check that
+  remote change files exceed `compactRemoteChangeThreshold` (default 2)
+  → second timer (15 ± 5 min) → run.
+
+Both paths are deduped by a single in‑flight guard. You can also call
+`db.compact()` manually.
+
+> **The auto defaults and the recommended manual policy are different
+> things.** The manual policy ("idle > 1 min, churn > 20") is what to
+> gate a "Sync now" button on. The auto defaults are what runs without
+> any button. See `docs/compaction.md`.
+
+> **Compaction is not race‑safe across devices.** The adapter contract
+> has no CAS/ETag write, so two simultaneous compactors can both
+> overwrite the manifest pointer. Mitigations: rely on probabilistic
+> avoidance for small meshes, or run with `serverManaged: true` and a
+> single authorized writer.
+
+Full protocol, events, lock story, prune invariants, and tuning
+checklist: **`docs/compaction.md`**.
+
+## Schema migration
+
+Schema versions are integers in `manifest.schema`. The engine tracks the
+current version on every write. There is **no in‑place rewrite of the
+remote history** — change files written under v1 stay v1 ciphertext.
+
+Recommended migration pattern:
+
+1. Bump `schema.version` in your code.
+2. Implement a one‑shot `onInit` migration that reads v1 rows from the
+   local store and writes v2 rows back. Use `db.batch(...)` to keep it
+   atomic per row group.
+3. Trigger compaction after the migration so the snapshot is written
+   under v2 and old v1 change files are pruned.
+4. Devices that have not yet migrated will read v2 change files; your
+   schema definitions need to handle the transition (e.g. accept both
+   shapes during the rollout window).
+
+For breaking changes that cannot be rolled out gradually, the
+heavier path is to bootstrap a fresh mesh, replicate data over, and
+retire the old mesh. The engine does not automate this.
 
 ## Events
 
 ```ts
-engine.on('change', (event) => {
-  console.log(event.type, event.table, event.id);
+db.on(event => {
+  switch (event.type) {
+    case 'sync:start':                /* pull began */ break;
+    case 'sync:complete':             /* event.entriesMerged */ break;
+    case 'change':                    /* event.table, event.rowId, event.row */ break;
+    case 'delete':                    /* event.table, event.rowId */ break;
+    case 'flush:start':               /* event.entryCount */ break;
+    case 'flush:complete':            break;
+    case 'flush:error':               /* event.error */ break;
+    case 'remote:poisoned':           /* unrecoverable; see security-model.md */ break;
+    case 'credentials:meshMismatch':  /* stored meshId != live; offer clearCredentials() */ break;
+    case 'compact:warning':           /* outbox is large */ break;
+    // compact:auto:start / complete / skip / error / delayed:* — see docs/compaction.md
+  }
 });
-```
-
-## Local TODO demo (WebDAV)
-
-From the monorepo root:
-
-```bash
-yarn demo:todo
 ```
 
 ## What this is not
@@ -521,22 +487,45 @@ yarn demo:todo
 - not Replicache
 - not a hosted backend
 - not a query engine over the cloud
-- not a server-trusted merge layer
+- not a server‑trusted merge layer
+
+## What can go wrong
+
+A short field guide. Detailed mitigations in the linked docs.
+
+| Symptom | Likely cause | Where to look |
+| --- | --- | --- |
+| `MeshCredentialMismatchError` on connect | Same `dbName`, new mesh; stale credential record | `engine.clearCredentials()` then reconnect; `docs/credential-store.md` |
+| `MeshEncryptionMismatchError` on connect | App flipped `encrypted` between sessions | Pin `encrypted` per `dbName`, never change |
+| `remote:poisoned` event | Decode failure on a manifest, change file, or snapshot | `docs/security-model.md` — usually wrong key, schema drift, or remote tampering |
+| Writes never appear on peer | Peer never compacted, or peer's poll interval is long, or remote dropped writes | Check `flush:complete` events; check remote folder by hand |
+| Local store has rows that are "old" after re‑pair | Engine kept local data when you re‑paired with a fresh mesh | Either delete local DB on re‑pair, or accept the merge |
+| Lost passphrase | No recovery | Passphrase is the key. Back it up out of band |
+| Long‑offline device "lost" recent edits | Rehydrate replaced local state with the snapshot | Local writes already in the outbox survive; in‑flight uncommitted UI state does not |
+| Compaction never runs | `autoCompact: false`, or no remote, or `compactAutoThreshold` never reached | `docs/compaction.md` — subscribe to `compact:auto:skip` |
+| Two compactors race | No CAS in the adapter; small probability in small meshes | Use `serverManaged: true` for large meshes |
 
 ## Tests
-
-From the monorepo root:
 
 ```bash
 yarn workspace @interocitor/core test
 ```
 
+Adapter contract tests (run for every adapter):
+
+```bash
+yarn workspace @interocitor/core test webdav.adapter.contract
+```
+
 ## Package context
 
-This package is the main JavaScript/TypeScript runtime in the monorepo. See also:
+Part of the Interocitor monorepo. See:
+
 - root `README.md` — monorepo overview
-- `packages/interocitor-swift` — Swift client
-- `examples/todo-webdav` — local demo app
+- `docs/security-model.md` — threat model
+- `docs/adapter-contract.md` — adapter requirements
+- `docs/compaction.md` — compaction protocol & tuning
+- `docs/credential-store.md` — credential persistence
 
 ## License
 

@@ -42,7 +42,7 @@ test('trace events explain head + manifest IO and prove no redundant rewrites', 
     const traces: any[] = [];
 
     const engine = new Interocitor(adapter as any, {
-      remotePath: '/Trace',
+      batchWindowMs: 0, remotePath: '/Trace',
       dbName: 'trace-head-manifest',
       pollInterval: 600_000,
       flushDebounce: 600_000,
@@ -160,7 +160,7 @@ test('trace head: future-prior HLC short-circuits via skip-no-change (no regress
     const headEvents: any[] = [];
 
     const engine = new Interocitor(adapter as any, {
-      remotePath: '/TraceRetry',
+      batchWindowMs: 0, remotePath: '/TraceRetry',
       dbName: 'trace-retry',
       pollInterval: 600_000,
       flushDebounce: 600_000,

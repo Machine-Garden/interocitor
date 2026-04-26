@@ -84,12 +84,12 @@ Google Drive / WebDAV / Cloudflare / custom]
 
 `sync()` does **not** perform storage cleanup. Cleanup of old change files happens during **compaction**, a separate maintenance flow.
 
-## Compaction
+## Compaction & batching
 
-Compaction exists in the shipped runtime APIs, but the detailed compaction policy lives in the package docs:
+Compaction, automatic compact scheduling, and batched writes exist in the shipped runtime APIs. The detailed policy, configuration, events, and `db.batch(fn)` API live in the package docs:
 
-- JS/TS: `packages/core/README.md`
-- Swift: `packages/interocitor-swift/README.md`
+- JS/TS — see `packages/core/README.md` (manual `compact()`, immediate sampled auto-compact, delayed two-phase auto-compact, implicit `batchWindowMs`, explicit `db.batch(fn)`)
+- Swift — see `packages/interocitor-swift/README.md` (manual `compact()` and coordination policy)
 
 This root README stays umbrella-only.
 

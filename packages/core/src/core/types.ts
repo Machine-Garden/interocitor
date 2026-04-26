@@ -577,6 +577,7 @@ export interface LocalStoreAdapter {
   getTableNames(): Promise<string[]>;
 
   pushOutbox(entry: ChangeEntry): Promise<void>;
+  pushOutboxEntries(entries: ChangeEntry[]): Promise<void>;
   drainOutbox(): Promise<ChangeEntry[]>;
   outboxSize(): Promise<number>;
 
@@ -658,14 +659,26 @@ export interface SyncConfig<
   flushThreshold?: number;
   /** Warn once queued local changes reach this count (default 50). */
   compactWarnThreshold?: number;
-  /** Consider sampled self-compaction once queued local changes reach this count (default 50). */
+  /** Consider auto-compaction once queued local changes reach this count (default 50). */
   compactAutoThreshold?: number;
-  /** Sampling numerator for automatic compact. Chance = numerator / estimated device count. Default 10. */
+  /** Sampling numerator for the immediate auto-compact path. Chance = numerator / estimated device count. Default 10. */
   compactAutoSampleNumerator?: number;
-  /** Estimated device count used to scale automatic compact sampling. Default 1. */
+  /** Estimated device count used to scale the immediate auto-compact sampling. Default 1. */
   compactAutoDeviceCount?: number;
-  /** Enable sampled automatic compact after large churn. Default true. */
+  /** Enable automatic compact scheduling after large churn. Default true. */
   autoCompact?: boolean;
+  /** First auto-compact delay base in ms (default 10m). Jittered by ± firstCompactDelayJitterMs. */
+  firstCompactDelayMs?: number;
+  /** First auto-compact delay jitter in ms (default 5m). */
+  firstCompactDelayJitterMs?: number;
+  /** Second auto-compact delay base in ms (default 15m). Jittered by ± secondCompactDelayJitterMs. */
+  secondCompactDelayMs?: number;
+  /** Second auto-compact delay jitter in ms (default 5m). */
+  secondCompactDelayJitterMs?: number;
+  /** Minimum remote change-file count required before the second delay starts (default 2). */
+  compactRemoteChangeThreshold?: number;
+  /** Implicit batch window in ms. All local writes inside the window join one ChangeEntry. Default 1000. */
+  batchWindowMs?: number;
   /**
    * Local database name for this engine's local cache.
    * Use distinct names to isolate multiple engine instances on the same origin.
@@ -748,10 +761,12 @@ export type SyncEvent =
   | { type: 'flush:complete' }
   | { type: 'flush:error'; error: Error }
   | { type: 'compact:warning'; queuedChangeCount: number; threshold: number; autoCompactThreshold: number; remotePath?: string; deviceId: string }
-  | { type: 'compact:auto:start'; queuedChangeCount: number; threshold: number; sampleRoll: number; sampleWindow: number; remotePath?: string; deviceId: string }
-  | { type: 'compact:auto:skip'; queuedChangeCount: number; threshold: number; sampleRoll: number; sampleWindow: number; remotePath?: string; deviceId: string; reason: 'sampling' | 'disabled' | 'not-connected' | 'already-running' | 'poisoned' | 'missing-remote' }
-  | { type: 'compact:auto:complete'; queuedChangeCount: number; threshold: number; remotePath?: string; deviceId: string }
-  | { type: 'compact:auto:error'; queuedChangeCount: number; threshold: number; remotePath?: string; deviceId: string; error: Error }
+  | { type: 'compact:auto:start'; queuedChangeCount: number; threshold: number; sampleRoll?: number; sampleWindow?: number; remoteChangeFileCount?: number; trigger: 'immediate' | 'delayed'; remotePath?: string; deviceId: string }
+  | { type: 'compact:auto:skip'; queuedChangeCount: number; threshold: number; sampleRoll?: number; sampleWindow?: number; trigger: 'immediate' | 'delayed'; remotePath?: string; deviceId: string; reason: 'sampling' | 'disabled' | 'not-connected' | 'already-running' | 'poisoned' | 'missing-remote' | 'below-remote-threshold' | 'superseded' }
+  | { type: 'compact:auto:complete'; queuedChangeCount: number; threshold: number; trigger: 'immediate' | 'delayed'; remoteChangeFileCount?: number; remotePath?: string; deviceId: string }
+  | { type: 'compact:auto:error'; queuedChangeCount: number; threshold: number; trigger: 'immediate' | 'delayed'; remoteChangeFileCount?: number; remotePath?: string; deviceId: string; error: Error }
+  | { type: 'compact:delayed:scheduled'; queuedChangeCount: number; delayMs: number; phase: 'check' | 'compact'; remotePath?: string; deviceId: string }
+  | { type: 'compact:delayed:check'; queuedChangeCount: number; remoteChangeFileCount: number; threshold: number; remotePath?: string; deviceId: string }
   | { type: 'change'; table: string; rowId: string; row: Row }
   | { type: 'delete'; table: string; rowId: string }
   | { type: 'rehydrate:start' }

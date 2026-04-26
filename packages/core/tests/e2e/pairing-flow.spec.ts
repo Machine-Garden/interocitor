@@ -102,7 +102,7 @@ test.describe('Multi-device pairing flow', () => {
         });
 
         const engine = new Interocitor(adapter, {
-          remotePath: '/TeamAlpha',
+          batchWindowMs: 0, remotePath: '/TeamAlpha',
           dbName: 'team-alpha',
           deviceId: 'device_1',
           encrypted: true,
@@ -204,7 +204,7 @@ test.describe('Multi-device pairing flow', () => {
           if (!credentials) return { error: 'no credentials' };
 
           const engine = new Interocitor(adapter, {
-            remotePath: credentials.remotePath,
+            batchWindowMs: 0, remotePath: credentials.remotePath,
             dbName: 'team-alpha',
             deviceId: 'device_2',
             passphrase: credentials.passphrase,
@@ -253,7 +253,7 @@ test.describe('Multi-device pairing flow', () => {
         });
 
         const engine = new Interocitor(adapter, {
-          remotePath: '/TeamBeta',
+          batchWindowMs: 0, remotePath: '/TeamBeta',
           dbName: 'team-beta',
           deviceId: 'device_3',
           encrypted: true,
@@ -315,7 +315,7 @@ test.describe('Multi-device pairing flow', () => {
 
           // DIFFERENT dbName — team-beta is a separate database.
           const engine = new Interocitor(adapter, {
-            remotePath: credentials.remotePath,
+            batchWindowMs: 0, remotePath: credentials.remotePath,
             dbName: 'team-beta',
             deviceId: 'device_2',
             passphrase: credentials.passphrase,
@@ -379,7 +379,7 @@ test.describe('Multi-device pairing flow', () => {
           auth: { username: 'u', password: 'p' },
         });
         const engine = new Interocitor(adapter, {
-          remotePath: '/TeamAlpha',
+          batchWindowMs: 0, remotePath: '/TeamAlpha',
           dbName: 'team-alpha',
           deviceId: 'device_2',
           passphrase: passArg,
@@ -416,7 +416,7 @@ test.describe('Multi-device pairing flow', () => {
           auth: { username: 'u', password: 'p' },
         });
         const engine = new Interocitor(adapter, {
-          remotePath: '/TeamAlpha',
+          batchWindowMs: 0, remotePath: '/TeamAlpha',
           dbName: 'team-alpha',
           deviceId: 'device_1',
           passphrase: passArg,
@@ -490,7 +490,7 @@ test.describe('Multi-device pairing flow', () => {
           if (!credentials) return { error: 'no credentials' };
 
           const engine = new Interocitor(adapter, {
-            remotePath: credentials.remotePath,
+            batchWindowMs: 0, remotePath: credentials.remotePath,
             dbName: 'team-alpha',
             deviceId: 'device_4',
             passphrase: credentials.passphrase,

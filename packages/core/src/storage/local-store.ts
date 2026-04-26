@@ -412,9 +412,15 @@ export class LocalStore implements LocalStoreAdapter {
   // ── Outbox ───────────────────────────────────────────────────────
 
   async pushOutbox(entry: ChangeEntry): Promise<void> {
+    await this.pushOutboxEntries([entry]);
+  }
+
+  async pushOutboxEntries(entries: ChangeEntry[]): Promise<void> {
+    if (entries.length === 0) return;
     const db = this.ensureDB();
     const t = tx(db, STORES.outbox, 'readwrite');
-    t.objectStore(STORES.outbox).add(entry);
+    const store = t.objectStore(STORES.outbox);
+    for (const entry of entries) store.add(entry);
     await txComplete(t);
   }
 

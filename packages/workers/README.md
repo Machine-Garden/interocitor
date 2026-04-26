@@ -13,6 +13,16 @@ Cloudflare Workers runtime for [Interocitor](https://github.com/TheUiTeam/intero
 ```ts
 import { InterocitorRelayDurableObject, withInterocitor } from '@interocitor/workers';
 
+interface Env {
+  MY_DB: D1Database;
+  MY_RELAY: DurableObjectNamespace;
+  INTEROCITOR_ACCESS_TOKEN?: string;
+  INTEROCITOR_SYSTEM_TOKEN?: string;
+  INTEROCITOR_MESH_SECRET?: string;
+  INTEROCITOR_ENABLE_SCHEDULED_MAINTENANCE?: string;
+  INTEROCITOR_PATH_TTL_HOURS?: string;
+}
+
 const appWorker = {
   async fetch(request: Request) {
     const url = new URL(request.url);
@@ -36,9 +46,9 @@ export default withInterocitor<Env>(appWorker, {
     pathTtlHours: (env) => env.INTEROCITOR_PATH_TTL_HOURS,
   },
 });
+```
 
 Interocitor does not constrain your `Env` type. You own your env shape. Pass only the bindings and settings it needs via getters.
-```
 
 Interocitor claims `/<prefix>/io/*`, `/<prefix>/notify/*`, `/<prefix>/__interocitor/*`, and `/<prefix>/health`. Everything else goes to your app.
 
@@ -61,6 +71,53 @@ new_classes = ["InterocitorRelayDurableObject"]
 ```
 
 Binding names are yours. Pass them to `withInterocitor(...)` via getters.
+
+### Realtime relay: what `InterocitorRelayDurableObject` does
+
+`InterocitorRelayDurableObject` is the optional Durable Object behind Interocitor's notify WebSocket route.
+
+- `withInterocitor(..., { relay: (env) => env.MY_RELAY })` enables `/<mountPrefix>/notify/<prefix>`.
+- The Worker authenticates that route with the same per-prefix access-token rule as `/<mountPrefix>/io/<prefix>`.
+- The relay stores WebSockets using Cloudflare's hibernation API (`acceptWebSocket`) and can fan out tiny invalidation messages with `broadcast(...)`.
+- Correctness does not depend on the relay. Clients still poll/pull. The relay is the low-latency path for apps that want push invalidations.
+
+Minimum Worker entry:
+
+```ts
+import { InterocitorRelayDurableObject, withInterocitor } from '@interocitor/workers';
+
+export { InterocitorRelayDurableObject };
+
+export default withInterocitor(appWorker, {
+  mountPrefix: '/sync',
+  db: (env) => env.MY_DB,
+  relay: (env) => env.MY_RELAY,
+});
+```
+
+Minimum Wrangler config:
+
+```toml
+[[durable_objects.bindings]]
+name = "MY_RELAY"
+class_name = "InterocitorRelayDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["InterocitorRelayDurableObject"]
+```
+
+Proof that the relay is reachable:
+
+```bash
+# 1. Start the Cloudflare TODO example with RUN_CF_EXAMPLE_TESTS=1.
+RUN_CF_EXAMPLE_TESTS=1 yarn test:e2e:cloudflare:run --grep "InterocitorRelayDurableObject"
+
+# 2. Or open the notify endpoint manually from a browser/client:
+# ws(s)://<worker>/sync/notify/<prefix>?access_token=<sha256(prefix + accessSecret)>
+```
+
+The repository includes this proof as `examples/todo-cloudflare-do/tests/e2e/cloudflare.relay.e2e.spec.ts`: it starts the example Worker, opens `/todo-interocitor/notify/<namespace>` with the valid token, and expects the WebSocket to reach `open`.
 
 ## Custom routing
 

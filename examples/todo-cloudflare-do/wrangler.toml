@@ -7,6 +7,9 @@ INTEROCITOR_APPEND_ONLY = "1"
 # Set to "1" to emit per-request traces to worker logs (wrangler tail / dev console).
 # Flip to "0" in production to silence routine traffic.
 INTEROCITOR_VERBOSE = "1"
+INTEROCITOR_ACCESS_TOKEN = "replace-with-production-secret"
+INTEROCITOR_SYSTEM_TOKEN = "replace-with-production-system-secret"
+INTEROCITOR_MESH_SECRET = "replace-with-production-mesh-secret"
 INTEROCITOR_PATH_TTL_HOURS = "168"
 INTEROCITOR_MAINTENANCE_MAX_PATHS_PER_RUN = "100"
 INTEROCITOR_MAX_CONTROL_BYTES = "262144"
@@ -24,4 +27,12 @@ database_name = "todo-cloudflare-do-db"
 database_id = "REPLACE_WITH_REAL_D1_DATABASE_ID"
 preview_database_id = "REPLACE_WITH_REAL_D1_PREVIEW_DATABASE_ID"
 migrations_dir = "migrations"
+
+[[durable_objects.bindings]]
+name = "INTEROCITOR_RELAY"
+class_name = "InterocitorRelayDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["InterocitorRelayDurableObject"]
 

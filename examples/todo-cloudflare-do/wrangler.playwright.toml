@@ -24,3 +24,11 @@ database_id = "REPLACE_WITH_REAL_D1_DATABASE_ID"
 preview_database_id = "REPLACE_WITH_REAL_D1_PREVIEW_DATABASE_ID"
 migrations_dir = "migrations"
 
+[[durable_objects.bindings]]
+name = "INTEROCITOR_RELAY"
+class_name = "InterocitorRelayDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["InterocitorRelayDurableObject"]
+

@@ -8,7 +8,7 @@
 
 GitHub example directory: <https://github.com/TheUiTeam/interocitor/tree/main/examples/todo-cloudflare-do>
 
-This example shows Interocitor mounted into an app-owned Worker under a prefix, with D1-backed transport state and no Durable Objects.
+This example shows Interocitor mounted into an app-owned Worker under a prefix, with D1-backed transport state and the optional `InterocitorRelayDurableObject` wired for notify WebSockets.
 
 ## What is implemented
 
@@ -16,6 +16,8 @@ This example shows Interocitor mounted into an app-owned Worker under a prefix, 
 - Interocitor mounted under `/todo-interocitor`
 - D1-backed metadata and append-only mutation persistence
 - Interocitor-native endpoints for sync flows
+- `InterocitorRelayDurableObject` exported and bound as `INTEROCITOR_RELAY`
+- `/todo-interocitor/notify/<namespace>` WebSocket route enabled through `relay: (env) => env.INTEROCITOR_RELAY`
 - maintenance and compaction-related cleanup hooks
 
 ## Route ownership
@@ -27,7 +29,24 @@ App owns:
 Interocitor owns:
 - `/todo-interocitor/health`
 - `/todo-interocitor/io/*`
+- `/todo-interocitor/notify/*`
 - `/todo-interocitor/__interocitor/*`
+
+## Relay proof of work
+
+The repository includes an opt-in e2e proof that the Durable Object relay is reachable through the mounted Worker route:
+
+```bash
+RUN_CF_EXAMPLE_TESTS=1 yarn test:e2e:cloudflare:run --grep "InterocitorRelayDurableObject"
+```
+
+That test opens:
+
+```text
+ws://127.0.0.1:<worker-port>/todo-interocitor/notify/<namespace>?access_token=<sha256(namespace + accessSecret)>
+```
+
+and expects the WebSocket to reach `open`. This proves the example exports `InterocitorRelayDurableObject`, Wrangler binds it, and `withInterocitor(..., { relay })` routes `/notify/<namespace>` into the Durable Object.
 
 ## Mutation policy
 

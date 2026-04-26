@@ -55,7 +55,29 @@ export function useLiveQuery<T extends Record<string, unknown>, R = T[]>(
   }
 
   const subscribe = useMemo(
-    () => (notify: () => void) => query.subscribe(() => notify()),
+    () => (notify: () => void) => {
+      let active = true;
+      const notifyWhenLoaded = () => {
+        void query.load().finally(() => {
+          if (active) notify();
+        });
+      };
+
+      // `useSyncExternalStore` only re-reads snapshots after `notify()`.
+      // The render-time `query.load()` above populates the async cache, but
+      // promise completion itself is not an external-store event. Bridge that
+      // first load, and every table invalidation, back into React.
+      notifyWhenLoaded();
+      const unsubscribe = query.subscribe(() => {
+        notify(); // keep stale data visible immediately while refresh is pending
+        notifyWhenLoaded();
+      });
+
+      return () => {
+        active = false;
+        unsubscribe();
+      };
+    },
     [query],
   );
 

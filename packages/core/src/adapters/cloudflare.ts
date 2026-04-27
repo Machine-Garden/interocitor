@@ -11,7 +11,7 @@
  *   wss://<worker>/notify/<prefix>  (WebSocket invalidations via InterocitorRelay DO)
  */
 
-import type { StorageAdapter, FileEntry } from '../core/types.ts';
+import type { StorageAdapter, FileEntry, RemoteInvalidationPayload, RemoteInvalidationHooks } from '../core/types.ts';
 
 export interface CloudflareAdapterConfig {
   /** Worker IO base URL that includes prefix, e.g. https://worker/io/team-a */
@@ -147,8 +147,8 @@ export class CloudflareAdapter implements StorageAdapter {
   }
 
   subscribeToInvalidations(
-    onInvalidate: (payload: { type: string; path: string; ts: number }) => void,
-    hooks?: { onReady?: () => void; onError?: () => void },
+    onInvalidate: (payload: RemoteInvalidationPayload) => void,
+    hooks?: RemoteInvalidationHooks,
   ): () => void {
     let ws: WebSocket | null = null;
     let cancelled = false;
@@ -159,8 +159,8 @@ export class CloudflareAdapter implements StorageAdapter {
       if (cancelled) return;
       try {
         ws = new WebSocket(this.notifyUrl);
-      } catch {
-        hooks?.onError?.();
+      } catch (error) {
+        hooks?.onError?.(error);
         scheduleReconnect();
         return;
       }
@@ -181,12 +181,15 @@ export class CloudflareAdapter implements StorageAdapter {
         }
       };
 
-      ws.onerror = () => {
-        hooks?.onError?.();
+      ws.onerror = (event) => {
+        hooks?.onError?.(event);
       };
 
       ws.onclose = () => {
-        if (!cancelled) scheduleReconnect();
+        if (!cancelled) {
+          hooks?.onClose?.();
+          scheduleReconnect();
+        }
       };
     };
 

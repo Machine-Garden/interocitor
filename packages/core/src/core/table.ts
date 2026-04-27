@@ -70,8 +70,12 @@ export class QueryResult<T extends Record<string, unknown>> implements PromiseLi
   }
 
   /**
-   * Read cached rows synchronously, if available. Returns `undefined` if the
-   * cache has no ready snapshot. Does not start a load.
+   * Read cached rows synchronously, if available. Returns `undefined` only if
+   * the cache has no row snapshot. Does not start a load.
+   *
+   * Stale-while-revalidate contract: pending/error snapshots may still carry
+   * rows from the previous ready load. Expose those rows so consumers can keep
+   * stale data visible while a refresh is in flight.
    *
    * Stable reference contract: callers (React, useSyncExternalStore, etc.)
    * MUST be able to compare the returned array by reference. We memoize the
@@ -82,7 +86,7 @@ export class QueryResult<T extends Record<string, unknown>> implements PromiseLi
   peekCache(): T[] | undefined {
     if (!this._engine) return undefined;
     const snap = this._engine.readQueryCache(this.descriptor);
-    if (snap.status !== 'ready' || !snap.rows) return undefined;
+    if (!snap.rows) return undefined;
     return this._project(snap.rows);
   }
 
@@ -296,11 +300,13 @@ export class RowResult<T extends Record<string, unknown>> implements PromiseLike
     return this._engine.loadRow(this.descriptor, options).then(r => this._project(r));
   }
 
-  /** Sync ready row, or `undefined` if the cache has nothing usable. */
+  /**
+   * Sync cached row, or `undefined` if the cache has no row. Pending/error
+   * snapshots may still carry the previous row for stale-while-revalidate.
+   */
   peekCache(): T | undefined {
     if (!this._engine) return undefined;
     const snap = this._engine.readRowCache(this.descriptor);
-    if (snap.status !== 'ready') return undefined;
     return this._project(snap.row);
   }
 

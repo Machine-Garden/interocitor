@@ -18,29 +18,39 @@ test('Cloudflare TODO worker exposes InterocitorRelayDurableObject on /notify/<p
   try {
     const namespace = makeNamespace('team-relay');
     const token = accessTokenForNamespace(namespace);
-    const notifyUrl = `${CF_WORKER_BASE_URL.replace(/^http/, 'ws')}/notify/${encodeURIComponent(namespace)}?access_token=${token}`;
+    const notifyHttpUrl = `${CF_WORKER_BASE_URL}/notify/${encodeURIComponent(namespace)}/health?access_token=${token}`;
+    const health = await page.request.get(notifyHttpUrl);
+    expect(health.ok()).toBe(true);
+    expect(health.headers()['content-type']).toContain('application/json');
+    expect(await health.json()).toMatchObject({ ok: true });
 
-    const outcome = await page.evaluate(async (url) => {
+    const notifyUrl = `${CF_WORKER_BASE_URL.replace(/^http/, 'ws')}/notify/${encodeURIComponent(namespace)}?access_token=${token}`;
+    const writeUrl = `${CF_WORKER_BASE_URL}/io/${encodeURIComponent(namespace)}/file?path=${encodeURIComponent('/relay-proof.txt')}&access_token=${token}`;
+
+    const outcome = await page.evaluate(async ({ notifyUrl, writeUrl }) => {
       return await new Promise<string>((resolve) => {
-        const ws = new WebSocket(url);
+        const ws = new WebSocket(notifyUrl);
         const timeout = window.setTimeout(() => {
           ws.close();
           resolve('timeout');
         }, 5_000);
 
         ws.onopen = () => {
+          void fetch(writeUrl, { method: 'PUT', body: 'relay-proof' }).catch(() => resolve('write-error'));
+        };
+        ws.onmessage = (event) => {
           window.clearTimeout(timeout);
           ws.close(1000, 'proof-complete');
-          resolve('open');
+          resolve(String(event.data));
         };
         ws.onerror = () => {
           window.clearTimeout(timeout);
-          resolve('error');
+          resolve('socket-error');
         };
       });
-    }, notifyUrl);
+    }, { notifyUrl, writeUrl });
 
-    expect(outcome).toBe('open');
+    expect(JSON.parse(outcome)).toMatchObject({ type: 'invalidation', op: 'write', path: '/relay-proof.txt' });
   } finally {
     await context.close();
   }

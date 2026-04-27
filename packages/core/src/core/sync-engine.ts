@@ -33,6 +33,8 @@ import type {
   ReadinessAwareQueryExecutor,
   RowDescriptor,
   RowCacheSnapshot,
+  RemoteInvalidationPayload,
+  RemoteInvalidationStorageAdapter,
 } from './types.ts';
 
 import type { HLC } from './types.ts';
@@ -196,8 +198,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   private batchTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingBatch: ChangeEntry | null = null;
 
-  // Poll management
+  // Poll / push invalidation management
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private unsubscribeRemoteInvalidations: (() => void) | null = null;
 
   // Lifecycle state
   private initialized = false;
@@ -299,6 +302,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
   private log(level: LogLevel, ...args: unknown[]): void {
     logAtLevel(this.logLevel, level, ...args);
+  }
+
+  private supportsRemoteInvalidations(adapter: StorageAdapter): adapter is StorageAdapter & RemoteInvalidationStorageAdapter {
+    return typeof (adapter as Partial<RemoteInvalidationStorageAdapter>).subscribeToInvalidations === 'function';
   }
 
   /** Await this before any storage operation. Returns the shared init promise. */
@@ -715,6 +722,51 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     this.pollTimer = setInterval(() => {
       this.pull().catch(() => {});
     }, this.config.pollInterval);
+  }
+
+  private stopRemoteInvalidations(): void {
+    if (!this.unsubscribeRemoteInvalidations) return;
+    try { this.unsubscribeRemoteInvalidations(); } catch {}
+    this.unsubscribeRemoteInvalidations = null;
+  }
+
+  private startRemoteInvalidations(adapter: StorageAdapter): void {
+    this.stopRemoteInvalidations();
+    if (!this.supportsRemoteInvalidations(adapter)) {
+      this.log('debug', '[interocitor:relay] adapter has no invalidation subscription', { adapter: adapter.name });
+      this.emit({ type: 'relay:unavailable', adapter: adapter.name, reason: 'adapter-unsupported' });
+      return;
+    }
+
+    this.log('info', '[interocitor:relay] subscribing', { adapter: adapter.name, remotePath: this.config.remotePath, deviceId: this.deviceId });
+    this.emit({ type: 'relay:subscribe', adapter: adapter.name, remotePath: this.config.remotePath, deviceId: this.deviceId });
+    this.unsubscribeRemoteInvalidations = adapter.subscribeToInvalidations(
+      (payload: RemoteInvalidationPayload) => {
+        this.log('info', '[interocitor:relay] invalidation received', payload);
+        this.emit({ type: 'relay:message', adapter: adapter.name, payload });
+        if (!this.connected) return;
+        this.pull().catch((error) => {
+          const err = error instanceof Error ? error : new Error(String(error));
+          this.log('warn', '[interocitor:relay] pull after invalidation failed', err);
+          this.emit({ type: 'relay:error', adapter: adapter.name, error: err });
+        });
+      },
+      {
+        onReady: () => {
+          this.log('info', '[interocitor:relay] ready', { adapter: adapter.name });
+          this.emit({ type: 'relay:ready', adapter: adapter.name });
+        },
+        onError: (error?: unknown) => {
+          const err = error instanceof Error ? error : new Error(error ? String(error) : 'Remote invalidation subscription error');
+          this.log('warn', '[interocitor:relay] subscription error', err);
+          this.emit({ type: 'relay:error', adapter: adapter.name, error: err });
+        },
+        onClose: () => {
+          this.log('warn', '[interocitor:relay] closed', { adapter: adapter.name });
+          this.emit({ type: 'relay:closed', adapter: adapter.name });
+        },
+      },
+    );
   }
 
   // ── State helpers ──────────────────────────────────────────────────
@@ -1344,6 +1396,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
         });
         this.emit({ type: 'sync:complete', entriesMerged: 0 });
         this.startPolling();
+        this.startRemoteInvalidations(adapter);
         this.connected = true;
         return true;
       }
@@ -1483,6 +1536,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     await this.doFlush();
 
     this.startPolling();
+    this.startRemoteInvalidations(adapter);
     this.connected = true;
     this.log('info', 'connect() — connected', { remotePath: this.config.remotePath, deviceId: this.deviceId, pollInterval: this.config.pollInterval });
 
@@ -1498,8 +1552,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   async disconnect(): Promise<void> {
     await this.ensureReady();
     // Hard tear-down. Order matters: stop timers first so no in-flight
-    // poll/flush touches the adapter while we are killing the session.
+    // poll/push/flush touches the adapter while we are killing the session.
     this.stopPolling();
+    this.stopRemoteInvalidations();
     this.clearScheduledFlush();
     this.clearCompactTimers();
     this.clearBatchTimer();
@@ -1564,6 +1619,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     // newly-attached adapter and re-write the *new* mesh with files signed
     // for the old mesh — i.e. self-poison the remote on adapter switch.
     this.stopPolling();
+    this.stopRemoteInvalidations();
     this.clearScheduledFlush();
     this.connected = false;
 

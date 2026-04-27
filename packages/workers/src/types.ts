@@ -173,6 +173,8 @@ export interface InterocitorRuntimeOptions<Env = unknown> {
   maxMainlineBytes?: (env: Env) => string | number | undefined;
   maxGenericFileBytes?: (env: Env) => string | number | undefined;
   meshSecret?: (env: Env) => string | undefined;
+  /** Enable diagnostic logs for request handling and relay delivery. */
+  verbose?: (env: Env) => string | number | boolean | undefined;
 }
 
 export interface InterocitorMountOptions<Env = unknown> {

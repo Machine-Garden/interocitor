@@ -13,6 +13,7 @@ import {
   opReconcileMetrics,
 } from './ops.ts';
 import { PATH_TYPE, classifyPath, meshRootForPath } from './paths.ts';
+import { broadcast } from './relay.ts';
 import { getMaintenanceStatus, runMaintenance } from './maintenance.ts';
 import type {
   D1Database,
@@ -67,6 +68,7 @@ interface ResolvedRuntimeConfig {
   maxMainlineBytes: number;
   maxGenericFileBytes: number;
   meshSecret: string;
+  verbose: boolean;
 }
 
 function parsePositiveInt(value: string | number | undefined, fallback: number): number {
@@ -85,6 +87,7 @@ function resolveRuntimeConfig<Env>(env: Env, runtime?: InterocitorRuntimeOptions
     maxMainlineBytes: parsePositiveInt(runtime?.maxMainlineBytes?.(env), DEFAULT_MAINLINE_BYTES),
     maxGenericFileBytes: parsePositiveInt(runtime?.maxGenericFileBytes?.(env), DEFAULT_GENERIC_FILE_BYTES),
     meshSecret: runtime?.meshSecret?.(env) || DEFAULT_MESH_SECRET,
+    verbose: runtime?.verbose?.(env) === true || runtime?.verbose?.(env) === '1' || runtime?.verbose?.(env) === 1,
   };
 }
 
@@ -195,6 +198,14 @@ function jsonResponse(payload: unknown, status = 200): Response {
   );
 }
 
+function bodyForEmptyResponse(status: number): null | '' {
+  return status === 204 || status === 205 || status === 304 ? null : '';
+}
+
+function emptyResponse(status: number): Response {
+  return withCors(new Response(bodyForEmptyResponse(status), { status }));
+}
+
 function parseIo(url: URL): { prefix: string; op: string } {
   const rest = url.pathname.slice(`${IO_PREFIX}/`.length);
   const parts = rest.split('/').filter(Boolean);
@@ -257,6 +268,8 @@ async function handleWriteFile(
   path: string,
   request: Request,
   runtime: ResolvedRuntimeConfig,
+  ctx: ExecutionContextLike,
+  relay?: DurableObjectNamespace,
 ): Promise<Response> {
   const bytes = await readBytes(request);
   if (!bytes) return jsonResponse({ error: 'Invalid request body' }, 400);
@@ -264,16 +277,23 @@ async function handleWriteFile(
   const limit = fileSizeLimitForPathType(pathType, runtime);
   if (bytes.byteLength > limit) return jsonResponse({ error: 'Payload too large', limit }, 413);
   const remoteRoot = meshRootForPath(path, pathType);
+  const notify = (status: number): Response => {
+    if (status >= 200 && status < 300) {
+      const payload = { type: 'invalidation', op: 'write', path: normalizePath(path), pathType, ts: Date.now() };
+      broadcast(relay, ctx, prefix, payload, { verbose: runtime.verbose });
+    }
+    return emptyResponse(status);
+  };
   if (pathType === PATH_TYPE.MANIFEST_POINTER || pathType === PATH_TYPE.HEAD) {
     const result = await opPutSemantic(db.raw, prefix, path, bytes, pathType, remoteRoot);
-    return withCors(new Response('', { status: result.status }));
+    return notify(result.status);
   }
   if (pathType === PATH_TYPE.DEVICE_HEARTBEAT) {
     const result = await opPutOverwrite(db.raw, prefix, path, bytes, pathType, remoteRoot);
-    return withCors(new Response('', { status: result.status }));
+    return notify(result.status);
   }
   const result = await opPutImmutable(db.raw, prefix, path, bytes, pathType, remoteRoot);
-  return withCors(new Response('', { status: result.status }));
+  return notify(result.status);
 }
 
 async function handleListFiles(db: DatabaseAdapter, prefix: string, body: Record<string, unknown>): Promise<Response> {
@@ -288,10 +308,20 @@ async function handleListFolders(db: DatabaseAdapter, prefix: string, body: Reco
   return jsonResponse({ folders: listing.folders }, 200);
 }
 
-async function handleDelete(db: DatabaseAdapter, prefix: string, path: string): Promise<Response> {
+async function handleDelete(
+  db: DatabaseAdapter,
+  prefix: string,
+  path: string,
+  ctx: ExecutionContextLike,
+  runtime: ResolvedRuntimeConfig,
+  relay?: DurableObjectNamespace,
+): Promise<Response> {
   const remoteRoot = meshRootForPath(path);
   const deleted = await opDeletePath(db.raw, prefix, path, remoteRoot);
-  return withCors(new Response('', { status: deleted ? 204 : 404 }));
+  if (deleted) {
+    broadcast(relay, ctx, prefix, { type: 'invalidation', op: 'delete', path: normalizePath(path), ts: Date.now() }, { verbose: runtime.verbose });
+  }
+  return emptyResponse(deleted ? 204 : 404);
 }
 
 async function handleSystem(
@@ -368,14 +398,24 @@ async function handleWsUpgrade<Env>(
   relayGetter?: (env: Env) => DurableObjectNamespace,
 ): Promise<Response> {
   if (!(await hasAccess(request, runtime, prefix))) {
+    if (runtime.verbose) console.warn('[interocitor:relay] unauthorized notify request', { prefix });
     return new Response('Unauthorized', { status: 401 });
+  }
+  const relay = relayGetter ? relayGetter(env) : undefined;
+  if (!relay) {
+    if (runtime.verbose) console.warn('[interocitor:relay] notify request failed: relay binding not configured', { prefix });
+    return new Response('WebSocket relay not configured', { status: 501 });
+  }
+  const stub = relay.get(relay.idFromName(prefix));
+  const url = new URL(request.url);
+  if (request.method.toUpperCase() === 'GET' && url.pathname.split('/').filter(Boolean)[2] === 'health') {
+    const response = await stub.fetch(new Request('https://internal/__status'));
+    return withCors(response);
   }
   if (request.headers.get('Upgrade') !== 'websocket') {
     return new Response('Expected WebSocket upgrade', { status: 426 });
   }
-  const relay = relayGetter ? relayGetter(env) : undefined;
-  if (!relay) return new Response('WebSocket relay not configured', { status: 501 });
-  const stub = relay.get(relay.idFromName(prefix));
+  if (runtime.verbose) console.debug('[interocitor:relay] websocket connect forwarded', { prefix });
   const connectUrl = new URL(request.url);
   connectUrl.pathname = '/__connect';
   return stub.fetch(new Request(connectUrl.toString(), request));
@@ -385,12 +425,15 @@ async function handleIoRequest<Env>(
   request: Request,
   env: Env,
   runtime: ResolvedRuntimeConfig,
+  ctx: ExecutionContextLike,
   url: URL,
   dbGetter: (env: Env) => D1Database,
+  relayGetter?: (env: Env) => DurableObjectNamespace,
 ): Promise<Response> {
   const db = resolveDatabase(env, dbGetter);
   const method = request.method.toUpperCase();
   const { prefix, op } = parseIo(url);
+  const relay = relayGetter ? relayGetter(env) : undefined;
   if (!prefix) return jsonResponse({ error: 'Missing prefix' }, 400);
   if (!(await hasAccess(request, runtime, prefix))) return jsonResponse({ error: 'Unauthorized' }, 401);
 
@@ -400,8 +443,8 @@ async function handleIoRequest<Env>(
   if (op === 'file') {
     const path = normalizePath(url.searchParams.get('path') || '/');
     if (method === 'GET') return handleGetFile(db, prefix, path);
-    if (method === 'PUT') return handleWriteFile(db, prefix, path, request, runtime);
-    if (method === 'DELETE') return handleDelete(db, prefix, path);
+    if (method === 'PUT') return handleWriteFile(db, prefix, path, request, runtime, ctx, relay);
+    if (method === 'DELETE') return handleDelete(db, prefix, path, ctx, runtime, relay);
   }
   if (op === 'metadata' && method === 'POST') {
     const body = await readJsonBody(request);
@@ -409,7 +452,7 @@ async function handleIoRequest<Env>(
   }
   if (op === 'ensure-folder' && method === 'POST') {
     await opListChildren(db.raw, prefix, normalizePath(String((await readJsonBody(request))?.path || '/'))).catch(() => null);
-    return withCors(new Response('', { status: 204 }));
+    return emptyResponse(204);
   }
   if (op === 'list-files' && method === 'POST') {
     return handleListFiles(db, prefix, await readJsonBody(request));
@@ -511,7 +554,7 @@ export const interocitorWorker = {
       return handleWsUpgrade(request, env, runtime, ctx, prefix, relayGetter);
     }
     if (url.pathname.startsWith(`${IO_PREFIX}/`)) {
-      return handleIoRequest(request, env, runtime, url, db);
+      return handleIoRequest(request, env, runtime, ctx, url, db, relayGetter);
     }
     if (url.pathname.startsWith(`${SYSTEM_PREFIX}/`)) {
       return handleSystem(resolveDatabase(env, db), request, url, runtime);

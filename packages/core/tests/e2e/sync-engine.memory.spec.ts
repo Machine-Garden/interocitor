@@ -46,6 +46,59 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result.files).toContain('/MeshBoot/manifest.json');
   });
 
+  test('subscribes to adapter invalidations and pulls on relay message', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      class PushAdapter extends MemoryAdapter {
+        readonly name = 'push-memory';
+        readyCount = 0;
+        unsubscribed = false;
+        listener: ((payload: { type: string; path: string; ts: number }) => void) | null = null;
+        subscribeToInvalidations(onInvalidate: (payload: { type: string; path: string; ts: number }) => void, hooks?: { onReady?: () => void }): () => void {
+          this.listener = onInvalidate;
+          this.readyCount++;
+          hooks?.onReady?.();
+          return () => {
+            this.unsubscribed = true;
+            this.listener = null;
+          };
+        }
+        push(path: string): void {
+          this.listener?.({ type: 'invalidation', path, ts: Date.now() });
+        }
+      }
+
+      const adapter = new PushAdapter();
+      const engine = new Interocitor(adapter, { batchWindowMs: 0, remotePath: '/MeshPush', pollInterval: 600_000, deviceId: 'dev_push' });
+      const events: string[] = [];
+      engine.on((event: { type: string }) => events.push(event.type));
+
+      await engine.init();
+      await engine.connect();
+      adapter.push('/MeshPush/changes/head.json');
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await engine.disconnect();
+
+      return {
+        readyCount: adapter.readyCount,
+        unsubscribed: adapter.unsubscribed,
+        relaySubscribe: events.includes('relay:subscribe'),
+        relayReady: events.includes('relay:ready'),
+        relayMessage: events.includes('relay:message'),
+        syncCompleteCount: events.filter(type => type === 'sync:complete').length,
+      };
+    });
+
+    expect(result.readyCount).toBe(1);
+    expect(result.unsubscribed).toBe(true);
+    expect(result.relaySubscribe).toBe(true);
+    expect(result.relayReady).toBe(true);
+    expect(result.relayMessage).toBe(true);
+    expect(result.syncCompleteCount).toBeGreaterThanOrEqual(2);
+  });
+
   test('flush writes one file per change and updates head', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { Interocitor } = await import('/packages/core/dist/index.js');

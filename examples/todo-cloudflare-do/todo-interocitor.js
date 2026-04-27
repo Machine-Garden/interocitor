@@ -25,6 +25,7 @@ export default withInterocitor(appWorker, {
     accessToken: (env) => env.INTEROCITOR_ACCESS_TOKEN,
     systemToken: (env) => env.INTEROCITOR_SYSTEM_TOKEN,
     meshSecret: (env) => env.INTEROCITOR_MESH_SECRET,
+    verbose: (env) => env.INTEROCITOR_VERBOSE,
     enableScheduledMaintenance: (env) => env.INTEROCITOR_ENABLE_SCHEDULED_MAINTENANCE,
     pathTtlHours: (env) => env.INTEROCITOR_PATH_TTL_HOURS,
     maxControlBytes: (env) => env.INTEROCITOR_MAX_CONTROL_BYTES,

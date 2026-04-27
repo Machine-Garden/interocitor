@@ -78,7 +78,9 @@ Binding names are yours. Pass them to `withInterocitor(...)` via getters.
 
 - `withInterocitor(..., { relay: (env) => env.MY_RELAY })` enables `/<mountPrefix>/notify/<prefix>`.
 - The Worker authenticates that route with the same per-prefix access-token rule as `/<mountPrefix>/io/<prefix>`.
-- The relay stores WebSockets using Cloudflare's hibernation API (`acceptWebSocket`) and can fan out tiny invalidation messages with `broadcast(...)`.
+- The relay stores WebSockets using Cloudflare's hibernation API (`acceptWebSocket`) and fans out tiny invalidation messages after successful file writes/deletes.
+- Check relay wiring with `GET /notify/<prefix>/health` using the same bearer/access token. It returns JSON such as `{ "ok": true, "connected": 0 }`; `501` means the relay binding was not configured.
+- Set `runtime.verbose` (for example from `INTEROCITOR_VERBOSE=1`) to emit relay diagnostics to `wrangler tail`: unauthorized notify requests, missing binding, WebSocket forwarding, and broadcast delivery/failure counts.
 - Correctness does not depend on the relay. Clients still poll/pull. The relay is the low-latency path for apps that want push invalidations.
 
 Minimum Worker entry:

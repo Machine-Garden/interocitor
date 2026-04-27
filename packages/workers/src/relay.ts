@@ -35,14 +35,26 @@ export class InterocitorRelayDurableObject {
     if (pathname === '/__broadcast') {
       const payload = await request.text();
       const sockets = this.ctx.getWebSockets();
+      let sent = 0;
+      let failed = 0;
       for (const ws of sockets) {
         try {
           ws.send(payload);
+          sent++;
         } catch {
+          failed++;
           // Dead socket — runtime cleanup handles it.
         }
       }
-      return new Response('ok');
+      return new Response(JSON.stringify({ ok: failed === 0, connected: sockets.length, sent, failed }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (pathname === '/__status') {
+      return new Response(JSON.stringify({ ok: true, connected: this.ctx.getWebSockets().length }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     if (pathname === '/__reset') {
@@ -82,13 +94,23 @@ export class InterocitorRelayDurableObject {
  * Fan out a JSON payload to all clients connected to the relay instance for
  * the given prefix. Fire-and-forget.
  */
+export interface BroadcastDiagnostics {
+  verbose?: boolean;
+  logger?: Pick<Console, 'debug' | 'warn'>;
+}
+
 export function broadcast(
   relay: DurableObjectNamespace | undefined,
   ctx: ExecutionContextLike | undefined,
   prefix: string,
   payload: unknown,
+  diagnostics: BroadcastDiagnostics = {},
 ): void {
-  if (!relay) return;
+  const logger = diagnostics.logger ?? console;
+  if (!relay) {
+    if (diagnostics.verbose) logger.warn('[interocitor:relay] broadcast skipped: relay binding not configured', { prefix });
+    return;
+  }
 
   const stub = relay.get(relay.idFromName(prefix));
   const broadcastPromise = stub
@@ -98,7 +120,20 @@ export function broadcast(
         body: JSON.stringify(payload),
       }),
     )
-    .catch(() => undefined);
+    .then(async (response) => {
+      const result = await response.json().catch(() => ({ ok: response.ok }));
+      if (!response.ok || (typeof result === 'object' && result !== null && 'failed' in result && Number(result.failed) > 0)) {
+        logger.warn('[interocitor:relay] broadcast incomplete', { prefix, status: response.status, result });
+        return;
+      }
+      if (diagnostics.verbose) logger.debug('[interocitor:relay] broadcast delivered', { prefix, result });
+    })
+    .catch((error) => {
+      logger.warn('[interocitor:relay] broadcast failed', {
+        prefix,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
 
   ctx?.waitUntil?.(broadcastPromise);
 }

@@ -132,6 +132,7 @@ test.describe('Interocitor query cache', () => {
       // Mutation triggers invalidation through emit().
       await engine.put('tasks', 't2', { title: 'b' });
       const snapDuringRevalidate = engine.readQueryCache(q.descriptor);
+      const peekDuringRevalidate = q.peekCache();
 
       // Wait for revalidation to settle.
       await snapDuringRevalidate.promise;
@@ -143,6 +144,7 @@ test.describe('Interocitor query cache', () => {
         initialCount,
         statusDuring: snapDuringRevalidate.status,
         rowsDuring: snapDuringRevalidate.rows?.length ?? -1,
+        peekRowsDuring: peekDuringRevalidate?.length ?? -1,
         statusAfter: snapAfterRevalidate.status,
         rowsAfter: snapAfterRevalidate.rows?.length ?? -1,
       };
@@ -151,8 +153,10 @@ test.describe('Interocitor query cache', () => {
     expect(result.statusInitial).toBe('ready');
     expect(result.initialCount).toBe(1);
     expect(result.statusDuring).toBe('pending');
-    // Stale rows must still be present so consumers don't flash empty.
+    // Stale rows must still be present and visible through public peekCache()
+    // so consumers don't flash empty while status is pending.
     expect(result.rowsDuring).toBe(1);
+    expect(result.peekRowsDuring).toBe(1);
     expect(result.statusAfter).toBe('ready');
     expect(result.rowsAfter).toBe(2);
   });
@@ -275,6 +279,7 @@ test.describe('Interocitor query cache', () => {
       // Stale-while-revalidate: mutating row keeps prior visible.
       await engine.put('tasks', 't1', { title: 'b' });
       const duringRevalidate = engine.readRowCache(r1.descriptor);
+      const peekDuringRevalidate = r1.peekCache();
       await duringRevalidate.promise;
       const afterRevalidate = engine.readRowCache(r1.descriptor);
 
@@ -298,6 +303,7 @@ test.describe('Interocitor query cache', () => {
         readyTitle: (ready.row as any)?.payload?.title?.value ?? null,
         statusDuring: duringRevalidate.status,
         duringTitle: (duringRevalidate.row as any)?.payload?.title?.value ?? null,
+        peekDuringTitle: (peekDuringRevalidate as any)?.title ?? null,
         afterRevalidateTitle: (afterRevalidate.row as any)?.payload?.title?.value ?? null,
         statusAfterDelete: afterDelete.status,
         rowAfterDelete: afterDelete.row ?? null,
@@ -313,8 +319,10 @@ test.describe('Interocitor query cache', () => {
     expect(result.statusReady).toBe('ready');
     expect(result.readyTitle).toBe('a');
     expect(result.statusDuring).toBe('pending');
-    // Stale row still visible while refresh runs.
+    // Stale row still visible through cache snapshot and public peekCache()
+    // while refresh runs.
     expect(result.duringTitle).toBe('a');
+    expect(result.peekDuringTitle).toBe('a');
     expect(result.afterRevalidateTitle).toBe('b');
     expect(result.statusAfterDelete).toBe('ready');
     expect(result.rowAfterDelete).toBeNull();

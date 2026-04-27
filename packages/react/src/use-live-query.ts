@@ -1,11 +1,86 @@
-import { useMemo, useRef, useSyncExternalStore } from 'react';
-import type { QueryResult } from '@interocitor/core';
+import { useDebugValue, useMemo, useRef, useSyncExternalStore } from 'react';
+import type { QueryDescriptor, QueryResult, WhereClause, WherePrimitive } from '@interocitor/core';
 
 export interface UseLiveQueryResult<R> {
   /** `undefined` until first fetch resolves. */
   data: R | undefined;
   loading: boolean;
   error: Error | null;
+}
+
+interface LiveQueryDebugValue {
+  label: string;
+  table: string;
+  where: string | null;
+  orderBy: string | null;
+  status: ReturnType<QueryResult<Record<string, unknown>>['peekStatus']>['status'];
+  rows: number | undefined;
+  loading: boolean;
+  error: string | null;
+  cacheKey: string;
+}
+
+function createLiveQueryDebugValue<T extends Record<string, unknown>, R>(
+  query: QueryResult<T>,
+  result: UseLiveQueryResult<R>,
+): LiveQueryDebugValue {
+  const { descriptor, cacheKey } = query.metadata;
+  const status = query.peekStatus().status;
+  const rows = query.peekCache()?.length;
+  const where = formatWhereClause(descriptor.clause);
+  const orderBy = formatOrderBy(descriptor);
+  const error = result.error?.message ?? null;
+  const labelParts = [
+    `table=${descriptor.table}`,
+    where ? `where=${where}` : null,
+    orderBy ? `orderBy=${orderBy}` : null,
+    `status=${status}`,
+    rows === undefined ? null : `rows=${rows}`,
+    error ? `error=${error}` : null,
+  ].filter((part): part is string => part !== null);
+
+  return {
+    label: `Interocitor useLiveQuery(${labelParts.join(', ')})`,
+    table: descriptor.table,
+    where,
+    orderBy,
+    status,
+    rows,
+    loading: result.loading,
+    error,
+    cacheKey,
+  };
+}
+
+function formatOrderBy(descriptor: QueryDescriptor): string | null {
+  if (!descriptor.orderBy) return null;
+  return `${descriptor.orderBy.field} ${descriptor.orderBy.dir}`;
+}
+
+function formatWhereClause(clause: WhereClause | undefined): string | null {
+  if (!clause) return null;
+
+  switch (clause.op) {
+    case 'between': {
+      const lower = formatPrimitive(clause.lower);
+      const upper = formatPrimitive(clause.upper);
+      const left = clause.lowerOpen ? '(' : '[';
+      const right = clause.upperOpen ? ')' : ']';
+      return `${clause.field} between ${left}${lower}, ${upper}${right}`;
+    }
+    case 'anyOf':
+      return `${clause.field} anyOf [${(clause.values ?? []).map(formatPrimitive).join(', ')}]`;
+    case 'startsWith':
+      return `${clause.field} startsWith ${formatPrimitive(clause.value)}`;
+    default:
+      return `${clause.field} ${clause.op} ${formatPrimitive(clause.value)}`;
+  }
+}
+
+function formatPrimitive(value: WherePrimitive | undefined): string {
+  if (value === undefined) return 'undefined';
+  if (value instanceof Date) return value.toISOString();
+  return JSON.stringify(value);
 }
 
 /**
@@ -99,7 +174,13 @@ export function useLiveQuery<T extends Record<string, unknown>, R = T[]>(
     const rows = query.peekCache();
     const status = query.peekStatus();
     const error = status.status === 'error' ? (status.error ?? null) : null;
-    const loading = !rows && !error;
+
+    // Stale-while-revalidate semantics:
+    // - If we have cached rows, keep showing them during refresh.
+    // - Loading only when we have no cached rows and the query isn't ready.
+    const hasRows = rows !== undefined;
+    const loaded = status.status === 'ready';
+    const loading = !hasRows && !loaded && !error;
 
     let data: R | undefined;
     if (rows) {
@@ -140,5 +221,7 @@ export function useLiveQuery<T extends Record<string, unknown>, R = T[]>(
     return next;
   };
 
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const result = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  useDebugValue(createLiveQueryDebugValue(query, result));
+  return result;
 }

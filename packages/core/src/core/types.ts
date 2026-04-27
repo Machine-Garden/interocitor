@@ -504,6 +504,27 @@ export interface FileEntry {
   revision?: string;
 }
 
+export interface RemoteInvalidationPayload {
+  type: string;
+  path: string;
+  ts: number;
+  op?: string;
+  pathType?: string;
+}
+
+export interface RemoteInvalidationHooks {
+  onReady?: () => void;
+  onError?: (error?: unknown) => void;
+  onClose?: () => void;
+}
+
+export interface RemoteInvalidationStorageAdapter {
+  subscribeToInvalidations(
+    onInvalidate: (payload: RemoteInvalidationPayload) => void,
+    hooks?: RemoteInvalidationHooks,
+  ): () => void;
+}
+
 /**
  * Contract implemented by remote backends such as WebDAV, Google Drive,
  * Cloudflare, or in-memory test adapters.
@@ -756,7 +777,13 @@ export type SyncEvent =
   | { type: 'connect:state'; dbName: string; remotePath?: string; deviceId: string; localEpoch?: number; remoteEpoch?: number; meshId?: string; encrypted: boolean }
   | { type: 'connect:noop'; dbName: string; remotePath?: string; deviceId: string; reason: 'already-connected' }
   | { type: 'connect:error'; error: Error; stage: string; dbName: string; remotePath?: string; deviceId: string }
-  | { type: 'transport:teardown'; dbName: string; remotePath?: string; deviceId: string; reason: 'switch-adapter' | 'disconnect' | 'detach' }
+  | { type: 'transport:teardown'; dbName: string; remotePath?: string; deviceId?: string; reason: 'switch-adapter' | 'disconnect' | 'detach' }
+  | { type: 'relay:subscribe'; adapter: string; remotePath?: string; deviceId: string }
+  | { type: 'relay:ready'; adapter: string }
+  | { type: 'relay:message'; adapter: string; payload: RemoteInvalidationPayload }
+  | { type: 'relay:error'; adapter: string; error: Error }
+  | { type: 'relay:closed'; adapter: string }
+  | { type: 'relay:unavailable'; adapter: string; reason: 'adapter-unsupported' }
   | { type: 'flush:start'; entryCount: number }
   | { type: 'flush:complete' }
   | { type: 'flush:error'; error: Error }

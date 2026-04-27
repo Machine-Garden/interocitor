@@ -215,6 +215,7 @@ test('useLiveQuery updates when periodic polling pulls remote rows', async () =>
       [reader],
       rows => rows.map(row => row.title).join(','),
     );
+
     return React.createElement('div', { id: 'titles' }, result.data ?? (result.loading ? 'loading' : 'empty'));
   }
 

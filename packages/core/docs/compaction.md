@@ -32,8 +32,10 @@ catch up on any change files newer than `W`.
    mesh is encrypted).
 4. Write `manifest-<generation+1>.json` and overwrite `manifest.json`
    (the pointer) to reference it.
-5. Set `local.epoch = nextEpoch`.
-6. List `changes/` and delete every entry whose HLC ≤ `watermarkHlc`.
+5. Compute `gcFloorHlc` from active device acknowledgements.
+6. Omit tombstones whose `deletedHlc <= gcFloorHlc` from the snapshot.
+7. Set `local.epoch = nextEpoch`.
+8. List `changes/` and delete every entry whose HLC ≤ `watermarkHlc`.
    Failure here is logged but non‑fatal — the snapshot is still valid.
 
 ## Triggers
@@ -82,6 +84,7 @@ have measured the actual mesh size.
 | `secondCompactDelayJitterMs` | `5 * 60_000` (±5m) | Jitter on the second delay |
 | `compactRemoteChangeThreshold` | `2` | Minimum remote change files before the second timer is armed |
 | `compactWarnThreshold` | `50` | Outbox size that triggers a single `compact:warning` event |
+| `offlineGraceMs` | `7 * 24 * 60 * 60_000` | How long an unseen device remains in GC consensus before it must realign from snapshot |
 
 > **Manual policy ≠ auto defaults.** The manual recommendation above
 > ("> 20 changes, idle > 1 min") is what to gate a button on. The auto
@@ -187,39 +190,57 @@ Compaction is allowed only for the authorized server writer
 Use this to delegate compaction to a single trusted worker and avoid the
 race entirely.
 
-## Pruning safety: long‑offline devices
+## Pruning safety: device acknowledgements and GC floor
 
-> **Question.** What happens to a device that was offline while another
-> device compacted? Its `cursor` points at an HLC that was just deleted.
+Compaction has two separate prune decisions:
 
-**Answer.** The device does *not* attempt to replay missing change files.
-On reconnect it re‑reads the manifest, sees a higher `epoch` than its
-local one, and the engine calls `rehydrate()`:
+1. **Change-file prune.** Delete remote change files whose HLC is ≤ the
+   new snapshot `watermarkHlc`. Those entries are redundant because the
+   snapshot captures the merged state.
+2. **Tombstone GC.** Omit deleted rows from a snapshot only when their
+   `deletedHlc <= manifest.gcFloorHlc`.
 
-1. Download `mainline/snapshot-<epoch>-<serverId>.json`.
-2. Decrypt, parse.
-3. `local.clearAll()` — wipe the local row store.
-4. Re‑populate from the snapshot.
-5. Set local HLC to the snapshot HLC.
-6. Pull any change files newer than the watermark.
+The GC floor is the mesh's point of no return. Devices acknowledge what
+they have actually observed by updating `devices/<deviceId>.json` after
+`pull()`, `rehydrate()`, `connect()` alignment, and `compact()`:
 
-This means the offline device's local *unsynced* writes survive only if
-they were already in the outbox before the rehydrate. Anything that was
-applied locally and not yet flushed will be re‑applied as a fresh write
-after rehydrate, with a new HLC. Reads remain consistent.
+```ts
+{
+  observedManifestGeneration,
+  observedEpoch,
+  observedWatermarkHlc,
+  observedGcFloorHlc,
+  observedAt
+}
+```
+
+During compaction the engine lists device metadata and computes:
+
+```text
+activeDevices = devices where retired != true
+             and lastSeenAt >= now - offlineGraceMs
+
+gcFloorHlc = min(activeDevices.observedWatermarkHlc)
+```
+
+`gcFloorHlc` is monotonic. It never moves backwards. Any active device
+without `observedWatermarkHlc` blocks advancement because it is still
+inside the offline grace period but has not acknowledged a canonical
+watermark.
+
+Devices not seen within `offlineGraceMs` are excluded from the active
+set. They may return later, but they are no longer trusted to publish
+old history directly. On `flush()`, the engine reloads the manifest and
+refuses to publish any local outbox entry whose `entry.hlc <=
+manifest.gcFloorHlc`. If a snapshot exists, it rehydrates from that
+snapshot instead, clearing the stale outbox and aligning with the point
+of no return.
 
 Invariant the prune step relies on:
 
-> Every row whose latest write has HLC ≤ `watermarkHlc` is present in the
-> snapshot at the same `watermarkHlc`.
-
-The snapshot is built *after* `pull()` from the local store, which is the
-authoritative merge of every change ever observed by this device. The
-prune step then deletes only files whose HLC is ≤ that watermark. The
-invariant holds as long as no change file is added with an HLC ≤
-watermark *after* compaction starts — which the HLC monotonicity rule
-guarantees on a single device but does **not** guarantee across devices
-without a lease. See "Coordination & locking" above for the trade‑off.
+> Every active device has acknowledged a watermark ≥ `gcFloorHlc`, and no
+> stale device may flush entries at or before `gcFloorHlc` without first
+> rehydrating from the canonical snapshot.
 
 ### What can still go wrong
 
@@ -268,6 +289,6 @@ Rehydrate emits:
   clients (`autoCompact: false`).
 - **Read‑heavy app, very few writes.** Manual `compact()` from a cron is
   fine; the auto paths will rarely fire.
-- **Privacy‑sensitive deletes.** See `deletion semantics` in the README
-  — pruning the change file does not delete the row, only the history.
-  The snapshot still contains the tombstone.
+- **Privacy‑sensitive deletes.** Tombstones carry no payload. They are
+  retained only until compaction can advance `gcFloorHlc` past their
+  `deletedHlc`, after all active devices have acknowledged the floor.

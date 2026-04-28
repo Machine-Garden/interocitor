@@ -19,13 +19,14 @@ import type {
   Snapshot,
   Row,
   SyncEvent,
+  DeviceMetadata,
 } from './types.ts';
 import type { HLC } from './types.ts';
 import { hlcSerialize, hlcCompareStr } from './hlc.ts';
 import { paths, textEncoder, textDecoder, generateId, computeContentHash, log } from './internals.ts';
 import { encodeSnapshotPayload, decodeSnapshotPayload } from './codec.ts';
 import type { CodecState } from './codec.ts';
-import { writeJson } from './manifest.ts';
+import { readJsonIfExists, writeJson } from './manifest.ts';
 import { hlcParse } from './hlc.ts';
 
 export interface CompactContext {
@@ -39,6 +40,39 @@ export interface CompactContext {
   serverId: string;
   emit: (event: SyncEvent) => void;
   pull: () => Promise<void>;
+  offlineGraceMs?: number;
+}
+
+async function computeGcFloor(ctx: CompactContext, nowMs: number): Promise<string> {
+  const p = paths(ctx.remotePath);
+  const graceMs = ctx.offlineGraceMs ?? 7 * 24 * 60 * 60_000;
+  const cutoffMs = nowMs - graceMs;
+  const floors: string[] = [];
+
+  try {
+    const files = await ctx.adapter.listFiles(p.devicesFolder);
+    for (const file of files) {
+      if (!file.name.endsWith('.json')) continue;
+      const deviceId = file.name.slice(0, -'.json'.length);
+      const meta = await readJsonIfExists<DeviceMetadata>(ctx.adapter, p.deviceFile(deviceId));
+      if (!meta || meta.retired) continue;
+      const lastSeen = Date.parse(meta.lastSeenAt || '');
+      if (Number.isFinite(lastSeen) && lastSeen < cutoffMs) continue;
+      // Active devices that have not yet acknowledged a watermark block
+      // advancement. They are still inside the offline grace window.
+      if (!meta.observedWatermarkHlc) return ctx.manifest.gcFloorHlc ?? '';
+      floors.push(meta.observedWatermarkHlc);
+    }
+  } catch {
+    return ctx.manifest.gcFloorHlc ?? '';
+  }
+
+  if (floors.length === 0) return ctx.manifest.gcFloorHlc ?? '';
+  floors.sort(hlcCompareStr);
+  const candidate = floors[0];
+  const existing = ctx.manifest.gcFloorHlc ?? '';
+  if (existing && hlcCompareStr(existing, candidate) > 0) return existing;
+  return candidate;
 }
 
 export async function compact(ctx: CompactContext): Promise<Manifest> {
@@ -52,7 +86,9 @@ export async function compact(ctx: CompactContext): Promise<Manifest> {
   await ctx.pull();
 
   const p = paths(remotePath);
-  const now = new Date().toISOString();
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+  const gcFloorHlc = await computeGcFloor(ctx, nowDate.getTime());
   const nextEpoch = manifest.epoch + 1;
   const nextGeneration = manifest.generation + 1;
   const snapshotPath = `${p.mainlineFolder}/snapshot-${nextEpoch}-${serverId}.json`;
@@ -61,6 +97,14 @@ export async function compact(ctx: CompactContext): Promise<Manifest> {
   const allRows = await local.getAllRows();
   const snapshotTables: Record<string, Record<string, Row>> = {};
   for (const row of allRows) {
+    if (
+      gcFloorHlc
+      && row._meta.deleted
+      && row._meta.deletedHlc
+      && hlcCompareStr(row._meta.deletedHlc, gcFloorHlc) <= 0
+    ) {
+      continue;
+    }
     const t = row._meta.table;
     if (!snapshotTables[t]) snapshotTables[t] = {};
     snapshotTables[t][row._meta.rowId] = row;
@@ -93,6 +137,10 @@ export async function compact(ctx: CompactContext): Promise<Manifest> {
     watermarkHlc: hlcSerialize(ctx.hlc),
     snapshotPath,
     deltaPath: null,
+    gcFloorHlc,
+    gcEpoch: gcFloorHlc ? nextEpoch : manifest.gcEpoch,
+    gcCreatedAt: gcFloorHlc ? now : manifest.gcCreatedAt,
+    offlineGraceMs: ctx.offlineGraceMs,
   };
 
   const nextManifest: Manifest = {

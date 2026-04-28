@@ -1338,6 +1338,212 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result.complete).toBeDefined();
   });
 
+  test('compaction publishes a GC floor and omits known tombstones after all active devices ack', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      const adapter = new MemoryAdapter();
+      const engine = new Interocitor(adapter, {
+        remotePath: '/GcFloorMesh',
+        dbName: 'gc-floor-db',
+        encrypted: false,
+        pollInterval: 600_000,
+        flushThreshold: 9999,
+        flushDebounce: 60_000,
+        autoCompact: false,
+        batchWindowMs: 0,
+        deviceId: 'dev_gc_a',
+        offlineGraceMs: 7 * 24 * 60 * 60_000,
+      });
+
+      await engine.init();
+      await engine.connect();
+      await engine.put('tasks', 'gone', { title: 'old' });
+      await engine.flush();
+      await engine.delete('tasks', 'gone');
+      await engine.flush();
+
+      await engine.compact();
+      const manifestAfterFirst = engine.getManifest();
+      const firstSnapshotPath = manifestAfterFirst?.snapshotPath ?? '';
+      const firstSnapshotPayload = JSON.parse(adapter.dump()[firstSnapshotPath]);
+      const firstSnapshot = firstSnapshotPayload.snapshot;
+      const firstHasTombstone = Boolean(firstSnapshot.tables.tasks?.gone?._meta.deleted);
+
+      await engine.compact();
+      const manifestAfterSecond = engine.getManifest();
+      const secondSnapshotPath = manifestAfterSecond?.snapshotPath ?? '';
+      const secondSnapshotPayload = JSON.parse(adapter.dump()[secondSnapshotPath]);
+      const secondSnapshot = secondSnapshotPayload.snapshot;
+      const secondHasGoneRow = Boolean(secondSnapshot.tables.tasks?.gone);
+      const deviceMeta = JSON.parse(adapter.dump()['/GcFloorMesh/devices/dev_gc_a.json']);
+
+      await engine.disconnect();
+
+      return {
+        firstHasTombstone,
+        secondHasGoneRow,
+        firstWatermark: manifestAfterFirst?.watermarkHlc,
+        gcFloor: manifestAfterSecond?.gcFloorHlc,
+        gcEpoch: manifestAfterSecond?.gcEpoch,
+        deviceObserved: deviceMeta.observedWatermarkHlc,
+      };
+    });
+
+    expect(result.firstHasTombstone).toBe(true);
+    expect(result.secondHasGoneRow).toBe(false);
+    expect(result.gcFloor).toBe(result.firstWatermark);
+    expect(result.gcEpoch).toBe(2);
+    expect(result.deviceObserved).toBeTruthy();
+  });
+
+  test('stale pre-floor outbox is refused and aligned from snapshot', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+      const { LocalStore } = await import('/packages/core/dist/storage/local-store.js');
+
+      const countChangeFiles = (dump: Record<string, string>) => Object.keys(dump)
+        .filter(path => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(path)).length;
+
+      const adapter = new MemoryAdapter();
+      const active = new Interocitor(adapter, {
+        remotePath: '/StaleFloorMesh',
+        dbName: 'stale-floor-active-db',
+        encrypted: false,
+        pollInterval: 600_000,
+        flushThreshold: 9999,
+        flushDebounce: 60_000,
+        autoCompact: false,
+        batchWindowMs: 0,
+        deviceId: 'dev_active_gc',
+      });
+
+      await active.init();
+      await active.connect();
+      await active.put('tasks', 'canonical', { title: 'remote truth' });
+      await active.flush();
+      await active.compact();
+      await active.compact();
+      const manifest = active.getManifest();
+      const gcFloor = manifest?.gcFloorHlc ?? '';
+      const changeFilesBefore = countChangeFiles(adapter.dump());
+      await active.disconnect();
+
+      const staleLocal = new LocalStore('stale-floor-client-db');
+      const stale = new Interocitor(adapter, {
+        remotePath: '/StaleFloorMesh',
+        dbName: 'stale-floor-client-db',
+        localStoreFactory: () => staleLocal,
+        encrypted: false,
+        pollInterval: 600_000,
+        flushThreshold: 9999,
+        flushDebounce: 60_000,
+        autoCompact: false,
+        batchWindowMs: 0,
+        deviceId: 'dev_stale_gc',
+      });
+
+      await stale.init();
+      await staleLocal.pushOutbox({
+        id: 'stale-change',
+        ts: Date.now(),
+        device: 'dev_stale_gc',
+        hlc: gcFloor,
+        ops: [{
+          type: 'upsert',
+          table: 'tasks',
+          rowId: 'poison',
+          columns: { title: { value: 'stale poison', hlc: gcFloor } },
+        }],
+      });
+
+      let error = '';
+      try {
+        await stale.flush();
+      } catch (err) {
+        error = err instanceof Error ? err.message : String(err);
+      }
+
+      const rows = await stale.table('tasks').query().load({ bypassCache: true });
+      const poison = await stale.loadRow({ table: 'tasks', rowId: 'poison' }, { bypassCache: true });
+      const outboxSize = await staleLocal.outboxSize();
+      const changeFilesAfter = countChangeFiles(adapter.dump());
+      await stale.disconnect();
+
+      return {
+        gcFloor,
+        error,
+        outboxSize,
+        changeFilesBefore,
+        changeFilesAfter,
+        rows: rows.map((row: any) => row.title).sort(),
+        poison,
+      };
+    });
+
+    expect(result.gcFloor).toBeTruthy();
+    expect(result.error).toContain('Refusing to flush changes at or before gcFloorHlc');
+    expect(result.outboxSize).toBe(0);
+    expect(result.changeFilesAfter).toBe(result.changeFilesBefore);
+    expect(result.rows).toEqual(['remote truth']);
+    expect(result.poison).toBeUndefined();
+  });
+
+  test('put after delete starts a fresh local row incarnation', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+      const { LocalStore } = await import('/packages/core/dist/storage/local-store.js');
+
+      const local = new LocalStore('reinsert-mesh-db');
+      const engine = new Interocitor(new MemoryAdapter(), {
+        remotePath: '/ReinsertMesh',
+        dbName: 'reinsert-mesh-db',
+        localStoreFactory: () => local,
+        encrypted: false,
+        pollInterval: 600_000,
+        flushThreshold: 9999,
+        flushDebounce: 60_000,
+        autoCompact: false,
+        batchWindowMs: 0,
+      });
+
+      await engine.init();
+      await engine.connect();
+      await engine.put('tasks', 'r1', { title: 'old', stale: 'must-not-return' });
+      await engine.delete('tasks', 'r1');
+      const rawTombstone = await local.getRow('tasks', 'r1');
+      const localAfterDelete = await engine.loadRow({ table: 'tasks', rowId: 'r1' }, { bypassCache: true });
+      await engine.put('tasks', 'r1', { title: 'new' });
+      const localAfterReinsert = await engine.loadRow({ table: 'tasks', rowId: 'r1' }, { bypassCache: true });
+      const query = await engine.table('tasks').query().load({ bypassCache: true });
+      await engine.disconnect();
+
+      return {
+        tombstoneDeleted: rawTombstone?._meta.deleted,
+        tombstoneDeletedHlc: rawTombstone?._meta.deletedHlc,
+        tombstonePayload: rawTombstone?.payload,
+        afterDelete: localAfterDelete,
+        afterReinsert: localAfterReinsert,
+        query,
+      };
+    });
+
+    expect(result.tombstoneDeleted).toBe(true);
+    expect(result.tombstoneDeletedHlc).toBeTruthy();
+    expect(result.tombstonePayload).toEqual({});
+    expect(result.afterDelete).toBeUndefined();
+    expect(result.afterReinsert).toEqual(expect.objectContaining({
+      _meta: expect.objectContaining({ deleted: false }),
+      payload: { title: expect.objectContaining({ value: 'new' }) },
+    }));
+    expect(result.query).toHaveLength(1);
+    expect(result.query[0]).toEqual(expect.objectContaining({ title: 'new' }));
+    expect(result.query[0]).not.toHaveProperty('stale');
+  });
+
   test('db.batch(): consecutive writes inside a batch produce one ChangeEntry', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { Interocitor } = await import('/packages/core/dist/index.js');

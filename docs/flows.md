@@ -62,10 +62,14 @@ against local IndexedDB. `connect()` is the first network call.
 
 ```mermaid
 flowchart TD
-    A([flush]) --> B[drainOutbox from IDB]
+    A([flush]) --> A1[reload manifest]
+    A1 --> B[drainOutbox from IDB]
     B --> C{entries.length\n== 0?}
     C -- Yes --> DONE([return])
-    C -- No --> D[emit flush:start]
+    C -- No --> C1{any entry.hlc\n<= gcFloorHlc?}
+    C1 -- Yes --> R[rehydrate from snapshot\nrefuse stale flush]
+    R --> ERR([throw rehydrate required])
+    C1 -- No --> D[emit flush:start]
     D --> E[flushToAdapter — primary]
     E --> F{replicas\nconfigured?}
     F -- No --> G[emit flush:complete]
@@ -88,43 +92,37 @@ sequenceDiagram
     participant E as SyncEngine (compactor)
     participant C as Cloud
 
-    E->>C: GET mainline/compact-lock.json
-    C-->>E: 404 / expired / active
-    alt lock active
-        E-->>E: abort compaction
-    else lock available
-        E->>C: PUT mainline/compact-lock.json (owner + expiresAt)
-        E->>C: GET mainline/compact-lock.json
-        alt lock owned by other
-            E-->>E: abort compaction
-        else lock owned by self
-            E->>E: pull() — merge all remote changes first
-            E->>E: getAllRows() — full IDB scan
-            E->>C: PUT mainline/snapshot-{epoch}-{writer}.json
-            E->>C: PUT manifest-{gen}.json (epoch, watermarkHlc, snapshotPath)
-            E->>C: PUT manifest.json { currentGeneration, file }
-            Note over C: pointer switches — other devices see new epoch on next connect/pull
+    Note over E: compactInFlight prevents overlap inside one engine instance
+    E->>E: pull() — merge all remote changes first
+    E->>C: LIST devices/
+    E->>E: active = not retired and lastSeenAt inside offlineGraceMs
+    E->>E: gcFloorHlc = min(active observedWatermarkHlc)
+    E->>E: getAllRows() — full IDB scan
+    E->>E: omit tombstones where deletedHlc <= gcFloorHlc
+    E->>C: PUT mainline/snapshot-{epoch}-{writer}.json
+    E->>C: PUT manifest-{gen}.json (epoch, watermarkHlc, snapshotPath, gcFloorHlc)
+    E->>C: PUT manifest.json { currentGeneration, file }
+    E->>C: PUT devices/{deviceId}.json observation ack
+    Note over C: pointer switches — other devices see new epoch/floor on next connect/pull/flush
 
-            E->>E: setMeta epoch ← nextEpoch
+    E->>E: setMeta epoch ← nextEpoch
 
-            E->>C: list changes/ (all files)
-            loop each change file with HLC ≤ watermarkHlc
-                E->>C: DELETE {hlc}-{changeId}.json
-            end
-            Note over E,C: changes/ now contains only post-watermark files
-            E->>C: DELETE mainline/compact-lock.json
-        end
+    E->>C: list changes/ (all files)
+    loop each change file with HLC ≤ watermarkHlc
+        E->>C: DELETE {hlc}-{changeId}.json
     end
+    Note over E,C: changes/ now contains only post-watermark files
 ```
 
 **Write ordering:** snapshot → manifest file → manifest pointer.
 Readers loading `manifest.json` always see a consistent pair; the
 snapshot file exists before any reader is directed to it.
 
-Other devices detect the epoch advance on the next `connect()` or `pull()`
-via `loadOrCreateManifest`:
-`remoteEpoch > localEpoch` → `rehydrate()` → load snapshot → pull deltas
-above watermark.
+Other devices detect epoch/floor advancement on the next `connect()`,
+`pull()`, or `flush()` manifest reload. If `remoteEpoch > localEpoch`,
+they `rehydrate()` from the snapshot and then pull deltas above the
+watermark. If their outbox contains entries at or before `gcFloorHlc`,
+flush is refused and the device aligns from the canonical snapshot.
 
 ## Bootstrap (first-ever connect)
 

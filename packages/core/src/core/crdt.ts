@@ -122,6 +122,10 @@ export function applyOp(
 
       existing._meta.deleted = true;
       existing._meta.deletedHlc = op.hlc;
+      // A tombstone only needs deletedHlc for future conflict checks. Keeping
+      // payload columns wastes storage and can leak pre-delete values into
+      // future row incarnations.
+      existing.payload = {};
       return existing;
     }
     // Tombstone for unseen row.
@@ -140,25 +144,29 @@ export function applyOp(
     changed = true;
   }
 
-  for (const [col, entry] of Object.entries(op.columns)) {
+  let columnsToApply = Object.entries(op.columns);
+
+  // Resurrection creates a new row incarnation. The tombstone wins over every
+  // payload column at or before deletedHlc, including columns retained on the
+  // local tombstone and stale columns bundled in a remote upsert. Otherwise a
+  // partial insert after delete can republish pre-delete fields forever.
+  if (row._meta.deleted && row._meta.deletedHlc) {
+    const deletedHlc = row._meta.deletedHlc;
+    columnsToApply = columnsToApply.filter(([, entry]) => hlcCompareStr(entry.hlc, deletedHlc) > 0);
+    if (columnsToApply.length === 0) return null;
+
+    row.payload = {};
+    row._meta.deleted = false;
+    row._meta.deletedHlc = undefined;
+    changed = true;
+  }
+
+  for (const [col, entry] of columnsToApply) {
     const existing = row.payload[col];
     const strategy = resolveStrategy(schema, op.table, col);
     const winner = mergeColumn(existing, entry, strategy, op.table, op.rowId, col);
     if (winner) {
       row.payload[col] = winner;
-      changed = true;
-    }
-  }
-
-  // Resurrection: upsert with HLC newer than tombstone revives the row.
-  if (row._meta.deleted && row._meta.deletedHlc) {
-    const newestOpHlc = Object.values(op.columns).reduce((max, entry) => {
-      return !max || hlcCompareStr(entry.hlc, max) > 0 ? entry.hlc : max;
-    }, '' as string);
-
-    if (newestOpHlc && hlcCompareStr(newestOpHlc, row._meta.deletedHlc) > 0) {
-      row._meta.deleted = false;
-      row._meta.deletedHlc = undefined;
       changed = true;
     }
   }

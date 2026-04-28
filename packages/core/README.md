@@ -339,29 +339,29 @@ Available strategies:
 
 ### Deletion semantics
 
-`delete()` writes a **tombstone**, not an unlink. Tombstones:
+`delete()` writes a **tombstone**, not an immediate unlink. Tombstones:
 
-- carry an HLC like any other write;
-- propagate through change files and snapshots like any other change;
-- are needed so that a slower device that re‑syncs an older `add()` is
-  overridden by the newer `delete()` (no resurrection).
+- carry `deletedHlc` like any other write;
+- hide the row from public reads and queries;
+- keep an empty payload, so deleted user data does not linger inside the
+  tombstone;
+- are needed so that slower devices cannot replay an older `add()` and
+  resurrect the row.
 
-Compaction collapses tombstones into the snapshot. After compaction:
+Re-inserting the same row id after a delete starts a fresh row
+incarnation. Columns from the old incarnation are not carried forward;
+a partial insert only contains the new columns.
 
-- The snapshot still records the row as deleted.
-- The change file is pruned at HLC ≤ watermark.
-- A device that was offline before the deletion catches up via
-  rehydrate (snapshot first, change files second). The tombstone in
-  the snapshot prevents resurrection.
+Compaction can later hard-delete tombstones from snapshots. The engine
+tracks per-device acknowledgements in `devices/<deviceId>.json`; once
+all active devices have observed a manifest watermark, compaction
+publishes `manifest.gcFloorHlc` as a point of no return. Tombstones with
+`deletedHlc <= gcFloorHlc` are omitted from the next snapshot.
 
-A device that was offline **with a local pending re‑add** of the same
-row id will still have its re‑add applied; whether it wins depends on
-HLC ordering. Treat hard‑deleted IDs as burned — generate a fresh row
-id when re‑creating.
-
-There is no built‑in retention policy ("forget tombstones older than N
-days"). Add one at the app layer if you need it; physically deleting a
-tombstone risks resurrection.
+Devices not seen within `offlineGraceMs` (default seven days) are
+excluded from GC consensus. If one wakes up with local outbox entries at
+or before `gcFloorHlc`, the engine refuses to flush those entries and
+rehydrates from the canonical snapshot instead.
 
 ### Local store
 
@@ -408,8 +408,9 @@ manifest and poison the remote.
 ## Maintenance / compaction
 
 Compaction collapses the change log into a snapshot, bumps the manifest,
-and prunes old change files. Sync works without it; the remote folder
-just grows until *some* device compacts.
+prunes old change files, and advances the tombstone GC floor when active
+devices have acknowledged the prior watermark. Sync works without it;
+the remote folder just grows until *some* device compacts.
 
 Two paths run automatically:
 
@@ -434,8 +435,8 @@ Both paths are deduped by a single in‑flight guard. You can also call
 > avoidance for small meshes, or run with `serverManaged: true` and a
 > single authorized writer.
 
-Full protocol, events, lock story, prune invariants, and tuning
-checklist: **`docs/compaction.md`**.
+Full protocol, events, lock story, device acknowledgement / GC-floor
+rules, prune invariants, and tuning checklist: **`docs/compaction.md`**.
 
 ## Schema migration
 

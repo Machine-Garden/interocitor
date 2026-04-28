@@ -64,6 +64,7 @@ export async function writeJson(adapter: StorageAdapter, path: string, value: un
 
 export async function createBootstrapManifest(
   ctx: ManifestContext,
+  meshId?: string,
 ): Promise<{ pointer: ManifestPointer; manifest: Manifest }> {
   const p = paths(ctx.remotePath);
   const now = new Date().toISOString();
@@ -74,7 +75,7 @@ export async function createBootstrapManifest(
     writtenBy: ctx.serverId,
     writtenAt: now,
     version: 3,
-    meshId: generateId('mesh'),
+    meshId: meshId || generateId('mesh'),
     schema: ctx.schema?.version ?? 1,
     encrypted: ctx.encrypted,
     server: {
@@ -138,7 +139,8 @@ export async function loadOrCreateManifest(
   if (!globalPointer) {
     bootstrapped = true;
     ctx.emit({ type: 'trace:manifest', op: 'bootstrap-create', reason, path: p.manifestPointer });
-    const bootstrap = await createBootstrapManifest(ctx);
+    const existingMeshId = await local.getMeta('meshId');
+    const bootstrap = await createBootstrapManifest(ctx, typeof existingMeshId === 'string' ? existingMeshId : undefined);
     // Skip the read-after-write — we just minted both files in this process,
     // they are exactly what's on disk. No GETs needed.
     pointer = bootstrap.pointer;
@@ -193,6 +195,10 @@ export async function upsertDeviceMetadata(
   opts?: {
     displayName?: string;
     deviceType?: import('./types.ts').DeviceType;
+    observedManifestGeneration?: number;
+    observedEpoch?: number;
+    observedWatermarkHlc?: string;
+    observedGcFloorHlc?: string;
     /**
      * When true, skip the read-merge step. Use only when the caller knows
      * no prior device record exists (e.g. immediately after bootstrap of
@@ -221,6 +227,18 @@ export async function upsertDeviceMetadata(
     displayName: opts?.displayName ?? existing?.displayName,
     deviceType: opts?.deviceType ?? existing?.deviceType,
     retired: existing?.retired,
+    observedManifestGeneration: opts?.observedManifestGeneration ?? existing?.observedManifestGeneration,
+    observedEpoch: opts?.observedEpoch ?? existing?.observedEpoch,
+    observedWatermarkHlc: opts?.observedWatermarkHlc ?? existing?.observedWatermarkHlc,
+    observedGcFloorHlc: opts?.observedGcFloorHlc ?? existing?.observedGcFloorHlc,
+    observedAt: opts?.observedManifestGeneration !== undefined
+      || opts?.observedEpoch !== undefined
+      || opts?.observedWatermarkHlc !== undefined
+      || opts?.observedGcFloorHlc !== undefined
+      ? now
+      : existing?.observedAt,
+    cutOffAt: existing?.cutOffAt,
+    cutOffReason: existing?.cutOffReason,
   };
   await writeJson(adapter, p.deviceFile(deviceId), next);
 }

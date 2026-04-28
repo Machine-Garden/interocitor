@@ -74,6 +74,7 @@ type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> = {
   secondCompactDelayMs: number;
   secondCompactDelayJitterMs: number;
   compactRemoteChangeThreshold: number;
+  offlineGraceMs: number;
   batchWindowMs: number;
   dbName: string;
   localStoreFactory: LocalStoreFactory;
@@ -94,6 +95,7 @@ const DEFAULT_FIRST_COMPACT_DELAY_JITTER_MS = 5 * 60_000;
 const DEFAULT_SECOND_COMPACT_DELAY_MS = 15 * 60_000;
 const DEFAULT_SECOND_COMPACT_DELAY_JITTER_MS = 5 * 60_000;
 const DEFAULT_COMPACT_REMOTE_CHANGE_THRESHOLD = 2;
+const DEFAULT_OFFLINE_GRACE_MS = 7 * 24 * 60 * 60_000;
 const DEFAULT_BATCH_WINDOW_MS = 1_000;
 
 // ─── Sync Engine ─────────────────────────────────────────────────────
@@ -272,6 +274,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       secondCompactDelayMs: config.secondCompactDelayMs ?? DEFAULT_SECOND_COMPACT_DELAY_MS,
       secondCompactDelayJitterMs: config.secondCompactDelayJitterMs ?? DEFAULT_SECOND_COMPACT_DELAY_JITTER_MS,
       compactRemoteChangeThreshold: config.compactRemoteChangeThreshold ?? DEFAULT_COMPACT_REMOTE_CHANGE_THRESHOLD,
+      offlineGraceMs: config.offlineGraceMs ?? DEFAULT_OFFLINE_GRACE_MS,
       batchWindowMs: config.batchWindowMs ?? DEFAULT_BATCH_WINDOW_MS,
       dbName: config.dbName ?? 'interocitor',
       localStoreFactory: config.localStoreFactory ?? (() => new LocalStore(config.dbName, undefined, config.schema)),
@@ -323,9 +326,12 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   ): Promise<S[K]> {
     const tableName = table as string;
     const current = await this.local.getRow(tableName, rowId);
-    // Clone row with namespaced shape. New rows start with empty payload.
+    const isResurrection = current?._meta.deleted === true;
+    // Clone row with namespaced shape. New rows and resurrected tombstones start
+    // with empty payload so a partial insert after delete cannot republish
+    // pre-delete columns.
     const row: Row = current
-      ? { _meta: { ...current._meta }, payload: { ...current.payload } }
+      ? { _meta: { ...current._meta }, payload: isResurrection ? {} : { ...current.payload } }
       : {
           _meta: { table: tableName, rowId, deleted: false, schemaVersion: this.schema?.version ?? 0 },
           payload: {},
@@ -365,6 +371,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     current._meta.deleted = true;
     current._meta.deletedHlc = hlcSerialize(nextHlc);
     current._meta.owner = this.deviceId;
+    // Tombstones carry only deletion metadata. Payload is no longer needed for
+    // CRDT conflict checks and should not retain deleted user data.
+    current.payload = {};
     await this.local.putRow(current);
     const op = this.rowToSyncOp(current);
     const hlc = this.getRowHlc(current);
@@ -665,6 +674,26 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     return this.config.remotePath;
   }
 
+  private async rebuildOutboxFromLocalState(): Promise<void> {
+    const rows = await this.local.getAllRows();
+    const entries: ChangeEntry[] = [];
+    for (const row of rows) {
+      const op = this.rowToSyncOp(row);
+      const hlc = this.getRowHlc(row);
+      if (!op || !hlc) continue;
+      entries.push({
+        id: generateId('chg'),
+        ts: Date.now(),
+        device: this.deviceId,
+        hlc,
+        ops: [op],
+      });
+    }
+    if (entries.length === 0) return;
+    await this.local.pushOutboxEntries(entries);
+    this.pendingCount = await this.local.outboxSize();
+  }
+
   private get codecState(): CodecState {
     return {
       encryptionKey: this.encryptionKey,
@@ -684,6 +713,24 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       schema: this.schema,
       emit: (e) => this.emit(e),
     };
+  }
+
+  private async acknowledgeManifest(): Promise<void> {
+    if (!this.adapter || !this.config.remotePath || !this.manifest) return;
+    // Before the first compaction there is no canonical watermark/floor to
+    // acknowledge. Initial connect already writes device presence metadata;
+    // avoid an extra no-op device write/read on every bootstrap/reconnect.
+    if (!this.manifest.watermarkHlc && !this.manifest.gcFloorHlc && this.manifest.epoch === 0) return;
+    await upsertDeviceMetadata(this.adapter, this.config.remotePath, this.deviceId, {
+      displayName: this.config.deviceName,
+      deviceType: this.config.deviceType,
+      observedManifestGeneration: this.manifest.generation,
+      observedEpoch: this.manifest.epoch,
+      observedWatermarkHlc: this.manifest.watermarkHlc,
+      observedGcFloorHlc: this.manifest.gcFloorHlc,
+    });
+    await this.local.setMeta('gcFloorHlc', this.manifest.gcFloorHlc ?? '');
+    await this.local.setMeta('gcEpoch', this.manifest.gcEpoch ?? 0);
   }
 
   // ── Flush / poll timers ────────────────────────────────────────────
@@ -1360,6 +1407,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   }
 
   private async tryConnectFastPath(adapter: StorageAdapter): Promise<boolean> {
+    // Fast-path is only safe when we have a locally cached manifest whose
+    // encryption mode matches the current engine config. If it does not match,
+    // fall through to full connect so MeshEncryptionMismatchError is raised.
+    if (!this.manifest) {
+      const cached = await this.local.getMeta('manifestCache') as Manifest | undefined;
+      if (!cached || cached.encrypted !== this.encrypted) return false;
+      this.manifest = cached;
+    }
     const cursorRaw = await this.local.getMeta('cursor');
     const cursor = typeof cursorRaw === 'string' ? cursorRaw : '';
     if (!cursor) return false;
@@ -1532,6 +1587,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     } else {
       this.log('debug', 'connect() — running initial pull');
       await this.pull();
+    }
+    if (bootstrapped) {
+      await this.rebuildOutboxFromLocalState();
     }
     await this.doFlush();
 
@@ -1723,6 +1781,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     );
     this.manifest = manifest;
     this.encrypted = manifest.encrypted || this.encrypted;
+    await this.local.setMeta('manifestCache', manifest);
+    await this.local.setMeta('remoteGcFloorHlc', manifest.gcFloorHlc ?? '');
+    await this.local.setMeta('remoteGcEpoch', manifest.gcEpoch ?? 0);
     return { bootstrapped };
   }
 
@@ -2111,6 +2172,12 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   }
 
   /** Internal flush — no ensureReady guard (called from connect, pull, doInit). */
+  private hasPreFloorEntries(entries: ChangeEntry[]): boolean {
+    const floor = this.manifest?.gcFloorHlc;
+    if (!floor) return false;
+    return entries.some(entry => entry.hlc && hlcCompareStr(entry.hlc, floor) <= 0);
+  }
+
   private async doFlush(): Promise<void> {
     if (!this.adapter) {
       this.clearScheduledFlush();
@@ -2125,6 +2192,29 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       return;
     }
 
+    // Reload manifest before deciding whether non-empty outbox entries
+    // predate the current point-of-no-return. A long-sleeping client may have
+    // a cached manifest from before another device compacted. Keep this after
+    // the empty-outbox return so idle flushes and transport teardown do not
+    // perform surprising remote reads or poison adapter switches.
+    await this.doLoadOrCreateManifest('flush');
+
+    // The manifest GC floor is a point of no return. If this local outbox
+    // contains entries at/before the floor, the device missed the retention
+    // window. Do not publish them; align from the canonical snapshot instead.
+    if (this.hasPreFloorEntries(entries)) {
+      this.clearScheduledFlush();
+      if (this.manifest?.snapshotPath) {
+        await this.rehydrate();
+        this.pendingCount = 0;
+        this.resetCompactWarning();
+      } else {
+        for (const entry of entries) await this.local.pushOutbox(entry);
+        this.pendingCount = entries.length;
+      }
+      throw new Error(`Refusing to flush changes at or before gcFloorHlc ${this.manifest?.gcFloorHlc}; rehydrate required`);
+    }
+
     this.log('debug', 'flush() — start', { entryCount: entries.length });
     this.emit({ type: 'flush:start', entryCount: entries.length });
     this.pendingCount = 0;
@@ -2132,10 +2222,6 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     this.clearScheduledFlush();
 
     try {
-      // Cached path: in steady state this is a 0-GET no-op that emits
-      // `trace:manifest { op: 'cache-hit', reason: 'flush' }`. The cache
-      // is dropped on poison and re-loaded on the next connect/compact.
-      await this.doLoadOrCreateManifest('flush');
       await flushToAdapter(this.adapter, this.requireRemotePath('flush()'), entries, true, this.codecState, this.deviceId, (e) => this.emit(e));
 
       for (const replica of this.config.replicas) {
@@ -2204,6 +2290,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       poisonRemote: (err, path) => this.poisonRemote(err, path),
       loadOrCreateManifest: async () => { await this.doLoadOrCreateManifest('pull'); },
     });
+    await this.acknowledgeManifest();
   }
 
   // ── Rehydrate / Compact ────────────────────────────────────────────
@@ -2224,6 +2311,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       poisonRemote: (err, path) => this.poisonRemote(err, path),
       pull: () => this.pull(),
     });
+    await this.acknowledgeManifest();
   }
 
   async compact(): Promise<void> {
@@ -2243,7 +2331,11 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
         serverId: this.serverId,
         emit: (e) => this.emit(e),
         pull: () => this.pull(),
+        offlineGraceMs: this.config.offlineGraceMs,
       });
+      await this.local.setMeta('remoteGcFloorHlc', this.manifest.gcFloorHlc ?? '');
+      await this.local.setMeta('remoteGcEpoch', this.manifest.gcEpoch ?? 0);
+      await this.acknowledgeManifest();
     })().finally(() => {
       if (this.compactInFlight === run) this.compactInFlight = null;
     });

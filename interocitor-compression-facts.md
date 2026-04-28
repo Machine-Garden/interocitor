@@ -22,9 +22,9 @@
 ### Snapshots (`snapshots/{snapshotId}-{serverId}.json`)
 - **Full point-in-time state**: All tables + all rows with HLC metadata per column
 - **Compact trigger**: Device initiates when total change log across all devices exceeds threshold (e.g., 1MB, 5000+ entries)
-- **Safe truncation**: Old change files retained until all known devices acknowledge snapshot (checked via cursors file or after 7 days)
-- **Content**: Includes watermark HLC and per-device cursors to enable safe pruning
-- **Reduces growth**: Removes outdated entries, hard-deletes tombstones older than 30 days
+- **Safe truncation**: Old change files are pruned after a snapshot captures entries at or before `watermarkHlc`
+- **Content**: Includes watermark HLC; manifest/device metadata track `gcFloorHlc` and per-device observations for safe tombstone GC
+- **Reduces growth**: Removes outdated change files and hard-deletes tombstones once active devices have acknowledged the GC floor
 - **Reference**: `./interocitor-architecture.md` § Compaction (lines 260–310), `./packages/interocitor/src/core/compaction.ts`
 
 ### Manifest (`manifest-{generation}.json`)

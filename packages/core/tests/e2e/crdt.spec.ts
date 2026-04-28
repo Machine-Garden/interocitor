@@ -121,11 +121,12 @@ test.describe('applyOp — delete', () => {
         hlc: '000002000000000000-0000-dev_a',
       }, 1);
 
-      return { deleted: deleted?._meta.deleted, hlc: deleted?._meta.deletedHlc };
+      return { deleted: deleted?._meta.deleted, hlc: deleted?._meta.deletedHlc, payload: deleted?.payload };
     });
 
     expect(result.deleted).toBe(true);
     expect(result.hlc).toBeTruthy();
+    expect(result.payload).toEqual({});
   });
 
   test('rejects a delete older than existing column HLC', async ({ page }) => {
@@ -200,6 +201,57 @@ test.describe('applyOp — delete', () => {
 
     expect(result.deleted).toBe(false);
     expect(result.value).toBe('back');
+  });
+
+  test('partial upsert after delete starts a fresh incarnation', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { applyOp, rowToPlain } = await import('/packages/core/dist/core/crdt.js');
+      const tables: Record<string, Record<string, any>> = {};
+
+      applyOp(tables, {
+        type: 'upsert', table: 't', rowId: 'r1',
+        columns: {
+          x: { value: 'old-x', hlc: '000001000000000000-0000-dev_a' },
+          y: { value: 'old-y', hlc: '000001000000000000-0000-dev_a' },
+        },
+      }, 1);
+
+      applyOp(tables, {
+        type: 'delete', table: 't', rowId: 'r1',
+        hlc: '000002000000000000-0000-dev_a',
+      }, 1);
+
+      const revived = applyOp(tables, {
+        type: 'upsert', table: 't', rowId: 'r1',
+        columns: { x: { value: 'new-x', hlc: '000003000000000000-0000-dev_b' } },
+      }, 1);
+
+      return revived ? rowToPlain(revived) : null;
+    });
+
+    expect(result).toEqual({ _table: 't', _rowId: 'r1', _deleted: false, x: 'new-x' });
+  });
+
+  test('stale upsert after delete does not mutate the tombstone payload', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { applyOp, rowToPlain } = await import('/packages/core/dist/core/crdt.js');
+      const tables: Record<string, Record<string, any>> = {};
+
+      applyOp(tables, {
+        type: 'delete', table: 't', rowId: 'r1',
+        hlc: '000002000000000000-0000-dev_a',
+      }, 1);
+
+      const changed = applyOp(tables, {
+        type: 'upsert', table: 't', rowId: 'r1',
+        columns: { x: { value: 'stale', hlc: '000001000000000000-0000-dev_b' } },
+      }, 1);
+
+      return { changed, row: rowToPlain(tables.t.r1) };
+    });
+
+    expect(result.changed).toBeNull();
+    expect(result.row).toEqual({ _table: 't', _rowId: 'r1', _deleted: true });
   });
 
   test('upsert with older HLC than delete does NOT revive', async ({ page }) => {

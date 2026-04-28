@@ -464,6 +464,19 @@ export interface Manifest {
   snapshotPath: string | null;
   /** Reserved for future delta-based catch-up. */
   deltaPath: string | null;
+
+  /**
+   * Point of no return for this mesh. Local or remote change entries at or
+   * before this HLC are considered captured by canonical snapshots and must
+   * not be flushed by stale clients.
+   */
+  gcFloorHlc?: string;
+  /** Epoch that published gcFloorHlc. */
+  gcEpoch?: number;
+  /** Timestamp when gcFloorHlc was computed. */
+  gcCreatedAt?: string;
+  /** Offline grace used to compute the active device set. */
+  offlineGraceMs?: number;
 }
 
 export type DeviceType = 'web' | 'ios' | 'android' | 'worker' | 'desktop' | 'tv';
@@ -476,6 +489,20 @@ export interface DeviceMetadata extends DeviceInfo {
   /** Device class */
   deviceType?: DeviceType;
   retired?: boolean;
+
+  /** Latest manifest generation this device has fully observed. */
+  observedManifestGeneration?: number;
+  /** Latest snapshot epoch this device has fully observed. */
+  observedEpoch?: number;
+  /** Latest manifest watermark this device has fully observed. */
+  observedWatermarkHlc?: string;
+  /** Latest manifest GC floor this device has accepted. */
+  observedGcFloorHlc?: string;
+  /** Timestamp of the observation acknowledgement. */
+  observedAt?: string;
+  /** Timestamp when this device was excluded from the active set. */
+  cutOffAt?: string;
+  cutOffReason?: 'offline-grace-expired' | 'manual-retire';
 }
 
 export interface DeviceHead {
@@ -698,6 +725,12 @@ export interface SyncConfig<
   secondCompactDelayJitterMs?: number;
   /** Minimum remote change-file count required before the second delay starts (default 2). */
   compactRemoteChangeThreshold?: number;
+  /**
+   * How long an unseen device remains part of compaction/tombstone-GC
+   * consensus. Devices older than this are excluded from the active set and
+   * must align from the current snapshot before writing again. Default 7 days.
+   */
+  offlineGraceMs?: number;
   /** Implicit batch window in ms. All local writes inside the window join one ChangeEntry. Default 1000. */
   batchWindowMs?: number;
   /**

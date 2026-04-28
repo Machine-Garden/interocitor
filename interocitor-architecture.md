@@ -208,9 +208,9 @@ type Op =
   | { type: 'delete'; table: string; rowId: string; hlc: string }
 ```
 
-**Deletes are soft.** A tombstone row stays in the DB with `_deleted: true` and an HLC. If a delete has a lower HLC than a subsequent upsert, the upsert wins (row comes back). This is correct — someone deleted it, then someone else (or same person on another device) added it back.
+**Deletes are soft.** A tombstone row stays in the DB with `_deleted: true` and `deletedHlc`. Its payload is reduced to `{}` so deleted user data does not remain in tombstones. If a later upsert has an HLC greater than `deletedHlc`, it starts a fresh row incarnation; stale pre-delete columns do not carry forward.
 
-Tombstones are cleaned up during compaction (see below).
+Tombstones are cleaned up during compaction only after active devices have acknowledged a GC floor (see below).
 
 ## Sync Engine Lifecycle
 
@@ -292,13 +292,13 @@ Change logs grow unbounded. Compaction creates a point-in-time snapshot and allo
 Any device can trigger compaction. Natural trigger: when total change log size across all devices exceeds a threshold (e.g. 1MB, or 5000 entries).
 
 ```
-1. Read current snapshot + all changes since snapshot → build merged state
-2. Write new snapshot to snapshots/latest.json
-3. Tombstones older than 30 days are removed from snapshot (hard delete)
-4. Do NOT delete old change log files yet
-5. Other devices notice new snapshot, rehydrate from it
-6. Once all known devices have acknowledged the snapshot (checked via a cursors file
-   or simply after 7 days), old change logs can be truncated
+1. Pull all remote changes → build merged local state
+2. Compute active devices from devices/<deviceId>.json
+3. Compute gcFloorHlc = min(active observedWatermarkHlc)
+4. Write new snapshot, omitting tombstones with deletedHlc <= gcFloorHlc
+5. Publish manifest with epoch, watermarkHlc, snapshotPath, gcFloorHlc
+6. Delete remote change files whose HLC <= watermarkHlc
+7. Devices that later see the new epoch/floor rehydrate before writing stale history
 ```
 
 ### Safe Truncation
@@ -767,7 +767,7 @@ If ALL devices lose the key (all browsers cleared, all phones lost):
 - **Real-time collaboration** (e.g. two people editing the same form field simultaneously) — 30-60s polling is not real-time. For that, you'd need WebRTC or a signaling server. Probably not needed for mesh meal planning.
 - **Large binary data** (photos, PDFs) — change logs are for structured data. Binary assets need a separate strategy (store in cloud folder, reference by path).
 - **Fine-grained permissions** — everyone in the folder sees everything. Acceptable for mesh, not for multi-tenant.
-- **Guaranteed ordering of deletes** — tombstone TTL means a very old delete can be "forgotten" after compaction. Edge case, not a practical problem.
+- **Unlimited offline writes after retention** — once `gcFloorHlc` advances, clients with pre-floor outbox entries must rehydrate instead of flushing. This protects the mesh from very old devices, but their stale unsynced writes are not merged automatically.
 
 ## Implementation Order
 

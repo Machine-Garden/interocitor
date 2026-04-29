@@ -12,11 +12,44 @@ import type {
  * using any binding name you want. Pass that binding to `withInterocitor(...)`
  * via the `relay` getter.
  */
+const RELAY_BROADCAST_BATCH_DELAY_MS = 1_000;
+
 export class InterocitorRelayDurableObject {
   private readonly ctx: DurableObjectStateLike;
+  private pendingBroadcastPayload: string | null = null;
+  private pendingBroadcastTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(state: DurableObjectStateLike, _env: InterocitorEnv) {
     this.ctx = state;
+  }
+
+  private flushPendingBroadcast(): { connected: number; sent: number; failed: number } {
+    const payload = this.pendingBroadcastPayload;
+    this.pendingBroadcastPayload = null;
+    if (this.pendingBroadcastTimer) {
+      clearTimeout(this.pendingBroadcastTimer);
+      this.pendingBroadcastTimer = null;
+    }
+    const sockets = this.ctx.getWebSockets();
+    if (!payload) return { connected: sockets.length, sent: 0, failed: 0 };
+    let sent = 0;
+    let failed = 0;
+    for (const ws of sockets) {
+      try {
+        ws.send(payload);
+        sent++;
+      } catch {
+        failed++;
+      }
+    }
+    return { connected: sockets.length, sent, failed };
+  }
+
+  private scheduleBroadcastFlush(): void {
+    if (this.pendingBroadcastTimer) return;
+    this.pendingBroadcastTimer = setTimeout(() => {
+      this.flushPendingBroadcast();
+    }, RELAY_BROADCAST_BATCH_DELAY_MS);
   }
 
   /** Handle relay control endpoints inside the Durable Object. */
@@ -33,26 +66,15 @@ export class InterocitorRelayDurableObject {
     }
 
     if (pathname === '/__broadcast') {
-      const payload = await request.text();
-      const sockets = this.ctx.getWebSockets();
-      let sent = 0;
-      let failed = 0;
-      for (const ws of sockets) {
-        try {
-          ws.send(payload);
-          sent++;
-        } catch {
-          failed++;
-          // Dead socket — runtime cleanup handles it.
-        }
-      }
-      return new Response(JSON.stringify({ ok: failed === 0, connected: sockets.length, sent, failed }), {
+      this.pendingBroadcastPayload = await request.text();
+      this.scheduleBroadcastFlush();
+      return new Response(JSON.stringify({ ok: true, queued: true, delayMs: RELAY_BROADCAST_BATCH_DELAY_MS }), {
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
     if (pathname === '/__status') {
-      return new Response(JSON.stringify({ ok: true, connected: this.ctx.getWebSockets().length }), {
+      return new Response(JSON.stringify({ ok: true, connected: this.ctx.getWebSockets().length, pendingBroadcast: this.pendingBroadcastPayload !== null, batchDelayMs: RELAY_BROADCAST_BATCH_DELAY_MS }), {
         headers: { 'Content-Type': 'application/json' },
       });
     }
@@ -65,6 +87,11 @@ export class InterocitorRelayDurableObject {
         } catch {
           // Ignore close failure.
         }
+      }
+      this.pendingBroadcastPayload = null;
+      if (this.pendingBroadcastTimer) {
+        clearTimeout(this.pendingBroadcastTimer);
+        this.pendingBroadcastTimer = null;
       }
       return new Response(JSON.stringify({ cleared: sockets.length }), {
         headers: { 'Content-Type': 'application/json' },

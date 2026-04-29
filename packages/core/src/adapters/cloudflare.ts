@@ -18,6 +18,8 @@ export interface CloudflareAdapterConfig {
   baseUrl: string;
   /** Optional bearer for server/cost protection (INTEROCITOR_ACCESS_TOKEN). */
   token?: string;
+  /** Disable relay/WebSocket invalidations for this client. */
+  relayEnabled?: boolean;
 }
 
 interface IoFileMeta {
@@ -61,7 +63,7 @@ export class CloudflareAdapter implements StorageAdapter {
   private ensuredFolders: Set<string> = new Set();
 
   constructor(config: CloudflareAdapterConfig) {
-    this.config = { ...config, baseUrl: config.baseUrl.replace(/\/$/, '') };
+    this.config = { ...config, baseUrl: config.baseUrl.replace(/\/$/, ''), relayEnabled: config.relayEnabled ?? true };
   }
 
   private headers(extra?: Record<string, string>): Record<string, string> {
@@ -150,6 +152,10 @@ export class CloudflareAdapter implements StorageAdapter {
     onInvalidate: (payload: RemoteInvalidationPayload) => void,
     hooks?: RemoteInvalidationHooks,
   ): () => void {
+    if (this.config.relayEnabled === false) {
+      hooks?.onClose?.();
+      return () => {};
+    }
     let ws: WebSocket | null = null;
     let cancelled = false;
     let backoffMs = 1000;

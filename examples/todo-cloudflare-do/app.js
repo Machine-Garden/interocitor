@@ -20,6 +20,11 @@ const els = {
   compactStatus: document.querySelector('#compactStatus'),
 };
 
+const requestStats = {
+  fetch: {},
+  websocket: { opened: 0, messages: 0, closed: 0, errors: 0 },
+};
+
 let runtime = {
   engine: null,
   tasks: null,
@@ -29,8 +34,73 @@ let runtime = {
   eventLog: [],
 };
 
+const nativeFetch = window.fetch.bind(window);
+const NativeWebSocket = window.WebSocket;
+
+function normalizeRequestKey(method, urlString) {
+  try {
+    const url = new URL(urlString, window.location.href);
+    const pathname = url.pathname;
+    if (pathname.includes('/todo-interocitor/io/')) {
+      if (pathname.endsWith('/list-files')) return `${method} list-files`;
+      if (pathname.endsWith('/list-folders')) return `${method} list-folders`;
+      if (pathname.endsWith('/metadata')) return `${method} metadata`;
+      if (pathname.endsWith('/ensure-folder')) return `${method} ensure-folder`;
+      if (pathname.endsWith('/file')) {
+        const rawPath = url.searchParams.get('path') || '/';
+        if (rawPath.includes('/devices/')) return `${method} file:device`;
+        if (rawPath.endsWith('/head.json')) return `${method} file:head`;
+        if (rawPath.includes('/mainline/')) return `${method} file:mainline`;
+        if (rawPath.includes('/changes/')) return `${method} file:change`;
+        return `${method} file:other`;
+      }
+    }
+    if (pathname.includes('/todo-interocitor/notify/')) return `${method} notify`;
+    return `${method} ${pathname}`;
+  } catch {
+    return `${method} ${urlString}`;
+  }
+}
+
+function bumpFetchStat(method, urlString) {
+  const key = normalizeRequestKey(method, urlString);
+  requestStats.fetch[key] = (requestStats.fetch[key] || 0) + 1;
+}
+
+window.fetch = async (input, init = {}) => {
+  const request = input instanceof Request ? input : new Request(input, init);
+  bumpFetchStat((request.method || 'GET').toUpperCase(), request.url);
+  return await nativeFetch(input, init);
+};
+
+window.WebSocket = class CountingWebSocket extends NativeWebSocket {
+  constructor(url, protocols) {
+    super(url, protocols);
+    requestStats.websocket.opened += 1;
+    this.addEventListener('message', () => {
+      requestStats.websocket.messages += 1;
+    });
+    this.addEventListener('close', () => {
+      requestStats.websocket.closed += 1;
+    });
+    this.addEventListener('error', () => {
+      requestStats.websocket.errors += 1;
+    });
+  }
+};
+
+function resetRequestStats() {
+  for (const key of Object.keys(requestStats.fetch)) delete requestStats.fetch[key];
+  requestStats.websocket.opened = 0;
+  requestStats.websocket.messages = 0;
+  requestStats.websocket.closed = 0;
+  requestStats.websocket.errors = 0;
+}
+
 let runtimeOptions = {
   pollInterval: 15000,
+  relayEnabled: true,
+  relayHealthyPollInterval: 300000,
 };
 
 function setStatus(message) {
@@ -149,6 +219,7 @@ async function connect() {
   const adapter = new CloudflareAdapter({
     baseUrl: `${session.workerBaseUrl}/io/${encodeURIComponent(session.namespace)}`,
     token: session.token || undefined,
+    relayEnabled: runtimeOptions.relayEnabled,
   });
 
   const tabDeviceId = sessionStorage.getItem('todo-cf-device-id') || `tab-${randomSuffix()}`;
@@ -159,6 +230,8 @@ async function connect() {
     remotePath: session.remotePath,
     dbName: `interocitor-cf-${tabDeviceId}`,
     pollInterval: runtimeOptions.pollInterval,
+    relayEnabled: runtimeOptions.relayEnabled,
+    relayHealthyPollInterval: runtimeOptions.relayHealthyPollInterval,
     flushDebounce: 200,
     flushThreshold: 1,
   });
@@ -166,36 +239,30 @@ async function connect() {
   engine.setEncryptionKey(await passphraseToKey(session.key));
 
   const eventLog = [];
+  let sseReadyResolve;
+  const sseReady = new Promise((resolve) => {
+    sseReadyResolve = resolve;
+  });
   const unsubEngine = engine.on((event) => {
     eventLog.push({ type: event.type, ts: Date.now() });
     if (event.type === 'change' || event.type === 'delete' || event.type === 'sync:complete') {
       void refreshTasks();
     }
+    if (event.type === 'relay:ready') {
+      eventLog.push({ type: 'sse:ready', ts: Date.now() });
+      sseReadyResolve?.(true);
+    }
+    if (event.type === 'relay:error') {
+      eventLog.push({ type: 'sse:error', ts: Date.now() });
+    }
+    if (event.type === 'relay:unavailable') {
+      sseReadyResolve?.(false);
+    }
   });
+  const unsubSse = () => {};
 
   await engine.init();
   await engine.connect();
-
-  let unsubSse = null;
-  let sseReadyResolve;
-  const sseReady = new Promise((resolve) => {
-    sseReadyResolve = resolve;
-  });
-  if (typeof adapter.subscribeToInvalidations === 'function') {
-    unsubSse = adapter.subscribeToInvalidations(() => {
-      void engine.pull().then(() => refreshTasks()).catch(() => {});
-    }, {
-      onReady: () => {
-        eventLog.push({ type: 'sse:ready', ts: Date.now() });
-        sseReadyResolve?.(true);
-      },
-      onError: () => {
-        eventLog.push({ type: 'sse:error', ts: Date.now() });
-      },
-    });
-  } else {
-    sseReadyResolve?.(false);
-  }
 
   runtime = {
     engine,
@@ -359,6 +426,12 @@ window.__todoDemo = {
     if (typeof options.pollInterval === 'number' && Number.isFinite(options.pollInterval) && options.pollInterval > 0) {
       runtimeOptions.pollInterval = options.pollInterval;
     }
+    if (typeof options.relayEnabled === 'boolean') {
+      runtimeOptions.relayEnabled = options.relayEnabled;
+    }
+    if (typeof options.relayHealthyPollInterval === 'number' && Number.isFinite(options.relayHealthyPollInterval) && options.relayHealthyPollInterval > 0) {
+      runtimeOptions.relayHealthyPollInterval = options.relayHealthyPollInterval;
+    }
     return { ...runtimeOptions };
   },
   getShareToken() {
@@ -369,6 +442,9 @@ window.__todoDemo = {
   },
   getStatus() {
     return els.status.textContent || '';
+  },
+  getRuntimeOptions() {
+    return { ...runtimeOptions };
   },
   async waitForSseReady(timeoutMs = 3000) {
     return await Promise.race([
@@ -383,6 +459,12 @@ window.__todoDemo = {
   },
   clearEvents() {
     runtime.eventLog.length = 0;
+  },
+  resetRequestStats() {
+    resetRequestStats();
+  },
+  getRequestStats() {
+    return JSON.parse(JSON.stringify(requestStats));
   },
   async waitForEvent(type, timeoutMs = 3000) {
     const startedAt = Date.now();

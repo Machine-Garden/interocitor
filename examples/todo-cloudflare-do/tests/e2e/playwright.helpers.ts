@@ -21,10 +21,10 @@ export async function openDemo(page: Page, baseURL: string): Promise<void> {
 
 export async function createSession(
   page: Page,
-  options: { namespace: string; remotePath?: string; token?: string; workerBaseUrl?: string; pollInterval?: number },
+  options: { namespace: string; remotePath?: string; token?: string; workerBaseUrl?: string; pollInterval?: number; relayEnabled?: boolean; relayHealthyPollInterval?: number },
 ): Promise<string> {
-  return await page.evaluate(async ({ namespace, remotePath, token, workerBaseUrl, pollInterval }) => {
-    window.__todoDemo.configure({ pollInterval });
+  return await page.evaluate(async ({ namespace, remotePath, token, workerBaseUrl, pollInterval, relayEnabled, relayHealthyPollInterval }) => {
+    window.__todoDemo.configure({ pollInterval, relayEnabled, relayHealthyPollInterval });
     await window.__todoDemo.createSession({ namespace, remotePath: remotePath || '/todo-app', token, workerBaseUrl });
     return window.__todoDemo.getShareToken();
   }, {
@@ -33,14 +33,16 @@ export async function createSession(
     token: options.token ?? '',
     workerBaseUrl: options.workerBaseUrl ?? CF_WORKER_BASE_URL,
     pollInterval: options.pollInterval ?? CF_POLL_INTERVAL_MS,
+    relayEnabled: options.relayEnabled ?? true,
+    relayHealthyPollInterval: options.relayHealthyPollInterval ?? 300_000,
   });
 }
 
-export async function applySession(page: Page, token: string, pollInterval = CF_POLL_INTERVAL_MS): Promise<void> {
-  await page.evaluate(({ raw, pollInterval: nextPollInterval }) => {
-    window.__todoDemo.configure({ pollInterval: nextPollInterval });
+export async function applySession(page: Page, token: string, pollInterval = CF_POLL_INTERVAL_MS, relayEnabled = true, relayHealthyPollInterval = 300_000): Promise<void> {
+  await page.evaluate(({ raw, pollInterval: nextPollInterval, relayEnabled: nextRelayEnabled, relayHealthyPollInterval: nextRelayHealthyPollInterval }) => {
+    window.__todoDemo.configure({ pollInterval: nextPollInterval, relayEnabled: nextRelayEnabled, relayHealthyPollInterval: nextRelayHealthyPollInterval });
     window.__todoDemo.applyToken(raw);
-  }, { raw: token, pollInterval });
+  }, { raw: token, pollInterval, relayEnabled, relayHealthyPollInterval });
 }
 
 export async function connectDemo(page: Page): Promise<void> {
@@ -110,9 +112,11 @@ declare global {
       addTask(title: string): Promise<void>;
       refreshTasks(): Promise<Array<{ title?: unknown }>>;
       compact(): Promise<void>;
-      configure(options: { pollInterval?: number }): { pollInterval: number };
+      configure(options: { pollInterval?: number; relayEnabled?: boolean; relayHealthyPollInterval?: number }): { pollInterval: number; relayEnabled: boolean; relayHealthyPollInterval: number };
       getShareToken(): string;
       getStatus(): string;
+      resetRequestStats(): void;
+      getRequestStats(): { fetch: Record<string, number>; websocket: { opened: number; messages: number; closed: number; errors: number } };
     };
   }
 }

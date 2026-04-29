@@ -70,13 +70,30 @@ function createStore() {
   const files = new Map();
   const folders = new Set(['/']);
   let forceUnauthorized = false;
+  const requestCounts = new Map();
+
+  function bump(method, path) {
+    const key = `${method} ${path}`;
+    requestCounts.set(key, (requestCounts.get(key) || 0) + 1);
+  }
+
+  function dumpRequestCounts() {
+    return Object.fromEntries(requestCounts.entries());
+  }
+
+  function resetRequestCounts() {
+    requestCounts.clear();
+  }
 
   return {
+    dumpRequestCounts,
+    resetRequestCounts,
     resetCloud() {
       files.clear();
       folders.clear();
       folders.add('/');
       forceUnauthorized = false;
+      resetRequestCounts();
     },
     setUnauthorized(enabled) {
       forceUnauthorized = Boolean(enabled);
@@ -109,6 +126,8 @@ function createStore() {
       if (forceUnauthorized) {
         return new Response('', { status: 401 });
       }
+
+      bump(method, path);
 
       if (method === 'PROPFIND') {
         const depth = init.headers && typeof init.headers === 'object'
@@ -268,6 +287,8 @@ const originalFetch = window.fetch.bind(window);
 
 window.__webdavMock = {
   resetCloud: () => store.resetCloud(),
+  resetRequestCounts: () => store.resetRequestCounts(),
+  dumpRequestCounts: () => store.dumpRequestCounts(),
   setUnauthorized: enabled => store.setUnauthorized(enabled),
   resetIndexedDb: () => store.resetIndexedDb(),
   dumpFiles: () => store.dumpFiles(),

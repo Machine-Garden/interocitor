@@ -84,6 +84,8 @@ type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> = {
   resolveInitialState?: SyncConfig<S>['resolveInitialState'];
   deviceName?: string;
   deviceType?: import('./types.ts').DeviceType;
+  relayEnabled: boolean;
+  relayHealthyPollInterval: number;
 };
 
 const DEFAULT_COMPACT_WARNING_THRESHOLD = 50;
@@ -203,6 +205,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   // Poll / push invalidation management
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private unsubscribeRemoteInvalidations: (() => void) | null = null;
+  private remoteInvalidationPullPromise: Promise<void> | null = null;
+  private remoteInvalidationPullQueued = false;
+  private remoteInvalidationCooldownTimer: ReturnType<typeof setTimeout> | null = null;
+  private remoteInvalidationCooldownQueued = false;
 
   // Lifecycle state
   private initialized = false;
@@ -282,6 +288,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       replicas: config.replicas ?? [],
       onInit: config.onInit,
       resolveInitialState: config.resolveInitialState,
+      relayEnabled: config.relayEnabled ?? true,
+      relayHealthyPollInterval: config.relayHealthyPollInterval ?? Math.max(config.pollInterval ?? 30_000, 300_000),
     };
     this.serverId = this.config.serverId;
     this.dbName = this.config.dbName;
@@ -728,6 +736,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       observedEpoch: this.manifest.epoch,
       observedWatermarkHlc: this.manifest.watermarkHlc,
       observedGcFloorHlc: this.manifest.gcFloorHlc,
+      skipTouchIfUnchanged: true,
     });
     await this.local.setMeta('gcFloorHlc', this.manifest.gcFloorHlc ?? '');
     await this.local.setMeta('gcEpoch', this.manifest.gcEpoch ?? 0);
@@ -764,26 +773,83 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     }
   }
 
-  private startPolling(): void {
+  private startPolling(intervalMs = this.config.pollInterval): void {
     this.stopPolling();
     this.pollTimer = setInterval(() => {
       this.pull().catch(() => {});
-    }, this.config.pollInterval);
+    }, intervalMs);
   }
 
   private stopRemoteInvalidations(): void {
-    if (!this.unsubscribeRemoteInvalidations) return;
-    try { this.unsubscribeRemoteInvalidations(); } catch {}
-    this.unsubscribeRemoteInvalidations = null;
+    if (this.unsubscribeRemoteInvalidations) {
+      try { this.unsubscribeRemoteInvalidations(); } catch {}
+      this.unsubscribeRemoteInvalidations = null;
+    }
+    if (this.remoteInvalidationCooldownTimer) {
+      clearTimeout(this.remoteInvalidationCooldownTimer);
+      this.remoteInvalidationCooldownTimer = null;
+    }
+    this.remoteInvalidationCooldownQueued = false;
+    this.remoteInvalidationPullQueued = false;
+    this.remoteInvalidationPullPromise = null;
   }
 
   private startRemoteInvalidations(adapter: StorageAdapter): void {
     this.stopRemoteInvalidations();
-    if (!this.supportsRemoteInvalidations(adapter)) {
-      this.log('debug', '[interocitor:relay] adapter has no invalidation subscription', { adapter: adapter.name });
-      this.emit({ type: 'relay:unavailable', adapter: adapter.name, reason: 'adapter-unsupported' });
+    if (!this.supportsRemoteInvalidations(adapter) || this.config.relayEnabled === false) {
+      this.startPolling(this.config.pollInterval);
+      this.log('debug', '[interocitor:relay] adapter has no invalidation subscription', { adapter: adapter.name, relayEnabled: this.config.relayEnabled });
+      this.emit({ type: 'relay:unavailable', adapter: adapter.name, reason: this.config.relayEnabled === false ? 'disabled' : 'adapter-unsupported' });
       return;
     }
+
+    const INVALIDATION_PULL_COOLDOWN_MS = 1_000;
+
+    const runInvalidationPull = (): void => {
+      if (!this.connected) return;
+      if (this.remoteInvalidationPullPromise) {
+        this.remoteInvalidationPullQueued = true;
+        this.log('debug', '[interocitor:relay] pull already in flight; queueing one replay', { adapter: adapter.name });
+        return;
+      }
+
+      const run = async (): Promise<void> => {
+        try {
+          await this.pull();
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          this.log('warn', '[interocitor:relay] pull after invalidation failed', err);
+          this.emit({ type: 'relay:error', adapter: adapter.name, error: err });
+        } finally {
+          this.remoteInvalidationPullPromise = null;
+          if (this.remoteInvalidationPullQueued && this.connected) {
+            this.remoteInvalidationPullQueued = false;
+            scheduleInvalidationPull();
+          }
+        }
+      };
+
+      this.remoteInvalidationPullPromise = run();
+    };
+
+    const scheduleInvalidationPull = (): void => {
+      if (!this.connected) return;
+      if (this.remoteInvalidationCooldownTimer) {
+        this.remoteInvalidationCooldownQueued = true;
+        this.log('debug', '[interocitor:relay] cooldown active; collapsing invalidation into queued replay', { adapter: adapter.name });
+        return;
+      }
+      this.remoteInvalidationCooldownQueued = false;
+      this.remoteInvalidationCooldownTimer = setTimeout(() => {
+        this.remoteInvalidationCooldownTimer = null;
+        const rerun = this.remoteInvalidationCooldownQueued;
+        this.remoteInvalidationCooldownQueued = false;
+        runInvalidationPull();
+        if (rerun && this.connected) {
+          scheduleInvalidationPull();
+        }
+      }, INVALIDATION_PULL_COOLDOWN_MS);
+    };
 
     this.log('info', '[interocitor:relay] subscribing', { adapter: adapter.name, remotePath: this.config.remotePath, deviceId: this.deviceId });
     this.emit({ type: 'relay:subscribe', adapter: adapter.name, remotePath: this.config.remotePath, deviceId: this.deviceId });
@@ -791,25 +857,23 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       (payload: RemoteInvalidationPayload) => {
         this.log('info', '[interocitor:relay] invalidation received', payload);
         this.emit({ type: 'relay:message', adapter: adapter.name, payload });
-        if (!this.connected) return;
-        this.pull().catch((error) => {
-          const err = error instanceof Error ? error : new Error(String(error));
-          this.log('warn', '[interocitor:relay] pull after invalidation failed', err);
-          this.emit({ type: 'relay:error', adapter: adapter.name, error: err });
-        });
+        scheduleInvalidationPull();
       },
       {
         onReady: () => {
-          this.log('info', '[interocitor:relay] ready', { adapter: adapter.name });
+          this.startPolling(this.config.relayHealthyPollInterval);
+          this.log('info', '[interocitor:relay] ready', { adapter: adapter.name, pollInterval: this.config.relayHealthyPollInterval });
           this.emit({ type: 'relay:ready', adapter: adapter.name });
         },
         onError: (error?: unknown) => {
+          this.startPolling(this.config.pollInterval);
           const err = error instanceof Error ? error : new Error(error ? String(error) : 'Remote invalidation subscription error');
           this.log('warn', '[interocitor:relay] subscription error', err);
           this.emit({ type: 'relay:error', adapter: adapter.name, error: err });
         },
         onClose: () => {
-          this.log('warn', '[interocitor:relay] closed', { adapter: adapter.name });
+          this.startPolling(this.config.pollInterval);
+          this.log('warn', '[interocitor:relay] closed', { adapter: adapter.name, pollInterval: this.config.pollInterval });
           this.emit({ type: 'relay:closed', adapter: adapter.name });
         },
       },
@@ -1450,7 +1514,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
           encrypted: this.encrypted,
         });
         this.emit({ type: 'sync:complete', entriesMerged: 0 });
-        this.startPolling();
+        this.startPolling(this.config.pollInterval);
         this.startRemoteInvalidations(adapter);
         this.connected = true;
         return true;
@@ -1564,6 +1628,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       // Skip the read-merge GET when we just minted the manifest in this
       // same connect cycle — no prior device record can possibly exist.
       bootstrap: bootstrapped,
+      skipTouchIfUnchanged: !bootstrapped,
     });
 
     const localEpochRaw = await this.local.getMeta('epoch');
@@ -1593,7 +1658,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     }
     await this.doFlush();
 
-    this.startPolling();
+    this.startPolling(this.config.pollInterval);
     this.startRemoteInvalidations(adapter);
     this.connected = true;
     this.log('info', 'connect() — connected', { remotePath: this.config.remotePath, deviceId: this.deviceId, pollInterval: this.config.pollInterval });

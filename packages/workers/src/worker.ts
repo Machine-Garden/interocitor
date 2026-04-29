@@ -277,8 +277,12 @@ async function handleWriteFile(
   const limit = fileSizeLimitForPathType(pathType, runtime);
   if (bytes.byteLength > limit) return jsonResponse({ error: 'Payload too large', limit }, 413);
   const remoteRoot = meshRootForPath(path, pathType);
+  const shouldBroadcast = ![
+    PATH_TYPE.DEVICE_HEARTBEAT,
+    PATH_TYPE.MANIFEST_SNAPSHOT,
+  ].includes(pathType as never);
   const notify = (status: number): Response => {
-    if (status >= 200 && status < 300) {
+    if (shouldBroadcast && status >= 200 && status < 300) {
       const payload = { type: 'invalidation', op: 'write', path: normalizePath(path), pathType, ts: Date.now() };
       broadcast(relay, ctx, prefix, payload, { verbose: runtime.verbose });
     }

@@ -205,6 +205,12 @@ export async function upsertDeviceMetadata(
      * a fresh mesh). Saves one round-trip per connect on first run.
      */
     bootstrap?: boolean;
+    /**
+     * When true, preserve existing timestamps and skip the write entirely if
+     * the merged metadata would be identical. Use for reconnect acknowledgements
+     * where observability matters more than heartbeats.
+     */
+    skipTouchIfUnchanged?: boolean;
   },
 ): Promise<void> {
   const p = paths(remotePath);
@@ -218,10 +224,14 @@ export async function upsertDeviceMetadata(
   const existing = opts?.bootstrap
     ? null
     : await readJsonIfExists<DeviceMetadata>(adapter, p.deviceFile(deviceId));
+  const touchedObserved = opts?.observedManifestGeneration !== undefined
+    || opts?.observedEpoch !== undefined
+    || opts?.observedWatermarkHlc !== undefined
+    || opts?.observedGcFloorHlc !== undefined;
   const next: DeviceMetadata = {
     deviceId,
     registeredAt: existing?.registeredAt ?? now,
-    lastSeenAt: now,
+    lastSeenAt: opts?.skipTouchIfUnchanged ? (existing?.lastSeenAt ?? now) : now,
     userId: existing?.userId,
     name: existing?.name,
     displayName: opts?.displayName ?? existing?.displayName,
@@ -231,14 +241,32 @@ export async function upsertDeviceMetadata(
     observedEpoch: opts?.observedEpoch ?? existing?.observedEpoch,
     observedWatermarkHlc: opts?.observedWatermarkHlc ?? existing?.observedWatermarkHlc,
     observedGcFloorHlc: opts?.observedGcFloorHlc ?? existing?.observedGcFloorHlc,
-    observedAt: opts?.observedManifestGeneration !== undefined
-      || opts?.observedEpoch !== undefined
-      || opts?.observedWatermarkHlc !== undefined
-      || opts?.observedGcFloorHlc !== undefined
-      ? now
+    observedAt: touchedObserved
+      ? (opts?.skipTouchIfUnchanged ? (existing?.observedAt ?? now) : now)
       : existing?.observedAt,
     cutOffAt: existing?.cutOffAt,
     cutOffReason: existing?.cutOffReason,
   };
+  if (opts?.skipTouchIfUnchanged && existing && JSON.stringify(existing) === JSON.stringify(next)) return;
+  if (opts?.skipTouchIfUnchanged && touchedObserved && existing) {
+    const observedChanged = existing.observedManifestGeneration !== next.observedManifestGeneration
+      || existing.observedEpoch !== next.observedEpoch
+      || existing.observedWatermarkHlc !== next.observedWatermarkHlc
+      || existing.observedGcFloorHlc !== next.observedGcFloorHlc
+      || existing.displayName !== next.displayName
+      || existing.deviceType !== next.deviceType
+      || existing.retired !== next.retired
+      || existing.cutOffAt !== next.cutOffAt
+      || existing.cutOffReason !== next.cutOffReason
+      || existing.userId !== next.userId
+      || existing.name !== next.name;
+    if (!observedChanged) return;
+    next.lastSeenAt = existing.lastSeenAt;
+    next.observedAt = existing.observedAt;
+  }
+  if (opts?.skipTouchIfUnchanged && existing) {
+    next.lastSeenAt = existing.lastSeenAt;
+    if (!touchedObserved) next.observedAt = existing.observedAt;
+  }
   await writeJson(adapter, p.deviceFile(deviceId), next);
 }

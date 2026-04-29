@@ -55,6 +55,64 @@ test('WebDAV adapter supports authenticate, CRUD, listing, and metadata', async 
   expect(result.afterDelete).toBeNull();
 });
 
+test('request budget: WebDAV reconnect avoids device rewrite churn', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { Interocitor } = await import('/packages/core/dist/index.js');
+    const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
+
+    const makeEngine = () => new Interocitor(
+      new WebDAVAdapter({ baseUrl: `${location.origin}/__webdav__`, auth: { username: 'u', password: 'p' } }),
+      { deviceId: 'dev_budget', remotePath: '/InterocitorBudget', pollInterval: 60_000, flushDebounce: 5, flushThreshold: 1 },
+    );
+
+    const first = makeEngine();
+    await first.init();
+    await first.connect();
+    const beforeReconnectCloud = window.__webdavMock.dumpFiles();
+    await first.disconnect();
+
+    window.__webdavMock.resetRequestCounts();
+
+    const second = makeEngine();
+    await second.init();
+    await second.connect();
+    const counts = window.__webdavMock.dumpRequestCounts();
+    const cloud = window.__webdavMock.dumpFiles();
+    await second.disconnect();
+
+    return { counts, cloud, beforeReconnectCloud };
+  });
+
+  expect(result.counts['PUT /InterocitorBudget/devices/dev_budget.json'] ?? 0).toBe(0);
+  expect(result.counts['PUT /InterocitorBudget/manifest.json'] ?? 0).toBe(0);
+  expect(result.counts['PUT /InterocitorBudget/manifest-1.json'] ?? 0).toBe(0);
+  expect(result.counts['PROPFIND /InterocitorBudget/mainline'] ?? 0).toBeLessThanOrEqual(1);
+  expect(result.counts['GET /InterocitorBudget/devices/dev_budget.json'] ?? 0).toBeLessThanOrEqual(1);
+});
+
+test('request budget: WebDAV repeated pull with no changes does not write', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { Interocitor } = await import('/packages/core/dist/index.js');
+    const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
+
+    const engine = new Interocitor(
+      new WebDAVAdapter({ baseUrl: `${location.origin}/__webdav__`, auth: { username: 'u', password: 'p' } }),
+      { deviceId: 'dev_pull_budget', remotePath: '/InterocitorPullBudget', pollInterval: 60_000, flushDebounce: 5, flushThreshold: 1 },
+    );
+
+    await engine.init();
+    await engine.connect();
+    window.__webdavMock.resetRequestCounts();
+    await engine.pull();
+    await engine.disconnect();
+    return window.__webdavMock.dumpRequestCounts();
+  });
+
+  const writeKeys = Object.keys(result).filter(key => key.startsWith('PUT ') || key.startsWith('DELETE ') || key.startsWith('MKCOL '));
+  expect(writeKeys).toEqual([]);
+  expect(result['PROPFIND /InterocitorPullBudget/mainline'] ?? 0).toBeLessThanOrEqual(1);
+});
+
 test('Interocitor writes file-per-change paths and syncs rows through WebDAV', async ({ page }) => {
   const result = await page.evaluate(async () => {
     const { Interocitor, rowToPlain, readColumn } = await import('/packages/core/dist/index.js');
@@ -267,6 +325,8 @@ declare global {
   interface Window {
     __webdavMock: {
       resetCloud(): void;
+      resetRequestCounts(): void;
+      dumpRequestCounts(): Record<string, number>;
       resetIndexedDb(): Promise<void>;
       dumpFiles(): Record<string, string>;
       hasFile(path: string): boolean;

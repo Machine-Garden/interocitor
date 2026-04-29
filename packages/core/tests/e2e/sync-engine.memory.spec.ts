@@ -99,6 +99,291 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result.syncCompleteCount).toBeGreaterThanOrEqual(2);
   });
 
+  test('request budget: reconnect budget is observed and bounded', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      class CountingPushAdapter extends MemoryAdapter {
+        name = 'counting-push-memory';
+        counts = {
+          authenticate: 0,
+          ensureFolder: 0,
+          listFiles: 0,
+          listFolders: 0,
+          readFile: 0,
+          writeFile: 0,
+          deleteFile: 0,
+          getFileMetadata: 0,
+          subscribeToInvalidations: 0,
+          unsubscribeRemoteInvalidations: 0,
+        };
+        listener: ((payload: { type: string; path: string; ts: number }) => void) | null = null;
+        async authenticate() { this.counts.authenticate++; return await super.authenticate(); }
+        async ensureFolder(path: string) { this.counts.ensureFolder++; return await super.ensureFolder(path); }
+        async listFiles(path: string) { this.counts.listFiles++; return await super.listFiles(path); }
+        async listFolders(path: string) { this.counts.listFolders++; return await super.listFolders(path); }
+        async readFile(path: string) { this.counts.readFile++; return await super.readFile(path); }
+        async writeFile(path: string, data: Uint8Array | string) { this.counts.writeFile++; return await super.writeFile(path, data); }
+        async deleteFile(path: string) { this.counts.deleteFile++; return await super.deleteFile(path); }
+        async getFileMetadata(path: string) { this.counts.getFileMetadata++; return await super.getFileMetadata(path); }
+        subscribeToInvalidations(onInvalidate: (payload: { type: string; path: string; ts: number }) => void, hooks?: { onReady?: () => void }): () => void {
+          this.counts.subscribeToInvalidations++;
+          this.listener = onInvalidate;
+          hooks?.onReady?.();
+          return () => {
+            this.counts.unsubscribeRemoteInvalidations++;
+            this.listener = null;
+          };
+        }
+        snapshotCounts() { return { ...this.counts }; }
+      }
+
+      const adapter = new CountingPushAdapter();
+      const engine = new Interocitor(adapter, { batchWindowMs: 0, remotePath: '/MeshBudget', pollInterval: 600_000, deviceId: 'dev_budget' });
+      await engine.init();
+      await engine.connect();
+      await engine.disconnect();
+      const afterFirstSession = adapter.snapshotCounts();
+
+      const engine2 = new Interocitor(adapter, { batchWindowMs: 0, remotePath: '/MeshBudget', pollInterval: 600_000, deviceId: 'dev_budget' });
+      await engine2.init();
+      await engine2.connect();
+      await engine2.disconnect();
+      const afterSecondSession = adapter.snapshotCounts();
+
+      return {
+        firstSession: afterFirstSession,
+        secondSessionDelta: {
+          authenticate: afterSecondSession.authenticate - afterFirstSession.authenticate,
+          ensureFolder: afterSecondSession.ensureFolder - afterFirstSession.ensureFolder,
+          listFiles: afterSecondSession.listFiles - afterFirstSession.listFiles,
+          listFolders: afterSecondSession.listFolders - afterFirstSession.listFolders,
+          readFile: afterSecondSession.readFile - afterFirstSession.readFile,
+          writeFile: afterSecondSession.writeFile - afterFirstSession.writeFile,
+          deleteFile: afterSecondSession.deleteFile - afterFirstSession.deleteFile,
+          getFileMetadata: afterSecondSession.getFileMetadata - afterFirstSession.getFileMetadata,
+          subscribeToInvalidations: afterSecondSession.subscribeToInvalidations - afterFirstSession.subscribeToInvalidations,
+          unsubscribeRemoteInvalidations: afterSecondSession.unsubscribeRemoteInvalidations - afterFirstSession.unsubscribeRemoteInvalidations,
+        },
+      };
+    });
+
+    expect(result.firstSession.authenticate).toBe(1);
+    expect(result.firstSession.ensureFolder).toBe(4);
+    expect(result.firstSession.listFiles).toBe(1);
+    expect(result.firstSession.listFolders).toBe(0);
+    expect(result.firstSession.readFile).toBe(2);
+    expect(result.firstSession.writeFile).toBe(3);
+    expect(result.firstSession.deleteFile).toBe(0);
+    expect(result.firstSession.getFileMetadata).toBe(0);
+    expect(result.secondSessionDelta.authenticate).toBe(0);
+    expect(result.secondSessionDelta.ensureFolder).toBeGreaterThanOrEqual(0);
+    expect(result.secondSessionDelta.listFiles).toBeGreaterThanOrEqual(0);
+    expect(result.secondSessionDelta.listFolders).toBe(0);
+    expect(result.secondSessionDelta.readFile).toBeGreaterThanOrEqual(0);
+    expect(result.secondSessionDelta.writeFile).toBeLessThanOrEqual(1);
+    expect(result.secondSessionDelta.deleteFile).toBe(0);
+    expect(result.secondSessionDelta.getFileMetadata).toBe(0);
+    expect(result.secondSessionDelta.subscribeToInvalidations).toBe(1);
+    expect(result.secondSessionDelta.unsubscribeRemoteInvalidations).toBe(1);
+  });
+
+  test('request budget: invalidation bursts trigger at most one list and no writes when nothing changed', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      class CountingPushAdapter extends MemoryAdapter {
+        name = 'counting-push-memory';
+        counts = {
+          authenticate: 0,
+          ensureFolder: 0,
+          listFiles: 0,
+          listFolders: 0,
+          readFile: 0,
+          writeFile: 0,
+          deleteFile: 0,
+          getFileMetadata: 0,
+          subscribeToInvalidations: 0,
+          unsubscribeRemoteInvalidations: 0,
+        };
+        listener: ((payload: { type: string; path: string; ts: number }) => void) | null = null;
+        async authenticate() { this.counts.authenticate++; return await super.authenticate(); }
+        async ensureFolder(path: string) { this.counts.ensureFolder++; return await super.ensureFolder(path); }
+        async listFiles(path: string) { this.counts.listFiles++; return await super.listFiles(path); }
+        async listFolders(path: string) { this.counts.listFolders++; return await super.listFolders(path); }
+        async readFile(path: string) { this.counts.readFile++; return await super.readFile(path); }
+        async writeFile(path: string, data: Uint8Array | string) { this.counts.writeFile++; return await super.writeFile(path, data); }
+        async deleteFile(path: string) { this.counts.deleteFile++; return await super.deleteFile(path); }
+        async getFileMetadata(path: string) { this.counts.getFileMetadata++; return await super.getFileMetadata(path); }
+        subscribeToInvalidations(onInvalidate: (payload: { type: string; path: string; ts: number }) => void, hooks?: { onReady?: () => void }): () => void {
+          this.counts.subscribeToInvalidations++;
+          this.listener = onInvalidate;
+          hooks?.onReady?.();
+          return () => {
+            this.counts.unsubscribeRemoteInvalidations++;
+            this.listener = null;
+          };
+        }
+        push(path: string): void {
+          this.listener?.({ type: 'invalidation', path, ts: Date.now() });
+        }
+        snapshotCounts() { return { ...this.counts }; }
+      }
+
+      const adapter = new CountingPushAdapter();
+      const engine = new Interocitor(adapter, { batchWindowMs: 0, remotePath: '/MeshBurstBudget', pollInterval: 600_000, deviceId: 'dev_burst' });
+      await engine.init();
+      await engine.connect();
+      const baseline = adapter.snapshotCounts();
+
+      adapter.push('/MeshBurstBudget/changes/head.json');
+      adapter.push('/MeshBurstBudget/changes/head.json');
+      adapter.push('/MeshBurstBudget/changes/head.json');
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const afterBurst = adapter.snapshotCounts();
+      await engine.disconnect();
+
+      return {
+        delta: {
+          authenticate: afterBurst.authenticate - baseline.authenticate,
+          ensureFolder: afterBurst.ensureFolder - baseline.ensureFolder,
+          listFiles: afterBurst.listFiles - baseline.listFiles,
+          listFolders: afterBurst.listFolders - baseline.listFolders,
+          readFile: afterBurst.readFile - baseline.readFile,
+          writeFile: afterBurst.writeFile - baseline.writeFile,
+          deleteFile: afterBurst.deleteFile - baseline.deleteFile,
+          getFileMetadata: afterBurst.getFileMetadata - baseline.getFileMetadata,
+          subscribeToInvalidations: afterBurst.subscribeToInvalidations - baseline.subscribeToInvalidations,
+          unsubscribeRemoteInvalidations: afterBurst.unsubscribeRemoteInvalidations - baseline.unsubscribeRemoteInvalidations,
+        },
+      };
+    });
+
+    expect(result.delta.authenticate).toBe(0);
+    expect(result.delta.ensureFolder).toBe(0);
+    expect(result.delta.listFiles).toBe(0);
+    expect(result.delta.listFolders).toBe(0);
+    expect(result.delta.readFile).toBeLessThanOrEqual(2);
+    expect(result.delta.writeFile).toBe(0);
+    expect(result.delta.deleteFile).toBe(0);
+    expect(result.delta.getFileMetadata).toBe(0);
+    expect(result.delta.subscribeToInvalidations).toBe(0);
+    expect(result.delta.unsubscribeRemoteInvalidations).toBe(0);
+  });
+
+  test('request budget: repeated same-adapter setRemoteStorage is zero remote requests', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      class CountingAdapter extends MemoryAdapter {
+        counts = { authenticate: 0, ensureFolder: 0, listFiles: 0, listFolders: 0, readFile: 0, writeFile: 0, deleteFile: 0, getFileMetadata: 0 };
+        async authenticate() { this.counts.authenticate++; return await super.authenticate(); }
+        async ensureFolder(path: string) { this.counts.ensureFolder++; return await super.ensureFolder(path); }
+        async listFiles(path: string) { this.counts.listFiles++; return await super.listFiles(path); }
+        async listFolders(path: string) { this.counts.listFolders++; return await super.listFolders(path); }
+        async readFile(path: string) { this.counts.readFile++; return await super.readFile(path); }
+        async writeFile(path: string, data: Uint8Array | string) { this.counts.writeFile++; return await super.writeFile(path, data); }
+        async deleteFile(path: string) { this.counts.deleteFile++; return await super.deleteFile(path); }
+        async getFileMetadata(path: string) { this.counts.getFileMetadata++; return await super.getFileMetadata(path); }
+        snapshotCounts() { return { ...this.counts }; }
+      }
+
+      const adapter = new CountingAdapter();
+      const engine = new Interocitor(adapter, { batchWindowMs: 0, remotePath: '/MeshSameAdapter', pollInterval: 600_000, deviceId: 'dev_same_adapter' });
+      await engine.init();
+      const before = adapter.snapshotCounts();
+      await engine.setRemoteStorage(adapter);
+      const after = adapter.snapshotCounts();
+      return {
+        delta: {
+          authenticate: after.authenticate - before.authenticate,
+          ensureFolder: after.ensureFolder - before.ensureFolder,
+          listFiles: after.listFiles - before.listFiles,
+          listFolders: after.listFolders - before.listFolders,
+          readFile: after.readFile - before.readFile,
+          writeFile: after.writeFile - before.writeFile,
+          deleteFile: after.deleteFile - before.deleteFile,
+          getFileMetadata: after.getFileMetadata - before.getFileMetadata,
+        },
+      };
+    });
+
+    expect(result.delta.authenticate).toBe(0);
+    expect(result.delta.ensureFolder).toBe(0);
+    expect(result.delta.listFiles).toBe(0);
+    expect(result.delta.listFolders).toBe(0);
+    expect(result.delta.readFile).toBe(0);
+    expect(result.delta.writeFile).toBe(0);
+    expect(result.delta.deleteFile).toBe(0);
+    expect(result.delta.getFileMetadata).toBe(0);
+  });
+
+  test('coalesces invalidation bursts without overlapping sync runs', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      class PushAdapter extends MemoryAdapter {
+        readonly name = 'push-memory';
+        listener: ((payload: { type: string; path: string; ts: number }) => void) | null = null;
+        subscribeToInvalidations(onInvalidate: (payload: { type: string; path: string; ts: number }) => void, hooks?: { onReady?: () => void }): () => void {
+          this.listener = onInvalidate;
+          hooks?.onReady?.();
+          return () => {
+            this.listener = null;
+          };
+        }
+        push(path: string): void {
+          this.listener?.({ type: 'invalidation', path, ts: Date.now() });
+        }
+      }
+
+      const adapter = new PushAdapter();
+      const engine = new Interocitor(adapter, { batchWindowMs: 0, remotePath: '/MeshBurst', pollInterval: 600_000, deviceId: 'dev_burst' });
+      let activeSyncs = 0;
+      let maxConcurrentSyncs = 0;
+      let invalidationMessages = 0;
+      let syncCompletes = 0;
+      engine.on((event: { type: string }) => {
+        if (event.type === 'relay:message') invalidationMessages++;
+        if (event.type === 'sync:start') {
+          activeSyncs++;
+          maxConcurrentSyncs = Math.max(maxConcurrentSyncs, activeSyncs);
+        }
+        if (event.type === 'sync:complete' || event.type === 'sync:error') {
+          activeSyncs = Math.max(0, activeSyncs - 1);
+          syncCompletes++;
+        }
+      });
+
+      await engine.init();
+      await engine.connect();
+      syncCompletes = 0;
+      invalidationMessages = 0;
+      activeSyncs = 0;
+      maxConcurrentSyncs = 0;
+
+      adapter.push('/MeshBurst/changes/head.json');
+      adapter.push('/MeshBurst/changes/head.json');
+      adapter.push('/MeshBurst/changes/head.json');
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await engine.disconnect();
+
+      return {
+        invalidationMessages,
+        syncCompletes,
+        maxConcurrentSyncs,
+      };
+    });
+
+    expect(result.invalidationMessages).toBe(3);
+    expect(result.syncCompletes).toBeLessThanOrEqual(1);
+    expect(result.maxConcurrentSyncs).toBeLessThanOrEqual(1);
+  });
+
   test('flush writes one file per change and updates head', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { Interocitor } = await import('/packages/core/dist/index.js');

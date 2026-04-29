@@ -699,6 +699,10 @@ export interface SyncConfig<
   serverId?: string;
   /** Polling interval in ms (default 30000) */
   pollInterval?: number;
+  /** Enable relay/WebSocket invalidations when supported. Default true. */
+  relayEnabled?: boolean;
+  /** Poll interval to use while relay is healthy. Default max(pollInterval, 300000). */
+  relayHealthyPollInterval?: number;
   /** Per-engine log threshold. Default: 'info'. */
   logLevel?: LogLevel;
   /** Flush debounce in ms (default 2000) */
@@ -816,7 +820,7 @@ export type SyncEvent =
   | { type: 'relay:message'; adapter: string; payload: RemoteInvalidationPayload }
   | { type: 'relay:error'; adapter: string; error: Error }
   | { type: 'relay:closed'; adapter: string }
-  | { type: 'relay:unavailable'; adapter: string; reason: 'adapter-unsupported' }
+  | { type: 'relay:unavailable'; adapter: string; reason: 'adapter-unsupported' | 'disabled' }
   | { type: 'flush:start'; entryCount: number }
   | { type: 'flush:complete' }
   | { type: 'flush:error'; error: Error }

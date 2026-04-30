@@ -100,6 +100,45 @@ async function importMeshSecretKey(secret?: string): Promise<CryptoKey> {
   return crypto.subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
 }
 
+/**
+ * Compute the HMAC tag for a mesh-id UUID component. Mirrors the client-side
+ * `computeTag` in `@interocitor/core` so issued ids round-trip cleanly.
+ */
+async function computeMeshTag(uuid: string, secret: CryptoKey): Promise<string> {
+  const sig = await crypto.subtle.sign('HMAC', secret, textEncoder.encode(uuid));
+  const tagBytes = new Uint8Array(sig, 0, 8);
+  let binary = '';
+  for (let i = 0; i < tagBytes.length; i++) binary += String.fromCharCode(tagBytes[i]);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+const MESH_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Strict validation of a request prefix. Returns null on success, or a 400
+ * Response on failure. Fast-fails before D1, cache, or auth work happens.
+ *
+ * Format: `<uuidv7>.<base64url-tag>` where the tag is HMAC-SHA256(uuid, meshSecret)
+ * truncated to 8 bytes. Anything else — wrong shape, bad UUID, or tag mismatch —
+ * yields 400 Invalid prefix.
+ */
+async function validateMeshPrefix(prefix: string, runtime: ResolvedRuntimeConfig): Promise<Response | null> {
+  if (!prefix) return jsonResponse({ error: 'Missing prefix' }, 400);
+  const dot = prefix.lastIndexOf('.');
+  if (dot === -1) return jsonResponse({ error: 'Invalid prefix' }, 400);
+  const uuid = prefix.slice(0, dot);
+  const tag = prefix.slice(dot + 1);
+  if (!MESH_UUID_RE.test(uuid) || !tag) return jsonResponse({ error: 'Invalid prefix' }, 400);
+  const secret = await importMeshSecretKey(runtime.meshSecret);
+  const expected = await computeMeshTag(uuid, secret);
+  // Constant-time compare.
+  if (tag.length !== expected.length) return jsonResponse({ error: 'Invalid prefix' }, 400);
+  let result = 0;
+  for (let i = 0; i < tag.length; i++) result |= tag.charCodeAt(i) ^ expected.charCodeAt(i);
+  if (result !== 0) return jsonResponse({ error: 'Invalid prefix' }, 400);
+  return null;
+}
+
 async function sha256Hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', textEncoder.encode(input));
   return Array.from(new Uint8Array(digest))
@@ -343,6 +382,13 @@ async function handleSystem(
     const body = await readJsonBody(request);
     const op = String(body?.op || '');
     if (!prefix || !op) return jsonResponse({ error: 'Missing prefix or op' }, 400);
+    // System ops other than `issue-mesh-id` operate against an existing mesh —
+    // validate the prefix integrity. `issue-mesh-id` itself receives an
+    // arbitrary placeholder prefix (not yet minted), so it's exempt.
+    if (op !== 'issue-mesh-id') {
+      const prefixError = await validateMeshPrefix(prefix, runtime);
+      if (prefixError) return prefixError;
+    }
     if (op === 'prune-compacted-changes' || op === 'compact') {
       const remotePath = normalizePath(String(body?.remotePath || '/'));
       const watermarkHlc = String(body?.watermarkHlc || '');
@@ -401,6 +447,8 @@ async function handleWsUpgrade<Env>(
   prefix: string,
   relayGetter?: (env: Env) => DurableObjectNamespace,
 ): Promise<Response> {
+  const prefixError = await validateMeshPrefix(prefix, runtime);
+  if (prefixError) return prefixError;
   if (!(await hasAccess(request, runtime, prefix))) {
     if (runtime.verbose) console.warn('[interocitor:relay] unauthorized notify request', { prefix });
     return new Response('Unauthorized', { status: 401 });
@@ -434,11 +482,14 @@ async function handleIoRequest<Env>(
   dbGetter: (env: Env) => D1Database,
   relayGetter?: (env: Env) => DurableObjectNamespace,
 ): Promise<Response> {
-  const db = resolveDatabase(env, dbGetter);
   const method = request.method.toUpperCase();
   const { prefix, op } = parseIo(url);
+  // Strict prefix integrity check — fast-fail BEFORE any D1/auth/cache work.
+  // A tampered prefix never reaches the database or the auth path.
+  const prefixError = await validateMeshPrefix(prefix, runtime);
+  if (prefixError) return prefixError;
+  const db = resolveDatabase(env, dbGetter);
   const relay = relayGetter ? relayGetter(env) : undefined;
-  if (!prefix) return jsonResponse({ error: 'Missing prefix' }, 400);
   if (!(await hasAccess(request, runtime, prefix))) return jsonResponse({ error: 'Unauthorized' }, 401);
 
   if (op === 'health' && method === 'GET') {

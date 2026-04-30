@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 export const CF_TESTS_ENABLED = Boolean(process.env.RUN_CF_EXAMPLE_TESTS);
@@ -6,13 +6,45 @@ export const CF_POLL_INTERVAL_MS = 250;
 export const CF_WORKER_BASE_URL = `http://127.0.0.1:${process.env.PLAYWRIGHT_CF_WORKER_PORT || '8788'}/todo-interocitor`;
 export const CF_ACCESS_SECRET = process.env.PLAYWRIGHT_CF_ACCESS_SECRET || 'playwright-access-secret';
 export const CF_SYSTEM_SECRET = process.env.PLAYWRIGHT_CF_SYSTEM_SECRET || 'playwright-system-secret';
+export const CF_MESH_SECRET = process.env.PLAYWRIGHT_CF_MESH_SECRET || 'replace-with-production-mesh-secret';
 
-export function makeNamespace(prefix = 'team-cf'): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+/** Generate a UUIDv7 (matches `packages/workers/src/ids.ts`). */
+function uuidv7(): string {
+  const now = Date.now();
+  const tsBytes = Buffer.alloc(6);
+  let ts = now;
+  for (let i = 5; i >= 0; i--) { tsBytes[i] = ts & 0xff; ts = Math.floor(ts / 256); }
+  const rand = randomBytes(10);
+  const bytes = Buffer.concat([tsBytes, rand]);
+  bytes[6] = (bytes[6] & 0x0f) | 0x70;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+/**
+ * Mint a strict mesh-id (`<uuidv7>.<hmac-tag>`) using the dev mesh secret.
+ * Matches `validateMeshPrefix` in the worker, so the resulting id passes the
+ * fast-fail integrity check at request entry. The optional `_label` argument
+ * is accepted for backward compatibility with older test code; it is ignored
+ * since strict prefixes have no human-readable component.
+ */
+export function makeNamespace(_label = 'team-cf'): string {
+  const id = uuidv7();
+  const sig = createHmac('sha256', CF_MESH_SECRET).update(id).digest();
+  const tag = sig.subarray(0, 8).toString('base64url');
+  return `${id}.${tag}`;
 }
 
 export function accessTokenForNamespace(namespace: string): string {
   return createHash('sha256').update(`${namespace}${CF_ACCESS_SECRET}`).digest('hex');
+}
+
+/** Tamper a strict mesh-id by flipping the last char of the HMAC tag. */
+export function tamperNamespace(namespace: string): string {
+  const last = namespace.slice(-1);
+  const flipped = last === 'A' ? 'B' : 'A';
+  return namespace.slice(0, -1) + flipped;
 }
 
 export async function openDemo(page: Page, baseURL: string): Promise<void> {

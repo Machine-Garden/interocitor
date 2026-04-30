@@ -1,4 +1,4 @@
-import { meshRootForPath, cacheKeyFor } from './paths.ts';
+import { meshRootForPath, cacheKeyFor, listingCacheKeyFor } from './paths.ts';
 import type { PathType } from './paths.ts';
 import type { D1Database, D1PreparedStatement, QueryRow } from './types.ts';
 
@@ -117,6 +117,56 @@ async function cacheDelete(prefix: string, path: string): Promise<void> {
   const cache = getDefaultCache();
   if (!cache) return;
   await cache.delete(cacheKeyFor(prefix, path));
+}
+
+// ─── Listing cache helpers ───────────────────────────────────────────────────
+//
+// `caches.default` lookup keyed by (prefix, folderPath). Used to short-circuit
+// `opListChildren` so repeated polls cost nothing in CPU or D1 — only request
+// quota. Mutations (put/delete/prune) explicitly invalidate the parent folder
+// listing via `listingCacheDelete`.
+
+// Short TTL: `caches.default` is per-colo and we cannot invalidate across
+// colos. Keep this low (≈1 min) so cross-colo drift is bounded — the cache
+// still absorbs poll bursts within a single colo (DDoS protection) without
+// stale reads becoming a problem.
+const LISTING_CACHE_TTL_SECONDS = 60;
+
+async function listingCacheGet(prefix: string, path: string): Promise<ListChildrenResult | null> {
+  const cache = getDefaultCache();
+  if (!cache) return null;
+  const resp = await cache.match(listingCacheKeyFor(prefix, path));
+  if (!resp) return null;
+  try {
+    return (await resp.json()) as ListChildrenResult;
+  } catch {
+    return null;
+  }
+}
+
+async function listingCachePut(prefix: string, path: string, listing: ListChildrenResult): Promise<void> {
+  const cache = getDefaultCache();
+  if (!cache) return;
+  await cache.put(
+    listingCacheKeyFor(prefix, path),
+    new Response(JSON.stringify(listing), {
+      headers: {
+        'Cache-Control': `public, max-age=${LISTING_CACHE_TTL_SECONDS}`,
+        'Content-Type': 'application/json',
+      },
+    }),
+  );
+}
+
+async function listingCacheDelete(prefix: string, path: string): Promise<void> {
+  const cache = getDefaultCache();
+  if (!cache) return;
+  await cache.delete(listingCacheKeyFor(prefix, path));
+}
+
+function parentDirOf(path: string): string {
+  const idx = path.lastIndexOf('/');
+  return idx <= 0 ? '/' : path.slice(0, idx);
 }
 
 // ─── Shared helpers ──────────────────────────────────────────────────────────
@@ -362,6 +412,8 @@ export async function opPutImmutable(
 
   if (wrote) {
     await cachePut(prefix, normalized, bytes, etag, now);
+    // Invalidate parent folder listing — new file appeared.
+    await listingCacheDelete(prefix, parentDir);
   }
 
   return { wrote, status: wrote ? 201 : 200 };
@@ -420,6 +472,9 @@ export async function opPutSemantic(
     ...meshDeltaStatements(db, prefix, remoteRoot, delta, now),
   ]);
 
+  // Listing changes whenever etag/mtime change, even on update-not-create.
+  await listingCacheDelete(prefix, parentDir);
+
   return { wrote: true, status: 204 };
 }
 
@@ -448,6 +503,8 @@ export async function opPutOverwrite(
     ).bind(prefix, normalized, bytes, bytes.byteLength, now, etag),
   ]);
 
+  await listingCacheDelete(prefix, parentDir);
+
   return { wrote: true, status: 204 };
 }
 
@@ -472,6 +529,12 @@ export async function opListChildren(
   path: string,
 ): Promise<ListChildrenResult> {
   const normalized = normalizePath(path);
+
+  // Cache hit: skip D1 entirely. Cache is invalidated by every op that
+  // mutates files/folders under this folder (see listingCacheDelete callers).
+  const cached = await listingCacheGet(prefix, normalized);
+  if (cached) return cached;
+
   const pattern = normalized === '/' ? '/%' : `${normalized}/%`;
   const slashCount = normalized === '/' ? 1 : normalized.split('/').filter(Boolean).length + 1;
   const depthTarget = slashCount;
@@ -509,7 +572,9 @@ export async function opListChildren(
     })
     .filter(Boolean);
 
-  return { files, folders };
+  const result: ListChildrenResult = { files, folders };
+  await listingCachePut(prefix, normalized, result);
+  return result;
 }
 
 // ─── OP: Delete path ─────────────────────────────────────────────────────────
@@ -534,6 +599,9 @@ export async function opDeletePath(
          deleted_at = ?2, updated_at = ?2
        WHERE prefix = ?1`,
     ).bind(prefix, nowIso()).run();
+    // Whole-prefix wipe: drop the root listing. Per-folder cache entries are
+    // best-effort stale; the TTL bounds their lifetime.
+    await listingCacheDelete(prefix, '/');
     return true;
   }
 
@@ -562,6 +630,10 @@ export async function opDeletePath(
       mainlineBytesDelta: 0,
     }, now));
   }
+
+  // Invalidate the parent folder listing of the deleted path. Subtree listings
+  // (if any were cached) age out via TTL — cheaper than walking children.
+  await listingCacheDelete(prefix, parentDirOf(normalized));
 
   return true;
 }
@@ -624,6 +696,11 @@ export async function opPruneCompacted(
   }
 
   await Promise.allSettled(toDelete.map((p) => cacheDelete(prefix, p)));
+
+  // All pruned files live under the same `<remoteRoot>/changes/` folder.
+  // Invalidate that single listing once.
+  const changesFolder = `${root === '/' ? '' : root}/changes`;
+  await listingCacheDelete(prefix, changesFolder);
 
   const now = nowIso();
   await db.batch(meshDeltaStatements(db, prefix, root, {

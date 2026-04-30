@@ -160,18 +160,29 @@ export class CloudflareAdapter implements StorageAdapter {
     let cancelled = false;
     let backoffMs = 1000;
     const MAX_BACKOFF_MS = 30_000;
+    // Attempts where the socket closed before ever opening (failed upgrade).
+    // After MAX_FAILED_UPGRADES consecutive such failures we back off to a long
+    // cooldown interval rather than hammering (e.g. DO free-tier exhaustion).
+    // Once the cooldown elapses we try again — self-healing if the server recovers.
+    let failedUpgradeStreak = 0;
+    const MAX_FAILED_UPGRADES = 5;
+    const COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 
     const connect = () => {
       if (cancelled) return;
+      let opened = false;
       try {
         ws = new WebSocket(this.notifyUrl);
       } catch (error) {
         hooks?.onError?.(error);
+        failedUpgradeStreak++;
         scheduleReconnect();
         return;
       }
 
       ws.onopen = () => {
+        opened = true;
+        failedUpgradeStreak = 0;
         backoffMs = 1000;
         hooks?.onReady?.();
       };
@@ -192,8 +203,20 @@ export class CloudflareAdapter implements StorageAdapter {
       };
 
       ws.onclose = () => {
+        if (!opened) {
+          // The upgrade itself failed (server returned non-101, e.g. 500/503).
+          failedUpgradeStreak++;
+        }
         if (!cancelled) {
           hooks?.onClose?.();
+          if (failedUpgradeStreak >= MAX_FAILED_UPGRADES) {
+            // Back off to a long cooldown then try again — self-healing if the
+            // server recovers (e.g. DO free-tier resets).
+            failedUpgradeStreak = 0;
+            backoffMs = 1000;
+            setTimeout(() => connect(), COOLDOWN_MS);
+            return;
+          }
           scheduleReconnect();
         }
       };

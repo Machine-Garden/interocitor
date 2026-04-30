@@ -99,3 +99,15 @@ export function cacheKeyFor(prefix: string, path: string): string {
   const safePath = path.startsWith('/') ? path : `/${path}`;
   return `https://interocitor-cache/${safePrefix}${safePath}`;
 }
+
+/**
+ * Build the URL used as a cache key for folder listings.
+ *
+ * Separate namespace from {@link cacheKeyFor} so file content and listing
+ * caches cannot collide.
+ */
+export function listingCacheKeyFor(prefix: string, path: string): string {
+  const safePrefix = encodeURIComponent(prefix);
+  const safePath = path.startsWith('/') ? path : `/${path}`;
+  return `https://interocitor-cache/listings/${safePrefix}${safePath}`;
+}

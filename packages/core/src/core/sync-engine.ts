@@ -89,6 +89,7 @@ type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> = {
 };
 
 const DEFAULT_COMPACT_WARNING_THRESHOLD = 50;
+const POLL_BACKGROUND_MULTIPLIER = 10;
 const DEFAULT_COMPACT_AUTO_THRESHOLD = 50;
 const DEFAULT_COMPACT_AUTO_SAMPLE_NUMERATOR = 10;
 const DEFAULT_COMPACT_AUTO_DEVICE_COUNT = 1;
@@ -203,7 +204,11 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   private pendingBatch: ChangeEntry | null = null;
 
   // Poll / push invalidation management
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private pollTimer: ReturnType<typeof setTimeout> | null = null;
+  private pollBaseIntervalMs = 0;
+  private pollCurrentIntervalMs = 0;
+  private pollGeneration: object = {};
+  private visibilityChangeListener: (() => void) | null = null;
   private unsubscribeRemoteInvalidations: (() => void) | null = null;
   private remoteInvalidationPullPromise: Promise<void> | null = null;
   private remoteInvalidationPullQueued = false;
@@ -768,16 +773,51 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
   private stopPolling(): void {
     if (this.pollTimer) {
-      clearInterval(this.pollTimer);
+      clearTimeout(this.pollTimer);
       this.pollTimer = null;
     }
+    this.pollGeneration = {}; // invalidate any in-flight pull's generation
+    this.pollBaseIntervalMs = 0;
   }
 
   private startPolling(intervalMs = this.config.pollInterval): void {
     this.stopPolling();
-    this.pollTimer = setInterval(() => {
-      this.pull().catch(() => {});
-    }, intervalMs);
+    this.pollBaseIntervalMs = intervalMs;
+    this.pollCurrentIntervalMs = intervalMs;
+    // Each startPolling call gets its own generation token so that in-flight
+    // pulls from a previous polling session don't reschedule after stopPolling.
+    const generation = {};
+    this.pollGeneration = generation;
+    const schedule = (): void => {
+      this.pollTimer = setTimeout(() => {
+        this.pollTimer = null;
+        this.pull().catch(() => {}).finally(() => {
+          if (this.pollGeneration === generation) {
+            schedule();
+          }
+        });
+      }, this.pollCurrentIntervalMs);
+    };
+    schedule();
+  }
+
+  /** Called by emit() to adapt the poll interval based on pull activity. */
+  private adaptPollInterval(entriesMerged: number): void {
+    if (!this.pollBaseIntervalMs) return; // not polling
+    const MAX_POLL_INTERVAL_MS = 60_000;
+    if (entriesMerged > 0) {
+      // Activity — reset to base interval.
+      if (this.pollCurrentIntervalMs !== this.pollBaseIntervalMs) {
+        this.pollCurrentIntervalMs = this.pollBaseIntervalMs;
+        this.log('debug', '[interocitor:poll] activity detected, poll interval reset', { intervalMs: this.pollCurrentIntervalMs });
+      }
+    } else {
+      // Idle — back off toward max.
+      if (this.pollCurrentIntervalMs < MAX_POLL_INTERVAL_MS) {
+        this.pollCurrentIntervalMs = Math.min(this.pollCurrentIntervalMs * 2, MAX_POLL_INTERVAL_MS);
+        this.log('debug', '[interocitor:poll] idle, poll interval backed off', { intervalMs: this.pollCurrentIntervalMs });
+      }
+    }
   }
 
   private stopRemoteInvalidations(): void {
@@ -981,6 +1021,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     if (event.type === 'change' || event.type === 'delete') {
       this.invalidateQueryCacheForTable(event.table);
       this.invalidateRowCacheForTable(event.table);
+    }
+    if (event.type === 'sync:complete') {
+      this.adaptPollInterval(event.entriesMerged);
     }
     for (const listener of this.listeners) {
       try { listener(event); } catch { /* don't let listener errors break sync */ }
@@ -1663,12 +1706,44 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     this.connected = true;
     this.log('info', 'connect() — connected', { remotePath: this.config.remotePath, deviceId: this.deviceId, pollInterval: this.config.pollInterval });
 
-    if (typeof window !== 'undefined') {
-      window.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') {
-          this.doFlush().catch(() => {});
+    this.startVisibilityTracking();
+  }
+
+  private startVisibilityTracking(): void {
+    this.stopVisibilityTracking();
+    if (typeof document === 'undefined') return;
+    const listener = () => {
+      if (document.visibilityState === 'hidden') {
+        // Tab backgrounded: flush pending writes and slow down polling 10×.
+        this.doFlush().catch(() => {});
+        if (this.pollBaseIntervalMs) {
+          this.pollCurrentIntervalMs = Math.min(
+            this.pollCurrentIntervalMs * POLL_BACKGROUND_MULTIPLIER,
+            this.pollBaseIntervalMs * POLL_BACKGROUND_MULTIPLIER,
+          );
+          this.log('debug', '[interocitor:poll] tab hidden, poll interval slowed', { intervalMs: this.pollCurrentIntervalMs });
         }
-      });
+      } else {
+        // Tab foregrounded: pull immediately then reset to base interval.
+        this.log('debug', '[interocitor:poll] tab visible, forcing pull and resetting interval');
+        if (this.pollBaseIntervalMs) {
+          this.pollCurrentIntervalMs = this.pollBaseIntervalMs;
+        }
+        if (this.connected) {
+          this.pull().catch(() => {});
+        }
+      }
+    };
+    this.visibilityChangeListener = listener;
+    document.addEventListener('visibilitychange', listener);
+  }
+
+  private stopVisibilityTracking(): void {
+    if (this.visibilityChangeListener) {
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', this.visibilityChangeListener);
+      }
+      this.visibilityChangeListener = null;
     }
   }
 
@@ -1678,6 +1753,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     // poll/push/flush touches the adapter while we are killing the session.
     this.stopPolling();
     this.stopRemoteInvalidations();
+    this.stopVisibilityTracking();
     this.clearScheduledFlush();
     this.clearCompactTimers();
     this.clearBatchTimer();

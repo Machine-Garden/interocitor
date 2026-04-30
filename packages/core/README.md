@@ -163,6 +163,32 @@ What we do **not** guarantee:
   manifest). See `docs/security-model.md`.
 - Recovery if the passphrase is lost — see "New device / restore".
 
+### Sync cadence
+
+The engine adapts how often it polls the remote so it does useful work
+when there is data to sync, and stays out of the way otherwise. This is
+all automatic — there is no configuration knob.
+
+- **Adaptive backoff.** Polling starts at `pollInterval` (30 s by
+  default). After every poll that merges zero entries the interval
+  doubles, capped at 60 s. Any poll that merges ≥ 1 entry resets the
+  interval back to base. The intent is to absorb idle bursts of clients
+  without hammering the remote, while still recovering immediately when
+  data starts flowing.
+- **Tab visibility.** When the host page is hidden
+  (`document.visibilityState === 'hidden'`) the current poll interval is
+  multiplied by 10 — backgrounded tabs poll lazily. When the tab becomes
+  visible again the interval is reset to base **and** an immediate
+  `pull()` is fired so foregrounded data jumps in without waiting for
+  the next tick. This is a standard SWR‑style refresh‑on‑focus pattern.
+  The listener is wired during `connect()` and torn down by
+  `disconnect()`; environments without `document` (e.g. Node) skip it.
+- **Push fallback.** Adapters that push invalidations (Cloudflare relay)
+  trigger an immediate pull and bypass the polling cadence entirely.
+  Polling is the safety net when the push channel is unavailable; the
+  WS connection itself uses bounded retries with a long cooldown after
+  repeated failed upgrades, so a misbehaving relay cannot DDoS itself.
+
 ## Setup lifecycle
 
 ```

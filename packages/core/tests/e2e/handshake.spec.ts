@@ -448,4 +448,14 @@ test.describe('QR output shape', () => {
     expect(result.intent).toBe('join');
     expect(result.encodedIsB64).toBe(true);
   });
+
+  test('QR decoder is available through the public handshake subpath', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { encodeQRPayload, decodeQRPayload } = await import('/packages/core/dist/handshake/qr-public.js');
+      const payload = { intent: 'share' as const, handshakeId: 'hs_1', generatorPub: 'pub_1', adapterConfig: 'adapter' };
+      return decodeQRPayload(encodeQRPayload(payload));
+    });
+
+    expect(result).toEqual({ intent: 'share', handshakeId: 'hs_1', generatorPub: 'pub_1', adapterConfig: 'adapter' });
+  });
 });

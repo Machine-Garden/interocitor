@@ -236,15 +236,56 @@ Joining a new device to an existing mesh requires three things:
 3. Access to the same **remote mailbox** (the same `remotePath` on a
    storage backend the new device can reach).
 
-The pairing flow ships these three over an ECDH relay handshake (see
-`generateShareQR` / `handleScannedQR` in the handshake module). After
-the handshake the new device:
+A production app should keep CRUD, sync lifecycle, and pairing separate:
+
+```text
+lib/interocitor-db.ts      engine, schema, local repository, credential primitives
+lib/interocitor-sync.ts    mesh id lifecycle, adapter, connect/disconnect, recovery
+lib/interocitor-pairing.ts QR handshake only
+```
+
+The pairing flow ships credentials over an ECDH relay handshake. The handshake relay base and sync adapter base are different concepts: a relay base is the temporary handshake-file path, such as `/Taska`; the Cloudflare adapter base URL is the concrete Worker route, such as `/sync/io/{meshId}`. The engine `remotePath` is still the mesh folder path used inside that adapter, such as `/Taska`.
+
+### Pairing intents
+
+**Join QR** is for a device that does not have credentials yet:
+
+1. Joiner mints a fresh mesh id.
+2. Joiner creates a Cloudflare adapter with base URL `/sync/io/{meshId}`.
+3. Joiner calls `generateJoinQR()`.
+4. Existing paired device scans and pushes credentials.
+5. Joiner receives credentials from `credentials` on the result.
+6. Joiner applies the passphrase and connects to the minted mesh.
+
+**Share QR** is for an existing mesh member inviting a new device:
+
+1. Existing device connects to the active mesh.
+2. Existing device calls `generateShareQR()` with `remotePath` and `passphrase`.
+3. New device scans and receives credentials from `handleScannedQR()`.
+4. New device applies credentials and connects using the adapter config from the payload.
+
+`handleScannedQR()` returns `null` for join intent because the scanner pushed its own credentials. It returns credentials for share intent because the scanner received credentials. Always handle the return value:
+
+```ts
+import { decodeQRPayload, handleScannedQR, parseQRFromUrl } from '@interocitor/core';
+// Raw QR payload decoder is also available from '@interocitor/core/handshake/qr'.
+
+const payload = parseQRFromUrl(location.hash) ?? decodeQRPayload(rawPastedPayload);
+const received = await handleScannedQR({ adapter, relayBase: '/Taska', payload });
+
+if (received) {
+  if (received.passphrase) db.setPassphrase(received.passphrase);
+  await connectFromPayload(received.remotePath);
+}
+```
+
+After the handshake the new device:
 
 ```ts
 const db = new Interocitor(adapter, {
   dbName: 'my-app',
   appName: 'My App',
-  remotePath: '/MyApp',
+  remotePath: '/Taska',
   passphrase: 'base58-from-handshake',
   encrypted: true,
 });

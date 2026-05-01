@@ -362,5 +362,28 @@ test.describe('LocalStore — clearAll', () => {
     expect(result.cursor).toBe(0);
     expect(result.meta).toBeUndefined();
   });
+
+  test('resetLocalDatabase deletes a named IndexedDB database', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { LocalStore } = await import('/packages/core/dist/storage/local-store.js');
+      const { resetLocalDatabase } = await import('/packages/core/dist/index.js');
+      const dbName = 'interocitor-reset-test';
+      const store = new LocalStore(dbName);
+      await store.open();
+      await store.putRow({ _meta: { table: 't', rowId: 'r', deleted: false, schemaVersion: 1 }, payload: {} });
+      store.close();
+
+      await resetLocalDatabase(dbName);
+
+      const reopened = new LocalStore(dbName);
+      await reopened.open();
+      const rows = await reopened.getAllRows();
+      reopened.close();
+      await resetLocalDatabase(dbName);
+      return rows.length;
+    });
+
+    expect(result).toBe(0);
+  });
 });
 

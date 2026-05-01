@@ -1242,6 +1242,52 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result).toContain('Cannot configure mesh after init()');
   });
 
+  test('setPassphrase works after init before connect', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+      const engine = new Interocitor(new MemoryAdapter(), {
+        remotePath: '/PassphraseMesh',
+        dbName: 'passphrase-after-init-db',
+        appName: 'Test App',
+        encrypted: false,
+      });
+
+      await engine.init();
+      engine.setPassphrase('pairing-passphrase');
+      const beforeConnect = { passphrase: engine.getPassphrase(), encrypted: engine.isEncrypted() };
+      await engine.disconnect();
+      return beforeConnect;
+    });
+
+    expect(result).toEqual({ passphrase: 'pairing-passphrase', encrypted: true });
+  });
+
+  test('setPassphrase is rejected while connected', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+      const engine = new Interocitor(new MemoryAdapter(), {
+        remotePath: '/ConnectedPassphraseMesh',
+        dbName: 'passphrase-connected-db',
+        appName: 'Test App',
+        encrypted: false,
+      });
+
+      await engine.connect();
+      try {
+        engine.setPassphrase('too-late');
+        return 'no-error';
+      } catch (error: any) {
+        return String(error?.message ?? error);
+      } finally {
+        await engine.disconnect();
+      }
+    });
+
+    expect(result).toContain('Cannot set passphrase while connected');
+  });
+
   test('emits compact:warning when queued changes reach compactWarnThreshold', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { Interocitor } = await import('/packages/core/dist/index.js');

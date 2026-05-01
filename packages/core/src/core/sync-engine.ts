@@ -1196,11 +1196,26 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   }
 
   /**
-   * Set the mesh encryption passphrase.
-   * Call before init() or between disconnect() and init().
+   * Set or replace the mesh encryption passphrase before connecting.
+   *
+   * Apps may call this before init(), after init(), or after credentials
+   * arrive from pairing. It intentionally does not rebuild the engine or
+   * change remotePath/deviceId; it only invalidates the derived key so the
+   * next connect/flush uses the new passphrase.
    */
   setPassphrase(passphrase: string): void {
-    this.configureMesh({ passphrase, encrypted: true });
+    if (this.connected) throw new Error('Cannot set passphrase while connected; disconnect first');
+    this.passphrase = passphrase;
+    this.encryptionKey = null;
+    this.encrypted = true;
+    this.emit({
+      type: 'mesh:configured',
+      dbName: this.dbName,
+      remotePath: this.config.remotePath,
+      deviceId: this.deviceId,
+      encrypted: this.encrypted,
+      hadPassphrase: true,
+    });
   }
 
   /**
@@ -1464,6 +1479,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       hasInFlight: !!this.connectPromise,
     });
     await this.ensureReady();
+    if (this.encrypted && !this.encryptionKey) await this.resolveEncryption();
     if (!this.config.remotePath) throw new Error('connect() requires remotePath; configure mesh before connecting');
 
     // Idempotent. If we are already connected to a live mesh on this

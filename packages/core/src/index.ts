@@ -63,6 +63,7 @@ export {
   type InterocitorInitContext,
 } from './core/sync-engine.ts';
 export { LocalStore } from './storage/local-store.ts';
+export { resetLocalDatabase } from './storage/reset.ts';
 export {
   type CredentialStore,
   type StoredCredentials,

@@ -10,6 +10,8 @@ Cloudflare Workers runtime for [Interocitor](https://github.com/TheUiTeam/intero
 
 ## Quick start
 
+Use the Worker package for the concrete sync adapter base URL, for example `/sync/io/{meshId}`. This is separate from the handshake relay base used by QR pairing, which is an app-level logical path such as `/Taska`.
+
 ```ts
 import { InterocitorRelayDurableObject, withInterocitor } from '@interocitor/workers';
 
@@ -56,13 +58,23 @@ Interocitor claims `/<prefix>/io/*`, `/<prefix>/notify/*`, `/<prefix>/__interoci
 
 ### Required bindings
 
+The conventional app wiring is:
+
+```ts
+const mount = createInterocitorMount({
+  mountPrefix: '/sync',
+  db: (env) => env.INTEROCITOR_DB,
+  relay: (env) => env.INTEROCITOR_RELAY,
+});
+```
+
 ```toml
 [[d1_databases]]
-binding = "MY_DB"
+binding = "INTEROCITOR_DB"
 # other Wrangler fields...
 
 [[durable_objects.bindings]]
-name = "MY_RELAY"
+name = "INTEROCITOR_RELAY"
 class_name = "InterocitorRelayDurableObject"
 
 [[migrations]]
@@ -70,7 +82,15 @@ tag = "v1"
 new_classes = ["InterocitorRelayDurableObject"]
 ```
 
-Binding names are yours. Pass them to `withInterocitor(...)` via getters.
+Binding names are ultimately yours. Pass them to `withInterocitor(...)` or `createInterocitorMount(...)` via getters.
+
+Apply the D1 schema from the package root:
+
+```bash
+wrangler d1 execute <database-name> --file node_modules/@interocitor/workers/schema.sql
+```
+
+The published package includes `schema.sql` in its `files` list.
 
 ### Realtime relay: what `InterocitorRelayDurableObject` does
 
@@ -78,7 +98,7 @@ Binding names are yours. Pass them to `withInterocitor(...)` via getters.
 
 - `withInterocitor(..., { relay: (env) => env.MY_RELAY })` enables `/<mountPrefix>/notify/<prefix>`.
 - The Worker authenticates that route with the same per-prefix access-token rule as `/<mountPrefix>/io/<prefix>`.
-- The relay stores WebSockets using Cloudflare's hibernation API (`acceptWebSocket`) and fans out tiny invalidation messages after successful file writes/deletes.
+- The relay stores WebSockets using Cloudflare's hibernation API (`acceptWebSocket`) and fans out tiny invalidation messages after successful file writes/deletes. The package broadcasts internally after successful `PUT` and `DELETE` responses; apps should not wrap these routes just to notify peers.
 - Check relay wiring with `GET /notify/<prefix>/health` using the same bearer/access token. It returns JSON such as `{ "ok": true, "connected": 0 }`; `501` means the relay binding was not configured.
 - Set `runtime.verbose` (for example from `INTEROCITOR_VERBOSE=1`) to emit relay diagnostics to `wrangler tail`: unauthorized notify requests, missing binding, WebSocket forwarding, and broadcast delivery/failure counts.
 - Correctness does not depend on the relay. Clients still poll/pull. The relay is the low-latency path for apps that want push invalidations.

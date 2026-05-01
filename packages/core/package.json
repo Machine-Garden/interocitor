@@ -30,6 +30,14 @@
       "import": "./dist/storage/local-store.js",
       "types": "./dist/storage/local-store.d.ts"
     },
+    "./storage/reset": {
+      "import": "./dist/storage/reset.js",
+      "types": "./dist/storage/reset.d.ts"
+    },
+    "./handshake/qr": {
+      "import": "./dist/handshake/qr-public.js",
+      "types": "./dist/handshake/qr-public.d.ts"
+    },
     "./crypto/keys": {
       "import": "./dist/crypto/keys.js",
       "types": "./dist/crypto/keys.d.ts"

@@ -208,11 +208,40 @@ Use one of the built-in adapters or provide your own:
 
 ## Pairing & multi-device
 
-Use the pairing helpers from `@interocitor/core` to exchange mesh config, passphrase, and device metadata.
+Use three app-side modules for production integrations:
+
+```text
+lib/interocitor-db.ts      engine, schema, local repository, credential primitives
+lib/interocitor-sync.ts    mesh id lifecycle, adapter, connect/disconnect, recovery
+lib/interocitor-pairing.ts QR handshake only
+```
+
+Mesh IDs are not optional. Do not hardcode one Cloudflare prefix such as `/io/app-name`; use one namespace per household/workspace/device group, for example a Cloudflare adapter base URL `/sync/io/{meshId}`. Store the active mesh id locally and expose create/connect/disconnect/recover UI.
+
+Pairing has two intents:
+
+- **Join QR**: the unpaired device mints a fresh mesh id, creates a Cloudflare adapter with base URL `/sync/io/{meshId}`, calls `generateJoinQR()`, then receives credentials from the result's `credentials` promise after an existing device scans and pushes them.
+- **Share QR**: an already-paired device calls `generateShareQR({ remotePath, passphrase })`; the new device scans and must use the credentials returned by `handleScannedQR()`.
+
+```ts
+import { decodeQRPayload, handleScannedQR, parseQRFromUrl } from '@interocitor/core';
+// Or from the stable subpath:
+// import { decodeQRPayload } from '@interocitor/core/handshake/qr';
+
+const payload = parseQRFromUrl(location.hash) ?? decodeQRPayload(rawPastedPayload);
+const received = await handleScannedQR({ adapter, relayBase: '/Taska', payload });
+
+if (received) {
+  if (received.passphrase) db.setPassphrase(received.passphrase);
+  await connectFromPayload(received.remotePath);
+}
+```
+
+`handleScannedQR()` returns `null` for join intent because the scanner pushed its own credentials. It returns credentials for share intent because the scanner received them.
 
 ## Local store
 
-Browser runtime defaults to IndexedDB.
+Browser runtime defaults to IndexedDB. For unrecoverable local encrypted mesh state, disconnect, detach remote storage, clear credentials, forget the local mesh id, call `resetLocalDatabase(dbName)`, then reload before creating or joining a new mesh.
 
 ## CRDT strategy
 
@@ -220,7 +249,7 @@ Interocitor uses per-column CRDT merge with hybrid logical clocks.
 
 ## Events
 
-The engine emits lifecycle and error events for reconnects, credential issues, and remote poison states.
+For simple snapshot UIs, refresh on `change`, `delete`, `rehydrate:complete`, and `sync:complete`. The engine also emits lifecycle and error events for reconnects, credential issues, and remote poison states.
 
 ## Demos
 

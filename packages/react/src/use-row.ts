@@ -100,11 +100,11 @@ export function useRow<T extends Record<string, unknown>, R = T>(
   // Stable snapshot bookkeeping. See useLiveQuery for full rationale —
   // useSyncExternalStore's getSnapshot must return a stable reference when
   // nothing observable changed.
-  const lastRowRef = useRef<T | undefined>(undefined);
-  const lastSelectorInputRef = useRef<T | undefined>(undefined);
+  const lastRowRef = useRef<T | undefined>(void 0);
+  const lastSelectorInputRef = useRef<T | undefined>(void 0);
   const lastSelectorHadInputRef = useRef<boolean>(false);
-  const lastSelectorFnRef = useRef<typeof selector>(undefined);
-  const lastSelectorOutputRef = useRef<R | undefined>(undefined);
+  const lastSelectorFnRef = useRef<typeof selector>(void 0);
+  const lastSelectorOutputRef = useRef<R | undefined>(void 0);
   const lastResultRef = useRef<UseRowResult<R> | null>(null);
 
   const getSnapshot = (): UseRowResult<R> => {

@@ -59,7 +59,7 @@ declare const caches: GlobalCaches | undefined;
 
 function getDefaultCache(): CacheNamespace | undefined {
   // biome-ignore lint/suspicious/noExplicitAny: Cloudflare Workers cache API not in DOM lib
-  const gc = (caches !== undefined ? caches : (globalThis as any).caches) as GlobalCaches | undefined;
+  const gc = (caches === undefined ? (globalThis as any).caches : caches) as GlobalCaches | undefined;
   return gc?.default;
 }
 

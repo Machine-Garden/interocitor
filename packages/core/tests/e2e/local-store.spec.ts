@@ -376,7 +376,7 @@ test.describe('LocalStore — clearAll', () => {
         store.close();
       }
 
-      await new Promise(resolve => setTimeout(resolve, 0));
+      await new Promise(resolve => { setTimeout(resolve, 0); });
       await resetLocalDatabase(dbName);
 
       const reopened = new LocalStore(dbName);

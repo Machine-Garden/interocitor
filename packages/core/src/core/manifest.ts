@@ -136,7 +136,12 @@ export async function loadOrCreateManifest(
   let pointer: ManifestPointer;
   let manifest: Manifest;
   let bootstrapped = false;
-  if (!globalPointer) {
+  if (globalPointer) {
+    pointer = globalPointer;
+    const manifestPath = `${ctx.remotePath}/${pointer.file}`;
+    ctx.emit({ type: 'trace:manifest', op: 'read', reason, path: manifestPath, generation: pointer.currentGeneration });
+    manifest = await readJson<Manifest>(ctx.adapter, manifestPath);
+  } else {
     bootstrapped = true;
     ctx.emit({ type: 'trace:manifest', op: 'bootstrap-create', reason, path: p.manifestPointer });
     const existingMeshId = await local.getMeta('meshId');
@@ -145,11 +150,6 @@ export async function loadOrCreateManifest(
     // they are exactly what's on disk. No GETs needed.
     pointer = bootstrap.pointer;
     manifest = bootstrap.manifest;
-  } else {
-    pointer = globalPointer;
-    const manifestPath = `${ctx.remotePath}/${pointer.file}`;
-    ctx.emit({ type: 'trace:manifest', op: 'read', reason, path: manifestPath, generation: pointer.currentGeneration });
-    manifest = await readJson<Manifest>(ctx.adapter, manifestPath);
   }
   const manifestPath = `${ctx.remotePath}/${pointer.file}`;
   await validateManifestHash(manifest as unknown as { contentHash: string; [key: string]: unknown });

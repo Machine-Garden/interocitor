@@ -69,7 +69,7 @@ function formatWhereClause(clause: WhereClause | undefined): string | null {
       return `${clause.field} between ${left}${lower}, ${upper}${right}`;
     }
     case 'anyOf':
-      return `${clause.field} anyOf [${(clause.values ?? []).map(formatPrimitive).join(', ')}]`;
+      return `${clause.field} anyOf [${(clause.values ?? []).map(value => formatPrimitive(value)).join(', ')}]`;
     case 'startsWith':
       return `${clause.field} startsWith ${formatPrimitive(clause.value)}`;
     default:
@@ -164,10 +164,10 @@ export function useLiveQuery<T extends Record<string, unknown>, R = T[]>(
   //  - last raw rows reference seen from the engine cache
   //  - last selector input + output (for memoization across calls)
   //  - last returned snapshot object (returned as-is on no-op renders)
-  const lastRowsRef = useRef<T[] | undefined>(undefined);
-  const lastSelectorInputRef = useRef<T[] | undefined>(undefined);
-  const lastSelectorFnRef = useRef<typeof selector>(undefined);
-  const lastSelectorOutputRef = useRef<R | undefined>(undefined);
+  const lastRowsRef = useRef<T[] | undefined>(void 0);
+  const lastSelectorInputRef = useRef<T[] | undefined>(void 0);
+  const lastSelectorFnRef = useRef<typeof selector>(void 0);
+  const lastSelectorOutputRef = useRef<R | undefined>(void 0);
   const lastResultRef = useRef<UseLiveQueryResult<R> | null>(null);
 
   const getSnapshot = (): UseLiveQueryResult<R> => {

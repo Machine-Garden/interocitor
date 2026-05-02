@@ -814,12 +814,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
         this.pollCurrentIntervalMs = this.pollBaseIntervalMs;
         this.log('debug', '[interocitor:poll] activity detected, poll interval reset', { intervalMs: this.pollCurrentIntervalMs });
       }
-    } else {
+    } else if (this.pollCurrentIntervalMs < MAX_POLL_INTERVAL_MS) {
       // Idle — back off toward max.
-      if (this.pollCurrentIntervalMs < MAX_POLL_INTERVAL_MS) {
-        this.pollCurrentIntervalMs = Math.min(this.pollCurrentIntervalMs * 2, MAX_POLL_INTERVAL_MS);
-        this.log('debug', '[interocitor:poll] idle, poll interval backed off', { intervalMs: this.pollCurrentIntervalMs });
-      }
+      this.pollCurrentIntervalMs = Math.min(this.pollCurrentIntervalMs * 2, MAX_POLL_INTERVAL_MS);
+      this.log('debug', '[interocitor:poll] idle, poll interval backed off', { intervalMs: this.pollCurrentIntervalMs });
     }
   }
 
@@ -2021,19 +2019,20 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   }
 
   private appendOpToPendingBatch(op: Op, hlc: string): void {
-    if (!this.pendingBatch) {
-      this.pendingBatch = {
-        id: generateId('chg'),
-        ts: Date.now(),
-        device: this.deviceId,
-        hlc,
-        ops: [op],
-      };
-    } else {
+    if (this.pendingBatch) {
       this.pendingBatch.ops.push(op);
       // Carry the highest HLC seen in this batch
       if (hlcCompareStr(hlc, this.pendingBatch.hlc) > 0) this.pendingBatch.hlc = hlc;
+      return;
     }
+
+    this.pendingBatch = {
+      id: generateId('chg'),
+      ts: Date.now(),
+      device: this.deviceId,
+      hlc,
+      ops: [op],
+    };
   }
 
   private armImplicitBatchTimer(): void {
@@ -2257,7 +2256,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
         trigger: 'delayed',
         remotePath: this.config.remotePath,
         deviceId: this.deviceId,
-        reason: !this.connected ? 'not-connected' : !this.config.autoCompact ? 'disabled' : 'missing-remote',
+        reason: this.connected ? (this.config.autoCompact ? 'missing-remote' : 'disabled') : 'not-connected',
       });
       return;
     }

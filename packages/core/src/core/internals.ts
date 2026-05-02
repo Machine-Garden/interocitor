@@ -74,7 +74,7 @@ export function generateId(prefix: string): string {
 export function getDeviceId(override?: string): string {
   if (override) return override;
   const KEY = 'interocitor-device-id';
-  const storage = typeof localStorage !== 'undefined' ? localStorage : null;
+  const storage = typeof localStorage === 'undefined' ? null : localStorage;
   let id = storage?.getItem(KEY) ?? null;
   if (!id) {
     id = createDeviceId();

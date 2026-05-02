@@ -75,7 +75,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       adapter.push('/MeshPush/changes/head.json');
       const deadline = Date.now() + 2_000;
       while (events.filter(type => type === 'sync:complete').length < 2 && Date.now() < deadline) {
-        await new Promise(resolve => setTimeout(resolve, 25));
+        await new Promise(resolve => { setTimeout(resolve, 25); });
       }
       await engine.disconnect();
 
@@ -239,7 +239,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       adapter.push('/MeshBurstBudget/changes/head.json');
       adapter.push('/MeshBurstBudget/changes/head.json');
       adapter.push('/MeshBurstBudget/changes/head.json');
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => { setTimeout(resolve, 100); });
       const afterBurst = adapter.snapshotCounts();
       await engine.disconnect();
 
@@ -367,7 +367,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       adapter.push('/MeshBurst/changes/head.json');
       adapter.push('/MeshBurst/changes/head.json');
       adapter.push('/MeshBurst/changes/head.json');
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => { setTimeout(resolve, 100); });
       await engine.disconnect();
 
       return {
@@ -1518,7 +1518,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await engine.put('tasks', 't1', { title: 'one' });
       await engine.put('tasks', 't2', { title: 'two' });
       // flush:threshold triggers doFlush which triggers maybeAutoCompact
-      await new Promise(r => setTimeout(r, 100));
+      await new Promise(resolve => { setTimeout(resolve, 100); });
 
       await engine.disconnect();
       return { skipReasons: skipEvents.map(e => e.reason) };
@@ -1756,7 +1756,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await engine.connect();
       await engine.put('tasks', 't1', { title: 'one' });
       await engine.flush();
-      await new Promise(r => setTimeout(r, 200));
+      await new Promise(resolve => { setTimeout(resolve, 200); });
       await engine.disconnect();
 
       return {
@@ -1811,7 +1811,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await engine.put('tasks', 't3', { title: 'three' });
       await engine.flush();
       // Wait for full delayed pipeline: check + run
-      await new Promise(r => setTimeout(r, 250));
+      await new Promise(resolve => { setTimeout(resolve, 250); });
       await engine.disconnect();
 
       return {
@@ -2103,7 +2103,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       // Now do two writes with a long gap between them — they should be 2 entries
       await engine.put('tasks', 'g1', { title: 'g-one' });
       await engine.flush();
-      await new Promise(r => setTimeout(r, 100));
+      await new Promise(resolve => { setTimeout(resolve, 100); });
       await engine.put('tasks', 'g2', { title: 'g-two' });
       await engine.flush();
       const afterGapped = Object.keys(adapter.dump()).filter(p => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p)).length;

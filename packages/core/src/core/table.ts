@@ -298,7 +298,7 @@ export class RowResult<T extends Record<string, unknown>> implements PromiseLike
   }
 
   load(options?: QueryExecutionOptions): Promise<T | undefined> {
-    if (!this._engine) return Promise.resolve(undefined);
+    if (!this._engine) return Promise.resolve<T | undefined>(void 0);
     return this._engine.loadRow(this.descriptor, options).then(r => this._project(r));
   }
 

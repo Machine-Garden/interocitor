@@ -22,9 +22,9 @@ function listFilesUrl(namespace: string): string {
   return `${CF_WORKER_BASE_URL}/io/${encodeURIComponent(namespace)}/list-files`;
 }
 
-async function postListFiles(namespace: string, opts: { withAuth?: boolean } = { withAuth: true }): Promise<{ status: number; body: string; elapsedMs: number }> {
+async function postListFiles(namespace: string, opts?: { withAuth?: boolean }): Promise<{ status: number; body: string; elapsedMs: number }> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json; charset=utf-8' };
-  if (opts.withAuth) headers.Authorization = `Bearer ${accessTokenForNamespace(namespace)}`;
+  if (opts?.withAuth ?? true) headers.Authorization = `Bearer ${accessTokenForNamespace(namespace)}`;
   // Warm DNS/TCP/TLS by issuing a no-op request first per call site is overkill;
   // serial mode + sample averaging below smooths out per-request noise.
   const t0 = performance.now();

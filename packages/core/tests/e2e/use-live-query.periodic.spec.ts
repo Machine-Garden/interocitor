@@ -176,7 +176,7 @@ async function waitFor(assertion: () => void | Promise<void>, timeoutMs = 2_000)
     } catch (error) {
       lastError = error;
       await act(async () => {
-        await new Promise(resolve => setTimeout(resolve, 25));
+        await new Promise(resolve => { setTimeout(resolve, 25); });
       });
     }
   }

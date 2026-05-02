@@ -97,6 +97,8 @@ function resetRequestStats() {
   requestStats.websocket.errors = 0;
 }
 
+function noopUnsubscribe() {}
+
 let runtimeOptions = {
   pollInterval: 15000,
   relayEnabled: true,
@@ -259,7 +261,7 @@ async function connect() {
       sseReadyResolve?.(false);
     }
   });
-  const unsubSse = () => {};
+  const unsubSse = noopUnsubscribe;
 
   await engine.init();
   await engine.connect();

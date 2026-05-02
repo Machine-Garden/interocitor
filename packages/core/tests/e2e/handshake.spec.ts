@@ -1,7 +1,6 @@
 import { expect, test } from '@playwright/test';
-function hexFrom(b: ArrayBuffer): string {
-  return Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2, '0')).join('');
-}
+
+/* eslint-disable unicorn/consistent-function-scoping -- Browser-context helpers must be defined inside page.evaluate. */
 
 
 test.beforeEach(async ({ page }) => {

@@ -112,6 +112,7 @@ export class QueryResult<T extends Record<string, unknown>> implements PromiseLi
     return this.load({ bypassCache: policy?.mode === 'bypass-cache' });
   }
 
+  // eslint-disable-next-line unicorn/no-thenable -- QueryResult intentionally supports await/db.table(...).where(...).
   then<R1 = T[], R2 = never>(
     onfulfilled?: ((value: T[]) => R1 | PromiseLike<R1>) | null,
     onrejected?: ((reason: unknown) => R2 | PromiseLike<R2>) | null,
@@ -124,6 +125,7 @@ export class QueryResult<T extends Record<string, unknown>> implements PromiseLi
    * Sync-only. Does NOT change `cacheKey` — this is post-load derivation.
    */
   sort(compareFn: (a: T, b: T) => number): QueryResult<T> {
+    // eslint-disable-next-line unicorn/no-array-sort -- package target/browser tests do not provide Array.prototype.toSorted.
     const next = (rows: T[]) => [...rows].sort(compareFn);
     return new QueryResult<T>(
       this.descriptor,
@@ -322,6 +324,7 @@ export class RowResult<T extends Record<string, unknown>> implements PromiseLike
     return this.load({ bypassCache: policy?.mode === 'bypass-cache' });
   }
 
+  // eslint-disable-next-line unicorn/no-thenable -- RowResult intentionally supports await/db.table(...).row(...).
   then<R1 = T | undefined, R2 = never>(
     onfulfilled?: ((value: T | undefined) => R1 | PromiseLike<R1>) | null,
     onrejected?: ((reason: unknown) => R2 | PromiseLike<R2>) | null,

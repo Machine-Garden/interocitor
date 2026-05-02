@@ -1,4 +1,6 @@
-export {};
+import type { WorkerLike } from './types.ts';
+
+export type RuntimeGlobalsModuleMarker = WorkerLike;
 
 declare global {
   interface ResponseInit {

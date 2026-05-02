@@ -109,7 +109,7 @@ async function computeMeshTag(uuid: string, secret: CryptoKey): Promise<string> 
   const tagBytes = new Uint8Array(sig, 0, 8);
   let binary = '';
   for (let i = 0; i < tagBytes.length; i++) binary += String.fromCodePoint(tagBytes[i]);
-  return btoa(binary).replaceAll(/\+/g, '-').replaceAll(/\//g, '_').replace(/=+$/, '');
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
 const MESH_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -412,7 +412,7 @@ async function handleSystem(
       const tagBytes = new Uint8Array(sig, 0, 8);
       let binary = '';
       for (let i = 0; i < tagBytes.length; i++) binary += String.fromCodePoint(tagBytes[i]);
-      const tag = btoa(binary).replaceAll(/\+/g, '-').replaceAll(/\//g, '_').replace(/=+$/, '');
+      const tag = btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
       return jsonResponse({ meshId: `${id}.${tag}` });
     }
     if (op === 'validate-mesh-id') {
@@ -578,9 +578,9 @@ export function withInterocitor<Env = unknown>(
     },
     async scheduled(event, env, ctx) {
       if (typeof baseWorker.scheduled === 'function') await baseWorker.scheduled(event, env, ctx);
-      const runtime = resolveRuntimeConfig(env, runtimeOptions);
-      if (runtime.enableScheduledMaintenance) {
-        runMaintenance(resolveDatabase(env, db), toMaintenanceEnv(runtime) as InterocitorEnv, null);
+      const resolvedRuntime = resolveRuntimeConfig(env, runtimeOptions);
+      if (resolvedRuntime.enableScheduledMaintenance) {
+        runMaintenance(resolveDatabase(env, db), toMaintenanceEnv(resolvedRuntime) as InterocitorEnv, null);
       }
     },
   };

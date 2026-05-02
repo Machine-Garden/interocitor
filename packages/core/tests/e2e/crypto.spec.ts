@@ -1,9 +1,6 @@
 import { expect, test } from '@playwright/test';
-function toHex(bytes: Uint8Array): string {
-  return Array.from(bytes).map(byte => byte.toString(16).padStart(2, '0')).join('');
-}
 
-
+/* eslint-disable unicorn/consistent-function-scoping -- Browser-context helpers must be defined inside page.evaluate. */
 test.beforeEach(async ({ page }) => {
   await page.goto('/packages/core/tests/e2e/fixtures/harness.html');
   await page.evaluate(() => {

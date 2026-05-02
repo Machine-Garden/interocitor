@@ -185,6 +185,7 @@ test.describe('Interocitor query cache', () => {
       const a1 = engine.table('tasks').where('weekId').equals('w1');
       const a2 = engine.table('tasks').where('weekId').equals('w1');
       const b = engine.table('tasks').where('weekId').equals('w2');
+      // eslint-disable-next-line unicorn/no-array-sort -- this is QueryResult.sort(), not Array.prototype.sort().
       const sorted = a1.sort((x: any, y: any) => x.title.localeCompare(y.title));
       const allA = engine.table('tasks').query();
 

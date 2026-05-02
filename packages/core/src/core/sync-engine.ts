@@ -480,6 +480,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       // and run after the cache hand-off.
       if (!descriptor.orderBy) return rows;
       const { field, dir } = descriptor.orderBy;
+      // eslint-disable-next-line unicorn/no-array-sort -- package target/browser tests do not provide Array.prototype.toSorted.
       const sorted = [...rows].sort((a, b) => {
         const av = readColumn(a, field);
         const bv = readColumn(b, field);
@@ -647,7 +648,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   }
 
   private get initContext(): InterocitorInitContext<S> {
-    return {
+    let context: InterocitorInitContext<S>;
+    context = {
       put: this.putNow.bind(this),
       delete: this.deleteNow.bind(this),
       // Cache APIs (ReadinessAwareQueryExecutor). Init-time tables need them
@@ -664,12 +666,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       loadRow: this.loadRow.bind(this),
       query: this.queryNow.bind(this),
       queryWhere: this.queryWhereNow.bind(this),
-      table: <K extends keyof S & string>(name: K) => new Table(this.initContext as any, name),
+      table: <K extends keyof S & string>(name: K) => new Table(context as any, name),
       on: this.on.bind(this),
       getDeviceId: this.getDeviceId.bind(this),
       getMeshId: this.getMeshId.bind(this),
       isEncrypted: this.isEncrypted.bind(this),
     };
+    return context;
   }
 
   // ── Internal accessors ─────────────────────────────────────────────

@@ -1,15 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-function counterMerge(local: any, remote: any, _ctx: any) {
-  return {
-    value: (local.value as number) + (remote.value as number),
-    hlc: local.hlc > remote.hlc ? local.hlc : remote.hlc,
-  };
-}
-
-function keepLocal(local: any, _remote: any) {
-  return local;
-}
+/* eslint-disable unicorn/consistent-function-scoping -- Browser-context helpers must be defined inside page.evaluate. */
 
 
 test.beforeEach(async ({ page }) => {

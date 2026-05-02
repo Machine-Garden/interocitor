@@ -196,16 +196,16 @@ test('Cloudflare TODO worker exposes InterocitorRelayDurableObject on /notify/<p
     const notifyUrl = `${CF_WORKER_BASE_URL.replace(/^http/, 'ws')}/notify/${encodeURIComponent(namespace)}?access_token=${token}`;
     const writeUrl = `${CF_WORKER_BASE_URL}/io/${encodeURIComponent(namespace)}/file?path=${encodeURIComponent('/relay-proof.txt')}&access_token=${token}`;
 
-    const outcome = await page.evaluate(async ({ notifyUrl, writeUrl }) => {
+    const outcome = await page.evaluate(async ({ notifyUrl: browserNotifyUrl, writeUrl: browserWriteUrl }) => {
       return await new Promise<string>((resolve) => {
-        const ws = new WebSocket(notifyUrl);
+        const ws = new WebSocket(browserNotifyUrl);
         const timeout = window.setTimeout(() => {
           ws.close();
           resolve('timeout');
         }, 5_000);
 
         ws.onopen = () => {
-          void fetch(writeUrl, { method: 'PUT', body: 'relay-proof' }).catch(() => resolve('write-error'));
+          void fetch(browserWriteUrl, { method: 'PUT', body: 'relay-proof' }).catch(() => resolve('write-error'));
         };
         ws.onmessage = (event) => {
           window.clearTimeout(timeout);

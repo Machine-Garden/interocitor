@@ -367,12 +367,16 @@ test.describe('LocalStore — clearAll', () => {
     const result = await page.evaluate(async () => {
       const { LocalStore } = await import('/packages/core/dist/storage/local-store.js');
       const { resetLocalDatabase } = await import('/packages/core/dist/index.js');
-      const dbName = 'interocitor-reset-test';
+      const dbName = `interocitor-reset-test-${crypto.randomUUID()}`;
       const store = new LocalStore(dbName);
       await store.open();
-      await store.putRow({ _meta: { table: 't', rowId: 'r', deleted: false, schemaVersion: 1 }, payload: {} });
-      store.close();
+      try {
+        await store.putRow({ _meta: { table: 't', rowId: 'r', deleted: false, schemaVersion: 1 }, payload: {} });
+      } finally {
+        store.close();
+      }
 
+      await new Promise(resolve => setTimeout(resolve, 0));
       await resetLocalDatabase(dbName);
 
       const reopened = new LocalStore(dbName);

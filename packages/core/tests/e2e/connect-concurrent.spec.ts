@@ -17,6 +17,8 @@
  */
 import { test, expect } from '@playwright/test';
 
+/* eslint-disable unicorn/consistent-function-scoping -- Browser-context helpers must be defined inside page.evaluate. */
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/packages/core/tests/e2e/fixtures/harness.html');
   await page.evaluate(async () => {
@@ -76,7 +78,7 @@ test('concurrent connect() calls run the pipeline once and produce one change fi
 
     // Fire two connect() in parallel (StrictMode double-mount / dual
     // auto-reconnect). Both must share the same in-flight promise.
-    const [a, b] = await Promise.all([engine.connect(), engine.connect()]);
+    await Promise.all([engine.connect(), engine.connect()]);
 
     // Snapshot call counts after the storm settles.
     const afterConnect = { ...calls };

@@ -42,22 +42,22 @@ test('reload after local writes reads head and performs no extra remote activity
     class CountingLocalStore extends (LocalStore as any) {
       async pushOutbox(...args: unknown[]) {
         localCalls.pushOutbox++;
-        // @ts-ignore base class call-through for browser-side test wrapper
+        // @ts-expect-error base class call-through for browser-side test wrapper
         return super.pushOutbox(...args);
       }
       async drainOutbox(...args: unknown[]) {
         localCalls.drainOutbox++;
-        // @ts-ignore base class call-through for browser-side test wrapper
+        // @ts-expect-error base class call-through for browser-side test wrapper
         return super.drainOutbox(...args);
       }
       async getAllRows(...args: unknown[]) {
         localCalls.getAllRows++;
-        // @ts-ignore base class call-through for browser-side test wrapper
+        // @ts-expect-error base class call-through for browser-side test wrapper
         return super.getAllRows(...args);
       }
       async outboxSize(...args: unknown[]) {
         localCalls.outboxSize++;
-        // @ts-ignore base class call-through for browser-side test wrapper
+        // @ts-expect-error base class call-through for browser-side test wrapper
         return super.outboxSize(...args);
       }
     }
@@ -126,7 +126,7 @@ test('reload after local writes reads head and performs no extra remote activity
     const firstDump = firstInner.dump();
     const changeFiles = Object.keys(firstDump)
       .filter(p => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p))
-      .sort();
+      .toSorted();
 
     // Fresh adapter instance, same remote contents. This models client code
     // that reconstructs an adapter from handshake config/baseUrl on reload,
@@ -161,7 +161,7 @@ test('reload after local writes reads head and performs no extra remote activity
       readPaths,
       writePaths,
       rowCount: rowsAfterReload.length,
-      allFilesAfterReload: Object.keys(reloadInner.dump()).sort(),
+      allFilesAfterReload: Object.keys(reloadInner.dump()).toSorted(),
     };
   });
 

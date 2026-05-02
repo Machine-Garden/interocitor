@@ -59,7 +59,7 @@ declare const caches: GlobalCaches | undefined;
 
 function getDefaultCache(): CacheNamespace | undefined {
   // biome-ignore lint/suspicious/noExplicitAny: Cloudflare Workers cache API not in DOM lib
-  const gc = (typeof caches !== 'undefined' ? caches : (globalThis as any).caches) as GlobalCaches | undefined;
+  const gc = (caches !== undefined ? caches : (globalThis as any).caches) as GlobalCaches | undefined;
   return gc?.default;
 }
 
@@ -606,7 +606,7 @@ export async function opDeletePath(
   }
 
   const subtreeStart = `${normalized}/`;
-  const subtreeEnd = `${normalized}/\uffff`;
+  const subtreeEnd = `${normalized}/\uFFFF`;
   const now = nowIso();
 
   // Avoid LIKE/GLOB on long/special paths in D1/SQLite; do a lexical prefix range instead.

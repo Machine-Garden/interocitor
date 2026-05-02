@@ -135,8 +135,8 @@ async function computeTag(data: string, secret: CryptoKey): Promise<string> {
 
 function base64url(bytes: Uint8Array): string {
   let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCodePoint(bytes[i]!);
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
 /** Constant-time string comparison to prevent timing attacks on tag. */
@@ -144,7 +144,7 @@ function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let result = 0;
   for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    result |= a.codePointAt(i)! ^ b.codePointAt(i)!;
   }
   return result === 0;
 }

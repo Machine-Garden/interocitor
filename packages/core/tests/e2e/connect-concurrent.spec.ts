@@ -275,7 +275,7 @@ test('reload + fresh-client read budget: own writes not re-read on reload; fresh
     await e2Reload.disconnect();
 
     return {
-      changeFilePaths: changeFiles.sort(),
+      changeFilePaths: changeFiles.toSorted(),
       phase1Reads,
       phase2Reads,
       phase3Reads,
@@ -302,7 +302,7 @@ test('reload + fresh-client read budget: own writes not re-read on reload; fresh
   // exactly once. Anything else means we either over- or under-fetch.
   const phase3ChangeReads = result.phase3Reads.filter(p => result.changeFilePaths.includes(p));
   expect(
-    phase3ChangeReads.sort(),
+    phase3ChangeReads.toSorted(),
     'fresh peer must GET each change file exactly once',
   ).toEqual(result.changeFilePaths);
   expect(result.peerRowCountAfterFirstConnect).toBe(2);

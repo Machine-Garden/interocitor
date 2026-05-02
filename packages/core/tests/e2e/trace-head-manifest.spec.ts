@@ -92,7 +92,7 @@ test('trace events explain head + manifest IO and prove no redundant rewrites', 
   const bootstrapReads = bootstrapManifest.filter(t => t.op === 'read');
 
   expect(bootstrapCreates, 'one bootstrap-create event').toHaveLength(1);
-  expect(bootstrapWrites.map(w => w.reason).sort(), 'two writes: manifest + pointer')
+  expect(bootstrapWrites.map(w => w.reason).toSorted(), 'two writes: manifest + pointer')
     .toEqual(['bootstrap', 'bootstrap-pointer']);
   expect(
     bootstrapReads.filter(r => r.path?.endsWith('manifest-1.json')),

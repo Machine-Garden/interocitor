@@ -108,8 +108,8 @@ async function computeMeshTag(uuid: string, secret: CryptoKey): Promise<string> 
   const sig = await crypto.subtle.sign('HMAC', secret, textEncoder.encode(uuid));
   const tagBytes = new Uint8Array(sig, 0, 8);
   let binary = '';
-  for (let i = 0; i < tagBytes.length; i++) binary += String.fromCharCode(tagBytes[i]);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  for (let i = 0; i < tagBytes.length; i++) binary += String.fromCodePoint(tagBytes[i]);
+  return btoa(binary).replaceAll(/\+/g, '-').replaceAll(/\//g, '_').replace(/=+$/, '');
 }
 
 const MESH_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -134,7 +134,7 @@ async function validateMeshPrefix(prefix: string, runtime: ResolvedRuntimeConfig
   // Constant-time compare.
   if (tag.length !== expected.length) return jsonResponse({ error: 'Invalid prefix' }, 400);
   let result = 0;
-  for (let i = 0; i < tag.length; i++) result |= tag.charCodeAt(i) ^ expected.charCodeAt(i);
+  for (let i = 0; i < tag.length; i++) result |= tag.codePointAt(i)! ^ expected.codePointAt(i)!;
   if (result !== 0) return jsonResponse({ error: 'Invalid prefix' }, 400);
   return null;
 }
@@ -411,8 +411,8 @@ async function handleSystem(
       const sig = await crypto.subtle.sign('HMAC', secret, textEncoder.encode(id));
       const tagBytes = new Uint8Array(sig, 0, 8);
       let binary = '';
-      for (let i = 0; i < tagBytes.length; i++) binary += String.fromCharCode(tagBytes[i]);
-      const tag = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      for (let i = 0; i < tagBytes.length; i++) binary += String.fromCodePoint(tagBytes[i]);
+      const tag = btoa(binary).replaceAll(/\+/g, '-').replaceAll(/\//g, '_').replace(/=+$/, '');
       return jsonResponse({ meshId: `${id}.${tag}` });
     }
     if (op === 'validate-mesh-id') {
@@ -426,11 +426,11 @@ async function handleSystem(
       const sig = await crypto.subtle.sign('HMAC', secret, textEncoder.encode(uuid));
       const expectedBytes = new Uint8Array(sig, 0, 8);
       let binary = '';
-      for (let i = 0; i < expectedBytes.length; i++) binary += String.fromCharCode(expectedBytes[i]);
-      const expected = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      for (let i = 0; i < expectedBytes.length; i++) binary += String.fromCodePoint(expectedBytes[i]!);
+      const expected = btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
       let result = 0;
       if (tag.length !== expected.length) return jsonResponse({ valid: false });
-      for (let i = 0; i < tag.length; i++) result |= tag.charCodeAt(i) ^ expected.charCodeAt(i);
+      for (let i = 0; i < tag.length; i++) result |= tag.codePointAt(i)! ^ expected.codePointAt(i)!;
       return jsonResponse({ valid: result === 0 });
     }
     return jsonResponse({ error: 'Unknown op' }, 404);

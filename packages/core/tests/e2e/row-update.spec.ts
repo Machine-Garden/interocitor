@@ -85,7 +85,7 @@ test.describe('Table.replace — full overwrite', () => {
     });
     expect(result.meta).toMatchObject({ table: 'tasks', rowId: 't1', deleted: false, schemaVersion: 0 });
     // Payload contains the new title; previous fields nulled (still present, value=null).
-    expect(result.payloadKeys.sort()).toEqual(['title']);
+    expect(result.payloadKeys.toSorted()).toEqual(['title']);
   });
 
   test('tolerates user payload keys named _table, _rowId, _meta, payload — meta isolation', async ({ page }) => {
@@ -115,7 +115,7 @@ test.describe('Table.replace — full overwrite', () => {
         payloadHasPayload: 'payload' in (raw?.payload ?? {}),
         payloadWeekId: raw?.payload?.weekId?.value,
         // typed projection includes user-named fields verbatim
-        typedKeys: Object.keys(typed ?? {}).sort(),
+        typedKeys: Object.keys(typed ?? {}).toSorted(),
       };
     });
     expect(result.engineTable).toBe('weekPlans');

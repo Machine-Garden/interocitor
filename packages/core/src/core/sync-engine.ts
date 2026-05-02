@@ -585,7 +585,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     const promise = (async () => {
       await this.ensureReady();
       const row = await this.local.getRow(descriptor.table, descriptor.rowId);
-      if (!row || row._meta.deleted) return undefined;
+      if (!row || row._meta.deleted) return;
       return row;
     })();
 
@@ -1609,7 +1609,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       return e;
     };
     const stageOk = (s: string, extra?: Record<string, unknown>) => {
-      console.log('[interocitor:connect] doConnect() — stage ok', { stage: s, dbName: this.dbName, deviceId: this.deviceId, ...(extra ?? {}) });
+      console.log('[interocitor:connect] doConnect() — stage ok', { stage: s, dbName: this.dbName, deviceId: this.deviceId, ...extra });
     };
 
     this.log('debug', 'connect() — authenticating with adapter', { adapter: adapter.name });

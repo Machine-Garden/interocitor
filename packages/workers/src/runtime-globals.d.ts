@@ -1,3 +1,5 @@
+export {};
+
 declare global {
   interface ResponseInit {
     webSocket?: WebSocket | null;
@@ -7,5 +9,3 @@ declare global {
     new (): [WebSocket, WebSocket] & { 0: WebSocket; 1: WebSocket };
   };
 }
-
-export {};

@@ -78,7 +78,10 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await engine.init();
       await engine.connect();
       adapter.push('/MeshPush/changes/head.json');
-      await new Promise(resolve => setTimeout(resolve, 100));
+      const deadline = Date.now() + 2_000;
+      while (events.filter(type => type === 'sync:complete').length < 2 && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
       await engine.disconnect();
 
       return {
@@ -497,6 +500,167 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result.openTitles).toEqual(['A', 'C']);
     expect(result.p2plusTitles).toEqual(['B', 'C']);
     expect(result.schemaVersion).toBe(1);
+  });
+
+  test('keeps indexed where range queries isolated to their table', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, types } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      const engine = new Interocitor(new MemoryAdapter(), {
+        batchWindowMs: 0,
+        remotePath: '/MeshWhereLeakRange',
+        pollInterval: 600_000,
+        deviceId: 'dev_where_leak_range',
+        schema: {
+          version: 1,
+          tables: {
+            alphaMeals: { fields: { date: types.index(types.string) } },
+            cookedMeals: { fields: { date: types.index(types.string) } },
+            mealEntries: { fields: { date: types.index(types.string) } },
+          },
+        },
+      });
+
+      await engine.init();
+      await engine.connect();
+
+      await engine.table('alphaMeals').put('alpha-1', {
+        id: 'alpha-1',
+        date: '2026-05-01',
+        beforeOnly: true,
+      } as any);
+      await engine.table('cookedMeals').put('cooked-1', {
+        id: 'cooked-1',
+        date: '2026-05-02',
+        targetOnly: true,
+      } as any);
+      await engine.table('mealEntries').put('entry-1', {
+        id: 'entry-1',
+        date: '2026-05-03',
+        afterOnly: true,
+      } as any);
+
+      const above = await engine.table('cookedMeals').where('date').above('2026-05-01' as any);
+      const aboveOrEqual = await engine.table('cookedMeals').where('date').aboveOrEqual('2026-05-02' as any);
+      const below = await engine.table('cookedMeals').where('date').below('2026-05-03' as any);
+      const belowOrEqual = await engine.table('cookedMeals').where('date').belowOrEqual('2026-05-02' as any);
+      const between = await engine.table('cookedMeals').where('date').between('2026-05-01' as any, '2026-05-03' as any);
+      const startsWith = await engine.table('cookedMeals').where('date').startsWith('2026-05');
+
+      await engine.disconnect();
+
+      return {
+        above: above.map((row: any) => ({
+          id: row.id,
+          targetOnly: row.targetOnly === true,
+          beforeOnly: row.beforeOnly === true,
+          afterOnly: row.afterOnly === true,
+        })),
+        aboveOrEqual: aboveOrEqual.map((row: any) => ({
+          id: row.id,
+          targetOnly: row.targetOnly === true,
+          beforeOnly: row.beforeOnly === true,
+          afterOnly: row.afterOnly === true,
+        })),
+        below: below.map((row: any) => ({
+          id: row.id,
+          targetOnly: row.targetOnly === true,
+          beforeOnly: row.beforeOnly === true,
+          afterOnly: row.afterOnly === true,
+        })),
+        belowOrEqual: belowOrEqual.map((row: any) => ({
+          id: row.id,
+          targetOnly: row.targetOnly === true,
+          beforeOnly: row.beforeOnly === true,
+          afterOnly: row.afterOnly === true,
+        })),
+        between: between.map((row: any) => ({
+          id: row.id,
+          targetOnly: row.targetOnly === true,
+          beforeOnly: row.beforeOnly === true,
+          afterOnly: row.afterOnly === true,
+        })),
+        startsWith: startsWith.map((row: any) => ({
+          id: row.id,
+          targetOnly: row.targetOnly === true,
+          beforeOnly: row.beforeOnly === true,
+          afterOnly: row.afterOnly === true,
+        })),
+      };
+    });
+
+    const expected = [{ id: 'cooked-1', targetOnly: true, beforeOnly: false, afterOnly: false }];
+    expect(result.above).toEqual(expected);
+    expect(result.aboveOrEqual).toEqual(expected);
+    expect(result.below).toEqual(expected);
+    expect(result.belowOrEqual).toEqual(expected);
+    expect(result.between).toEqual(expected);
+    expect(result.startsWith).toEqual(expected);
+  });
+
+  test('keeps indexed where equality and anyOf queries isolated to their table', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, types } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      const engine = new Interocitor(new MemoryAdapter(), {
+        batchWindowMs: 0,
+        remotePath: '/MeshWhereLeakExact',
+        pollInterval: 600_000,
+        deviceId: 'dev_where_leak_exact',
+        schema: {
+          version: 1,
+          tables: {
+            cookedMeals: { fields: { date: types.index(types.string) } },
+            mealEntries: { fields: { date: types.index(types.string) } },
+          },
+        },
+      });
+
+      await engine.init();
+      await engine.connect();
+
+      await engine.table('mealEntries').put('entry-same-date', {
+        id: 'entry-same-date',
+        date: '2026-05-02',
+        slot: 'dinner',
+        recipeId: '11ea811631',
+      } as any);
+      await engine.table('cookedMeals').put('cooked-same-date', {
+        id: 'cooked-same-date',
+        date: '2026-05-02',
+        title: 'Dinner',
+        recipeId: '11ea811631',
+      } as any);
+      await engine.table('mealEntries').put('entry-other-date', {
+        id: 'entry-other-date',
+        date: '2026-05-03',
+        slot: 'lunch',
+      } as any);
+
+      const equals = await engine.table('cookedMeals').where('date').equals('2026-05-02' as any);
+      const anyOf = await engine.table('cookedMeals').where('date').anyOf(['2026-05-02', '2026-05-03'] as any);
+
+      await engine.disconnect();
+
+      return {
+        equals: equals.map((row: any) => ({
+          id: row.id,
+          hasCookedShape: row.title === 'Dinner',
+          hasMealEntryShape: row.slot !== undefined,
+        })),
+        anyOf: anyOf.map((row: any) => ({
+          id: row.id,
+          hasCookedShape: row.title === 'Dinner',
+          hasMealEntryShape: row.slot !== undefined,
+        })),
+      };
+    });
+
+    const expected = [{ id: 'cooked-same-date', hasCookedShape: true, hasMealEntryShape: false }];
+    expect(result.equals).toEqual(expected);
+    expect(result.anyOf).toEqual(expected);
   });
 
   test('rejects unauthorized server writer in manifest', async ({ page }) => {
@@ -1809,7 +1973,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         outboxSize,
         changeFilesBefore,
         changeFilesAfter,
-        rows: rows.map((row: any) => row.title).sort(),
+        rows: rows.map((row: any) => row.title).toSorted(),
         poison,
       };
     });

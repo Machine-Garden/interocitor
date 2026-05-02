@@ -243,7 +243,7 @@ test('useLiveQuery updates when periodic polling pulls remote rows', async () =>
     await act(async () => {
       renderer?.unmount();
     });
-    await reader.disconnect().catch(() => undefined);
-    await writer.disconnect().catch(() => undefined);
+    await reader.disconnect().catch(() => {});
+    await writer.disconnect().catch(() => {});
   }
 });

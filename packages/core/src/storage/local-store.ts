@@ -157,17 +157,24 @@ function hasSchemaIndex(
 }
 
 function rangeForClause(table: string, clause: WhereClause): IDBKeyRange | null {
+  // Schema indexes are keyed as [table, fieldValue]. Range queries must bound
+  // both sides of the compound key; lowerBound([table, value]) alone would also
+  // include later table names, and upperBound([table, value]) would include
+  // earlier table names.
+  const tableLowerBound = [table];
+  const tableUpperBound = [table, []];
+
   switch (clause.op) {
     case 'equals':
       return IDBKeyRange.only([table, clause.value]);
     case 'above':
-      return IDBKeyRange.lowerBound([table, clause.value], true);
+      return IDBKeyRange.bound([table, clause.value], tableUpperBound, true, false);
     case 'aboveOrEqual':
-      return IDBKeyRange.lowerBound([table, clause.value], false);
+      return IDBKeyRange.bound([table, clause.value], tableUpperBound, false, false);
     case 'below':
-      return IDBKeyRange.upperBound([table, clause.value], true);
+      return IDBKeyRange.bound(tableLowerBound, [table, clause.value], false, true);
     case 'belowOrEqual':
-      return IDBKeyRange.upperBound([table, clause.value], false);
+      return IDBKeyRange.bound(tableLowerBound, [table, clause.value], false, false);
     case 'between':
       return IDBKeyRange.bound(
         [table, clause.lower],
@@ -366,7 +373,7 @@ export class LocalStore implements LocalStoreAdapter {
       for (const value of values) {
         const matches = await reqToPromise(index.getAll(IDBKeyRange.only([table, value])));
         for (const row of matches as Row[]) {
-          if (!row._meta.deleted) {
+          if (!row._meta.deleted && row._meta.table === table) {
             merged.set(`${row._meta.table}/${row._meta.rowId}`, row);
           }
         }
@@ -376,7 +383,7 @@ export class LocalStore implements LocalStoreAdapter {
 
     const range = rangeForClause(table, clause);
     const results = await reqToPromise(index.getAll(range ?? undefined));
-    return (results as Row[]).filter(row => !row._meta.deleted);
+    return (results as Row[]).filter(row => !row._meta.deleted && row._meta.table === table);
   }
 
   async getTableNames(): Promise<string[]> {

@@ -2,6 +2,8 @@
 
 ## WebSocket-based invalidation
 
+> Historical planning note. WebSocket invalidation now exists in the Workers package as an optional Durable Object relay. Treat the current Workers README as the source of truth for setup.
+
 ### Why SSE is removed
 
 The original Cloudflare Worker implementation used Server-Sent Events (SSE) backed by a Durable Object for real-time invalidation. That model was removed because:
@@ -12,9 +14,9 @@ The original Cloudflare Worker implementation used Server-Sent Events (SSE) back
 
 ### Current model
 
-Pull-based sync. Clients pull after local changes and on a configurable interval. No server push.
+Pull-based sync remains sufficient for correctness: clients pull after local changes and on a configurable interval. Current Workers builds can also opt into WebSocket-based invalidation via `InterocitorRelayDurableObject`; that relay is an optimization that wakes clients to pull sooner, not a correctness requirement.
 
-This is sufficient for most use cases and is the cheapest correct model.
+This is sufficient for most use cases and keeps realtime push optional.
 
 ### Future: WebSocket-based invalidation (Paid plan)
 

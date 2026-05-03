@@ -175,7 +175,31 @@ export async function decryptEntry(
   key: CryptoKey,
   envelopeStr: string
 ): Promise<string> {
-  const envelope: EncryptedEnvelope = JSON.parse(envelopeStr);
+  const bytes = await decryptBytes(key, new TextEncoder().encode(envelopeStr));
+  return new TextDecoder().decode(bytes);
+}
+
+/** Encrypt arbitrary binary data using the mesh AES-GCM key. */
+export async function encryptBytes(key: CryptoKey, plaintext: Uint8Array): Promise<Uint8Array> {
+  const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    plaintext.buffer.slice(plaintext.byteOffset, plaintext.byteOffset + plaintext.byteLength) as ArrayBuffer,
+  );
+
+  const envelope: EncryptedEnvelope = {
+    v: ENVELOPE_VERSION,
+    iv: uint8ToBase64(iv),
+    ct: uint8ToBase64(new Uint8Array(ciphertext)),
+  };
+
+  return new TextEncoder().encode(JSON.stringify(envelope));
+}
+
+/** Decrypt binary data produced by {@link encryptBytes}. */
+export async function decryptBytes(key: CryptoKey, envelopeBytes: Uint8Array): Promise<Uint8Array> {
+  const envelope: EncryptedEnvelope = JSON.parse(new TextDecoder().decode(envelopeBytes));
   if (envelope.v !== ENVELOPE_VERSION) {
     throw new Error(`Unknown envelope version: ${envelope.v}`);
   }
@@ -186,10 +210,10 @@ export async function decryptEntry(
   const decrypted = await crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: iv.buffer as ArrayBuffer },
     key,
-    ct.buffer as ArrayBuffer
+    ct.buffer.slice(ct.byteOffset, ct.byteOffset + ct.byteLength) as ArrayBuffer,
   );
 
-  return new TextDecoder().decode(decrypted);
+  return new Uint8Array(decrypted);
 }
 
 /**

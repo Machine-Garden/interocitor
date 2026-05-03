@@ -11,7 +11,7 @@
  *   wss://<worker>/notify/<prefix>  (WebSocket invalidations via InterocitorRelay DO)
  */
 
-import type { StorageAdapter, FileEntry, RemoteInvalidationPayload, RemoteInvalidationHooks } from '../core/types.ts';
+import type { StorageAdapter, FileEntry, RemoteInvalidationPayload, RemoteInvalidationHooks, StoredFileMetadata, StoredFileWriteOptions } from '../core/types.ts';
 
 export interface CloudflareAdapterConfig {
   /** Worker IO base URL that includes prefix, e.g. https://worker/io/team-a */
@@ -28,6 +28,13 @@ interface IoFileMeta {
   size: number;
   modifiedTime: string;
   etag?: string;
+  uploadedByDeviceId?: string;
+  uploadedAt?: string;
+  lastAccessedAt?: string;
+  useCount?: number;
+  plaintextSize?: number;
+  storedSize?: number;
+  contentType?: string;
 }
 
 /**
@@ -113,6 +120,12 @@ export class CloudflareAdapter implements StorageAdapter {
 
   private fileUrl(path: string): string {
     const u = new URL(this.ioUrl('/file'));
+    u.searchParams.set('path', path);
+    return u.toString();
+  }
+
+  private storedFileUrl(path: string): string {
+    const u = new URL(this.ioUrl('/stored-file'));
     u.searchParams.set('path', path);
     return u.toString();
   }
@@ -354,6 +367,45 @@ export class CloudflareAdapter implements StorageAdapter {
       modifiedTime: f.modifiedTime,
       etag: f.etag,
     };
+  }
+
+  async putStoredFile(path: string, data: Uint8Array | string, options: StoredFileWriteOptions = {}): Promise<StoredFileMetadata> {
+    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+    const res = await fetch(this.storedFileUrl(path), {
+      method: 'PUT',
+      headers: this.headers({
+        'Content-Type': options.contentType || 'application/octet-stream',
+        'X-Interocitor-Device-Id': options.uploadedByDeviceId || '',
+        'X-Interocitor-Plaintext-Size': String(options.plaintextSize ?? bytes.byteLength),
+      }),
+      body: bytes as unknown as BodyInit,
+    });
+    if (!res.ok) throw new Error(`Failed to upload stored file ${path}: HTTP ${res.status}`);
+    const payload = await res.json() as { file: StoredFileMetadata };
+    return payload.file;
+  }
+
+  async getStoredFile(path: string): Promise<Uint8Array> {
+    const res = await fetch(this.storedFileUrl(path), { method: 'GET', headers: this.headers() });
+    if (!res.ok) throw new Error(`Failed to read stored file ${path}: HTTP ${res.status}`);
+    return new Uint8Array(await res.arrayBuffer());
+  }
+
+  async deleteStoredFile(path: string): Promise<void> {
+    const res = await fetch(this.storedFileUrl(path), { method: 'DELETE', headers: this.headers() });
+    if (!res.ok && res.status !== 404) throw new Error(`Failed to delete stored file ${path}: HTTP ${res.status}`);
+  }
+
+  async getStoredFileMetadata(path: string): Promise<StoredFileMetadata | null> {
+    const res = await fetch(this.ioUrl('/stored-file-metadata'), {
+      method: 'POST',
+      headers: this.headers({ 'Content-Type': 'application/json; charset=utf-8' }),
+      body: JSON.stringify({ path }),
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) return null;
+    const payload = await res.json() as { file?: StoredFileMetadata | null };
+    return payload.file ?? null;
   }
 }
 

@@ -339,6 +339,18 @@ await db.pull();                                              // force pull
 await db.compact();                                           // see docs/compaction.md
 await db.disconnect();                                        // tear down
 
+// Durable files — encrypted, not compacted, not merged
+await db.putFile('receipts/may.pdf', pdfBytes, 'application/pdf');
+const pdf = await db.getFile('receipts/may.pdf');
+const fileMeta = await db.getFileMetadata('receipts/may.pdf');
+await db.deleteFile('receipts/may.pdf');
+
+// Images — first-class file helpers
+await db.putImage('avatars/me.png', fileOrBlob);
+const image = await db.getImage('avatars/me.png');             // { data, blob, metadata }
+const blobUrl = await db.getImageBlobUrl('avatars/me.png');    // { url, revoke }
+blobUrl.revoke();
+
 // Credentials
 db.getPassphrase();
 db.setPassphrase(passphrase);
@@ -351,6 +363,36 @@ await db.batch(async () => {
   await db.table('todos').add({ title: 'a' });
   await db.table('todos').patch(otherId, { done: true });
 });
+```
+
+### Files and images
+
+Durable files are application objects stored under the mesh `files/` namespace. They are encrypted with the same mesh key when encryption is enabled, but they are not CRDT rows: no merge, no replay, no compaction, no snapshot membership. A file at a path simply exists until overwritten or deleted.
+
+```ts
+await db.putFile('attachments/report.pdf', bytes, 'application/pdf');
+
+const bytes = await db.getFile('attachments/report.pdf');
+const meta = await db.getFileMetadata('attachments/report.pdf');
+
+await db.deleteFile('attachments/report.pdf');
+```
+
+`StoredFileMetadata` includes path, size, content type, uploader device, upload time, stored/plaintext byte sizes, and backend-tracked access counters when available.
+
+Images are convenience wrappers over files:
+
+```ts
+await db.putImage('avatars/me.png', file); // File, Blob, ArrayBuffer, Uint8Array, data URL, or SVG string
+
+const image = await db.getImage('avatars/me.png');
+// image.data: Uint8Array
+// image.blob: Blob
+// image.contentType: image/png, image/jpeg, ...
+
+const view = await db.getImageBlobUrl('avatars/me.png');
+img.src = view.url;
+view.revoke();
 ```
 
 ### Schema typing
@@ -464,6 +506,8 @@ For `remotePath: '/MyApp'`:
 │   └── <HLC>-chg_<id>.json                 # encrypted change entries
 ├── devices/
 │   └── <deviceId>.json                     # device metadata
+├── files/
+│   └── <app path>                          # durable encrypted app files
 └── mainline/
     └── snapshot-<epoch>-<serverId>.json    # encrypted snapshot
 ```

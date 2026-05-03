@@ -7,3 +7,5 @@ export { useLiveQuery } from './use-live-query.ts';
 export type { UseLiveQueryResult } from './use-live-query.ts';
 export { useRow } from './use-row.ts';
 export type { UseRowResult } from './use-row.ts';
+export { useImage } from './image.ts';
+export type { UseImageResult } from './image.ts';

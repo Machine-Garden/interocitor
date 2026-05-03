@@ -1,5 +1,7 @@
 # Interocitor: Local-First Database over Cloud Storage
 
+> Historical architecture note. Some implementation details in this document predate the current package layout and file-storage APIs. For current public APIs, storage contracts, and security guarantees, prefer `README.md`, `packages/core/README.md`, `packages/core/docs/adapter-contract.md`, and `packages/core/docs/security-model.md`.
+
 ## Problem
 
 A web app needs to share structured data across multiple devices in a mesh. Requirements:
@@ -308,6 +310,12 @@ Cloud storage doesn't support file truncation. Instead:
 1. Device writes a **new** change log file: `changes/{deviceId}-2.ndjson`
 2. Deletes the old one: `changes/{deviceId}.ndjson`
 3. Snapshot records which file generation each device is on
+
+## Durable files and images
+
+Current Interocitor also supports durable application files under a mesh `files/` namespace. They are encrypted like row payloads when encryption is enabled, but they are not change-log entries: no merge, no replay, no compaction, and no snapshot membership. Images are first-class helpers over that file layer (`putImage`, `getImage`, `getImageBlobUrl`), with React display handled by `useImage`.
+
+Cloudflare Workers can store durable file bodies in R2 and metadata in D1, including uploader device, byte sizes, content type, last access, use count, per-file limits, per-mesh quota, and upload authorization callbacks.
 
 ## Storage Adapter Interface
 

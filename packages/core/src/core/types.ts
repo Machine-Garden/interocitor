@@ -531,6 +531,61 @@ export interface FileEntry {
   revision?: string;
 }
 
+/** Metadata for durable application files stored beside a mesh. */
+export interface StoredFileMetadata extends FileEntry {
+  /** Device that uploaded the current object version. */
+  uploadedByDeviceId?: string;
+  /** ISO timestamp for the current object version upload. */
+  uploadedAt?: string;
+  /** Last successful read timestamp, when tracked by the backend. */
+  lastAccessedAt?: string;
+  /** Total successful reads, when tracked by the backend. */
+  useCount?: number;
+  /** Original plaintext byte length, when known. */
+  plaintextSize?: number;
+  /** Stored ciphertext/transport byte length. Defaults to size. */
+  storedSize?: number;
+  /** Application content type, if provided by the uploader. */
+  contentType?: string;
+}
+
+export interface StoredFileWriteOptions {
+  /** Device identity to persist for abuse controls/audit. */
+  uploadedByDeviceId?: string;
+  /** Plaintext byte length before encryption. */
+  plaintextSize?: number;
+  /** Application content type. */
+  contentType?: string;
+}
+
+export type ImageInput = Blob | ArrayBuffer | Uint8Array | string;
+
+export interface PutImageOptions {
+  /** Override content type. Defaults to Blob/File type or data URL media type. */
+  contentType?: string;
+}
+
+export interface StoredImageMetadata extends StoredFileMetadata {
+  contentType: string;
+}
+
+export interface StoredImage {
+  path: string;
+  data: Uint8Array;
+  blob: Blob;
+  metadata: StoredImageMetadata | null;
+  contentType: string;
+}
+
+export interface StoredImageBlobUrl {
+  path: string;
+  url: string;
+  blob: Blob;
+  metadata: StoredImageMetadata | null;
+  contentType: string;
+  revoke(): void;
+}
+
 export interface RemoteInvalidationPayload {
   type: string;
   path: string;
@@ -575,6 +630,13 @@ export interface StorageAdapter {
 
   // Metadata
   getFileMetadata(path: string): Promise<FileEntry | null>;
+
+  // Durable application file CRUD. Optional for legacy adapters; the engine
+  // falls back to the regular file primitives when these are not implemented.
+  putStoredFile?(path: string, data: Uint8Array | string, options?: StoredFileWriteOptions): Promise<StoredFileMetadata>;
+  getStoredFile?(path: string): Promise<Uint8Array>;
+  deleteStoredFile?(path: string): Promise<void>;
+  getStoredFileMetadata?(path: string): Promise<StoredFileMetadata | null>;
 
   /**
    * Return an opaque config string describing how to reach this backend,

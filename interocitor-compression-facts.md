@@ -1,5 +1,7 @@
 # Interocitor: Data Volume & Compression Facts
 
+> Historical sizing note. This document is useful for compression intuition, but names/layout examples may be older than the current implementation. Current sync/file layout lives in `README.md` and `packages/core/docs/adapter-contract.md`.
+
 ## Remote File Architecture
 
 ### Change Files (`changes/{deviceId}-{generation}.ndjson`)
@@ -28,7 +30,7 @@
 - **Reference**: `./interocitor-architecture.md` § Compaction (lines 260–310), `./packages/interocitor/src/core/compaction.ts`
 
 ### Manifest (`manifest-{generation}.json`)
-- **Metadata**: Schema version, mesh ID, encryption flag, encryption disabled by default, snapshot/delta paths
+- **Metadata**: Schema version, mesh ID, encryption flag, snapshot/change paths. Encryption is enabled by default in current JS/TS docs; verify package-specific defaults before using this historical sizing note.
 - **Content-hashed**: Includes SHA256 of payload for integrity; hash verified on read
 - **Cleartext always**: Readable without decryption key (device needs to know encryption is required to prompt for key)
 - **Reference**: `./packages/interocitor/src/core/manifest.ts`, `./interocitor-architecture.md` § Encryption (lines 590–599)
@@ -72,7 +74,7 @@
 
 ### No Server-Side Compression Features
 - **StorageAdapter interface** (lines 313–342 in arch doc):
-  - `readFile()`, `writeFile()`, `appendToFile()` (not universally supported)
+  - `readFile()`, `writeFile()`, `deleteFile()`, metadata operations, and optional durable app-file methods (`putStoredFile`, `getStoredFile`, `deleteStoredFile`)
   - Metadata: `size`, `modifiedTime`, `etag` — no compression-related fields
 - **Missing**: No `deflate` or compression negotiation headers in adapter code
 - **Why**: Cloud providers handle compression at TLS layer; app-level compression incompatible with encryption

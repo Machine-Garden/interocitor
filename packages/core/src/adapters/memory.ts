@@ -5,7 +5,7 @@
  * Also serves as a reference implementation for the StorageAdapter interface.
  */
 
-import type { StorageAdapter, FileEntry } from '../core/types.ts';
+import type { StorageAdapter, FileEntry, StoredFileMetadata, StoredFileWriteOptions } from '../core/types.ts';
 
 /**
  * In-memory implementation of {@link StorageAdapter}.
@@ -23,6 +23,7 @@ export class MemoryAdapter implements StorageAdapter {
   readonly name = 'memory';
 
   private files: Map<string, { data: Uint8Array; modifiedTime: string }> = new Map();
+  private storedFileMetadata: Map<string, StoredFileMetadata> = new Map();
   private folders: Set<string> = new Set();
   private authenticated = false;
   // Mirrors the cloud-adapter convention: cache "ensured" paths so a
@@ -136,6 +137,49 @@ export class MemoryAdapter implements StorageAdapter {
     };
   }
 
+  async putStoredFile(path: string, data: Uint8Array | string, options: StoredFileWriteOptions = {}): Promise<StoredFileMetadata> {
+    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+    await this.writeFile(path, bytes);
+    const now = new Date().toISOString();
+    const meta: StoredFileMetadata = {
+      name: path.split('/').pop() || path,
+      path,
+      size: bytes.byteLength,
+      modifiedTime: now,
+      uploadedAt: now,
+      uploadedByDeviceId: options.uploadedByDeviceId,
+      plaintextSize: options.plaintextSize,
+      storedSize: bytes.byteLength,
+      contentType: options.contentType,
+      lastAccessedAt: undefined,
+      useCount: 0,
+    };
+    this.storedFileMetadata.set(path, meta);
+    return { ...meta };
+  }
+
+  async getStoredFile(path: string): Promise<Uint8Array> {
+    const bytes = await this.readFile(path);
+    const meta = this.storedFileMetadata.get(path);
+    if (meta) {
+      const next = { ...meta, lastAccessedAt: new Date().toISOString(), useCount: (meta.useCount ?? 0) + 1 };
+      this.storedFileMetadata.set(path, next);
+    }
+    return bytes;
+  }
+
+  async deleteStoredFile(path: string): Promise<void> {
+    await this.deleteFile(path);
+    this.storedFileMetadata.delete(path);
+  }
+
+  async getStoredFileMetadata(path: string): Promise<StoredFileMetadata | null> {
+    const meta = this.storedFileMetadata.get(path);
+    if (meta) return { ...meta };
+    const file = await this.getFileMetadata(path);
+    return file ? { ...file, storedSize: file.size } : null;
+  }
+
   /** Test helper: dump all files for inspection. */
   dump(): Record<string, string> {
     const result: Record<string, string> = {};
@@ -149,6 +193,7 @@ export class MemoryAdapter implements StorageAdapter {
   /** Test helper: reset all state. */
   reset(): void {
     this.files.clear();
+    this.storedFileMetadata.clear();
     this.folders.clear();
   }
 }

@@ -107,9 +107,41 @@ export interface WorkerCache {
  * }
  * ```
  */
+export interface R2ObjectBody {
+  body: ReadableStream;
+  size: number;
+  etag?: string;
+  httpEtag?: string;
+  writeHttpMetadata(headers: Headers): void;
+}
+
+export interface R2Bucket {
+  get(key: string): Promise<R2ObjectBody | null>;
+  put(key: string, value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob, options?: { httpMetadata?: Record<string, string>; customMetadata?: Record<string, string> }): Promise<unknown>;
+  delete(key: string): Promise<void>;
+}
+
+export interface FileUploadAuthorizationRequest {
+  prefix: string;
+  path: string;
+  uploadedByDeviceId: string;
+  size: number;
+  plaintextSize?: number;
+  contentType?: string;
+  currentMeshStoredBytes: number;
+  maxMeshStoredBytes: number;
+  request: Request;
+}
+
+export type FileUploadAuthorizationResult =
+  | boolean
+  | { allowed: boolean; reason?: string; status?: number };
+
 export interface InterocitorEnv extends Record<string, unknown> {
   /** D1 database binding. Required unless you pass `db` explicitly via mount options. */
   INTEROCITOR_DB?: D1Database;
+  /** R2 bucket for durable app file bodies. Required for /stored-file routes. */
+  INTEROCITOR_FILES?: R2Bucket;
   /** Shared secret used to derive per-prefix access tokens. */
   INTEROCITOR_ACCESS_TOKEN?: string;
   /** Bearer token required to call system ops (prune, reconcile, maintenance). */
@@ -124,8 +156,12 @@ export interface InterocitorEnv extends Record<string, unknown> {
   INTEROCITOR_MAX_CHANGE_BYTES?: string | number;
   /** Max bytes for mainline snapshot files. Default 16 MiB. */
   INTEROCITOR_MAX_MAINLINE_BYTES?: string | number;
-  /** Max bytes for any other file type. Default 8 MiB. */
+  /** Max bytes for any other sync file type. Default 8 MiB. */
   INTEROCITOR_MAX_GENERIC_FILE_BYTES?: string | number;
+  /** Max bytes for one durable app file upload. Default 32 MiB. */
+  INTEROCITOR_MAX_STORED_FILE_BYTES?: string | number;
+  /** Max total durable app file bytes per mesh. Default 512 MiB. */
+  INTEROCITOR_MAX_MESH_STORED_BYTES?: string | number;
   /**
    * HMAC secret for issuing and validating mesh/team IDs.
    *
@@ -172,6 +208,9 @@ export interface InterocitorRuntimeOptions<Env = unknown> {
   maxChangeBytes?: (env: Env) => string | number | undefined;
   maxMainlineBytes?: (env: Env) => string | number | undefined;
   maxGenericFileBytes?: (env: Env) => string | number | undefined;
+  maxStoredFileBytes?: (env: Env) => string | number | undefined;
+  maxMeshStoredBytes?: (env: Env) => string | number | undefined;
+  authorizeFileUpload?: (request: FileUploadAuthorizationRequest, env: Env) => FileUploadAuthorizationResult | Promise<FileUploadAuthorizationResult>;
   meshSecret?: (env: Env) => string | undefined;
   /** Enable diagnostic logs for request handling and relay delivery. */
   verbose?: (env: Env) => string | number | boolean | undefined;
@@ -192,7 +231,9 @@ export interface InterocitorMountOptions<Env = unknown> {
    * ```
    *
    */
-  db: (env: Env) => D1Database;  
+  db: (env: Env) => D1Database;
+  /** Resolve the R2 bucket for durable app file bodies. */
+  files?: (env: Env) => R2Bucket | undefined;
   runtime?: InterocitorRuntimeOptions<Env>;
     /**
    * Resolve the relay Durable Object namespace from the Worker env at request time.

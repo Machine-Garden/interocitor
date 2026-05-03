@@ -18,6 +18,10 @@ export type {
   InterocitorMount,
   InterocitorMountOptions,
   WorkerLike,
+  R2Bucket,
+  R2ObjectBody,
+  FileUploadAuthorizationRequest,
+  FileUploadAuthorizationResult,
 } from './types.ts';
 
 export { applySchema, ensureSchema, SCHEMA_STATEMENTS } from './schema.ts';

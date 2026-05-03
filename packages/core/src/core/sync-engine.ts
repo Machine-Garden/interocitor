@@ -35,6 +35,12 @@ import type {
   RowCacheSnapshot,
   RemoteInvalidationPayload,
   RemoteInvalidationStorageAdapter,
+  StoredFileMetadata,
+  ImageInput,
+  PutImageOptions,
+  StoredImage,
+  StoredImageBlobUrl,
+  StoredImageMetadata,
 } from './types.ts';
 
 import type { HLC } from './types.ts';
@@ -47,7 +53,7 @@ import { LocalStore } from '../storage/local-store.ts';
 import { paths, logAtLevel, normalizeLogLevel, generateId, getDeviceId } from './internals.ts';
 import type { CodecState } from './codec.ts';
 import { loadOrCreateManifest, upsertDeviceMetadata } from './manifest.ts';
-import { generateKey, keyToPassphrase, passphraseToKey } from '../crypto/encryption.ts';
+import { decryptBytes, encryptBytes, generateKey, keyToPassphrase, passphraseToKey } from '../crypto/encryption.ts';
 import { MeshCredentialMismatchError } from './errors.ts';
 import { createCredentialStore, type CredentialStore } from '../storage/credential-store.ts';
 import type { ManifestContext } from './manifest.ts';
@@ -688,6 +694,92 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   private requireRemotePath(operation: string): string {
     if (!this.config.remotePath) throw new Error(`${operation} requires remotePath; configure mesh before connecting`);
     return this.config.remotePath;
+  }
+
+  private storedFilePath(path: string): string {
+    const remotePath = this.requireRemotePath('file storage');
+    const clean = path.split('/').filter(Boolean).join('/');
+    if (!clean) throw new Error('File path must not be empty');
+    return `${remotePath.replace(/\/$/, '')}/files/${clean}`;
+  }
+
+  private async encodeStoredFile(data: Uint8Array | string): Promise<{ stored: Uint8Array; plaintextSize: number }> {
+    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+    if (!this.encrypted) return { stored: bytes, plaintextSize: bytes.byteLength };
+    if (!this.encryptionKey) await this.resolveEncryption();
+    if (!this.encryptionKey) throw new Error('File storage requires an encryption key');
+    return { stored: await encryptBytes(this.encryptionKey, bytes), plaintextSize: bytes.byteLength };
+  }
+
+  private async decodeStoredFile(data: Uint8Array): Promise<Uint8Array> {
+    if (!this.encrypted) return data;
+    if (!this.encryptionKey) await this.resolveEncryption();
+    if (!this.encryptionKey) throw new Error('File storage requires an encryption key');
+    return decryptBytes(this.encryptionKey, data);
+  }
+
+  private inferImageContentType(path: string, explicit?: string | null): string {
+    if (explicit) {
+      if (!explicit.toLowerCase().startsWith('image/')) throw new Error(`Image content type must start with image/: ${explicit}`);
+      return explicit;
+    }
+    const ext = path.split('?')[0]?.split('#')[0]?.split('.').pop()?.toLowerCase();
+    switch (ext) {
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'gif':
+        return 'image/gif';
+      case 'webp':
+        return 'image/webp';
+      case 'svg':
+        return 'image/svg+xml';
+      case 'avif':
+        return 'image/avif';
+      case 'bmp':
+        return 'image/bmp';
+      case 'ico':
+        return 'image/x-icon';
+      default:
+        return 'image/png';
+    }
+  }
+
+  private parseImageDataUrl(dataUrl: string): { data: Uint8Array; contentType?: string } | null {
+    const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(dataUrl);
+    if (!match) return null;
+    const contentType = match[1] || undefined;
+    const isBase64 = Boolean(match[2]);
+    const payload = match[3] ?? '';
+    if (isBase64) {
+      const binary = atob(payload.replace(/\s+/g, ''));
+      const data = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) data[i] = binary.charCodeAt(i);
+      return { data, contentType };
+    }
+    return { data: new TextEncoder().encode(decodeURIComponent(payload)), contentType };
+  }
+
+  private async encodeImageInput(input: ImageInput, path: string, contentType?: string): Promise<{ data: Uint8Array; contentType: string }> {
+    if (typeof Blob !== 'undefined' && input instanceof Blob) {
+      const type = this.inferImageContentType(path, contentType || input.type || undefined);
+      return { data: new Uint8Array(await input.arrayBuffer()), contentType: type };
+    }
+    if (typeof input === 'string') {
+      const parsed = this.parseImageDataUrl(input);
+      if (parsed) return { data: parsed.data, contentType: this.inferImageContentType(path, contentType || parsed.contentType) };
+      return { data: new TextEncoder().encode(input), contentType: this.inferImageContentType(path, contentType || 'image/svg+xml') };
+    }
+    if (input instanceof Uint8Array) return { data: input, contentType: this.inferImageContentType(path, contentType) };
+    if (input instanceof ArrayBuffer) return { data: new Uint8Array(input), contentType: this.inferImageContentType(path, contentType) };
+    throw new Error('Unsupported image input in this runtime');
+  }
+
+  private coerceImageMetadata(meta: StoredFileMetadata | null, contentType: string): StoredImageMetadata | null {
+    if (!meta) return null;
+    return { ...meta, contentType: this.inferImageContentType(meta.path, meta.contentType || contentType) };
   }
 
   private async rebuildOutboxFromLocalState(): Promise<void> {
@@ -2500,6 +2592,101 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     });
     this.compactInFlight = run;
     return run;
+  }
+
+  // ── Durable file storage ───────────────────────────────────────────
+
+  /** Upload a durable application file. Files are encrypted with the mesh key and are never compacted or merged. */
+  async putFile(path: string, data: Uint8Array | string, contentType?: string): Promise<StoredFileMetadata> {
+    await this.ensureReady();
+    const adapter = this.requireAdapter('putFile()');
+    const filePath = this.storedFilePath(path);
+    const { stored, plaintextSize } = await this.encodeStoredFile(data);
+    const options = { uploadedByDeviceId: this.deviceId, plaintextSize, contentType };
+    if (adapter.putStoredFile) return adapter.putStoredFile(filePath, stored, options);
+    await adapter.ensureFolder(`${this.requireRemotePath('putFile()').replace(/\/$/, '')}/files`);
+    await adapter.writeFile(filePath, stored);
+    const meta = await adapter.getFileMetadata(filePath);
+    return {
+      name: meta?.name ?? filePath.split('/').pop() ?? filePath,
+      path: filePath,
+      size: meta?.size ?? stored.byteLength,
+      modifiedTime: meta?.modifiedTime ?? new Date().toISOString(),
+      etag: meta?.etag,
+      uploadedByDeviceId: this.deviceId,
+      plaintextSize,
+      storedSize: stored.byteLength,
+      contentType,
+    };
+  }
+
+  /** Read and decrypt a durable application file. */
+  async getFile(path: string): Promise<Uint8Array> {
+    await this.ensureReady();
+    const adapter = this.requireAdapter('getFile()');
+    const filePath = this.storedFilePath(path);
+    const stored = adapter.getStoredFile ? await adapter.getStoredFile(filePath) : await adapter.readFile(filePath);
+    return this.decodeStoredFile(stored);
+  }
+
+  /** Delete a durable application file. Missing files are treated as already deleted. */
+  async deleteFile(path: string): Promise<void> {
+    await this.ensureReady();
+    const adapter = this.requireAdapter('deleteFile()');
+    const filePath = this.storedFilePath(path);
+    if (adapter.deleteStoredFile) await adapter.deleteStoredFile(filePath);
+    else await adapter.deleteFile(filePath);
+  }
+
+  /** Return metadata for a durable application file without downloading content. */
+  async getFileMetadata(path: string): Promise<StoredFileMetadata | null> {
+    await this.ensureReady();
+    const adapter = this.requireAdapter('getFileMetadata()');
+    const filePath = this.storedFilePath(path);
+    if (adapter.getStoredFileMetadata) return adapter.getStoredFileMetadata(filePath);
+    const meta = await adapter.getFileMetadata(filePath);
+    return meta ? { ...meta, storedSize: meta.size } : null;
+  }
+
+  // ── First-class image storage ───────────────────────────────────────
+
+  /** Encode and upload an image through durable encrypted file storage. */
+  async putImage(path: string, image: ImageInput, options: PutImageOptions = {}): Promise<StoredImageMetadata> {
+    const encoded = await this.encodeImageInput(image, path, options.contentType);
+    const meta = await this.putFile(path, encoded.data, encoded.contentType);
+    return { ...meta, contentType: encoded.contentType };
+  }
+
+  /** Read an image as decoded bytes plus a browser Blob. */
+  async getImage(path: string): Promise<StoredImage> {
+    const metadata = await this.getFileMetadata(path);
+    const contentType = this.inferImageContentType(path, metadata?.contentType);
+    const data = await this.getFile(path);
+    const blob = new Blob([data as BlobPart], { type: contentType });
+    return {
+      path,
+      data,
+      blob,
+      metadata: this.coerceImageMetadata(metadata, contentType),
+      contentType,
+    };
+  }
+
+  /** Read an image and return a revokable browser blob: URL for UI rendering. */
+  async getImageBlobUrl(path: string): Promise<StoredImageBlobUrl> {
+    if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+      throw new Error('Blob URLs are not available in this runtime');
+    }
+    const image = await this.getImage(path);
+    const url = URL.createObjectURL(image.blob);
+    return {
+      path,
+      url,
+      blob: image.blob,
+      metadata: image.metadata,
+      contentType: image.contentType,
+      revoke: () => URL.revokeObjectURL(url),
+    };
   }
 
   // ── Mesh management ────────────────────────────────────────────────

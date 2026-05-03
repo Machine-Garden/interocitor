@@ -18,6 +18,22 @@ const SCHEMA_SQL = [
     PRIMARY KEY (prefix, path)
   )`,
   `CREATE INDEX IF NOT EXISTS idx_folders_prefix_path ON folders(prefix, path)`,
+  `CREATE TABLE IF NOT EXISTS stored_files (
+    prefix                 TEXT    NOT NULL,
+    path                   TEXT    NOT NULL,
+    r2_key                 TEXT    NOT NULL,
+    size                   INTEGER NOT NULL,
+    plaintext_size         INTEGER,
+    content_type           TEXT,
+    uploaded_by_device_id  TEXT    NOT NULL,
+    uploaded_at            TEXT    NOT NULL,
+    modified_time          TEXT    NOT NULL,
+    last_accessed_at       TEXT,
+    use_count              INTEGER NOT NULL DEFAULT 0,
+    etag                   TEXT,
+    PRIMARY KEY (prefix, path)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_stored_files_prefix ON stored_files(prefix)`,
   `CREATE TABLE IF NOT EXISTS mesh_paths (
     prefix                TEXT    NOT NULL,
     remote_root           TEXT    NOT NULL,

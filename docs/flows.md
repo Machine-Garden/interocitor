@@ -1,6 +1,6 @@
 # Protocol Flows
 
-Detailed Mermaid diagrams for every sync protocol path. For the bird's-eye overview see [README.md](../README.md).
+Detailed Mermaid diagrams for row-sync protocol paths. Durable files/images use direct `putFile`/`getFile`/`deleteFile` operations under the mesh `files/` namespace and do not participate in pull/flush/compaction. For the bird's-eye overview see [README.md](../README.md).
 
 ## Pull — fast-skip and merge
 

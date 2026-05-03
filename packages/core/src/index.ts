@@ -102,6 +102,13 @@ export type {
   // Remote adapter contract — needed for custom adapter implementations
   StorageAdapter,
   FileEntry,
+  StoredFileMetadata,
+  StoredFileWriteOptions,
+  ImageInput,
+  PutImageOptions,
+  StoredImageMetadata,
+  StoredImage,
+  StoredImageBlobUrl,
 
   // Local adapter contract — implement to plug in a custom local backend
   LocalStoreAdapter,

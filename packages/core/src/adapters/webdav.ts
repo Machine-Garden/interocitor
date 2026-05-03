@@ -8,7 +8,7 @@
  * Most implementations support Basic auth or Bearer tokens.
  */
 
-import type { StorageAdapter, FileEntry } from '../core/types.ts';
+import type { StorageAdapter, FileEntry, StoredFileMetadata, StoredFileWriteOptions } from '../core/types.ts';
 
 interface WebDAVConfig {
   /** Base URL of the WebDAV endpoint, e.g. "https://cloud.example.com/remote.php/dav/files/username" */
@@ -257,6 +257,67 @@ export class WebDAVAdapter implements StorageAdapter {
     // 204 No Content or 404 Not Found — both acceptable
     if (!res.ok && res.status !== 404) {
       throw new Error(`Failed to delete ${path}: ${res.status}`);
+    }
+  }
+
+  private parentDir(path: string): string {
+    const clean = path.startsWith('/') ? path : `/${path}`;
+    const idx = clean.lastIndexOf('/');
+    return idx <= 0 ? '/' : clean.slice(0, idx);
+  }
+
+  private storedMetaPath(path: string): string {
+    return `${path}.interocitor-meta.json`;
+  }
+
+  async putStoredFile(path: string, data: Uint8Array | string, options: StoredFileWriteOptions = {}): Promise<StoredFileMetadata> {
+    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+    await this.ensureFolder(this.parentDir(path));
+    await this.writeFile(path, bytes);
+    const file = await this.getFileMetadata(path);
+    const now = new Date().toISOString();
+    const meta: StoredFileMetadata = {
+      name: file?.name ?? path.split('/').pop() ?? path,
+      path,
+      size: file?.size ?? bytes.byteLength,
+      modifiedTime: file?.modifiedTime ?? now,
+      etag: file?.etag,
+      uploadedAt: now,
+      uploadedByDeviceId: options.uploadedByDeviceId,
+      plaintextSize: options.plaintextSize,
+      storedSize: bytes.byteLength,
+      contentType: options.contentType,
+      useCount: 0,
+    };
+    await this.writeFile(this.storedMetaPath(path), JSON.stringify(meta));
+    return meta;
+  }
+
+  async getStoredFile(path: string): Promise<Uint8Array> {
+    const bytes = await this.readFile(path);
+    const meta = await this.getStoredFileMetadata(path);
+    if (meta) {
+      await this.writeFile(this.storedMetaPath(path), JSON.stringify({
+        ...meta,
+        lastAccessedAt: new Date().toISOString(),
+        useCount: (meta.useCount ?? 0) + 1,
+      }));
+    }
+    return bytes;
+  }
+
+  async deleteStoredFile(path: string): Promise<void> {
+    await this.deleteFile(path);
+    try { await this.deleteFile(this.storedMetaPath(path)); } catch {}
+  }
+
+  async getStoredFileMetadata(path: string): Promise<StoredFileMetadata | null> {
+    try {
+      const raw = await this.readFile(this.storedMetaPath(path));
+      return JSON.parse(new TextDecoder().decode(raw)) as StoredFileMetadata;
+    } catch {
+      const file = await this.getFileMetadata(path);
+      return file ? { ...file, storedSize: file.size } : null;
     }
   }
 

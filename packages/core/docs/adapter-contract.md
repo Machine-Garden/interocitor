@@ -27,6 +27,14 @@ interface StorageAdapter {
 
   getFileMetadata(path: string): Promise<FileEntry | null>;
 
+  // Optional durable app-file capability. Sync internals keep using the
+  // primitives above; these methods are for user files/images that do not
+  // compact or merge.
+  putStoredFile?(path: string, data: Uint8Array | string, options?: StoredFileWriteOptions): Promise<StoredFileMetadata>;
+  getStoredFile?(path: string): Promise<Uint8Array>;
+  deleteStoredFile?(path: string): Promise<void>;
+  getStoredFileMetadata?(path: string): Promise<StoredFileMetadata | null>;
+
   getHandshakeConfig?(): string;
   resetFolderCache?(): void;
 }
@@ -38,6 +46,22 @@ interface FileEntry {
   modifiedTime: string;   // ISO 8601
   etag?: string;
   revision?: string;
+}
+
+interface StoredFileMetadata extends FileEntry {
+  uploadedByDeviceId?: string;
+  uploadedAt?: string;
+  lastAccessedAt?: string;
+  useCount?: number;
+  plaintextSize?: number;
+  storedSize?: number;
+  contentType?: string;
+}
+
+interface StoredFileWriteOptions {
+  uploadedByDeviceId?: string;
+  plaintextSize?: number;
+  contentType?: string;
 }
 ```
 
@@ -101,6 +125,21 @@ canonical source of truth when in doubt.
 - Removes the file. Subsequent `readFile(path)` should fail.
 - Deleting a missing file should be a no‑op (no throw). The engine
   prunes during compaction and may race with concurrent compactors.
+
+### Durable app-file methods
+
+`putStoredFile`, `getStoredFile`, `deleteStoredFile`, and `getStoredFileMetadata` are optional. Implement them when a backend has a better storage path for user files than the sync-object primitives.
+
+Semantics:
+
+- They store opaque bytes at a mesh file path chosen by the engine.
+- They are not part of `changes/`, snapshots, or compaction.
+- `putStoredFile` may overwrite the current object at that path.
+- `deleteStoredFile` removes the object and any backend metadata used for quota/access tracking.
+- `getStoredFile` should update `lastAccessedAt`/`useCount` when the backend tracks those fields.
+- Returned `size` should be the stored byte size; `plaintextSize` is supplied by the engine when known.
+
+If an adapter does not implement these methods, the engine falls back to `writeFile`/`readFile`/`deleteFile`/`getFileMetadata` under `<remotePath>/files/...`.
 
 ### `ensureFolder(path)`
 
@@ -182,6 +221,8 @@ For a configured `remotePath = /MyApp` (mesh‑scoped — see "Scope" below):
 │   └── ...
 ├── devices/
 │   └── <deviceId>.json                        # device metadata
+├── files/
+│   └── <app path>                             # durable encrypted app files
 └── mainline/
     └── snapshot-<epoch>-<serverId>.json       # encrypted snapshot
 ```

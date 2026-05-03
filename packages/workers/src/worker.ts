@@ -25,6 +25,8 @@ import type {
   InterocitorMountOptions,
   InterocitorRuntimeOptions,
   WorkerLike,
+  R2Bucket,
+  FileUploadAuthorizationResult,
 } from './types.ts';
 export type { InterocitorEnv, InterocitorMountOptions, InterocitorRuntimeOptions } from './types.ts';
 
@@ -57,6 +59,8 @@ function wrapSchemaError(error: unknown): never {
 }
 
 const DEFAULT_MESH_SECRET = 'interocitor';
+const DEFAULT_STORED_FILE_BYTES = 32 * 1024 * 1024;
+const DEFAULT_MESH_STORED_BYTES = 512 * 1024 * 1024;
 
 interface ResolvedRuntimeConfig {
   accessToken?: string;
@@ -67,6 +71,9 @@ interface ResolvedRuntimeConfig {
   maxChangeBytes: number;
   maxMainlineBytes: number;
   maxGenericFileBytes: number;
+  maxStoredFileBytes: number;
+  maxMeshStoredBytes: number;
+  authorizeFileUpload?: InterocitorRuntimeOptions<unknown>['authorizeFileUpload'];
   meshSecret: string;
   verbose: boolean;
 }
@@ -86,6 +93,9 @@ function resolveRuntimeConfig<Env>(env: Env, runtime?: InterocitorRuntimeOptions
     maxChangeBytes: parsePositiveInt(runtime?.maxChangeBytes?.(env), DEFAULT_CHANGE_BYTES),
     maxMainlineBytes: parsePositiveInt(runtime?.maxMainlineBytes?.(env), DEFAULT_MAINLINE_BYTES),
     maxGenericFileBytes: parsePositiveInt(runtime?.maxGenericFileBytes?.(env), DEFAULT_GENERIC_FILE_BYTES),
+    maxStoredFileBytes: parsePositiveInt(runtime?.maxStoredFileBytes?.(env), DEFAULT_STORED_FILE_BYTES),
+    maxMeshStoredBytes: parsePositiveInt(runtime?.maxMeshStoredBytes?.(env), DEFAULT_MESH_STORED_BYTES),
+    authorizeFileUpload: runtime?.authorizeFileUpload as InterocitorRuntimeOptions<unknown>['authorizeFileUpload'],
     meshSecret: runtime?.meshSecret?.(env) || DEFAULT_MESH_SECRET,
     verbose: runtime?.verbose?.(env) === true || runtime?.verbose?.(env) === '1' || runtime?.verbose?.(env) === 1,
   };
@@ -367,6 +377,154 @@ async function handleDelete(
   return emptyResponse(deleted ? 204 : 404);
 }
 
+interface StoredFileRow {
+  [key: string]: unknown;
+  prefix?: string;
+  path?: string;
+  r2_key?: string;
+  size?: number;
+  plaintext_size?: number | null;
+  content_type?: string | null;
+  uploaded_by_device_id?: string;
+  uploaded_at?: string;
+  modified_time?: string;
+  last_accessed_at?: string | null;
+  use_count?: number;
+  etag?: string | null;
+}
+
+function storedFileKey(prefix: string, path: string): string {
+  return `meshes/${encodeURIComponent(prefix)}/files/${encodeURIComponent(normalizePath(path).slice(1))}`;
+}
+
+function storedFileMetadata(row: StoredFileRow): Record<string, unknown> {
+  const path = normalizePath(String(row.path || '/'));
+  return {
+    name: fileNameFromPath(path),
+    path,
+    size: Number(row.size ?? 0),
+    modifiedTime: String(row.modified_time || row.uploaded_at || ''),
+    etag: row.etag || undefined,
+    uploadedByDeviceId: String(row.uploaded_by_device_id || ''),
+    uploadedAt: String(row.uploaded_at || ''),
+    lastAccessedAt: row.last_accessed_at || undefined,
+    useCount: Number(row.use_count ?? 0),
+    plaintextSize: row.plaintext_size == null ? undefined : Number(row.plaintext_size),
+    storedSize: Number(row.size ?? 0),
+    contentType: row.content_type || undefined,
+  };
+}
+
+async function currentStoredBytes(db: DatabaseAdapter, prefix: string): Promise<number> {
+  const row = await db.first<{ total?: number }>('SELECT COALESCE(SUM(size), 0) AS total FROM stored_files WHERE prefix=?1', prefix);
+  return Number(row?.total ?? 0);
+}
+
+async function handleStoredFileMetadata(db: DatabaseAdapter, prefix: string, path: string): Promise<Response> {
+  const normalized = normalizePath(path);
+  const row = await db.first<StoredFileRow>('SELECT * FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
+  if (!row) return jsonResponse({ file: null }, 404);
+  return jsonResponse({ file: storedFileMetadata(row) }, 200);
+}
+
+async function handleGetStoredFile(db: DatabaseAdapter, bucket: R2Bucket | undefined, prefix: string, path: string): Promise<Response> {
+  if (!bucket) return jsonResponse({ error: 'File storage bucket not configured' }, 501);
+  const normalized = normalizePath(path);
+  const row = await db.first<StoredFileRow>('SELECT * FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
+  if (!row?.r2_key) return withCors(new Response('Not found', { status: 404 }));
+  const object = await bucket.get(String(row.r2_key));
+  if (!object) return withCors(new Response('Not found', { status: 404 }));
+  const now = new Date().toISOString();
+  await db.run('UPDATE stored_files SET last_accessed_at=?3, use_count=use_count+1 WHERE prefix=?1 AND path=?2', prefix, normalized, now);
+  const headers = new Headers({
+    'Content-Type': String(row.content_type || 'application/octet-stream'),
+    'Content-Length': String(object.size),
+  });
+  if (object.httpEtag || object.etag || row.etag) headers.set('ETag', String(object.httpEtag || object.etag || row.etag));
+  return withCors(new Response(object.body, { status: 200, headers }));
+}
+
+async function normalizeAuthorization(result: FileUploadAuthorizationResult): Promise<{ allowed: boolean; reason?: string; status: number }> {
+  if (typeof result === 'boolean') return { allowed: result, status: result ? 200 : 403 };
+  return { allowed: result.allowed, reason: result.reason, status: result.status ?? (result.allowed ? 200 : 403) };
+}
+
+async function handlePutStoredFile<Env>(
+  db: DatabaseAdapter,
+  bucket: R2Bucket | undefined,
+  prefix: string,
+  path: string,
+  request: Request,
+  runtime: ResolvedRuntimeConfig,
+  env: Env,
+): Promise<Response> {
+  if (!bucket) return jsonResponse({ error: 'File storage bucket not configured' }, 501);
+  const bytes = await readBytes(request);
+  if (!bytes) return jsonResponse({ error: 'Invalid request body' }, 400);
+  if (bytes.byteLength > runtime.maxStoredFileBytes) return jsonResponse({ error: 'Payload too large', limit: runtime.maxStoredFileBytes }, 413);
+  const normalized = normalizePath(path);
+  const uploadedByDeviceId = String(request.headers.get('X-Interocitor-Device-Id') || '').trim();
+  if (!uploadedByDeviceId) return jsonResponse({ error: 'Missing X-Interocitor-Device-Id' }, 401);
+  const contentType = request.headers.get('Content-Type') || 'application/octet-stream';
+  const plaintextSizeHeader = request.headers.get('X-Interocitor-Plaintext-Size');
+  const plaintextSize = plaintextSizeHeader ? Number.parseInt(plaintextSizeHeader, 10) : undefined;
+  const existing = await db.first<StoredFileRow>('SELECT size, r2_key FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
+  const current = await currentStoredBytes(db, prefix);
+  const nextTotal = current - Number(existing?.size ?? 0) + bytes.byteLength;
+  if (nextTotal > runtime.maxMeshStoredBytes) return jsonResponse({ error: 'Mesh storage quota exceeded', limit: runtime.maxMeshStoredBytes }, 413);
+  if (runtime.authorizeFileUpload) {
+    const auth = await normalizeAuthorization(await runtime.authorizeFileUpload({
+      prefix,
+      path: normalized,
+      uploadedByDeviceId,
+      size: bytes.byteLength,
+      plaintextSize: Number.isFinite(plaintextSize) ? plaintextSize : undefined,
+      contentType,
+      currentMeshStoredBytes: current,
+      maxMeshStoredBytes: runtime.maxMeshStoredBytes,
+      request,
+    }, env));
+    if (!auth.allowed) return jsonResponse({ error: auth.reason || 'Upload rejected' }, auth.status);
+  }
+  const key = String(existing?.r2_key || storedFileKey(prefix, normalized));
+  const now = new Date().toISOString();
+  await bucket.put(key, bytes, {
+    httpMetadata: { contentType },
+    customMetadata: { prefix, path: normalized, uploadedByDeviceId },
+  });
+  const etag = crypto.randomUUID();
+  await db.run(
+    `INSERT INTO stored_files (prefix,path,r2_key,size,plaintext_size,content_type,uploaded_by_device_id,uploaded_at,modified_time,last_accessed_at,use_count,etag)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8,NULL,0,?9)
+     ON CONFLICT(prefix,path) DO UPDATE SET
+       r2_key=excluded.r2_key, size=excluded.size, plaintext_size=excluded.plaintext_size,
+       content_type=excluded.content_type, uploaded_by_device_id=excluded.uploaded_by_device_id,
+       uploaded_at=excluded.uploaded_at, modified_time=excluded.modified_time,
+       last_accessed_at=NULL, use_count=0, etag=excluded.etag`,
+    prefix,
+    normalized,
+    key,
+    bytes.byteLength,
+    Number.isFinite(plaintextSize) ? plaintextSize : null,
+    contentType,
+    uploadedByDeviceId,
+    now,
+    etag,
+  );
+  const row = await db.first<StoredFileRow>('SELECT * FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
+  return jsonResponse({ file: storedFileMetadata(row ?? { path: normalized, size: bytes.byteLength, uploaded_by_device_id: uploadedByDeviceId, uploaded_at: now, modified_time: now, etag }) }, existing ? 200 : 201);
+}
+
+async function handleDeleteStoredFile(db: DatabaseAdapter, bucket: R2Bucket | undefined, prefix: string, path: string): Promise<Response> {
+  if (!bucket) return jsonResponse({ error: 'File storage bucket not configured' }, 501);
+  const normalized = normalizePath(path);
+  const row = await db.first<StoredFileRow>('SELECT r2_key FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
+  if (!row?.r2_key) return emptyResponse(404);
+  await bucket.delete(String(row.r2_key));
+  await db.run('DELETE FROM stored_files WHERE prefix=?1 AND path=?2', prefix, normalized);
+  return emptyResponse(204);
+}
+
 async function handleSystem(
   db: DatabaseAdapter,
   request: Request,
@@ -481,6 +639,7 @@ async function handleIoRequest<Env>(
   url: URL,
   dbGetter: (env: Env) => D1Database,
   relayGetter?: (env: Env) => DurableObjectNamespace,
+  filesGetter?: (env: Env) => R2Bucket | undefined,
 ): Promise<Response> {
   const method = request.method.toUpperCase();
   const { prefix, op } = parseIo(url);
@@ -490,6 +649,7 @@ async function handleIoRequest<Env>(
   if (prefixError) return prefixError;
   const db = resolveDatabase(env, dbGetter);
   const relay = relayGetter ? relayGetter(env) : undefined;
+  const files = filesGetter ? filesGetter(env) : undefined;
   if (!(await hasAccess(request, runtime, prefix))) return jsonResponse({ error: 'Unauthorized' }, 401);
 
   if (op === 'health' && method === 'GET') {
@@ -504,6 +664,16 @@ async function handleIoRequest<Env>(
   if (op === 'metadata' && method === 'POST') {
     const body = await readJsonBody(request);
     return handleMetadata(db, prefix, String(body?.path || '/'));
+  }
+  if (op === 'stored-file') {
+    const path = normalizePath(url.searchParams.get('path') || '/');
+    if (method === 'GET') return handleGetStoredFile(db, files, prefix, path);
+    if (method === 'PUT') return handlePutStoredFile(db, files, prefix, path, request, runtime, env);
+    if (method === 'DELETE') return handleDeleteStoredFile(db, files, prefix, path);
+  }
+  if (op === 'stored-file-metadata' && method === 'POST') {
+    const body = await readJsonBody(request);
+    return handleStoredFileMetadata(db, prefix, String(body?.path || '/'));
   }
   if (op === 'ensure-folder' && method === 'POST') {
     await opListChildren(db.raw, prefix, normalizePath(String((await readJsonBody(request))?.path || '/'))).catch(() => null);
@@ -529,6 +699,7 @@ export function createInterocitorMount<Env = unknown>(
   const mountPrefix = normalizeMountPrefix(options.mountPrefix ?? '');
   const dbGetter = options.db;
   const relayGetter = options.relay;
+  const filesGetter = options.files ?? ((env: Env) => (env as InterocitorEnv).INTEROCITOR_FILES);
   const healthPath = joinMountPath(mountPrefix, '/health');
   const ioBase = joinMountPath(mountPrefix, IO_PREFIX);
   const notifyBase = joinMountPath(mountPrefix, NOTIFY_PREFIX);
@@ -549,7 +720,7 @@ export function createInterocitorMount<Env = unknown>(
     const strippedPath = stripMountPrefix(url.pathname, mountPrefix);
     if (strippedPath === null) return new Response('Not found', { status: 404 });
     url.pathname = strippedPath;
-    return interocitorWorker.fetch(new Request(url.toString(), request), env, ctx, dbGetter, relayGetter, runtimeOptions);
+    return interocitorWorker.fetch(new Request(url.toString(), request), env, ctx, dbGetter, relayGetter, runtimeOptions, filesGetter);
   }
 
   return Object.freeze({ mountPrefix, healthPath, ioBase, notifyBase, systemBase, matches, fetch });
@@ -563,8 +734,8 @@ export function withInterocitor<Env = unknown>(
   worker: WorkerLike<Env> = EMPTY_WORKER as WorkerLike<Env>,
   options: WithInterocitorOptions<Env>,
 ): WorkerLike<Env> {
-  const { mountPrefix, db, relay, runtime } = options;
-  const interocitor = createInterocitorMount<Env>({ mountPrefix, db, relay, runtime });
+  const { mountPrefix, db, relay, files, runtime } = options;
+  const interocitor = createInterocitorMount<Env>({ mountPrefix, db, relay, files, runtime });
   const runtimeOptions = runtime;  
   const baseWorker = worker ?? (EMPTY_WORKER as WorkerLike<Env>);
 
@@ -592,8 +763,9 @@ export const interocitorWorker = {
     env: Env,
     ctx: ExecutionContextLike,
     dbGetter: (env: Env) => D1Database,
-      relayGetter?: (env: Env) => DurableObjectNamespace,
+    relayGetter?: (env: Env) => DurableObjectNamespace,
     runtimeOptions?: InterocitorRuntimeOptions<Env>,
+    filesGetter?: (env: Env) => R2Bucket | undefined,
   ): Promise<Response> {
     const runtime = resolveRuntimeConfig(env, runtimeOptions);
     const db = dbGetter;
@@ -609,7 +781,7 @@ export const interocitorWorker = {
       return handleWsUpgrade(request, env, runtime, ctx, prefix, relayGetter);
     }
     if (url.pathname.startsWith(`${IO_PREFIX}/`)) {
-      return handleIoRequest(request, env, runtime, ctx, url, db, relayGetter);
+      return handleIoRequest(request, env, runtime, ctx, url, db, relayGetter, filesGetter ?? ((e: Env) => (e as InterocitorEnv).INTEROCITOR_FILES));
     }
     if (url.pathname.startsWith(`${SYSTEM_PREFIX}/`)) {
       return handleSystem(resolveDatabase(env, db), request, url, runtime);

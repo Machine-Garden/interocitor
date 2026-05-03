@@ -20,6 +20,7 @@ Low-level primitives:
 - typed React context factory
 - live query hook
 - live row hook
+- image blob URL hook
 
 ## Install
 
@@ -115,6 +116,26 @@ const { data: task } = useRow(db.table('tasks'), taskId);
 ```
 
 `data` is `undefined` until the first fetch resolves, or if the row does not exist.
+
+## useImage
+
+Display encrypted images stored with `db.putImage(...)` or `db.putFile(..., 'image/*')`.
+
+```tsx
+function Avatar({ path }: { path?: string }) {
+  const db = useDb();
+  const image = useImage(db, path);
+
+  if (image.loading) return <span>Loading…</span>;
+  if (image.error) return <span>Image unavailable</span>;
+  if (!image.url) return null;
+
+  return <img src={image.url} alt="" />;
+}
+```
+
+`useImage` returns `{ url, blob, loading, error, metadata, contentType, revoke }`.
+It automatically revokes the previous `blob:` URL on unmount and path changes. Call `image.revoke()` if you want to clear the current URL earlier.
 
 ## Mutations
 

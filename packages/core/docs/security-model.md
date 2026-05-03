@@ -13,8 +13,7 @@ When `encrypted: true` (the default) the engine uses **AES‑GCM with a
 passphrase (`passphraseToKey`) or generated freshly (`generateKey`) on
 first init.
 
-Every change file and every snapshot is encrypted **before** it leaves the
-device. The remote sees only an `EncryptedEnvelope` blob:
+Every change file, snapshot, and durable app file is encrypted **before** it leaves the device. The remote sees only an `EncryptedEnvelope` blob:
 
 ```
 version | iv (12 bytes) | ciphertext (incl. AES-GCM tag)
@@ -25,6 +24,9 @@ What this gives you:
 - **Confidentiality of row contents.** Field names, field values, and
   table names are inside the encrypted payload. The remote cannot read
   them without the passphrase.
+- **Confidentiality of durable file contents.** `putFile()` and `putImage()`
+  encrypt file bytes with the mesh key before adapter upload when
+  `encrypted: true`.
 - **Integrity of each entry.** AES‑GCM is authenticated; flipped bits in
   ciphertext fail to decrypt and trigger a `decode:error` →
   `remote:poisoned` flow.
@@ -42,7 +44,7 @@ the payload is plaintext on the remote.
   encodes a wall‑clock timestamp and a device id. An observer can see
   *when* you wrote and *which device* did it.
 - **Folder layout.** The remote folder structure (`changes/`, `mainline/`,
-  `devices/`, `manifest.json`) is fixed and visible.
+  `devices/`, `files/`, `manifest.json`) is fixed and visible.
 - **Manifest contents.** `manifest.json` and `manifest-<gen>.json` are
   **not encrypted**. They contain `meshId`, `schemaVersion`, `epoch`,
   `watermarkHlc`, `writtenBy` (device id), `writtenAt`, `encrypted: true`,
@@ -51,7 +53,8 @@ the payload is plaintext on the remote.
   `deviceName`, `deviceType`, last‑seen timestamps. Encrypted same way as
   change files only if the mesh is encrypted, but the device id appears
   in the file name regardless.
-- **Sizes & timing.** File sizes leak row sizes. Write timing leaks
+- **Sizes & timing.** Sync file sizes leak row sizes. Durable file object
+  sizes leak approximate attachment/image sizes. Write/read timing leaks
   user activity patterns.
 - **Passphrase strength.** A weak passphrase means a weak key. The engine
   derives the key directly from `base58Decode(passphrase)` — there is **no

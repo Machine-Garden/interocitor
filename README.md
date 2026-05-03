@@ -9,273 +9,278 @@
 </p>
 
 <p align="center">
-  Privacy-first, local-second sync for apps that should stay readable only on the client.
+  End-to-end encrypted local-first sync, durable file storage, and image display primitives for apps that should keep user data readable only on the client.
 </p>
 
-## Monorepo umbrella
+## What Interocitor is
 
-- `packages/core` — `@interocitor/core`, the main JavaScript/TypeScript package
-- `packages/react` — `@interocitor/react`, React bindings
-- `packages/interocitor-swift` — Swift client
-- `packages/webdav` — `@interocitor/webdav`, tiny local WebDAV server for demos/tests
-- `packages/workers` — `@interocitor/workers`, Cloudflare transport pieces
-- `examples/` — runnable demos
+Interocitor is a local-first data engine. Your app reads and writes local state first, then syncs encrypted artifacts through storage you control: WebDAV, Google Drive, Cloudflare Workers/R2, or a custom adapter.
 
-## Why
+The remote is a mailbox, not a trusted database:
 
-Interocitor is your app's personal keychain.
-Your devices hold the key. The cloud is only a mailbox. It carries encrypted sync artifacts and cannot read your mail.
+- row data is encrypted before upload
+- devices keep working offline
+- sync converges when devices see the same remote files
+- app files and images can live beside the mesh without entering CRDT compaction
+- Cloudflare Workers can add server-side abuse controls without getting plaintext
 
-What this means:
-- encryption on by default
-- reads and writes are local-first
-- sync uses a remote mailbox, not a trusted database
-- restore is explicit app UI, not automatic magic
+## What you get
+
+- **Typed local data.** Tables, rows, live queries, schema inference.
+- **Encrypted sync.** Change files and snapshots are encrypted with the mesh key by default.
+- **Durable file storage.** `PUT`, `GET`, `DELETE` style file APIs for blobs that do not merge and do not compact.
+- **First-class images.** Store `Blob`, `File`, bytes, data URLs, or SVG strings; read back bytes, `Blob`, or a revokable `blob:` URL.
+- **React hooks.** `useLiveQuery`, `useRow`, and `useImage` keep rendering decisions in app code.
+- **Cloudflare backend.** D1 for sync metadata, R2 for durable file bodies, optional Durable Object realtime invalidation, upload quotas, and upload authorization callbacks.
+
+## Install
+
+```bash
+yarn add @interocitor/core
+# optional
+yarn add @interocitor/react @interocitor/workers
+```
 
 ## Quick start
 
 ```ts
-import { Interocitor } from '@interocitor/core';
+import { Interocitor, types, type DatabaseSchemaDefinition, type InferSchemaType } from '@interocitor/core';
 import { WebDAVAdapter } from '@interocitor/core/adapters/webdav';
 
-const db = new Interocitor({
-  dbName: 'my-app',
-  appName: 'My App',
-  // encrypted by default; set encrypted: false to opt out
+const schema = {
+  version: 1,
+  tables: {
+    todos: {
+      fields: {
+        text: types.string,
+        done: types.boolean,
+        avatarPath: types.string.optional(),
+      },
+    },
+  },
+} satisfies DatabaseSchemaDefinition;
+
+type DB = InferSchemaType<typeof schema>;
+
+const db = new Interocitor<DB>({
+  appName: 'Todo',
+  dbName: 'todo',
+  schema,
+  encrypted: true,
 });
+
 await db.init();
 
-const id = await db.table('todos').add({
-  text: 'Ship privacy-first sync',
-  done: false,
-}, { prefix: 'todo' });
+db.configureMesh({
+  remotePath: '/Todo',
+  encrypted: true,
+  // In a real app: restore an existing passphrase or let the first device create one.
+  passphrase,
+});
 
-db.configureMesh({ remotePath: '/MyApp', encrypted: true });
 await db.setRemoteStorage(new WebDAVAdapter({
-  baseUrl: 'https://your-webdav-server.example.com',
+  baseUrl: 'https://dav.example.com',
   auth: { username: 'user', password: 'pass' },
 }));
+
 await db.connect();
+
+const todoId = await db.table('todos').add({
+  text: 'Ship encrypted sync',
+  done: false,
+});
+
+await db.table('todos').patch(todoId, { done: true });
+```
+
+## Files and images
+
+Files are durable application objects. They are encrypted like row data, but they do not participate in CRDT merge, change-log compaction, or snapshots. A file just exists at a path until overwritten or deleted.
+
+```ts
+await db.putFile('receipts/2026-05-03.pdf', pdfBytes, 'application/pdf');
+
+const bytes = await db.getFile('receipts/2026-05-03.pdf');
+const metadata = await db.getFileMetadata('receipts/2026-05-03.pdf');
+
+await db.deleteFile('receipts/2026-05-03.pdf');
+```
+
+Image helpers sit on top of file storage:
+
+```ts
+await db.putImage('avatars/me.png', file); // File, Blob, ArrayBuffer, Uint8Array, data URL, or SVG string
+
+const image = await db.getImage('avatars/me.png');
+console.log(image.blob, image.metadata?.uploadedByDeviceId);
+
+const rendered = await db.getImageBlobUrl('avatars/me.png');
+img.src = rendered.url;
+rendered.revoke();
+```
+
+Metadata tracks who uploaded the current version, stored/plaintext size, upload time, content type, last access time, and total use count when the backend supports it.
+
+## React
+
+React bindings are deliberately small. App code owns engine lifecycle; hooks consume an already-created engine.
+
+```tsx
+import { createInterocitorContext, useImage, useLiveQuery, useRow } from '@interocitor/react';
+
+export const [InterocitorProvider, useDb] = createInterocitorContext<DB>();
+
+function TodoList() {
+  const db = useDb();
+  const { data: todos = [] } = useLiveQuery(() => db.table('todos').query(), [db]);
+  return todos.map(todo => <TodoRow key={todo.id} id={todo.id} />);
+}
+
+function TodoAvatar({ path }: { path?: string }) {
+  const db = useDb();
+  const image = useImage(db, path);
+  if (image.loading) return <span>Loading…</span>;
+  if (image.error || !image.url) return null;
+  return <img src={image.url} alt="" />;
+}
+```
+
+## Cloudflare Workers backend
+
+`@interocitor/workers` mounts Interocitor under your Worker. It can provide:
+
+- D1-backed sync object storage
+- R2-backed durable file storage
+- upload size limits and per-mesh total byte quotas
+- upload authorization callbacks that can reject by mesh, device, path, size, content type, or your app auth
+- optional Durable Object realtime invalidation
+- system ops for mesh ID issue/validation and maintenance
+
+```ts
+import { withInterocitor, InterocitorRelayDurableObject } from '@interocitor/workers';
+
+interface Env {
+  DB: D1Database;
+  FILES: R2Bucket;
+  RELAY: DurableObjectNamespace;
+  INTEROCITOR_ACCESS_TOKEN: string;
+}
+
+const appWorker = {
+  async fetch(request: Request) {
+    return new Response('app');
+  },
+};
+
+export { InterocitorRelayDurableObject };
+
+export default withInterocitor(appWorker, {
+  mountPrefix: '/sync',
+  db: env => env.DB,
+  files: env => env.FILES,
+  relay: env => env.RELAY,
+  runtime: {
+    accessToken: env => env.INTEROCITOR_ACCESS_TOKEN,
+    maxStoredFileBytes: () => 32 * 1024 * 1024,
+    maxMeshStoredBytes: () => 512 * 1024 * 1024,
+    authorizeFileUpload: async ({ uploadedByDeviceId, size, contentType }) => {
+      if (!uploadedByDeviceId) return { allowed: false, status: 401, reason: 'missing device' };
+      if (contentType?.startsWith('image/') && size > 8 * 1024 * 1024) {
+        return { allowed: false, status: 413, reason: 'image too large' };
+      }
+      return true;
+    },
+  },
+});
 ```
 
 ## How sync works
 
-Interocitor keeps the full working dataset local. Cloud storage only carries encrypted sync artifacts.
+Interocitor keeps the working dataset local. Sync is a mailbox protocol:
 
 ```mermaid
 flowchart LR
   A[App UI] --> B[Interocitor]
   B --> C[Local store]
-  B --> D[Encrypt + serialize changes]
-  D --> E[Transport adapter
-Google Drive / WebDAV / Cloudflare / custom]
-  E --> F[Remote mailbox
-(ciphertext only)]
+  B --> D[Encrypt changes / files]
+  D --> E[Adapter: WebDAV / Google Drive / Workers / custom]
+  E --> F[Remote mailbox]
   F --> E
-  E --> G[Download encrypted files]
+  E --> G[Download remote artifacts]
   G --> H[Decrypt on client]
   H --> B
 ```
 
-`sync()` reconciles local state with the remote mailbox in two steps:
+For row data:
 
-1. `pull()` — download remote change files and merge them into local state.
-2. `flush()` — push queued local outbox entries to the remote mailbox.
+1. Local writes update the local store and queue change ops.
+2. `flush()` uploads encrypted change files.
+3. `pull()` downloads unseen changes and merges rows by CRDT rules.
+4. `compact()` can collapse old change logs into an encrypted snapshot.
 
-`sync()` does **not** perform storage cleanup. Cleanup of old change files happens during **compaction**, a separate maintenance flow.
+For files:
 
-## Compaction & batching
+1. `putFile()`/`putImage()` encrypts the object and uploads it under the mesh `files/` namespace.
+2. `getFile()`/`getImage()` downloads and decrypts it directly.
+3. `deleteFile()` removes it directly.
 
-Compaction, automatic compact scheduling, and batched writes exist in the shipped runtime APIs. The detailed policy, configuration, events, and `db.batch(fn)` API live in the package docs:
+Files are not replayed, merged, compacted, or stored in row snapshots.
 
-- JS/TS — see `packages/core/README.md` (manual `compact()`, immediate sampled auto-compact, delayed two-phase auto-compact, implicit `batchWindowMs`, explicit `db.batch(fn)`)
-- Swift — see `packages/interocitor-swift/README.md` (manual `compact()` and coordination policy)
+## Guarantees and limits
 
-This root README stays umbrella-only.
+Interocitor gives you:
 
-## Core API at a glance
+- local reads and writes after `init()`
+- background sync after `connect()`
+- eventual convergence for row data when devices observe the same remote artifacts
+- encrypted remote payloads when `encrypted: true`
+- explicit restore/pairing instead of hidden account magic
 
-- `new Interocitor(config)` — create engine only; no hidden init side effects
-- `await db.init()` — explicit local init
-- `db.configureMesh(...)` — apply remotePath/passphrase/device config before connect
-- `await db.table(name).add(data, { prefix? })` — insert with generated row ID
-- `await db.table(name).patch(id, partial)` — patch touched fields only
-- `await db.table(name).replace(id, row)` — full replace
-- `await db.table(name).delete(id)` — tombstone locally
-- `await db.table(name).query()` — read from local indexes only
-- `await db.table(name).where(field).equals(value).orderBy(field, dir)` — filtered local query with explicit ordering
-- `await db.connect()` — authenticate + sync when remote adapter is configured
+Interocitor does not give you:
 
-For compact and maintenance guidance, see the package README that ships with your runtime.
-
-## Local-only mode
-
-```ts
-const db = new Interocitor({ dbName: 'solo-app' });
-await db.init();
-await db.table('notes').add({ text: 'offline first' }, { prefix: 'note' });
-```
-
-Local CRUD works without any adapter.
-
-## Schema typing
-
-```ts
-import { schema } from '@interocitor/core';
-
-const appSchema = schema({
-  todos: {
-    text: schema.string(),
-    done: schema.boolean().index(),
-    createdAt: schema.date(),
-    note: schema.string().optional(),
-  },
-});
-
-const db = new Interocitor({ dbName: 'typed-app', schema: appSchema });
-
-// inferred row type:
-// { text: string; done: boolean; createdAt: Date; note?: string }
-```
-
-`.optional` makes the property optional in the inferred row type. Indexed/unique fields cannot be optional.
-
-## Device identity
-
-Devices self-identify with UUIDv7 IDs — sortable, globally unique. Optional naming:
-
-```ts
-const db = new Interocitor({
-  dbName: 'my-app',
-  deviceName: 'Anton’s iPhone',
-  deviceType: 'ios',
-});
-```
-
-These appear in pairing metadata and sync manifests.
-
-## Row ownership
-
-Every row written through the engine automatically gets `_owner` set to the writing device ID.
-
-```ts
-const row = await db.table('todos').row(id);
-row?._owner; // device ID of last writer
-```
-
-## Mesh IDs
-
-Mesh/team IDs should be worker-issued with an embedded HMAC tag:
-
-```ts
-import { createMeshSecret, issueMeshId, isValidMeshId } from '@interocitor/core';
-
-const secret = await createMeshSecret();
-const meshId = await issueMeshId(secret);
-const ok = await isValidMeshId(meshId, secret);
-```
-
-Format: `<uuidv7>.<base64url HMAC tag>`.
-
-## Row IDs
-
-```ts
-import { createRowId, normalizeRowId } from '@interocitor/core';
-
-const id = await createRowId('todo');
-const safe = normalizeRowId(id);
-```
-
-Row IDs are opaque, sortable, and safe for sync artifacts.
-
-## Offline guarantee
-
-| Operation | Network? |
-| --- | --- |
-| init | No |
-| add / patch / replace / delete | No |
-| query / row | No |
-| connect / sync | Yes, if adapter configured |
+- a hosted backend
+- server-authoritative conflict resolution
+- hidden timing/size/device metadata
+- per-device revocation without creating a new mesh/key
+- protection from malicious code running on the user's device
 
 ## Adapters
 
-Use one of the built-in adapters or provide your own:
-
-- WebDAV
-- Google Drive
-- Cloudflare
-- Memory adapter for tests
-
-## Pairing & multi-device
-
-Use three app-side modules for production integrations:
-
-```text
-lib/interocitor-db.ts      engine, schema, local repository, credential primitives
-lib/interocitor-sync.ts    mesh id lifecycle, adapter, connect/disconnect, recovery
-lib/interocitor-pairing.ts QR handshake only
-```
-
-Mesh IDs are not optional. Do not hardcode one Cloudflare prefix such as `/io/app-name`; use one namespace per household/workspace/device group, for example a Cloudflare adapter base URL `/sync/io/{meshId}`. Store the active mesh id locally and expose create/connect/disconnect/recover UI.
-
-Pairing has two intents:
-
-- **Join QR**: the unpaired device mints a fresh mesh id, creates a Cloudflare adapter with base URL `/sync/io/{meshId}`, calls `generateJoinQR()`, then receives credentials from the result's `credentials` promise after an existing device scans and pushes them.
-- **Share QR**: an already-paired device calls `generateShareQR({ remotePath, passphrase })`; the new device scans and must use the credentials returned by `handleScannedQR()`.
-
-```ts
-import { decodeQRPayload, handleScannedQR, parseQRFromUrl } from '@interocitor/core';
-// Or from the stable subpath:
-// import { decodeQRPayload } from '@interocitor/core/handshake/qr';
-
-const payload = parseQRFromUrl(location.hash) ?? decodeQRPayload(rawPastedPayload);
-const received = await handleScannedQR({ adapter, relayBase: '/Taska', payload });
-
-if (received) {
-  if (received.passphrase) db.setPassphrase(received.passphrase);
-  await connectFromPayload(received.remotePath);
-}
-```
-
-`handleScannedQR()` returns `null` for join intent because the scanner pushed its own credentials. It returns credentials for share intent because the scanner received them.
-
-## Local store
-
-Browser runtime defaults to IndexedDB. For unrecoverable local encrypted mesh state, disconnect, detach remote storage, clear credentials, forget the local mesh id, call `resetLocalDatabase(dbName)`, then reload before creating or joining a new mesh.
-
-## CRDT strategy
-
-Interocitor uses per-column CRDT merge with hybrid logical clocks.
-
-## Events
-
-For simple snapshot UIs, refresh on `change`, `delete`, `rehydrate:complete`, and `sync:complete`. The engine also emits lifecycle and error events for reconnects, credential issues, and remote poison states.
-
-## Demos
-
-### Local TODO demo (WebDAV)
-
-See `examples/todo-webdav`.
-
-## What this is not
-
-- not Firebase
-- not a server-trusted merge layer
-- not plaintext cloud sync
-
-## Tests
-
-Run workspace tests from the monorepo root.
+| Package / adapter | Use when |
+| --- | --- |
+| `MemoryAdapter` | Tests and local demos. |
+| `WebDAVAdapter` | You have a WebDAV server or want simple self-hosted storage. |
+| `GoogleDriveAdapter` | User-owned Drive as the mailbox. |
+| `CloudflareAdapter` + `@interocitor/workers` | You want a Worker endpoint with D1 sync storage, R2 file storage, quotas, auth callbacks, and optional realtime relay. |
+| Custom `StorageAdapter` | You want to bring your own byte store. |
 
 ## Package map
 
-- `packages/core` — JS/TS runtime
-- `packages/react` — React hooks
-- `packages/interocitor-swift` — Swift runtime
-- `packages/workers` — Worker-side helpers
-- `packages/webdav` — WebDAV helper server
+- `packages/core` — `@interocitor/core`, engine, adapters, storage contracts, file/image APIs.
+- `packages/react` — `@interocitor/react`, context and hooks.
+- `packages/workers` — `@interocitor/workers`, Cloudflare Worker/D1/R2 runtime.
+- `packages/interocitor-swift` — Swift client.
+- `packages/webdav` — local WebDAV server for demos/tests.
+- `examples/` — runnable demos.
+
+## Deep dives
+
+- Core API and protocol details: [`packages/core/README.md`](packages/core/README.md)
+- Adapter contract: [`packages/core/docs/adapter-contract.md`](packages/core/docs/adapter-contract.md)
+- Security model: [`packages/core/docs/security-model.md`](packages/core/docs/security-model.md)
+- Compaction: [`packages/core/docs/compaction.md`](packages/core/docs/compaction.md)
+- React bindings: [`packages/react/README.md`](packages/react/README.md)
+- Cloudflare runtime: [`packages/workers/README.md`](packages/workers/README.md)
+- Protocol flows: [`docs/flows.md`](docs/flows.md)
+
+## Tests
+
+```bash
+yarn test
+```
+
+Package-specific checks live in each package `package.json`.
 
 ## License
 
 MIT
-

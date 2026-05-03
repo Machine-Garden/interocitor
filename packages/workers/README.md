@@ -73,6 +73,10 @@ const mount = createInterocitorMount({
 binding = "INTEROCITOR_DB"
 # other Wrangler fields...
 
+[[r2_buckets]]
+binding = "INTEROCITOR_FILES"
+bucket_name = "interocitor-files"
+
 [[durable_objects.bindings]]
 name = "INTEROCITOR_RELAY"
 class_name = "InterocitorRelayDurableObject"
@@ -82,7 +86,7 @@ tag = "v1"
 new_classes = ["InterocitorRelayDurableObject"]
 ```
 
-Binding names are ultimately yours. Pass them to `withInterocitor(...)` or `createInterocitorMount(...)` via getters.
+Binding names are ultimately yours. Pass them to `withInterocitor(...)` or `createInterocitorMount(...)` via getters. D1 is required for sync; R2 is required only if clients call durable file/image APIs; Durable Objects are required only for realtime relay.
 
 Apply the D1 schema from the package root:
 
@@ -151,6 +155,7 @@ import { createInterocitorMount } from '@interocitor/workers';
 const mount = createInterocitorMount<Env>({
   mountPrefix: '/sync',
   db: (env) => env.MY_DB,
+  files: (env) => env.MY_FILES,
   relay: (env) => env.MY_RELAY,
   runtime: {
     accessToken: (env) => env.INTEROCITOR_ACCESS_TOKEN,
@@ -170,6 +175,45 @@ export default {
 };
 ```
 
+## File and image storage
+
+Durable app files are stored in R2 and tracked in D1 metadata. This is separate from sync change files: files are uploaded, read, overwritten, and deleted directly; they are never compacted or merged.
+
+Worker metadata tracks:
+
+- uploader device id
+- stored byte size and optional plaintext byte size
+- content type
+- upload/modified time
+- last access time
+- total read count
+
+Uploads are guarded before R2 write:
+
+- `maxStoredFileBytes` limits one upload.
+- `maxMeshStoredBytes` limits total stored file bytes for a mesh, accounting for overwrites and deletes.
+- `authorizeFileUpload` can reject by mesh prefix, path, uploader device id, size, content type, current mesh usage, or app-specific request auth.
+
+```ts
+const mount = createInterocitorMount<Env>({
+  mountPrefix: '/sync',
+  db: env => env.INTEROCITOR_DB,
+  files: env => env.INTEROCITOR_FILES,
+  runtime: {
+    maxStoredFileBytes: env => env.INTEROCITOR_MAX_STORED_FILE_BYTES,
+    maxMeshStoredBytes: env => env.INTEROCITOR_MAX_MESH_STORED_BYTES,
+    authorizeFileUpload: async ({ prefix, path, uploadedByDeviceId, size, contentType, request }) => {
+      if (!uploadedByDeviceId) return { allowed: false, status: 401, reason: 'missing device' };
+      if (contentType?.startsWith('image/') && size > 8 * 1024 * 1024) {
+        return { allowed: false, status: 413, reason: 'image too large' };
+      }
+      // Inspect request headers/cookies here if your app has user auth.
+      return true;
+    },
+  },
+});
+```
+
 ## Runtime getters
 
 Interocitor no longer reads magic env variable names by itself. You pass everything explicitly through getters.
@@ -185,10 +229,13 @@ runtime: {
   maxChangeBytes: (env) => env.INTEROCITOR_MAX_CHANGE_BYTES,
   maxMainlineBytes: (env) => env.INTEROCITOR_MAX_MAINLINE_BYTES,
   maxGenericFileBytes: (env) => env.INTEROCITOR_MAX_GENERIC_FILE_BYTES,
+  maxStoredFileBytes: (env) => env.INTEROCITOR_MAX_STORED_FILE_BYTES,
+  maxMeshStoredBytes: (env) => env.INTEROCITOR_MAX_MESH_STORED_BYTES,
+  authorizeFileUpload: async (upload, env) => true,
 }
 ```
 
-Only `db` is required. Everything else is optional.
+Only `db` is required for sync. `files` is required for durable file/image APIs. Everything else is optional.
 
 ## Mesh IDs
 

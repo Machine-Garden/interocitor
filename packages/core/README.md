@@ -5,25 +5,31 @@
 </p>
 
 <p align="center">
-  <em>Encrypted local-first CRDT sync for browser apps.</em>
+  <em>Encrypted local-first CRDT database and durable file store for browser apps.</em>
 </p>
 
 # @interocitor/core
 
-End‑to‑end encrypted, local‑first sync over a remote folder you already
-own (Google Drive, WebDAV, Cloudflare R2, your own server). The cloud is
-a mailbox; merge happens on the device.
+End‑to‑end encrypted, local‑first app data over storage you already own
+(Google Drive, WebDAV, Cloudflare R2, your own server). Interocitor gives
+your app both structured CRDT rows and path-addressed files/images. The
+cloud is a mailbox; merge and decryption happen on the device.
 
 ## What it is
 
-- A sync engine, not a database. Local reads/writes go through an embedded
-  store (IndexedDB in the browser). The engine ships diffs, not queries.
+- A client-side CRDT database for structured state. Local reads/writes go
+  through an embedded store (IndexedDB in the browser). The engine ships
+  diffs, not queries.
+- A durable file store for blobs/images that belong to the same mesh.
+  Files are encrypted, path-addressed, and overwritten/deleted explicitly;
+  they do not merge or compact.
 - A CRDT over per‑column HLC values. Every device converges to the same
-  state without a central merge authority.
+  row state without a central merge authority.
 - An end‑to‑end encryption layer. The remote sees ciphertext blobs and
   enough metadata to route them; nothing else.
-- A pluggable transport. Any backend that can list/read/write/delete
-  files works. See `docs/adapter-contract.md`.
+- A pluggable transport. Backends provide object storage operations for
+  sync objects and, optionally, first-class durable file operations. See
+  `docs/adapter-contract.md`.
 
 ## Why
 
@@ -84,14 +90,17 @@ flowchart LR
   G --> B
 ```
 
-The remote is a mailbox. The engine puts encrypted change files into it
-and pulls down change files from peers. All merging happens on the
-device. There is no server‑side compute.
+The remote is a mailbox. For rows, the engine puts encrypted change
+files into it and pulls down change files from peers. For files/images,
+the engine puts encrypted durable objects under `files/` and reads or
+deletes them by app path. Row merging happens on the device. There is no
+server-side compute required for correctness.
 
-Three artifacts live on the remote:
+Four artifact families live on the remote:
 
 - **change files** — one per write batch, named `<HLC>-chg_<id>.json`;
-- **snapshots** — periodic full state, written by compaction;
+- **snapshots** — periodic full row state, written by compaction;
+- **durable files** — app blobs/images under `files/`, addressed by app path;
 - **a manifest** — pointer to the current generation, plus mesh metadata.
 
 See `docs/adapter-contract.md` for the full layout.

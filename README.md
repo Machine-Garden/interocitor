@@ -5,31 +5,35 @@
 </p>
 
 <p align="center">
-  <strong>A mailbox that can't read your mail.</strong>
+  <strong>CRDT data and files, synced through a mailbox that cannot read them.</strong>
 </p>
 
 <p align="center">
-  End-to-end encrypted local-first sync, durable file storage, and image display primitives for apps that should keep user data readable only on the client.
+  Interocitor gives apps a local-first encrypted database and a durable encrypted file store that share the same mesh, devices, passphrase, adapters, and backend policy.
 </p>
 
 ## What Interocitor is
 
-Interocitor is a local-first data engine. Your app reads and writes local state first, then syncs encrypted artifacts through storage you control: WebDAV, Google Drive, Cloudflare Workers/R2, or a custom adapter.
+Interocitor is a client-side application data layer with two first-class surfaces:
 
-The remote is a mailbox, not a trusted database:
+1. **A CRDT database** for structured state: tables, rows, typed schemas, local queries, per-column conflict resolution, snapshots, and compaction.
+2. **A durable file store** for blobs and images: `PUT`, `GET`, and `DELETE` by path, metadata, image encoding helpers, and browser `blob:` URLs for display.
 
-- row data is encrypted before upload
-- devices keep working offline
-- sync converges when devices see the same remote files
-- app files and images can live beside the mesh without entering CRDT compaction
-- Cloudflare Workers can add server-side abuse controls without getting plaintext
+Both surfaces are local-first and encrypted before they leave the device. They sync through storage you control — WebDAV, Google Drive, Cloudflare Workers/R2, or a custom adapter — without asking that storage layer to understand your app data.
+
+The remote is a mailbox, not a trusted database or media service:
+
+- CRDT row changes are encrypted, uploaded, pulled, merged, and compacted by devices.
+- Files and images are encrypted, uploaded, read, overwritten, or deleted as durable objects. They do not merge and they do not enter row compaction.
+- Devices keep working offline because reads and writes hit local state first.
+- Cloudflare Workers can enforce upload size, mesh/device authorization, per-mesh quota, and delete accounting without seeing plaintext.
 
 ## What you get
 
-- **Typed local data.** Tables, rows, live queries, schema inference.
-- **Encrypted sync.** Change files and snapshots are encrypted with the mesh key by default.
-- **Durable file storage.** `PUT`, `GET`, `DELETE` style file APIs for blobs that do not merge and do not compact.
+- **Typed CRDT database.** Tables, rows, live queries, schema inference, and deterministic convergence across devices.
+- **Durable file storage.** Path-addressed encrypted blobs with `putFile`, `getFile`, `deleteFile`, and metadata.
 - **First-class images.** Store `Blob`, `File`, bytes, data URLs, or SVG strings; read back bytes, `Blob`, or a revokable `blob:` URL.
+- **One mesh.** Rows, files, devices, passphrase, adapters, pairing, and backend policy are part of the same application mesh.
 - **React hooks.** `useLiveQuery`, `useRow`, and `useImage` keep rendering decisions in app code.
 - **Cloudflare backend.** D1 for sync metadata, R2 for durable file bodies, optional Durable Object realtime invalidation, upload quotas, and upload authorization callbacks.
 
@@ -85,17 +89,26 @@ await db.setRemoteStorage(new WebDAVAdapter({
 
 await db.connect();
 
+const avatarPath = 'avatars/me.png';
+await db.putImage(avatarPath, avatarFile);
+
 const todoId = await db.table('todos').add({
   text: 'Ship encrypted sync',
   done: false,
+  avatarPath,
 });
 
 await db.table('todos').patch(todoId, { done: true });
+
+const avatar = await db.getImageBlobUrl(avatarPath);
+img.src = avatar.url;
 ```
 
 ## Files and images
 
-Files are durable application objects. They are encrypted like row data, but they do not participate in CRDT merge, change-log compaction, or snapshots. A file just exists at a path until overwritten or deleted.
+Files are the second half of the app data model, not an implementation detail of the sync backend. Use rows for structured state that should merge; use files for bytes that should exist exactly as uploaded until overwritten or deleted.
+
+Files are encrypted like row data, scoped to the same mesh, and addressed by app paths. They do not participate in CRDT merge, change-log compaction, or snapshots. A file just exists at a path until overwritten or deleted.
 
 ```ts
 await db.putFile('receipts/2026-05-03.pdf', pdfBytes, 'application/pdf');
@@ -147,7 +160,7 @@ function TodoAvatar({ path }: { path?: string }) {
 
 ## Cloudflare Workers backend
 
-`@interocitor/workers` mounts Interocitor under your Worker. It can provide:
+`@interocitor/workers` mounts both Interocitor surfaces under your Worker: CRDT sync routes for rows and R2-backed durable file routes for blobs/images. It can provide:
 
 - D1-backed sync object storage
 - R2-backed durable file storage
@@ -194,9 +207,9 @@ export default withInterocitor(appWorker, {
 });
 ```
 
-## How sync works
+## How app data syncs
 
-Interocitor keeps the working dataset local. Sync is a mailbox protocol:
+Interocitor keeps both structured rows and file metadata local-first. Sync is a mailbox protocol:
 
 ```mermaid
 flowchart LR

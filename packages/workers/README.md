@@ -6,7 +6,7 @@
 
 # @interocitor/workers
 
-Cloudflare Workers runtime for [Interocitor](https://github.com/TheUiTeam/interocitor). Handles storage, sync, and optional realtime relay — all behind a single URL prefix in your existing Worker.
+Cloudflare Workers runtime for [Interocitor](https://github.com/TheUiTeam/interocitor). Handles both app-data surfaces — CRDT row sync and R2-backed durable file/image storage — plus optional realtime relay, all behind a single URL prefix in your existing Worker.
 
 ## Quick start
 
@@ -17,6 +17,7 @@ import { InterocitorRelayDurableObject, withInterocitor } from '@interocitor/wor
 
 interface Env {
   MY_DB: D1Database;
+  MY_FILES: R2Bucket;
   MY_RELAY: DurableObjectNamespace;
   INTEROCITOR_ACCESS_TOKEN?: string;
   INTEROCITOR_SYSTEM_TOKEN?: string;
@@ -39,6 +40,7 @@ export { InterocitorRelayDurableObject };
 export default withInterocitor<Env>(appWorker, {
   mountPrefix: '/sync',
   db: (env) => env.MY_DB,
+  files: (env) => env.MY_FILES,
   relay: (env) => env.MY_RELAY,
   runtime: {
     accessToken: (env) => env.INTEROCITOR_ACCESS_TOKEN,
@@ -64,6 +66,7 @@ The conventional app wiring is:
 const mount = createInterocitorMount({
   mountPrefix: '/sync',
   db: (env) => env.INTEROCITOR_DB,
+  files: (env) => env.INTEROCITOR_FILES,
   relay: (env) => env.INTEROCITOR_RELAY,
 });
 ```

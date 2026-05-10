@@ -37,7 +37,6 @@ import { createInterocitorContext } from '@interocitor/react';
 import type { InferSchemaType } from '@interocitor/core';
 
 const schema = {
-  version: 1,
   tables: {
     tasks: {
       fields: {

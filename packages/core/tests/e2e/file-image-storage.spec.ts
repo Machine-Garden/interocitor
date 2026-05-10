@@ -16,7 +16,6 @@ test.describe('durable file and image storage', () => {
       const { generateKey, keyToPassphrase } = await import('/packages/core/dist/crypto/keys.js');
 
       const schema = {
-        version: 1,
         tables: {
           notes: {
             fields: { text: types.string },
@@ -66,7 +65,6 @@ test.describe('durable file and image storage', () => {
       const { generateKey, keyToPassphrase } = await import('/packages/core/dist/crypto/keys.js');
 
       const schema = {
-        version: 1,
         tables: {
           images: {
             fields: { path: types.string },

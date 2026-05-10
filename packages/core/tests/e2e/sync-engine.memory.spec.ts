@@ -460,7 +460,6 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         pollInterval: 600_000,
         deviceId: 'dev_where',
         schema: {
-          version: 1,
           tables: {
             tasks: {
               fields: {
@@ -508,7 +507,6 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         pollInterval: 600_000,
         deviceId: 'dev_where_leak_range',
         schema: {
-          version: 1,
           tables: {
             alphaMeals: { fields: { date: types.index(types.string) } },
             cookedMeals: { fields: { date: types.index(types.string) } },
@@ -605,7 +603,6 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         pollInterval: 600_000,
         deviceId: 'dev_where_leak_exact',
         schema: {
-          version: 1,
           tables: {
             cookedMeals: { fields: { date: types.index(types.string) } },
             mealEntries: { fields: { date: types.index(types.string) } },

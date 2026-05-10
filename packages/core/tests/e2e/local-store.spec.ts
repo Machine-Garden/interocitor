@@ -209,6 +209,55 @@ test.describe('LocalStore — row operations', () => {
 
     expect(result).toEqual(['t1']);
   });
+
+  test('auto-repairs schema indexes when schema changes without version bump', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { LocalStore } = await import('/packages/core/dist/storage/local-store.js');
+      const dbName = 'interocitor-auto-repair';
+
+      const initial = new LocalStore(dbName, undefined, {
+        tables: {
+          tasks: {
+            fields: {
+              title: { type: { kind: 'string' } },
+            },
+          },
+        },
+      });
+      await initial.open();
+      await initial.putRows([
+        { _meta: { table: 'tasks', rowId: 't1', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'open', hlc: '0' }, title: { value: 'alpha', hlc: '0' } } },
+        { _meta: { table: 'tasks', rowId: 't2', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'done', hlc: '0' }, title: { value: 'beta', hlc: '0' } } },
+      ] as any);
+      initial.close();
+
+      const upgraded = new LocalStore(dbName, undefined, {
+        tables: {
+          tasks: {
+            fields: {
+              title: { type: { kind: 'string' } },
+              status: { type: { kind: 'string' }, index: true },
+            },
+          },
+        },
+      });
+      await upgraded.open();
+      const open = await upgraded.queryWhere('tasks', { field: 'status', op: 'equals', value: 'open' } as any);
+      const idbVersion = (upgraded as any).db?.version ?? null;
+      const fingerprint = await upgraded.getMeta('interocitor:cache:fingerprint');
+      upgraded.close();
+
+      return {
+        rows: open.map(row => row._meta.rowId),
+        idbVersion,
+        fingerprint,
+      };
+    });
+
+    expect(result.rows).toEqual(['t1']);
+    expect(result.idbVersion).toBeGreaterThan(1);
+    expect(typeof result.fingerprint).toBe('string');
+  });
 });
 
 // ─── Outbox ──────────────────────────────────────────────────────────

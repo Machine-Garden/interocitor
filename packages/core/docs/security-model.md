@@ -79,7 +79,7 @@ Even with encryption on, a remote with full access to the bucket sees:
 | Mesh ID | `manifest.meshId` | Identity of the mesh (a UUIDv7 + HMAC tag) |
 | Device IDs | `devices/<id>.json`, change‑file names | One value per device joined to the mesh |
 | Device names | `devices/<id>.json` (encrypted) | Hidden when encryption is on |
-| Schema version | `manifest.schema` | A monotonic integer |
+| Schema version | `manifest.schema` | Optional logical compatibility marker when app code sets `schema.version` |
 | Write timestamps | `<HLC>-chg_<id>.json` names | Activity timeline per device |
 | Write rate | File creation rate | Bursts and idle periods |
 | Row size distribution | File sizes | Approximate row sizes |

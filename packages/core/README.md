@@ -411,7 +411,6 @@ import { types } from '@interocitor/core';
 import type { DatabaseSchemaDefinition } from '@interocitor/core';
 
 const schema = {
-  version: 1,
   tables: {
     todos: {
       fields: {
@@ -560,21 +559,33 @@ rules, prune invariants, and tuning checklist: **`docs/compaction.md`**.
 
 ## Schema migration
 
-Schema versions are integers in `manifest.schema`. The engine tracks the
-current version on every write. There is **no in‑place rewrite of the
-remote history** — change files written under v1 stay v1 ciphertext.
+Interocitor now manages **local cache/index upgrades automatically**.
+Adding or removing `types.index(...)` fields no longer requires bumping a
+public schema version just to keep IndexedDB in sync. The local store
+computes its own cache fingerprint, repairs missing indexes on open, and
+falls back to scans if a stale cache slips through.
 
-Recommended migration pattern:
+`schema.version` is now **optional** and only matters if you want an
+explicit logical compatibility gate in the remote manifest. If you set
+it, the engine writes it to `manifest.schema` and will reject manifests
+written under a different logical version.
+
+Use `schema.version` only for app-level data meaning changes such as:
+
+1. row shapes that old clients cannot safely read,
+2. `onInit` migrations that rewrite logical data,
+3. staged rollouts where you want explicit manifest compatibility checks.
+
+Recommended pattern for logical migrations:
 
 1. Bump `schema.version` in your code.
-2. Implement a one‑shot `onInit` migration that reads v1 rows from the
-   local store and writes v2 rows back. Use `db.batch(...)` to keep it
-   atomic per row group.
+2. Implement a one-shot `onInit` migration that reads old rows from the
+   local store and writes the new shape back. Use `db.batch(...)` to
+   keep it atomic per row group.
 3. Trigger compaction after the migration so the snapshot is written
-   under v2 and old v1 change files are pruned.
-4. Devices that have not yet migrated will read v2 change files; your
-   schema definitions need to handle the transition (e.g. accept both
-   shapes during the rollout window).
+   under the new logical version and old change files are pruned.
+4. During rollout, make sure old clients either tolerate both shapes or
+   are blocked by the manifest version mismatch on connect.
 
 For breaking changes that cannot be rolled out gradually, the
 heavier path is to bootstrap a fresh mesh, replicate data over, and

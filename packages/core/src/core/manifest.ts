@@ -162,7 +162,7 @@ export async function loadOrCreateManifest(
   if (manifest.version !== 3) {
     throw new Error(`Unsupported manifest version ${manifest.version} (expected 3).`);
   }
-  if (ctx.schema && manifest.schema !== ctx.schema.version) {
+  if (ctx.schema?.version !== undefined && manifest.schema !== ctx.schema.version) {
     ctx.emit({ type: 'schema:mismatch', local: ctx.schema.version, remote: manifest.schema });
     throw new Error(`Schema version mismatch: local=${ctx.schema.version}, remote=${manifest.schema}`);
   }

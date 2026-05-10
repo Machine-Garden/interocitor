@@ -203,7 +203,7 @@ export interface TableSchemaDefinition<T extends Record<string, unknown> = Recor
 }
 
 /**
- * Versioned schema definition used for local index planning and migrations.
+ * Schema definition used for local query planning and logical compatibility checks.
  *
  * @typeParam S — database shape: `{ tableName: { fieldName: FieldType } }`.
  *   Inferred automatically when you pass a schema literal to `SyncConfig`.
@@ -211,7 +211,6 @@ export interface TableSchemaDefinition<T extends Record<string, unknown> = Recor
  *
  * @example
  * const schema = {
- *   version: 1,
  *   tables: {
  *     tasks: { fields: { title: types.string, status: types.enum('open', 'done') } },
  *   },
@@ -221,8 +220,8 @@ export interface TableSchemaDefinition<T extends Record<string, unknown> = Recor
 export interface DatabaseSchemaDefinition<
   S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>,
 > {
-  /** Increment when index/table metadata changes. */
-  version: number;
+  /** Optional logical schema version for app-level compatibility checks. */
+  version?: number;
   tables: { [K in keyof S]: TableSchemaDefinition<S[K]> } & Record<string, TableSchemaDefinition>;
   /** Default merge strategy for all tables. Default: `'remote-wins'`. */
   mergeStrategy?: MergeStrategy;
@@ -259,7 +258,6 @@ export type InferTableShape<T> =
  *
  * @example
  * const schema = {
- *   version: 1,
  *   tables: { tasks: { fields: { title: types.string, status: types.enum('open', 'done') } } },
  * } satisfies DatabaseSchemaDefinition;
  *

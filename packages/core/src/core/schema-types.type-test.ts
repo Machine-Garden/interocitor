@@ -69,7 +69,6 @@ types.index('string');
 // ─── Full schema definition compiles ────────────────────────────────
 
 const schema: DatabaseSchemaDefinition = {
-  version: 1,
   tables: {
     tasks: {
       fields: {
@@ -89,7 +88,6 @@ void schema;
 // Build a typed schema via `satisfies` — TS widens to the generic but keeps
 // the phantom types intact for inference.
 const typedSchema = {
-  version: 1,
   tables: {
     tasks: {
       fields: {
@@ -157,7 +155,6 @@ const _config: SyncConfig<{ tasks: { title: string } }> = {
   remotePath: '/App',
   appName: 'App',
   schema: {
-    version: 1,
     tables: { tasks: { fields: { title: types.string } } },
   },
 };
@@ -168,7 +165,6 @@ const _badConfig: SyncConfig<{ tasks: { title: string } }> = {
   remotePath: '/App',
   appName: 'App',
   schema: {
-    version: 1,
     tables: { tasks: { fields: {
       // @ts-expect-error — IndexableSchemaField<number> is not SchemaField<string>
       title: types.number,
@@ -207,7 +203,6 @@ typedEngine.table('nonexistent');
 // ─── Regression: satisfies DatabaseSchemaDefinition infers correctly ─
 
 const userSchema = {
-  version: 1,
   tables: {
     weekPlans: {
       fields: {
@@ -257,7 +252,6 @@ const _optionalIndexedString: IndexableSchemaField<string> = types.index(types.s
 const _optionalUniqueString: IndexableSchemaField<string> = types.unique(types.string.optional);
 
 const optionalSchema = {
-  version: 1,
   tables: {
     tasks: {
       fields: {

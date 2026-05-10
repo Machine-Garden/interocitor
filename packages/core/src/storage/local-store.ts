@@ -24,6 +24,7 @@ import type {
 
 const DEFAULT_DB_NAME = 'interocitor';
 const DEFAULT_DB_VERSION = 1;
+const CACHE_FINGERPRINT_META_KEY = 'interocitor:cache:fingerprint';
 
 const STORES = {
   rows: 'rows',         // key: "{table}/{rowId}"
@@ -46,9 +47,6 @@ function schemaIndexKeyPath(field: string): string[] {
 
 function normalizeSchema(schema?: DatabaseSchemaDefinition): DatabaseSchemaDefinition | undefined {
   if (!schema) return undefined;
-  if (!Number.isInteger(schema.version) || schema.version < 1) {
-    throw new Error('Schema version must be an integer >= 1');
-  }
   return schema;
 }
 
@@ -64,8 +62,9 @@ function domStringListToArray(list: DOMStringList): string[] {
 function expectedSchemaIndexes(schema?: DatabaseSchemaDefinition): Map<string, { keyPath: string[]; unique: boolean }> {
   const expected = new Map<string, { keyPath: string[]; unique: boolean }>();
   if (!schema) return expected;
-  for (const [table, def] of Object.entries(schema.tables)) {
-    const fieldEntries = Object.entries(def.fields ?? {});
+  for (const table of Object.keys(schema.tables).sort()) {
+    const def = schema.tables[table]!;
+    const fieldEntries = Object.entries(def.fields ?? {}).sort(([a], [b]) => a.localeCompare(b));
     for (const [fieldName, input] of fieldEntries) {
       const fieldDef = normalizeFieldInput(input);
       if (!fieldDef.index && !fieldDef.unique) continue;
@@ -74,7 +73,8 @@ function expectedSchemaIndexes(schema?: DatabaseSchemaDefinition): Map<string, {
         unique: fieldDef.unique ?? false,
       });
     }
-    for (const index of def.indexes ?? []) {
+    const indexes = [...(def.indexes ?? [])].sort((a, b) => a.name.localeCompare(b.name) || a.field.localeCompare(b.field));
+    for (const index of indexes) {
       expected.set(schemaIndexName(table, index.name), {
         keyPath: schemaIndexKeyPath(index.field),
         unique: index.unique ?? false,
@@ -82,6 +82,15 @@ function expectedSchemaIndexes(schema?: DatabaseSchemaDefinition): Map<string, {
     }
   }
   return expected;
+}
+
+function schemaFingerprint(schema?: DatabaseSchemaDefinition): string {
+  const indexes = Array.from(expectedSchemaIndexes(schema).entries()).map(([name, def]) => ({
+    name,
+    keyPath: def.keyPath,
+    unique: def.unique,
+  }));
+  return JSON.stringify(indexes);
 }
 
 function normalizeFieldInput(input: SchemaField<unknown>): { index: boolean; unique: boolean } {
@@ -193,9 +202,26 @@ function rangeForClause(table: string, clause: WhereClause): IDBKeyRange | null 
   }
 }
 
-function openDB(dbName: string, dbVersion: number, schema?: DatabaseSchemaDefinition): Promise<IDBDatabase> {
+function reconcileSchemaIndexes(rowsStore: IDBObjectStore, schema?: DatabaseSchemaDefinition): void {
+  const expected = expectedSchemaIndexes(schema);
+  const existing = domStringListToArray(rowsStore.indexNames).filter(name => name.startsWith(SCHEMA_INDEX_PREFIX));
+
+  for (const indexName of existing) {
+    if (!expected.has(indexName)) {
+      rowsStore.deleteIndex(indexName);
+    }
+  }
+
+  for (const [indexName, def] of expected.entries()) {
+    if (!rowsStore.indexNames.contains(indexName)) {
+      rowsStore.createIndex(indexName, def.keyPath, { unique: def.unique });
+    }
+  }
+}
+
+function openDB(dbName: string, dbVersion: number | undefined, schema?: DatabaseSchemaDefinition): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(dbName, dbVersion);
+    const req = dbVersion === undefined ? indexedDB.open(dbName) : indexedDB.open(dbName, dbVersion);
 
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -216,22 +242,7 @@ function openDB(dbName: string, dbVersion: number, schema?: DatabaseSchemaDefini
       }
 
       const rowsStore = req.transaction?.objectStore(STORES.rows);
-      if (rowsStore) {
-        const expected = expectedSchemaIndexes(schema);
-        const existing = domStringListToArray(rowsStore.indexNames).filter(name => name.startsWith(SCHEMA_INDEX_PREFIX));
-
-        for (const indexName of existing) {
-          if (!expected.has(indexName)) {
-            rowsStore.deleteIndex(indexName);
-          }
-        }
-
-        for (const [indexName, def] of expected.entries()) {
-          if (!rowsStore.indexNames.contains(indexName)) {
-            rowsStore.createIndex(indexName, def.keyPath, { unique: def.unique });
-          }
-        }
-      }
+      if (rowsStore) reconcileSchemaIndexes(rowsStore, schema);
     };
 
     req.onsuccess = () => resolve(req.result);
@@ -273,8 +284,9 @@ function txComplete(transaction: IDBTransaction): Promise<void> {
 export class LocalStore implements LocalStoreAdapter {
   private db: IDBDatabase | null = null;
   private readonly dbName: string;
-  private readonly dbVersion: number;
+  private readonly configuredDbVersion?: number;
   private readonly schema?: DatabaseSchemaDefinition;
+  private readonly desiredFingerprint: string;
 
   /**
    * @param dbName    IndexedDB database name. Use distinct names to isolate
@@ -284,13 +296,59 @@ export class LocalStore implements LocalStoreAdapter {
    */
   constructor(dbName?: string, dbVersion?: number, schema?: DatabaseSchemaDefinition) {
     this.schema = normalizeSchema(schema);
-    const schemaVersionBump = this.schema?.version ?? 0;
     this.dbName = dbName ?? DEFAULT_DB_NAME;
-    this.dbVersion = dbVersion ?? (DEFAULT_DB_VERSION + schemaVersionBump);
+    this.configuredDbVersion = dbVersion;
+    this.desiredFingerprint = schemaFingerprint(this.schema);
+  }
+
+  private async readCacheFingerprint(db: IDBDatabase): Promise<string | undefined> {
+    const t = tx(db, STORES.meta, 'readonly');
+    const value = await reqToPromise(t.objectStore(STORES.meta).get(CACHE_FINGERPRINT_META_KEY));
+    return typeof value === 'string' ? value : undefined;
+  }
+
+  private async writeCacheFingerprint(db: IDBDatabase): Promise<void> {
+    const t = tx(db, STORES.meta, 'readwrite');
+    t.objectStore(STORES.meta).put(this.desiredFingerprint, CACHE_FINGERPRINT_META_KEY);
+    await txComplete(t);
+  }
+
+  private needsRepair(db: IDBDatabase, storedFingerprint?: string): boolean {
+    if (!db.objectStoreNames.contains(STORES.rows)) return true;
+    const rows = tx(db, STORES.rows, 'readonly').objectStore(STORES.rows);
+    const expected = expectedSchemaIndexes(this.schema);
+    const existing = new Set(domStringListToArray(rows.indexNames).filter(name => name.startsWith(SCHEMA_INDEX_PREFIX)));
+    if (storedFingerprint !== this.desiredFingerprint) return true;
+    if (existing.size !== expected.size) return true;
+    for (const name of expected.keys()) {
+      if (!existing.has(name)) return true;
+    }
+    return false;
   }
 
   async open(): Promise<void> {
-    this.db = await openDB(this.dbName, this.dbVersion, this.schema);
+    const requestedVersion = this.configuredDbVersion ?? DEFAULT_DB_VERSION;
+    let db = await openDB(this.dbName, undefined, this.schema);
+
+    if (db.version < requestedVersion) {
+      db.close();
+      db = await openDB(this.dbName, requestedVersion, this.schema);
+    }
+
+    let storedFingerprint = await this.readCacheFingerprint(db);
+
+    if (this.needsRepair(db, storedFingerprint)) {
+      const nextVersion = Math.max(db.version + 1, requestedVersion);
+      db.close();
+      db = await openDB(this.dbName, nextVersion, this.schema);
+      storedFingerprint = await this.readCacheFingerprint(db);
+    }
+
+    if (storedFingerprint !== this.desiredFingerprint) {
+      await this.writeCacheFingerprint(db);
+    }
+
+    this.db = db;
   }
 
   close(): void {
@@ -365,7 +423,12 @@ export class LocalStore implements LocalStoreAdapter {
 
     const t = tx(db, STORES.rows, 'readonly');
     const store = t.objectStore(STORES.rows);
-    const index = store.index(schemaIndexName(table, indexDef.name));
+    const indexName = schemaIndexName(table, indexDef.name);
+    if (!store.indexNames.contains(indexName)) {
+      const rows = await this.getTable(table);
+      return rows.filter(row => matchesClause(readColumnValue(row, clause.field), clause));
+    }
+    const index = store.index(indexName);
 
     if (clause.op === 'anyOf') {
       const values = clause.values ?? [];

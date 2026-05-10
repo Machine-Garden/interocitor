@@ -116,7 +116,7 @@ const DEFAULT_BATCH_WINDOW_MS = 1_000;
  * Initialization is automatic — just construct and use. No `await engine.init()` needed.
  *
  * @example
- * const schema = { version: 1, tables: { tasks: { fields: { title: types.string } } } }
+ * const schema = { tables: { tasks: { fields: { title: types.string } } } }
  *   satisfies DatabaseSchemaDefinition;
  *
  * type DB = InferSchemaType<typeof schema>;
@@ -544,7 +544,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     for (const key of keys) {
       const entry = this.queryCache.get(key);
       if (!entry) continue;
-      this.runQuery(entry.descriptor, key);
+      void this.runQuery(entry.descriptor, key).catch(() => {
+        // runQuery already updates cache state to error; avoid unhandled rejections
+      });
     }
   }
 
@@ -1398,7 +1400,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     this.log('debug', 'init() — opening local store', { dbName: this.config.dbName, encrypted: this.encrypted, remotePath: this.config.remotePath });
     try {
       await this.local.open();
-      if (this.schema) {
+      if (this.schema?.version !== undefined) {
         await this.local.setMeta('schema:version', this.schema.version);
       }
 

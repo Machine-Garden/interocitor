@@ -52,7 +52,6 @@ import { Interocitor, types, type DatabaseSchemaDefinition, type InferSchemaType
 import { WebDAVAdapter } from '@interocitor/core/adapters/webdav';
 
 const schema = {
-  version: 1,
   tables: {
     todos: {
       fields: {

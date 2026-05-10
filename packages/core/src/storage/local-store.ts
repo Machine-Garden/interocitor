@@ -84,15 +84,6 @@ function expectedSchemaIndexes(schema?: DatabaseSchemaDefinition): Map<string, {
   return expected;
 }
 
-function schemaFingerprint(schema?: DatabaseSchemaDefinition): string {
-  const indexes = Array.from(expectedSchemaIndexes(schema).entries()).map(([name, def]) => ({
-    name,
-    keyPath: def.keyPath,
-    unique: def.unique,
-  }));
-  return JSON.stringify(indexes);
-}
-
 function normalizeFieldInput(input: SchemaField<unknown>): { index: boolean; unique: boolean } {
   return {
     index: input.index ?? false,
@@ -286,6 +277,7 @@ export class LocalStore implements LocalStoreAdapter {
   private readonly dbName: string;
   private readonly configuredDbVersion?: number;
   private readonly schema?: DatabaseSchemaDefinition;
+  private readonly expectedIndexes: Map<string, { keyPath: string[]; unique: boolean }>;
   private readonly desiredFingerprint: string;
 
   /**
@@ -298,7 +290,12 @@ export class LocalStore implements LocalStoreAdapter {
     this.schema = normalizeSchema(schema);
     this.dbName = dbName ?? DEFAULT_DB_NAME;
     this.configuredDbVersion = dbVersion;
-    this.desiredFingerprint = schemaFingerprint(this.schema);
+    this.expectedIndexes = expectedSchemaIndexes(this.schema);
+    this.desiredFingerprint = JSON.stringify(Array.from(this.expectedIndexes.entries()).map(([name, def]) => ({
+      name,
+      keyPath: def.keyPath,
+      unique: def.unique,
+    })));
   }
 
   private async readCacheFingerprint(db: IDBDatabase): Promise<string | undefined> {
@@ -316,11 +313,10 @@ export class LocalStore implements LocalStoreAdapter {
   private needsRepair(db: IDBDatabase, storedFingerprint?: string): boolean {
     if (!db.objectStoreNames.contains(STORES.rows)) return true;
     const rows = tx(db, STORES.rows, 'readonly').objectStore(STORES.rows);
-    const expected = expectedSchemaIndexes(this.schema);
     const existing = new Set(domStringListToArray(rows.indexNames).filter(name => name.startsWith(SCHEMA_INDEX_PREFIX)));
     if (storedFingerprint !== this.desiredFingerprint) return true;
-    if (existing.size !== expected.size) return true;
-    for (const name of expected.keys()) {
+    if (existing.size !== this.expectedIndexes.size) return true;
+    for (const name of this.expectedIndexes.keys()) {
       if (!existing.has(name)) return true;
     }
     return false;
@@ -330,17 +326,22 @@ export class LocalStore implements LocalStoreAdapter {
     const requestedVersion = this.configuredDbVersion ?? DEFAULT_DB_VERSION;
     let db = await openDB(this.dbName, undefined, this.schema);
 
-    if (db.version < requestedVersion) {
+    const reopenAt = async (nextVersion: number): Promise<IDBDatabase> => {
       db.close();
-      db = await openDB(this.dbName, requestedVersion, this.schema);
+      return openDB(this.dbName, nextVersion, this.schema);
+    };
+
+    if (db.version < requestedVersion) {
+      db = await reopenAt(requestedVersion);
     }
 
     let storedFingerprint = await this.readCacheFingerprint(db);
+    const repairVersion = this.needsRepair(db, storedFingerprint)
+      ? Math.max(db.version + 1, requestedVersion)
+      : null;
 
-    if (this.needsRepair(db, storedFingerprint)) {
-      const nextVersion = Math.max(db.version + 1, requestedVersion);
-      db.close();
-      db = await openDB(this.dbName, nextVersion, this.schema);
+    if (repairVersion !== null) {
+      db = await reopenAt(repairVersion);
       storedFingerprint = await this.readCacheFingerprint(db);
     }
 

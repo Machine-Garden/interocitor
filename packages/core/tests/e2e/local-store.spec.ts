@@ -258,6 +258,123 @@ test.describe('LocalStore — row operations', () => {
     expect(result.idbVersion).toBeGreaterThan(1);
     expect(typeof result.fingerprint).toBe('string');
   });
+
+  test('auto-repairs multiple schema indexes in a single reopen', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { LocalStore } = await import('/packages/core/dist/storage/local-store.js');
+      const dbName = 'interocitor-auto-repair-multi';
+
+      const initial = new LocalStore(dbName, undefined, {
+        tables: {
+          tasks: {
+            fields: {
+              title: { type: { kind: 'string' } },
+            },
+          },
+        },
+      });
+      await initial.open();
+      await initial.putRows([
+        { _meta: { table: 'tasks', rowId: 't1', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'open', hlc: '0' }, priority: { value: 1, hlc: '0' }, title: { value: 'alpha', hlc: '0' } } },
+        { _meta: { table: 'tasks', rowId: 't2', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'done', hlc: '0' }, priority: { value: 3, hlc: '0' }, title: { value: 'beta', hlc: '0' } } },
+        { _meta: { table: 'tasks', rowId: 't3', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'open', hlc: '0' }, priority: { value: 2, hlc: '0' }, title: { value: 'gamma', hlc: '0' } } },
+      ] as any);
+      initial.close();
+
+      const upgraded = new LocalStore(dbName, undefined, {
+        tables: {
+          tasks: {
+            fields: {
+              title: { type: { kind: 'string' } },
+              status: { type: { kind: 'string' }, index: true },
+              priority: { type: { kind: 'number' }, index: true },
+            },
+          },
+        },
+      });
+      await upgraded.open();
+      const open = await upgraded.queryWhere('tasks', { field: 'status', op: 'equals', value: 'open' } as any);
+      const range = await upgraded.queryWhere('tasks', { field: 'priority', op: 'aboveOrEqual', value: 2 } as any);
+      const idbVersion = (upgraded as any).db?.version ?? null;
+      upgraded.close();
+
+      return {
+        open: open.map(row => row._meta.rowId).toSorted(),
+        range: range.map(row => row._meta.rowId).toSorted(),
+        idbVersion,
+      };
+    });
+
+    expect(result.open).toEqual(['t1', 't3']);
+    expect(result.range).toEqual(['t2', 't3']);
+    expect(result.idbVersion).toBeGreaterThan(1);
+  });
+
+  test('queryWhere survives missing physical index and falls back without throwing', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { LocalStore } = await import('/packages/core/dist/storage/local-store.js');
+      const dbName = 'interocitor-missing-index-fallback';
+
+      const initial = new LocalStore(dbName, undefined, {
+        tables: {
+          tasks: {
+            fields: {
+              title: { type: { kind: 'string' } },
+            },
+          },
+        },
+      });
+      await initial.open();
+      await initial.putRows([
+        { _meta: { table: 'tasks', rowId: 't1', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'open', hlc: '0' }, title: { value: 'alpha', hlc: '0' } } },
+        { _meta: { table: 'tasks', rowId: 't2', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'done', hlc: '0' }, title: { value: 'beta', hlc: '0' } } },
+      ] as any);
+      initial.close();
+
+      const upgraded = new LocalStore(dbName, undefined, {
+        tables: {
+          tasks: {
+            fields: {
+              title: { type: { kind: 'string' } },
+              status: { type: { kind: 'string' }, index: true },
+            },
+          },
+        },
+      });
+      await upgraded.open();
+
+      const tx = (upgraded as any).db.transaction('rows', 'readonly');
+      const store = tx.objectStore('rows');
+      const indexName = 'table:tasks:status';
+      if (store.indexNames.contains(indexName)) {
+        store.deleteIndex(indexName);
+      }
+      await new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve(undefined);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error ?? new Error('deleteIndex aborted'));
+      });
+
+      try {
+        const open = await upgraded.queryWhere('tasks', { field: 'status', op: 'equals', value: 'open' } as any);
+        upgraded.close();
+        return {
+          rows: open.map(row => row._meta.rowId),
+          threw: false,
+        };
+      } catch (error) {
+        upgraded.close();
+        return {
+          rows: [],
+          threw: true,
+          message: String((error as Error)?.message ?? error),
+        };
+      }
+    });
+
+    expect(result.threw).toBe(false);
+    expect(result.rows).toEqual(['t1']);
+  });
 });
 
 // ─── Outbox ──────────────────────────────────────────────────────────

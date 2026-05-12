@@ -47,7 +47,7 @@ import type { HLC } from './types.ts';
 import { hlcInit, hlcNow, hlcSerialize, hlcParse, hlcCompareStr } from './hlc.ts';
 import { Table, computeCacheKey } from './table.ts';
 import { readColumn } from './crdt.ts';
-import { LocalStore } from '../storage/local-store.ts';
+import { createResilientLocalStore } from '../storage/resilient-store.ts';
 
 // Extracted modules
 import { paths, logAtLevel, normalizeLogLevel, generateId, getDeviceId } from './internals.ts';
@@ -58,6 +58,10 @@ import { MeshCredentialMismatchError } from './errors.ts';
 import { createCredentialStore, type CredentialStore } from '../storage/credential-store.ts';
 import type { ManifestContext } from './manifest.ts';
 import { flushToAdapter } from './flush.ts';
+import {
+  LocalStoreConnectedStoresApi,
+  type ConnectedStoresApi,
+} from './connected-stores.ts';
 import { pull as doPull } from './pull.ts';
 import { compact as doCompact, rehydrate as doRehydrate } from './compaction.ts';
 
@@ -238,6 +242,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   private readonly schema?: DatabaseSchemaDefinition<S>;
   private readonly credentialStore: CredentialStore | null;
   private readonly dbName: string;
+  private connectedStoresApi: ConnectedStoresApi | null = null;
 
   // Async query cache. cacheKey -> entry. See QueryCacheEntry doc above.
   private queryCache: Map<string, QueryCacheEntry> = new Map();
@@ -294,7 +299,11 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       offlineGraceMs: config.offlineGraceMs ?? DEFAULT_OFFLINE_GRACE_MS,
       batchWindowMs: config.batchWindowMs ?? DEFAULT_BATCH_WINDOW_MS,
       dbName: config.dbName ?? 'interocitor',
-      localStoreFactory: config.localStoreFactory ?? (() => new LocalStore(config.dbName, undefined, config.schema)),
+      localStoreFactory: config.localStoreFactory ?? (() => createResilientLocalStore({
+        dbName: config.dbName,
+        schema: config.schema,
+        openTimeoutMs: config.localOpenTimeoutMs,
+      })),
       schema: config.schema,
       replicas: config.replicas ?? [],
       onInit: config.onInit,
@@ -2699,6 +2708,29 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
   getDeviceId(): string {
     return this.deviceId;
+  }
+
+  /**
+   * Credential vault for sub-stores derived from this Interocitor.
+   *
+   * Use `put / get / list / remove` to manage credentials. The engine never
+   * constructs child engines — apps read these and build their own
+   * Interocitor instances. Credentials are persisted inside this engine's
+   * LocalStore; anyone with read access to this store inherits read access
+   * to every sub-store's credentials.
+   */
+  get connectedStores(): ConnectedStoresApi {
+    if (!this.connectedStoresApi) {
+      const inner = new LocalStoreConnectedStoresApi(this.local);
+      const ensure = () => this.ensureReady();
+      this.connectedStoresApi = {
+        list: async () => { await ensure(); return inner.list(); },
+        get: async (id) => { await ensure(); return inner.get(id); },
+        put: async (creds) => { await ensure(); return inner.put(creds); },
+        remove: async (id) => { await ensure(); return inner.remove(id); },
+      };
+    }
+    return this.connectedStoresApi;
   }
 
   getMeshId(): string | undefined {

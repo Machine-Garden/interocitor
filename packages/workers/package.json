@@ -1,6 +1,6 @@
 {
   "name": "@interocitor/workers",
-  "version": "0.0.0-beta.9",
+  "version": "0.0.0-beta.10",
   "description": "Cloudflare Workers runtime for Interocitor-native sync endpoints, semantic storage ops, relay wiring, and maintenance flows.",
   "type": "module",
   "main": "./dist/index.js",

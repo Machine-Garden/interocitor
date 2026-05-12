@@ -9,3 +9,5 @@ export { useRow } from './use-row.ts';
 export type { UseRowResult } from './use-row.ts';
 export { useImage } from './image.ts';
 export type { UseImageResult } from './image.ts';
+export { useConnectedStores, useConnectedStore } from './use-connected-stores.ts';
+export type { UseConnectedStoresResult, UseConnectedStoreResult } from './use-connected-stores.ts';

@@ -557,6 +557,48 @@ Both paths are deduped by a single in‑flight guard. You can also call
 Full protocol, events, lock story, device acknowledgement / GC-floor
 rules, prune invariants, and tuning checklist: **`docs/compaction.md`**.
 
+## Connected stores
+
+`engine.connectedStores` is a small **credential vault** for sub-stores
+that conceptually belong to this Interocitor (for example a "reviews"
+store derived from a "family planner" store). It does **not** construct
+or run child engines — it only stores credentials so apps don't have to
+reinvent that storage themselves.
+
+Direction is one-way by construction: the parent stores credentials for
+sub-stores, and sub-stores have no awareness of the parent. Anyone with
+read access to the parent inherits read access to the sub-store
+credentials persisted here.
+
+```ts
+import type { ConnectedStoreCredentials } from '@interocitor/core';
+
+await db.connectedStores.put({
+  id: 'reviews',
+  alias: 'family-reviews',
+  remotePath: '/family/reviews',
+  passphrase: 'review-pass',
+  encrypted: true,
+  dbName: 'reviews-db',
+  adapter: { kind: 'memory' },
+  metadata: { icon: 'star' },
+});
+
+const all: ConnectedStoreCredentials[] = await db.connectedStores.list();
+const reviews = await db.connectedStores.get('reviews');
+await db.connectedStores.remove('reviews');
+```
+
+Notes:
+
+- Credentials are persisted as a single JSON list under a dedicated meta
+  key inside the parent's local store. Sub-stores never appear as parent
+  tables or rows.
+- `put(creds)` upserts by `id`, preserves `createdAt`, and refreshes
+  `updatedAt` automatically.
+- The engine never reads `passphrase`/`adapter`/`remotePath` from these
+  records — apps construct their own `Interocitor` instances from them.
+
 ## Schema migration
 
 Interocitor now manages **local cache/index upgrades automatically**.

@@ -63,6 +63,12 @@ export {
   type InterocitorInitContext,
 } from './core/sync-engine.ts';
 export { LocalStore } from './storage/local-store.ts';
+export { MemoryLocalStore } from './storage/memory-store.ts';
+export {
+  createResilientLocalStore,
+  DEFAULT_LOCAL_OPEN_TIMEOUT_MS,
+  type ResilientLocalStoreOptions,
+} from './storage/resilient-store.ts';
 export { resetLocalDatabase } from './storage/reset.ts';
 export {
   type CredentialStore,
@@ -73,6 +79,12 @@ export {
 } from './storage/credential-store.ts';
 export { Table, QueryResult, RowResult } from './core/table.ts';
 export { types } from './core/schema-types.ts';
+export {
+  LocalStoreConnectedStoresApi,
+  type ConnectedStoresApi,
+  type ConnectedStoreCredentials,
+  type ConnectedStoreAdapterRef,
+} from './core/connected-stores.ts';
 
 // ─── Typed errors ─────────────────────────────────────────────────────
 

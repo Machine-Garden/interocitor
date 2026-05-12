@@ -809,6 +809,18 @@ export interface SyncConfig<
    * for constructing the store.
    */
   localStoreFactory?: LocalStoreFactory;
+  /**
+   * Hard deadline for the local store's `open()` call. Past this, the
+   * engine silently degrades to an in-memory store (no persistence across
+   * reload, but cloud sync still works) and logs a single console.error
+   * for monitoring. Default 300 ms — IndexedDB.open should resolve in
+   * tens of ms on healthy platforms; anything slower indicates a wedged
+   * connection (blocked, suspended tab on iOS, etc.).
+   *
+   * Ignored when `localStoreFactory` is supplied — custom factories own
+   * their own readiness contract.
+   */
+  localOpenTimeoutMs?: number;
   /** Optional table/index metadata for local query planning and migrations. */
   schema?: DatabaseSchemaDefinition<S>;
 

@@ -210,11 +210,22 @@ function reconcileSchemaIndexes(rowsStore: IDBObjectStore, schema?: DatabaseSche
   }
 }
 
-function openDB(dbName: string, dbVersion: number | undefined, schema?: DatabaseSchemaDefinition): Promise<IDBDatabase> {
+function openDB(
+  dbName: string,
+  dbVersion: number | undefined,
+  schema?: DatabaseSchemaDefinition,
+  onProgress?: () => void,
+): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = dbVersion === undefined ? indexedDB.open(dbName) : indexedDB.open(dbName, dbVersion);
 
     req.onupgradeneeded = () => {
+      // Signal "the platform is alive and processing". The resilient wrapper
+      // uses this to disarm its open-deadline: a long-running upgrade
+      // (creating indexes over many rows on a slow device) is making
+      // progress, not blocked. Without this, a legitimate upgrade past the
+      // deadline would falsely trigger memory-mode fallback.
+      try { onProgress?.(); } catch { /* never let a bad listener break open */ }
       const db = req.result;
       if (!db.objectStoreNames.contains(STORES.rows)) {
         // keyPath uses dotted path into the new namespaced row shape.
@@ -236,8 +247,31 @@ function openDB(dbName: string, dbVersion: number | undefined, schema?: Database
       if (rowsStore) reconcileSchemaIndexes(rowsStore, schema);
     };
 
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      // If another caller (sibling tab, worker, or even our own next open()
+      // for an upgrade) requests a higher version, voluntarily close this
+      // connection so the upgrade can proceed instead of blocking it.
+      // Without this handler, an upgrade open elsewhere would hang on
+      // 'blocked' until this connection is closed manually.
+      db.onversionchange = () => {
+        try { db.close(); } catch { /* already closed */ }
+      };
+      resolve(db);
+    };
+    req.onerror = () => reject(req.error ?? new Error(`IndexedDB open failed for "${dbName}"`));
+    // Fired when an upgrade open is held up by another live connection at a
+    // lower version. Without this handler the request never fires success or
+    // error and the promise hangs forever — surfacing only as a downstream
+    // init() timeout with no diagnostic. Reject loudly with an actionable
+    // message instead.
+    req.onblocked = () => {
+      reject(new Error(
+        `IndexedDB open blocked: another connection to "${dbName}" is open at a lower version ` +
+        `(requested v${dbVersion ?? 'current'}). Close other tabs/workers using this database, ` +
+        `or ensure prior LocalStore instances called close().`,
+      ));
+    };
   });
 }
 
@@ -322,13 +356,24 @@ export class LocalStore implements LocalStoreAdapter {
     return false;
   }
 
-  async open(): Promise<void> {
+  async open(onProgress?: () => void): Promise<void> {
     const requestedVersion = this.configuredDbVersion ?? DEFAULT_DB_VERSION;
-    let db = await openDB(this.dbName, undefined, this.schema);
+    let db = await openDB(this.dbName, undefined, this.schema, onProgress);
 
     const reopenAt = async (nextVersion: number): Promise<IDBDatabase> => {
+      // Close synchronously, then yield a macrotask before re-opening at the
+      // higher version. db.close() only requests close; the actual close
+      // happens after pending transactions drain. Reopening immediately can
+      // race the prior connection still appearing live to indexedDB.open(),
+      // producing a transient 'blocked' event. The yield gives the platform
+      // a beat to finalize the close. Onversionchange on the prior handle
+      // is still our backstop if any other connection lingers.
       db.close();
-      return openDB(this.dbName, nextVersion, this.schema);
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      // A reopen is itself "progress" — the deadline (if any) has already
+      // been disarmed, but we keep the contract by signaling again on the
+      // upcoming upgrade-needed.
+      return openDB(this.dbName, nextVersion, this.schema, onProgress);
     };
 
     if (db.version < requestedVersion) {

@@ -68,8 +68,26 @@ export {
   createResilientLocalStore,
   DEFAULT_LOCAL_OPEN_TIMEOUT_MS,
   type ResilientLocalStoreOptions,
+  type LocalStoreDegradedHook,
+  type LocalStoreDegradationInfo,
+  type LocalStoreDegradationReason,
 } from './storage/resilient-store.ts';
-export { resetLocalDatabase } from './storage/reset.ts';
+export {
+  ConnectStageTimeoutError,
+  DEFAULT_CONNECT_STAGE_TIMEOUT_MS,
+  withDeadline,
+} from './core/with-deadline.ts';
+export {
+  resetLocalDatabase,
+  resetLocalDatabaseWithDeadline,
+  type ResetLocalDatabaseOutcome,
+} from './storage/reset.ts';
+export {
+  createNamedLocalStore,
+  getActiveLocalDatabaseName,
+  type NamedLocalStoreOptions,
+  type PointerStore,
+} from './storage/named-local-store.ts';
 export {
   type CredentialStore,
   type StoredCredentials,

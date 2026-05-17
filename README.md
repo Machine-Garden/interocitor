@@ -243,6 +243,8 @@ Files are not replayed, merged, compacted, or stored in row snapshots.
 Interocitor gives you:
 
 - local reads and writes after `init()`
+- **never-stuck local-first operation**: IndexedDB and cloud transport are recoverable details, not prerequisites for using the app
+- bounded `connect()` progress: stalled cloud stages degrade to offline-ready mode instead of wedging the UI
 - background sync after `connect()`
 - eventual convergence for row data when devices observe the same remote artifacts
 - encrypted remote payloads when `encrypted: true`

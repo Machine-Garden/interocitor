@@ -41,6 +41,195 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result.files).toContain('/MeshBoot/manifest.json');
   });
 
+  test('connect() degrades to offline-ready when a cloud stage stalls past deadline', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      class StallingAdapter extends MemoryAdapter {
+        name = 'stalling-memory';
+        // Force ensureFolder to never resolve, simulating a remote/network
+        // call that hangs without rejecting.
+        override async ensureFolder(_path: string): Promise<void> {
+          await new Promise<void>(() => { /* never resolves */ });
+        }
+      }
+
+      const stalled: any[] = [];
+      const events: string[] = [];
+      const engine = new Interocitor(new StallingAdapter(), {
+        remotePath: '/StallingMesh',
+        encrypted: false,
+        deviceId: 'dev_stall',
+        pollInterval: 600_000,
+        connectStageTimeoutMs: 50,
+        onConnectStalled: (info: any) => stalled.push(info),
+      });
+      engine.on((event: { type: string }) => events.push(event.type));
+
+      await engine.init();
+      const t0 = Date.now();
+      let connectError: string | null = null;
+      try {
+        await engine.connect();
+      } catch (err) {
+        connectError = err instanceof Error ? err.message : String(err);
+      }
+      const elapsed = Date.now() - t0;
+
+      // After offline-ready degrade we should still be initialized, not
+      // connected, and writes must still queue locally.
+      const initializedBefore = engine.isReady();
+      await engine.put('tasks', 'queued-offline', { title: 'queued offline' });
+      const rowCount = (await engine.query('tasks')).length;
+      const initializedAfter = engine.isReady();
+
+      return {
+        connectError,
+        stalledStages: stalled.map((s: any) => s.stage),
+        stalledTimeouts: stalled.map((s: any) => s.timeoutMs),
+        events,
+        elapsed,
+        initializedBefore,
+        initializedAfter,
+        rowCount,
+      };
+    });
+
+    expect(result.connectError).toBeNull();
+    expect(result.stalledStages).toContain('ensureFolder');
+    expect(result.stalledTimeouts.every(ms => ms === 50)).toBe(true);
+    expect(result.events).toContain('connect:error');
+    expect(result.elapsed).toBeLessThan(2_000);
+    expect(result.initializedBefore).toBe(true);
+    expect(result.initializedAfter).toBe(true);
+    expect(result.rowCount).toBeGreaterThanOrEqual(1);
+  });
+
+  test('init survives a local store whose IndexedDB handle starts closing', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      class OneShotClosingLocalStore {
+        // Fails the very first post-open setMeta with a closing-handle error,
+        // then succeeds. This models Safari's "transaction on closing DB"
+        // failure that we observed in production Sentry data.
+        private failedOnce = false;
+        private meta = new Map<string, unknown>();
+        async open(): Promise<void> { /* success */ }
+        close(): void { /* noop */ }
+        async getRow(_table: string, _rowId: string): Promise<any> { return undefined; }
+        async putRow(_row: any): Promise<void> { /* noop */ }
+        async putRows(_rows: any[]): Promise<void> { /* noop */ }
+        async getTable(_table: string): Promise<any[]> { return []; }
+        async queryWhere(_table: string, _clause: any): Promise<any[]> { return []; }
+        async getAllRows(): Promise<any[]> { return []; }
+        async clearRows(): Promise<void> { /* noop */ }
+        async getTableNames(): Promise<string[]> { return []; }
+        async pushOutbox(_entry: any): Promise<void> { /* noop */ }
+        async pushOutboxEntries(_entries: any[]): Promise<void> { /* noop */ }
+        async drainOutbox(): Promise<any[]> { return []; }
+        async outboxSize(): Promise<number> { return 0; }
+        async getCursor(_deviceId: string): Promise<number> { return 0; }
+        async setCursor(_deviceId: string, _offset: number): Promise<void> { /* noop */ }
+        async getAllCursors(): Promise<Record<string, number>> { return {}; }
+        async getMeta(key: string): Promise<unknown> { return this.meta.get(key); }
+        async setMeta(key: string, value: unknown): Promise<void> {
+          if (!this.failedOnce) {
+            this.failedOnce = true;
+            throw new DOMException('The database connection is closing.', 'InvalidStateError');
+          }
+          this.meta.set(key, value);
+        }
+        async clearAll(): Promise<void> { this.meta.clear(); }
+      }
+
+      const { createResilientLocalStore } = await import('/packages/core/dist/storage/resilient-store.js');
+
+      const events: string[] = [];
+      const degradations: any[] = [];
+      const origError = console.error;
+      console.error = () => { /* silence noise */ };
+      try {
+        const engine = new Interocitor(new MemoryAdapter(), {
+          remotePath: '/InitSurvivesClosing', pollInterval: 600_000, deviceId: 'init-survival',
+          encrypted: false,
+          localStoreFactory: () => createResilientLocalStore({
+            dbName: 'init-survives-closing',
+            openTimeoutMs: 200,
+            primaryFactory: () => new OneShotClosingLocalStore() as any,
+            onDegraded: (info: any) => { degradations.push(info); },
+          }),
+        });
+        engine.on((event: { type: string }) => events.push(event.type));
+
+        let initError: string | null = null;
+        try {
+          await engine.init();
+        } catch (err) {
+          initError = err instanceof Error ? err.message : String(err);
+        }
+        const initializedAfterInit = engine.isReady();
+        let connectError: string | null = null;
+        try {
+          await engine.connect();
+        } catch (err) {
+          connectError = err instanceof Error ? err.message : String(err);
+        }
+        let putError: string | null = null;
+        try {
+          await engine.put('tasks', 'after-degrade', { title: 'init survived' });
+        } catch (err) {
+          putError = err instanceof Error ? err.message : String(err);
+        }
+        let flushError: string | null = null;
+        try {
+          await engine.flush();
+        } catch (err) {
+          flushError = err instanceof Error ? err.message : String(err);
+        }
+        const rows = await engine.query('tasks').catch(() => []);
+        const rowCount = rows.length;
+        const liveResult = {
+          initError,
+          connectError,
+          putError,
+          flushError,
+          initializedAfterInit,
+          initialized: engine.isReady(),
+          rowCount,
+          degradationReasons: degradations.map(d => d.reason),
+          events,
+        };
+        await engine.disconnect().catch(() => {});
+        return liveResult;
+      } finally {
+        console.error = origError;
+      }
+    });
+
+    expect({
+      initError: result.initError,
+      connectError: result.connectError,
+      putError: result.putError,
+      flushError: result.flushError,
+      initializedAfterInit: result.initializedAfterInit,
+      initialized: result.initialized,
+      degradationReasons: result.degradationReasons,
+    }).toEqual({
+      initError: null,
+      connectError: null,
+      putError: null,
+      flushError: null,
+      initializedAfterInit: true,
+      initialized: true,
+      degradationReasons: ['idb-handle-closing'],
+    });
+    expect(result.rowCount).toBeGreaterThanOrEqual(0);
+    expect(result.events).toContain('flush:complete');
+  });
+
   test('subscribes to adapter invalidations and pulls on relay message', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { Interocitor } = await import('/packages/core/dist/index.js');

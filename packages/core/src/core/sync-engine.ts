@@ -55,6 +55,7 @@ import type { CodecState } from './codec.ts';
 import { loadOrCreateManifest, upsertDeviceMetadata } from './manifest.ts';
 import { decryptBytes, encryptBytes, generateKey, keyToPassphrase, passphraseToKey } from '../crypto/encryption.ts';
 import { MeshCredentialMismatchError } from './errors.ts';
+import { ConnectStageTimeoutError, DEFAULT_CONNECT_STAGE_TIMEOUT_MS, withDeadline } from './with-deadline.ts';
 import { createCredentialStore, type CredentialStore } from '../storage/credential-store.ts';
 import type { ManifestContext } from './manifest.ts';
 import { flushToAdapter } from './flush.ts';
@@ -96,6 +97,8 @@ type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> = {
   deviceType?: import('./types.ts').DeviceType;
   relayEnabled: boolean;
   relayHealthyPollInterval: number;
+  connectStageTimeoutMs: number;
+  onConnectStalled?: SyncConfig<S>['onConnectStalled'];
 };
 
 const DEFAULT_COMPACT_WARNING_THRESHOLD = 50;
@@ -303,6 +306,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
         dbName: config.dbName,
         schema: config.schema,
         openTimeoutMs: config.localOpenTimeoutMs,
+        onDegraded: config.onLocalDegraded,
       })),
       schema: config.schema,
       replicas: config.replicas ?? [],
@@ -310,6 +314,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       resolveInitialState: config.resolveInitialState,
       relayEnabled: config.relayEnabled ?? true,
       relayHealthyPollInterval: config.relayHealthyPollInterval ?? Math.max(config.pollInterval ?? 30_000, 300_000),
+      connectStageTimeoutMs: config.connectStageTimeoutMs ?? DEFAULT_CONNECT_STAGE_TIMEOUT_MS,
+      onConnectStalled: config.onConnectStalled,
     };
     this.serverId = this.config.serverId;
     this.dbName = this.config.dbName;
@@ -1690,6 +1696,40 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     return false;
   }
 
+  /**
+   * Wrap a connect-stage operation in a bounded-progress deadline. On stall,
+   * the engine enters offline-ready mode: it does not throw, does not mark
+   * itself connected, and does fire the optional onConnectStalled callback.
+   * Returns `null` when the stage stalled; otherwise the stage's result.
+   */
+  private async runConnectStage<T>(name: string, op: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> {
+    try {
+      const value = await withDeadline(name, op, this.config.connectStageTimeoutMs);
+      return { ok: true, value };
+    } catch (error) {
+      if (error instanceof ConnectStageTimeoutError) {
+        this.log('warn', `connect() — stage stalled: ${name}`, { timeoutMs: error.timeoutMs });
+        this.emit({
+          type: 'connect:error',
+          error,
+          stage: name,
+          dbName: this.dbName,
+          remotePath: this.config.remotePath,
+          deviceId: this.deviceId,
+        });
+        if (this.config.onConnectStalled) {
+          try {
+            this.config.onConnectStalled({ stage: name, timeoutMs: error.timeoutMs, error });
+          } catch {
+            // Never let a consumer hook stop the engine.
+          }
+        }
+        return { ok: false, error };
+      }
+      return { ok: false, error };
+    }
+  }
+
   private async doConnect(): Promise<void> {
     const adapter = this.requireAdapter('connect()');
     console.log('[interocitor:connect] doConnect() — start', {
@@ -1719,9 +1759,11 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     this.log('debug', 'connect() — authenticating with adapter', { adapter: adapter.name });
     if (!adapter.isAuthenticated()) {
       this.emit({ type: 'auth:required' });
-      try { await adapter.authenticate(); } catch (err) {
-        this.log('error', 'connect() — authentication failed', err);
-        throw stage('authenticate', err);
+      const authResult = await this.runConnectStage('authenticate', () => adapter.authenticate());
+      if (!authResult.ok) {
+        if (authResult.error instanceof ConnectStageTimeoutError) return; // offline-ready degrade
+        this.log('error', 'connect() — authentication failed', authResult.error);
+        throw stage('authenticate', authResult.error);
       }
       this.emit({ type: 'auth:complete' });
     }
@@ -1738,26 +1780,25 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     const p = paths(remotePath);
     this.log('debug', 'connect() — ensuring remote folders', { remotePath, deviceId: this.deviceId });
     for (const folder of [remotePath, p.devicesFolder, p.mainlineFolder, p.changesFolder]) {
-      try {
-        await adapter.ensureFolder(folder);
-        this.log('debug', 'connect() — ensureFolder ok', folder);
-      } catch (err) {
-        this.log('error', 'connect() — ensureFolder failed', folder, err);
-        throw stage('ensureFolder', err);
+      const folderResult = await this.runConnectStage('ensureFolder', () => adapter.ensureFolder(folder));
+      if (!folderResult.ok) {
+        if (folderResult.error instanceof ConnectStageTimeoutError) return; // offline-ready degrade
+        this.log('error', 'connect() — ensureFolder failed', folder, folderResult.error);
+        throw stage('ensureFolder', folderResult.error);
       }
+      this.log('debug', 'connect() — ensureFolder ok', folder);
     }
 
     this.log('debug', 'connect() — loading/creating manifest');
     let bootstrapped = false;
-    try {
-      // Force on connect: any cached manifest predates the new transport
-      // session and may be stale (compaction by another writer, mesh swap).
-      ({ bootstrapped } = await this.doLoadOrCreateManifest('connect', true));
-      stageOk('loadOrCreateManifest', { bootstrapped, meshId: this.manifest?.meshId, generation: this.manifest?.generation });
-    } catch (err) {
-      this.log('error', 'connect() — loadOrCreateManifest failed', err);
-      throw stage('loadOrCreateManifest', err);
+    const manifestResult = await this.runConnectStage('loadOrCreateManifest', () => this.doLoadOrCreateManifest('connect', true));
+    if (!manifestResult.ok) {
+      if (manifestResult.error instanceof ConnectStageTimeoutError) return; // offline-ready degrade
+      this.log('error', 'connect() — loadOrCreateManifest failed', manifestResult.error);
+      throw stage('loadOrCreateManifest', manifestResult.error);
     }
+    bootstrapped = manifestResult.value.bootstrapped;
+    stageOk('loadOrCreateManifest', { bootstrapped, meshId: this.manifest?.meshId, generation: this.manifest?.generation });
 
     // Post-manifest credential check.
     //
@@ -1785,14 +1826,19 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     await this.persistCredentials();
     stageOk('persistCredentialsPostManifest');
 
-    await upsertDeviceMetadata(adapter, remotePath, this.deviceId, {
+    const deviceMetadataResult = await this.runConnectStage('upsertDeviceMetadata', () => upsertDeviceMetadata(adapter, remotePath, this.deviceId, {
       displayName: this.config.deviceName,
       deviceType: this.config.deviceType,
       // Skip the read-merge GET when we just minted the manifest in this
       // same connect cycle — no prior device record can possibly exist.
       bootstrap: bootstrapped,
       skipTouchIfUnchanged: !bootstrapped,
-    });
+    }));
+    if (!deviceMetadataResult.ok) {
+      if (deviceMetadataResult.error instanceof ConnectStageTimeoutError) return;
+      throw stage('upsertDeviceMetadata', deviceMetadataResult.error);
+    }
+    stageOk('upsertDeviceMetadata');
 
     const localEpochRaw = await this.local.getMeta('epoch');
     const localEpoch = typeof localEpochRaw === 'number' ? localEpochRaw : 0;
@@ -1811,15 +1857,27 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
     if (localEpoch < remoteEpoch) {
       this.log('debug', 'connect() — epoch advanced, rehydrating from snapshot');
-      await this.rehydrate();
+      const rehydrateResult = await this.runConnectStage('rehydrate', () => this.rehydrate());
+      if (!rehydrateResult.ok) {
+        if (rehydrateResult.error instanceof ConnectStageTimeoutError) return;
+        throw stage('rehydrate', rehydrateResult.error);
+      }
     } else {
       this.log('debug', 'connect() — running initial pull');
-      await this.pull();
+      const pullResult = await this.runConnectStage('pull', () => this.pull());
+      if (!pullResult.ok) {
+        if (pullResult.error instanceof ConnectStageTimeoutError) return;
+        throw stage('pull', pullResult.error);
+      }
     }
     if (bootstrapped) {
       await this.rebuildOutboxFromLocalState();
     }
-    await this.doFlush();
+    const flushResult = await this.runConnectStage('flush', () => this.doFlush());
+    if (!flushResult.ok) {
+      if (flushResult.error instanceof ConnectStageTimeoutError) return;
+      throw stage('flush', flushResult.error);
+    }
 
     this.startPolling(this.config.pollInterval);
     this.startRemoteInvalidations(adapter);

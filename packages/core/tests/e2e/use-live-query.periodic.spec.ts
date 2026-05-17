@@ -247,3 +247,72 @@ test('useLiveQuery updates when periodic polling pulls remote rows', async () =>
     await writer.disconnect().catch(() => {});
   }
 });
+
+test('period-filtered live query updates when first row for new period arrives remotely', async () => {
+  type Task = { title: string; period: string };
+  type Schema = { tasks: Task };
+
+  const remote = new MemoryAdapter();
+  const writer = new Interocitor<Schema>(remote, {
+    remotePath: '/LiveQueryNewPeriod',
+    encrypted: false,
+    deviceId: 'live_query_period_writer',
+    pollInterval: 25,
+    flushThreshold: 999,
+    batchWindowMs: 0,
+    localStoreFactory: () => new InMemoryLocalStore(),
+  });
+  const reader = new Interocitor<Schema>(remote, {
+    remotePath: '/LiveQueryNewPeriod',
+    encrypted: false,
+    deviceId: 'live_query_period_reader',
+    pollInterval: 25,
+    flushThreshold: 999,
+    batchWindowMs: 0,
+    localStoreFactory: () => new InMemoryLocalStore(),
+  });
+
+  let renderer: ReactTestRenderer | null = null;
+
+  function PeriodTitles() {
+    const result = useLiveQuery(
+      () => reader.table('tasks').where('period').equals('2026-W21').orderBy('title'),
+      [reader],
+      rows => rows.map(row => row.title).join(','),
+    );
+
+    return React.createElement('div', { id: 'titles' }, result.data ?? (result.loading ? 'loading' : 'empty'));
+  }
+
+  try {
+    await writer.init();
+    await reader.init();
+    await writer.connect();
+    await reader.connect();
+
+    // Database is non-empty overall; only the current period-scoped view is empty.
+    await writer.put('tasks', 'prior-period-task', { title: 'old sprint task', period: '2026-W20' });
+    await writer.flush();
+
+    await act(async () => {
+      renderer = create(React.createElement(PeriodTitles));
+    });
+
+    await waitFor(() => {
+      expect(renderedText(renderer!)).toBe('');
+    });
+
+    await writer.put('tasks', 'new-period-task', { title: 'first new sprint task', period: '2026-W21' });
+    await writer.flush();
+
+    await waitFor(() => {
+      expect(renderedText(renderer!)).toBe('first new sprint task');
+    });
+  } finally {
+    await act(async () => {
+      renderer?.unmount();
+    });
+    await reader.disconnect().catch(() => {});
+    await writer.disconnect().catch(() => {});
+  }
+});

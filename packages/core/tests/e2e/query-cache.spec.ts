@@ -161,6 +161,90 @@ test.describe('Interocitor query cache', () => {
     expect(result.rowsAfter).toBe(2);
   });
 
+  test('remote invalidation refreshes a ready empty query cache entry', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+      const { MemoryLocalStore } = await import('/packages/core/dist/storage/memory-store.js');
+
+      class SharedPushAdapter extends MemoryAdapter {
+        name = 'shared-push-memory';
+        listeners = new Set<(payload: { type: string; path: string; ts: number }) => void>();
+        override subscribeToInvalidations(
+          onInvalidate: (payload: { type: string; path: string; ts: number }) => void,
+          hooks?: { onReady?: () => void },
+        ): () => void {
+          this.listeners.add(onInvalidate);
+          hooks?.onReady?.();
+          return () => {
+            this.listeners.delete(onInvalidate);
+          };
+        }
+        push(path: string): void {
+          const payload = { type: 'invalidation', path, ts: Date.now() };
+          for (const listener of this.listeners) listener(payload);
+        }
+      }
+
+      const adapter = new SharedPushAdapter();
+      const writer = new Interocitor(adapter, {
+        remotePath: '/QC-remote-invalidation', pollInterval: 600_000, deviceId: 'writer',
+        localStoreFactory: () => new MemoryLocalStore(),
+      });
+      const reader = new Interocitor(adapter, {
+        remotePath: '/QC-remote-invalidation', pollInterval: 600_000, deviceId: 'reader',
+        localStoreFactory: () => new MemoryLocalStore(),
+      });
+      const events: string[] = [];
+      reader.on((event: { type: string }) => events.push(event.type));
+
+      await writer.init();
+      await reader.init();
+      await writer.connect();
+      await reader.connect();
+
+      const q = reader.table('tasks').query();
+      const initialRows = await q;
+      const readyEmpty = reader.readQueryCache(q.descriptor);
+
+      await writer.put('tasks', 'remote-1', { title: 'remote first row' });
+      await writer.flush();
+      adapter.push('/QC-remote-invalidation/changes/head.json');
+
+      const deadline = Date.now() + 2_000;
+      while (Date.now() < deadline) {
+        const snap = reader.readQueryCache(q.descriptor);
+        const titles = (snap.rows ?? []).map((row: any) => row.payload?.title?.value ?? null);
+        if (titles.includes('remote first row')) break;
+        await new Promise(resolve => { setTimeout(resolve, 25); });
+      }
+
+      const afterCache = reader.readQueryCache(q.descriptor);
+      const regularRows = await q;
+      const bypassRows = await q.load({ bypassCache: true });
+
+      await reader.disconnect();
+      await writer.disconnect();
+      return {
+        initialRows: initialRows.map((row: any) => row.title ?? null),
+        readyEmptyStatus: readyEmpty.status,
+        readyEmptyCount: readyEmpty.rows?.length ?? 0,
+        events,
+        cacheTitlesAfter: (afterCache.rows ?? []).map((row: any) => row.payload?.title?.value ?? null),
+        regularTitlesAfter: regularRows.map((row: any) => row.title ?? null),
+        bypassTitlesAfter: bypassRows.map((row: any) => row.title ?? null),
+      };
+    });
+
+    expect(result.initialRows).toEqual([]);
+    expect(result.readyEmptyStatus).toBe('ready');
+    expect(result.readyEmptyCount).toBe(0);
+    expect(result.events).toContain('relay:message');
+    expect(result.cacheTitlesAfter).toEqual(['remote first row']);
+    expect(result.regularTitlesAfter).toEqual(['remote first row']);
+    expect(result.bypassTitlesAfter).toEqual(['remote first row']);
+  });
+
   test('cacheKey is stable per descriptor and indifferent to sort()', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { Interocitor, types } = await import('/packages/core/dist/index.js');

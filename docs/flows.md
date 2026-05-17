@@ -32,31 +32,73 @@ itself is enough to skip them.
 
 ```mermaid
 flowchart TD
-    A([init]) --> B[open IDB\nrestore HLC + table names]
-    B --> C([connect])
+    A([init]) --> B{open resilient\nlocal store}
+    B -- IDB ok --> B1[restore HLC + table names]
+    B -- IDB blocked / closing / stalled --> B2[degrade to memory\nemit onLocalDegraded]
+    B2 --> B1
+    B1 --> C([connect])
     C --> D{adapter\nauthenticated?}
-    D -- No --> E[adapter.authenticate]
-    E --> D
-    D -- Yes --> F["ensureFolder ×4\nremotePath → devices\n→ mainline → changes"]
-    F --> G[loadOrCreateManifest]
-    G -- no manifest.json --> H[createBootstrapManifest\nmanifest-1 + manifest.json]
-    H --> G
-    G -- found --> I[validate content hash\ncheck schema version\ncheck server auth if managed]
-    I --> J{localEpoch\n< remoteEpoch?}
-    J -- Yes: new snapshot --> K[rehydrate]
-    K --> K1[GET snapshotPath from manifest]
-    K1 --> K2[clearAll IDB]
-    K2 --> K3[write snapshot rows to IDB\nrestore HLC]
-    K3 --> L
-    J -- No --> L[pull change files]
-    L --> M[flush outbox]
-    M --> N[flush to replicas\nbest-effort]
+    D -- No --> E[bounded stage:\nadapter.authenticate]
+    E --> E1{stage completed\nbefore deadline?}
+    E1 -- No --> Z[offline-ready degrade\nemit connect:error + onConnectStalled]
+    E1 -- Yes --> D
+    D -- Yes --> F["bounded stage:\nensureFolder ×4\nremotePath → devices\n→ mainline → changes"]
+    F --> F1{stage completed\nbefore deadline?}
+    F1 -- No --> Z
+    F1 -- Yes --> G[bounded stage:\nloadOrCreateManifest]
+    G --> G0{stage completed\nbefore deadline?}
+    G0 -- No --> Z
+    G0 -- Yes --> G1{manifest exists?}
+    G1 -- No --> H[createBootstrapManifest\nmanifest-1 + manifest.json]
+    H --> G1
+    G1 -- Yes --> I[validate content hash\ncheck schema version\ncheck server auth if managed]
+    I --> I1[bounded stage:\nupsertDeviceMetadata]
+    I1 --> I2{stage completed\nbefore deadline?}
+    I2 -- No --> Z
+    I2 -- Yes --> J{localEpoch\n< remoteEpoch?}
+    J -- Yes: new snapshot --> K[bounded stage:\nrehydrate]
+    K --> K0{stage completed\nbefore deadline?}
+    K0 -- No --> Z
+    K0 -- Yes --> K1[GET snapshotPath from manifest]
+    K1 --> K2[clearAll local store]
+    K2 --> K3[write snapshot rows\nrestore HLC]
+    K3 --> M
+    J -- No --> L[bounded stage:\npull change files]
+    L --> L0{stage completed\nbefore deadline?}
+    L0 -- No --> Z
+    L0 -- Yes --> M[bounded stage:\nflush outbox]
+    M --> M0{stage completed\nbefore deadline?}
+    M0 -- No --> Z
+    M0 -- Yes --> N[flush to replicas\nbest-effort]
     N --> O([startPolling every N ms])
+    Z --> Z1([return from connect\nready but not connected])
 ```
 
 **Offline guarantee:** `init()` never touches the network. After `init()`,
 `put()`, `delete()`, `get()`, `query()`, and `queryWhere()` all work
-against local IndexedDB. `connect()` is the first network call.
+against the local store. IndexedDB is preferred but not required: if it is
+blocked, closing, unavailable, or fails to make progress, the resilient
+store degrades to memory so the app can continue.
+
+**Bounded connect guarantee:** `connect()` is the first network call. Each
+cloud stage has a bounded-progress deadline (`connectStageTimeoutMs`, 15s
+by default). A stalled stage emits `connect:error` and calls
+`onConnectStalled`, then returns offline-ready: `init()` remains complete,
+local writes keep queuing, and the app can retry `connect()` later.
+
+**Failure semantics:** local-store degradation and connect-stage stalls are
+availability fallbacks, not successful sync. A degraded local store may lose
+session-only writes on reload until they have flushed remotely. An
+offline-ready `connect()` means the engine is ready for local work but is
+not yet connected to the remote. Validation errors such as mesh mismatch,
+encryption mismatch, poison, or schema incompatibility are not availability
+fallbacks; they still surface as hard correctness/security errors.
+
+**Disaster recovery:** the durable local database name is a cache
+namespace, not mesh identity. If a browser keeps a DB blocked or a handle
+keeps closing, applications can rotate to a new versioned local DB name and
+continue. Old DB names are cleaned up opportunistically when the platform
+supports IndexedDB enumeration; cleanup must never block app startup.
 
 ## Flush (local → cloud)
 

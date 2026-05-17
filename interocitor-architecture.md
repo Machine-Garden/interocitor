@@ -50,6 +50,13 @@ A web app needs to share structured data across multiple devices in a mesh. Requ
 
 Each device maintains a **full local copy** in IndexedDB (or OPFS-backed SQLite). The cloud folder is a **mailbox**, not a runtime database. No device reads directly from the cloud folder to serve UI — it syncs in the background.
 
+Current implementations also follow a **never-stuck local-first principle**:
+IndexedDB and cloud transport are recoverable implementation details. If
+IndexedDB is blocked, closing, or unavailable, the engine degrades to an
+in-memory local store and can rotate to a fresh versioned DB name later. If
+a cloud connect stage stalls, the engine returns offline-ready instead of
+wedging the app. The user must be able to keep reading/writing local state.
+
 ## Core Concepts
 
 ### 1. Device Identity

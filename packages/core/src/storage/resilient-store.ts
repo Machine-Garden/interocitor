@@ -1,19 +1,48 @@
 /**
  * Resilient local store wrapper.
  *
- * Antifragility contract: `open()` must never hang. Either it succeeds with
- * the configured persistent store (IndexedDB), or it falls through to a
- * volatile in-memory store and continues. The engine never blocks on a
- * dead/blocked IDB request.
+ * Antifragility contract: the application must never get stuck on IndexedDB.
  *
- * The local store is a cache — cloud is the source of truth — so falling
- * back to memory degrades durability across reloads but does not lose
- * data already synced to the cloud, and does not break the engine.
+ * Rules:
+ * - `open()` must settle in bounded time.
+ * - If IndexedDB is blocked, suspended, closing, or otherwise non-progressing,
+ *   the store degrades to in-memory mode and the engine continues.
+ * - The local database is treated as a cache, never the source of truth.
+ * - Recovery prefers continued app function over local durability.
+ *
+ * In practice this means two recovery paths:
+ * 1. `open()` is protected by a no-progress deadline and falls back to memory.
+ * 2. Post-open operations are retried once on memory when the underlying IDB
+ *    handle starts closing or has already closed.
  *
  * Failure path: `console.error(...)` so monitoring (Sentry/etc.) records
  * the degradation, then silently continues. No public event, no mode
  * getter — the local cache is an implementation detail.
  */
+
+/**
+ * Whether an IndexedDB error means the handle is no longer trustworthy and the
+ * application should abandon persistence in favour of progress.
+ */
+function isUnrecoverableIdbState(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const normalized = message.toLowerCase();
+  return normalized.includes('database connection is closing')
+    || normalized.includes('connection is closing')
+    || normalized.includes('invalidstateerror')
+    || normalized.includes('the database connection is closed')
+    || normalized.includes('transaction on idbdatabase')
+    || normalized.includes('connection closed');
+}
+
+/**
+ * Stable human-readable reason attached to console diagnostics so Sentry and
+ * logs can distinguish open-time stalls from post-open handle death.
+ */
+function classifyFallbackReason(error: unknown): string {
+  if (isUnrecoverableIdbState(error)) return 'idb-handle-closing';
+  return 'idb-open-stalled-or-unavailable';
+}
 
 import type { DatabaseSchemaDefinition, LocalStoreAdapter } from '../core/types.ts';
 import { LocalStore } from './local-store.ts';
@@ -21,6 +50,18 @@ import { MemoryLocalStore } from './memory-store.ts';
 
 /** Default IDB open deadline. Anything longer is a wedged platform. */
 export const DEFAULT_LOCAL_OPEN_TIMEOUT_MS = 300;
+
+export type LocalStoreDegradationReason =
+  | 'idb-handle-closing'
+  | 'idb-open-stalled-or-unavailable';
+
+export interface LocalStoreDegradationInfo {
+  reason: LocalStoreDegradationReason;
+  error: unknown;
+  dbName?: string;
+}
+
+export type LocalStoreDegradedHook = (info: LocalStoreDegradationInfo) => void;
 
 export interface ResilientLocalStoreOptions {
   dbName?: string;
@@ -32,6 +73,13 @@ export interface ResilientLocalStoreOptions {
   primaryFactory?: () => LocalStoreAdapter;
   /** Override for tests. Defaults to () => new MemoryLocalStore(). */
   fallbackFactory?: () => LocalStoreAdapter;
+  /**
+   * Notified when the resilient store degrades to memory because
+   * IndexedDB hung at open or its handle became unusable post-open.
+   * Hook must be synchronous and never throw — failures are swallowed
+   * to preserve the "never stuck" guarantee.
+   */
+  onDegraded?: LocalStoreDegradedHook;
 }
 
 /**
@@ -91,9 +139,17 @@ export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {})
 
   const fallback = (reason: unknown, primary: LocalStoreAdapter | null): LocalStoreAdapter => {
     degraded = true;
+    const classifiedReason = classifyFallbackReason(reason);
     // Sentry / monitoring hook. One line, easy to grep.
     // eslint-disable-next-line no-console
-    console.error('[interocitor] LocalStore degraded to memory:', reason);
+    console.error(`[interocitor] LocalStore degraded to memory (${classifiedReason}):`, reason);
+    if (opts.onDegraded) {
+      try {
+        opts.onDegraded({ reason: classifiedReason as LocalStoreDegradationReason, error: reason, dbName: opts.dbName });
+      } catch {
+        // Never let a consumer hook stop the engine.
+      }
+    }
     if (primary) {
       try { primary.close(); } catch { /* ignore */ }
     }
@@ -101,6 +157,17 @@ export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {})
     // MemoryLocalStore.open() is a noop, but call it for contract symmetry.
     void mem.open();
     return mem;
+  };
+
+  const runWithRecovery = async <T>(operation: (store: LocalStoreAdapter) => Promise<T>): Promise<T> => {
+    const current = requireActive(active);
+    try {
+      return await operation(current);
+    } catch (error) {
+      if (!isUnrecoverableIdbState(error) || degraded) throw error;
+      active = fallback(error, current);
+      return operation(requireActive(active));
+    }
   };
 
   const adapter: LocalStoreAdapter = {
@@ -128,32 +195,27 @@ export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {})
       degraded = false;
     },
 
-    // Every other method is a thin pass-through. We do NOT add per-call
-    // timeouts here — once IDB is open, individual transactions either
-    // complete or surface real errors. Adding more deadlines just hides
-    // bugs; the only point we cannot recover from is the initial open.
+    getRow: (table, rowId) => runWithRecovery((store) => store.getRow(table, rowId)),
+    putRow: (row) => runWithRecovery((store) => store.putRow(row)),
+    putRows: (rows) => runWithRecovery((store) => store.putRows(rows)),
+    getTable: (table) => runWithRecovery((store) => store.getTable(table)),
+    queryWhere: (table, clause) => runWithRecovery((store) => store.queryWhere(table, clause)),
+    getAllRows: () => runWithRecovery((store) => store.getAllRows()),
+    clearRows: () => runWithRecovery((store) => store.clearRows()),
+    getTableNames: () => runWithRecovery((store) => store.getTableNames()),
 
-    getRow: (table, rowId) => requireActive(active).getRow(table, rowId),
-    putRow: (row) => requireActive(active).putRow(row),
-    putRows: (rows) => requireActive(active).putRows(rows),
-    getTable: (table) => requireActive(active).getTable(table),
-    queryWhere: (table, clause) => requireActive(active).queryWhere(table, clause),
-    getAllRows: () => requireActive(active).getAllRows(),
-    clearRows: () => requireActive(active).clearRows(),
-    getTableNames: () => requireActive(active).getTableNames(),
+    pushOutbox: (entry) => runWithRecovery((store) => store.pushOutbox(entry)),
+    pushOutboxEntries: (entries) => runWithRecovery((store) => store.pushOutboxEntries(entries)),
+    drainOutbox: () => runWithRecovery((store) => store.drainOutbox()),
+    outboxSize: () => runWithRecovery((store) => store.outboxSize()),
 
-    pushOutbox: (entry) => requireActive(active).pushOutbox(entry),
-    pushOutboxEntries: (entries) => requireActive(active).pushOutboxEntries(entries),
-    drainOutbox: () => requireActive(active).drainOutbox(),
-    outboxSize: () => requireActive(active).outboxSize(),
+    getCursor: (deviceId) => runWithRecovery((store) => store.getCursor(deviceId)),
+    setCursor: (deviceId, offset) => runWithRecovery((store) => store.setCursor(deviceId, offset)),
+    getAllCursors: () => runWithRecovery((store) => store.getAllCursors()),
 
-    getCursor: (deviceId) => requireActive(active).getCursor(deviceId),
-    setCursor: (deviceId, offset) => requireActive(active).setCursor(deviceId, offset),
-    getAllCursors: () => requireActive(active).getAllCursors(),
-
-    getMeta: (key) => requireActive(active).getMeta(key),
-    setMeta: (key, value) => requireActive(active).setMeta(key, value),
-    clearAll: () => requireActive(active).clearAll(),
+    getMeta: (key) => runWithRecovery((store) => store.getMeta(key)),
+    setMeta: (key, value) => runWithRecovery((store) => store.setMeta(key, value)),
+    clearAll: () => runWithRecovery((store) => store.clearAll()),
   };
 
   // Diagnostic, not a public API. Tests and internal logging can read it.

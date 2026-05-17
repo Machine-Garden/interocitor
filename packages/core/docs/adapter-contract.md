@@ -150,6 +150,18 @@ If an adapter does not implement these methods, the engine falls back to `writeF
   trips; expose `resetFolderCache()` so the engine can invalidate on
   mesh swap or transport teardown.
 
+### Bounded progress
+
+Adapters should prefer rejecting failed operations over leaving promises
+pending forever. The engine wraps connect-time adapter calls with
+`connectStageTimeoutMs`, but adapter authors should still make network
+requests abortable and give meaningful errors where possible.
+
+A stalled adapter call is treated as an offline-ready condition, not an
+application-fatal condition: the engine emits `connect:error`, calls
+`onConnectStalled`, returns from `connect()`, and keeps local reads/writes
+available for a later retry.
+
 ### `authenticate()` / `isAuthenticated()`
 
 - The engine calls `authenticate()` once before connecting, and again

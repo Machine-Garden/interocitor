@@ -273,4 +273,68 @@ test.describe('Resilient LocalStore', () => {
     expect(result.degraded).toBe(true);
     expect(result.metaSurvived).toBe(true);
   });
+
+  test('createResilientLocalStore degrades and retries when an opened primary starts closing', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { createResilientLocalStore } = await import('/packages/core/dist/storage/resilient-store.js');
+
+      let getMetaCalls = 0;
+      const closingPrimary = {
+        open: async () => {},
+        close: () => {},
+        getRow: async () => undefined,
+        putRow: async () => {},
+        putRows: async () => {},
+        getTable: async () => [],
+        queryWhere: async () => [],
+        getAllRows: async () => [],
+        clearRows: async () => {},
+        getTableNames: async () => [],
+        pushOutbox: async () => {},
+        pushOutboxEntries: async () => {},
+        drainOutbox: async () => [],
+        outboxSize: async () => 0,
+        getCursor: async () => 0,
+        setCursor: async () => {},
+        getAllCursors: async () => ({}),
+        getMeta: async () => {
+          getMetaCalls++;
+          throw new DOMException('The database connection is closing.', 'InvalidStateError');
+        },
+        setMeta: async () => {},
+        clearAll: async () => {},
+      };
+
+      const origError = console.error;
+      let degradedLogged = false;
+      console.error = (...args: unknown[]) => {
+        if (args.some(a => String(a).includes('LocalStore degraded to memory'))) degradedLogged = true;
+      };
+      try {
+        const store = createResilientLocalStore({
+          openTimeoutMs: 1000,
+          primaryFactory: () => closingPrimary as any,
+        });
+        await store.open();
+        const firstMeta = await store.getMeta('k');
+        await store.setMeta('fresh', 'survived-after-closing');
+        const freshMeta = await store.getMeta('fresh');
+        return {
+          degraded: (store as any).__degraded === true,
+          degradedLogged,
+          firstMeta,
+          freshMeta,
+          getMetaCalls,
+        };
+      } finally {
+        console.error = origError;
+      }
+    });
+
+    expect(result.degraded).toBe(true);
+    expect(result.degradedLogged).toBe(true);
+    expect(result.firstMeta).toBeUndefined();
+    expect(result.freshMeta).toBe('survived-after-closing');
+    expect(result.getMetaCalls).toBe(1);
+  });
 });

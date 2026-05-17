@@ -147,6 +147,30 @@ Writes are persisted locally and queued in an outbox. They survive
 reload, crash, and offline periods. On reconnect the engine drains the
 outbox to the remote.
 
+### Never-stuck principle
+
+Interocitor treats persistence and transport as implementation details
+behind the local-first API. The application must not become unusable
+because IndexedDB is wedged, a database upgrade is blocked by another tab,
+or a cloud call hangs forever.
+
+Failure-mode hierarchy:
+
+1. **Use durable local storage** when IndexedDB opens and behaves normally.
+2. **Degrade to memory** when IndexedDB is unavailable, blocked, closing, or
+   fails to make progress. The current session keeps working; durability
+   across reloads is reduced until the app reconnects or rotates storage.
+3. **Rotate the local database name** for persistent IndexedDB disasters.
+   The DB name is a cache namespace, not identity. Mesh identity lives in
+   credentials and the remote manifest.
+4. **Stay offline-ready** when a cloud connect stage stalls. `connect()`
+   returns, `init()` remains complete, writes continue locally, and the app
+   can retry `connect()` later.
+
+This principle is intentionally conservative: stale or broken local cache
+must never block the user from reading/writing the app's current in-memory
+state.
+
 ## Sync guarantees
 
 - **Eventual convergence.** Two devices that have seen the same set of
@@ -330,6 +354,10 @@ const db = new Interocitor(adapter, {
   appName: 'My App',
   remotePath: '/MyApp',
   schema,
+  connectStageTimeoutMs: 15_000,
+  onConnectStalled: ({ stage, timeoutMs }) => {
+    console.warn(`connect stage stalled: ${stage}`, { timeoutMs });
+  },
 });
 await db.init();
 
@@ -486,6 +514,46 @@ The local store is a pluggable `LocalStoreAdapter`. Browser default is
 IndexedDB. The Swift package ships SQLite. Tests use an in‑memory
 implementation. Reads, writes, queries, and the outbox all go through
 this interface.
+
+Browser IndexedDB is wrapped by a resilient boundary:
+
+- `createResilientLocalStore()` bounds IndexedDB open time and degrades to
+  memory on blocked/stalled opens or post-open `InvalidStateError` /
+  "database connection is closing" failures.
+- `onLocalDegraded` lets apps log or show a non-fatal banner. The hook must
+  be informational only; the engine has already continued.
+- `createNamedLocalStore()` adds versioned DB-name rotation. Use it when the
+  app prefers abandoning a poisoned cache namespace over waiting for old
+  tabs/workers to release it.
+- `resetLocalDatabaseWithDeadline()` provides a never-hanging destructive
+  reset primitive for user-facing "repair local cache" flows.
+
+Example:
+
+```ts
+const db = new Interocitor(adapter, {
+  localStoreFactory: () => createNamedLocalStore({
+    baseName: 'MealPlannerInterocitor',
+    schema,
+    onLocalDegraded: ({ reason, error }) => report(reason, error),
+    onRotated: ({ from, to, reason }) => reportRotation(from, to, reason),
+  }),
+});
+```
+
+### Connect-stage degradation
+
+`connect()` has bounded-progress semantics. Cloud work is split into
+stages (`authenticate`, `ensureFolder`, `loadOrCreateManifest`,
+`upsertDeviceMetadata`, `pull`, `rehydrate`, `flush`). Each stage uses
+`connectStageTimeoutMs` (default
+15s). If a stage stalls, `connect()` returns without throwing, emits
+`connect:error`, calls `onConnectStalled`, and leaves the engine ready but
+not connected. Local reads/writes continue and writes stay queued for a
+future successful connect.
+
+Apps should treat `onConnectStalled` like `onLocalDegraded`: telemetry and
+user messaging only. Do not make app correctness depend on the callback.
 
 ## Adapters
 
@@ -645,6 +713,7 @@ db.on(event => {
     case 'flush:start':               /* event.entryCount */ break;
     case 'flush:complete':            break;
     case 'flush:error':               /* event.error */ break;
+    case 'connect:error':             /* event.stage, event.error; may be bounded-progress offline-ready degrade */ break;
     case 'remote:poisoned':           /* unrecoverable; see security-model.md */ break;
     case 'credentials:meshMismatch':  /* stored meshId != live; offer clearCredentials() */ break;
     case 'compact:warning':           /* outbox is large */ break;
@@ -672,7 +741,8 @@ A short field guide. Detailed mitigations in the linked docs.
 | `MeshCredentialMismatchError` on connect | Same `dbName`, new mesh; stale credential record | `engine.clearCredentials()` then reconnect; `docs/credential-store.md` |
 | `MeshEncryptionMismatchError` on connect | App flipped `encrypted` between sessions | Pin `encrypted` per `dbName`, never change |
 | `remote:poisoned` event | Decode failure on a manifest, change file, or snapshot | `docs/security-model.md` — usually wrong key, schema drift, or remote tampering |
-| Writes never appear on peer | Peer never compacted, or peer's poll interval is long, or remote dropped writes | Check `flush:complete` events; check remote folder by hand |
+| Writes never appear on peer | Peer never compacted, peer's poll interval is long, remote dropped writes, or `connect()` is offline-ready after a stalled cloud stage | Check `flush:complete`, `connect:error`, `onConnectStalled`; check remote folder by hand |
+| App is unusable after IndexedDB error | Local cache is wedged, blocked by older tab, or connection is closing | Use `createResilientLocalStore` / `createNamedLocalStore`; log `onLocalDegraded`; offer `resetLocalDatabaseWithDeadline` repair |
 | Local store has rows that are "old" after re‑pair | Engine kept local data when you re‑paired with a fresh mesh | Either delete local DB on re‑pair, or accept the merge |
 | Lost passphrase | No recovery | Passphrase is the key. Back it up out of band |
 | Long‑offline device "lost" recent edits | Rehydrate replaced local state with the snapshot | Local writes already in the outbox survive; in‑flight uncommitted UI state does not |

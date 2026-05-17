@@ -821,6 +821,43 @@ export interface SyncConfig<
    * their own readiness contract.
    */
   localOpenTimeoutMs?: number;
+  /**
+   * Called when the local store degrades to in-memory mode because
+   * IndexedDB either failed to open in bounded time or its handle
+   * became unusable post-open. The engine still works after this
+   * fires; the hook is for product-level signalling (e.g. show a
+   * "local cache degraded, continuing" banner, log to Sentry).
+   *
+   * Reasons: 'idb-open-stalled-or-unavailable' | 'idb-handle-closing'.
+   * Ignored when `localStoreFactory` is supplied.
+   */
+  onLocalDegraded?: import('../storage/resilient-store.ts').LocalStoreDegradedHook;
+  /**
+   * Per-stage timeout for cloud work performed during connect(). Each
+   * connect stage (authenticate, ensureFolder, manifest, device metadata,
+   * pull/rehydrate, first flush) must complete within this window or it
+   * is treated as stalled. Default: 15 000 ms.
+   *
+   * When a stage stalls the engine enters an offline-ready state:
+   *   - isReady() === true
+   *   - local writes still queue to the outbox
+   *   - connect() is safely re-callable
+   *   - no `throw` escapes connect()
+   * Pepper / consumers can react via `onConnectStalled`.
+   */
+  connectStageTimeoutMs?: number;
+  /**
+   * Called when connect() degraded to offline-ready because a cloud stage
+   * exceeded its deadline. Receives the stage name, the original error
+   * (`ConnectStageTimeoutError` for deadline-driven stalls) and the
+   * configured timeout. Hook must not throw — failures are swallowed
+   * to preserve the "never stuck" guarantee.
+   */
+  onConnectStalled?: (info: {
+    stage: string;
+    timeoutMs: number;
+    error: unknown;
+  }) => void;
   /** Optional table/index metadata for local query planning and migrations. */
   schema?: DatabaseSchemaDefinition<S>;
 

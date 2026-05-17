@@ -555,5 +555,36 @@ test.describe('LocalStore — clearAll', () => {
 
     expect(result).toBe(0);
   });
+
+  test('operations fail deterministically when the database connection is closing', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { LocalStore } = await import('/packages/core/dist/storage/local-store.js');
+      const dbName = `interocitor-closing-test-${crypto.randomUUID()}`;
+      const store = new LocalStore(dbName);
+      await store.open();
+      await store.putRow({ _meta: { table: 't', rowId: 'seed', deleted: false, schemaVersion: 1 }, payload: {} });
+
+      const db = (store as any).db as IDBDatabase;
+      const tx = db.transaction('rows', 'readonly');
+      const req = tx.objectStore('rows').get('t\u0000seed');
+      db.close();
+      let requestOutcome = 'pending';
+      await new Promise<void>((resolve) => {
+        req.onsuccess = () => { requestOutcome = 'success'; resolve(); };
+        req.onerror = () => { requestOutcome = String(req.error?.message ?? req.error ?? 'error'); resolve(); };
+      });
+
+      let thrownMessage = '';
+      try {
+        await store.getAllRows();
+      } catch (error) {
+        thrownMessage = error instanceof Error ? error.message : String(error);
+      }
+
+      return { requestOutcome, thrownMessage };
+    });
+
+    expect(result.thrownMessage).toContain('closing');
+  });
 });
 

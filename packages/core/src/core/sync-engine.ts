@@ -231,6 +231,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   // Lifecycle state
   private initialized = false;
   private connected = false;
+  private connectionStatus: import('./types.ts').ConnectionStatus = 'offline';
   private initPromise: Promise<void> | null = null;
   // In-flight connect dedupe. Concurrent callers (React StrictMode double-
   // mount, dual auto-reconnect resolves) share the same execution instead of
@@ -445,6 +446,32 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
    *  between sync cache reads and awaiting a load. */
   isReady(): boolean {
     return this.initialized;
+  }
+
+  getConnectionStatus(): import('./types.ts').ConnectionStatus {
+    return this.connectionStatus;
+  }
+
+  getConnectionStatusDetails(): import('./types.ts').ConnectionStatusDetails {
+    const solo = !this.config.remotePath;
+    return {
+      status: this.getConnectionStatus(),
+      solo,
+      ready: this.initialized,
+      connected: this.connected,
+      remotePath: this.config.remotePath,
+      meshId: this.manifest?.meshId,
+      deviceId: this.deviceId,
+    };
+  }
+
+  private setConnectionStatus(status: import('./types.ts').ConnectionStatus): void {
+    if (this.connectionStatus === status) {
+      this.emit({ type: 'connection:status', status: this.getConnectionStatus() });
+      return;
+    }
+    this.connectionStatus = status;
+    this.emit({ type: 'connection:status', status: this.getConnectionStatus() });
   }
 
   /** Stable cache key for a descriptor. Owned by core. */
@@ -1433,6 +1460,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       await this.loadLocalState();
       this.log('debug', 'init() — complete', { knownTables: Array.from(this.knownTables) });
       this.initialized = true;
+      this.setConnectionStatus('offline');
       if (this.config.onInit) {
         await this.config.onInit(this.initContext);
       }
@@ -1591,6 +1619,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     await this.ensureReady();
     if (this.encrypted && !this.encryptionKey) await this.resolveEncryption();
     if (!this.config.remotePath) throw new Error('connect() requires remotePath; configure mesh before connecting');
+    this.setConnectionStatus('connecting');
 
     // Idempotent. If we are already connected to a live mesh on this
     // adapter+remotePath, don't restart the session — restart was the root
@@ -1686,6 +1715,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
         this.startPolling(this.config.pollInterval);
         this.startRemoteInvalidations(adapter);
         this.connected = true;
+        this.setConnectionStatus('idle');
         return true;
       }
     } catch {
@@ -1724,6 +1754,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
             // Never let a consumer hook stop the engine.
           }
         }
+        this.setConnectionStatus('offline');
         return { ok: false, error };
       }
       return { ok: false, error };
@@ -1882,6 +1913,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     this.startPolling(this.config.pollInterval);
     this.startRemoteInvalidations(adapter);
     this.connected = true;
+    this.setConnectionStatus('idle');
     this.log('info', 'connect() — connected', { remotePath: this.config.remotePath, deviceId: this.deviceId, pollInterval: this.config.pollInterval });
 
     this.startVisibilityTracking();
@@ -1951,6 +1983,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     this.local.close();
     this.connected = false;
     this.initialized = false;
+    this.connectionStatus = 'offline';
+    this.emit({ type: 'connection:status', status: this.getConnectionStatus() });
     this.initPromise = null;
     this.connectPromise = null;
     this.remotePoisonError = null;
@@ -2537,6 +2571,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
     this.log('debug', 'flush() — start', { entryCount: entries.length });
     this.emit({ type: 'flush:start', entryCount: entries.length });
+    if (this.connected) this.setConnectionStatus('syncing');
     this.pendingCount = 0;
     this.resetCompactWarning();
     this.clearScheduledFlush();
@@ -2580,8 +2615,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
       this.log('debug', 'flush() — complete', { entryCount: entries.length });
       this.emit({ type: 'flush:complete' });
+      if (this.connected) this.setConnectionStatus('idle');
       await this.maybeAutoCompact(triggerQueuedChangeCount);
     } catch (err) {
+      if (this.connected) this.setConnectionStatus('idle');
       this.log('error', 'flush() — failed, re-queuing entries', err);
       for (const entry of entries) await this.local.pushOutbox(entry);
       this.pendingCount = entries.length;
@@ -2595,22 +2632,27 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   async pull(): Promise<void> {
     await this.ensureReady();
     const adapter = this.requireAdapter('pull()');
-    this.hlc = await doPull({
-      adapter,
-      local: this.local,
-      remotePath: this.requireRemotePath('pull()'),
-      codecState: this.codecState,
-      hlc: this.hlc,
-      deviceId: this.deviceId,
-      tables: this.tables,
-      knownTables: this.knownTables,
-      schema: this.schema,
-      emit: (e) => this.emit(e),
-      ensureRowsCached: (ops) => this.ensureRowsCached(ops),
-      poisonRemote: (err, path) => this.poisonRemote(err, path),
-      loadOrCreateManifest: async () => { await this.doLoadOrCreateManifest('pull'); },
-    });
-    await this.acknowledgeManifest();
+    if (this.connected) this.setConnectionStatus('syncing');
+    try {
+      this.hlc = await doPull({
+        adapter,
+        local: this.local,
+        remotePath: this.requireRemotePath('pull()'),
+        codecState: this.codecState,
+        hlc: this.hlc,
+        deviceId: this.deviceId,
+        tables: this.tables,
+        knownTables: this.knownTables,
+        schema: this.schema,
+        emit: (e) => this.emit(e),
+        ensureRowsCached: (ops) => this.ensureRowsCached(ops),
+        poisonRemote: (err, path) => this.poisonRemote(err, path),
+        loadOrCreateManifest: async () => { await this.doLoadOrCreateManifest('pull'); },
+      });
+      await this.acknowledgeManifest();
+    } finally {
+      if (this.connected) this.setConnectionStatus('idle');
+    }
   }
 
   // ── Rehydrate / Compact ────────────────────────────────────────────

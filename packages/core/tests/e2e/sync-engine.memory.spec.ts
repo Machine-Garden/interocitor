@@ -41,6 +41,72 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result.files).toContain('/MeshBoot/manifest.json');
   });
 
+  test('connection status reports solo gate and connection phases', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      const solo = new Interocitor(new MemoryAdapter(), {
+        appName: 'StatusTest',
+        dbName: `status-solo-${crypto.randomUUID()}`,
+        encrypted: false,
+        deviceId: 'status_solo',
+      });
+      await solo.init();
+      const soloStatus = solo.getConnectionStatus();
+      const soloDetails = solo.getConnectionStatusDetails();
+
+      const events: any[] = [];
+      const db = new Interocitor(new MemoryAdapter(), {
+        appName: 'StatusTest',
+        dbName: `status-mesh-${crypto.randomUUID()}`,
+        remotePath: '/StatusMesh',
+        encrypted: false,
+        deviceId: 'status_mesh',
+        pollInterval: 600_000,
+      });
+      db.on((event: any) => {
+        if (event.type === 'connection:status') events.push(event.status);
+      });
+
+      await db.init();
+      const afterInit = db.getConnectionStatus();
+      const connectPromise = db.connect();
+      await Promise.resolve();
+      const duringConnect = events.includes('connecting');
+      await connectPromise;
+      const afterConnect = db.getConnectionStatus();
+      await db.put('tasks', 'a', { title: 'A' });
+      await db.flush();
+      const sawSyncing = events.includes('syncing');
+      const afterFlush = db.getConnectionStatus();
+      await db.disconnect();
+      const afterDisconnect = events.at(-1);
+
+      return {
+        soloStatus,
+        soloDetails,
+        afterInit,
+        duringConnect,
+        afterConnect,
+        sawSyncing,
+        afterFlush,
+        afterDisconnect,
+      };
+    });
+
+    expect(result.soloStatus).toBe('offline');
+    expect(result.soloDetails.status).toBe('offline');
+    expect(result.soloDetails.solo).toBe(true);
+    expect(result.soloDetails.ready).toBe(true);
+    expect(result.afterInit).toBe('offline');
+    expect(result.duringConnect).toBe(true);
+    expect(result.afterConnect).toBe('idle');
+    expect(result.sawSyncing).toBe(true);
+    expect(result.afterFlush).toBe('idle');
+    expect(result.afterDisconnect).toBe('offline');
+  });
+
   test('connect() degrades to offline-ready when a cloud stage stalls past deadline', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { Interocitor } = await import('/packages/core/dist/index.js');

@@ -724,6 +724,25 @@ export interface SyncInitialState {
   deviceId?: string;
 }
 
+export type ConnectionStatus = 'offline' | 'connecting' | 'syncing' | 'idle';
+
+export interface ConnectionStatusDetails {
+  /** Primitive status for UI gates and labels. */
+  status: ConnectionStatus;
+  /** True when the engine has no remote mesh path configured. */
+  solo: boolean;
+  /** Local store has initialized and local reads/writes are available. */
+  ready: boolean;
+  /** Remote sync is connected and polling/listening. */
+  connected: boolean;
+  /** Current remote path, if configured. */
+  remotePath?: string;
+  /** Current mesh id, once known. */
+  meshId?: string;
+  /** Current device id. */
+  deviceId: string;
+}
+
 export type LogLevel = import('./internals.ts').LogLevel;
 
 export interface SyncConfig<
@@ -920,6 +939,7 @@ export type SyncEvent =
   | { type: 'credentials:persisted'; dbName: string; remotePath?: string; deviceId: string; encrypted: boolean }
   | { type: 'encryption:resolved'; strategy: 'passphrase' | 'existing-key' | 'generated'; dbName: string; remotePath?: string; encrypted: boolean }
   | { type: 'mesh:configured'; dbName: string; remotePath?: string; deviceId: string; encrypted: boolean; hadPassphrase: boolean }
+  | { type: 'connection:status'; status: ConnectionStatus }
   | { type: 'connect:state'; dbName: string; remotePath?: string; deviceId: string; localEpoch?: number; remoteEpoch?: number; meshId?: string; encrypted: boolean }
   | { type: 'connect:noop'; dbName: string; remotePath?: string; deviceId: string; reason: 'already-connected' }
   | { type: 'connect:error'; error: Error; stage: string; dbName: string; remotePath?: string; deviceId: string }

@@ -83,6 +83,26 @@ await db.connect(); // starts remote sync; may return offline-ready on stalled c
 </InterocitorProvider>
 ```
 
+## useConnectionStatus
+
+Expose a small user-facing connection model from the engine.
+
+```tsx
+const solo = useIsSolo(db);
+const status = useConnectionStatus(db);
+
+if (solo) return <SetupMeshButton />;
+if (status === 'connecting') return <span>Connecting…</span>;
+if (status === 'syncing') return <span>Syncing…</span>;
+if (status === 'offline') return <span>Offline — changes will sync later</span>;
+return <span>Up to date</span>;
+```
+
+`useConnectionStatus` returns only communication state: `offline`,
+`connecting`, `syncing`, or `idle`. `useIsSolo` is the separate no-mesh
+boolean gate. If a component needs nuance, read it imperatively from core
+with `db.getConnectionStatusDetails()`.
+
 ## useLiveQuery
 
 Factory + deps. React-first. No render loop.
@@ -125,14 +145,19 @@ const { data: task } = useRow(db.table('tasks'), taskId);
 
 ## useImage
 
-Display encrypted images stored with `db.putImage(...)` or `db.putFile(..., 'image/*')`.
+Display image files stored with `db.putImage(...)` or `db.putFile(..., 'image/*')`.
+
+`useImage` is image-oriented UI sugar over `db.getImageBlobUrl(path)`. It is
+not a generic attachment downloader: use `db.getFile(path)` for non-image
+files or custom download flows.
 
 ```tsx
-function Avatar({ path }: { path?: string }) {
+function Avatar({ userId }: { userId: string }) {
   const db = useDb();
-  const image = useImage(db, path);
+  const user = useRow(db.table('users'), userId);
+  const image = useImage(db, user.data?.avatar_path);
 
-  if (image.loading) return <span>Loading…</span>;
+  if (user.loading || image.loading) return <span>Loading…</span>;
   if (image.error) return <span>Image unavailable</span>;
   if (!image.url) return null;
 
@@ -140,8 +165,16 @@ function Avatar({ path }: { path?: string }) {
 }
 ```
 
+Upload pattern:
+
+```tsx
+const path = `users/${userId}/avatar`;
+await db.putImage(path, file);
+await db.table('users').patch(userId, { avatar_path: path });
+```
+
 `useImage` returns `{ url, blob, loading, error, metadata, contentType, revoke }`.
-It automatically revokes the previous `blob:` URL on unmount and path changes. Call `image.revoke()` if you want to clear the current URL earlier.
+It automatically revokes the previous `blob:` URL on unmount and path changes. Call `image.revoke()` if you want to clear the current URL earlier. If loading is cancelled after the blob URL is created, the hook revokes it immediately.
 
 ## Mutations
 

@@ -48,6 +48,24 @@ ws://127.0.0.1:<worker-port>/todo-interocitor/notify/<namespace>?access_token=<s
 
 and expects the WebSocket to reach `open`. This proves the example exports `InterocitorRelayDurableObject`, Wrangler binds it, and `withInterocitor(..., { relay })` routes `/notify/<namespace>` into the Durable Object.
 
+## Durable files pattern
+
+The TODO UI intentionally stays row-only, but the Cloudflare-backed transport
+also supports durable file objects under the mesh `files/` namespace. Use
+rows for references and metadata; store large or binary payloads separately.
+
+```js
+const path = `tasks/${taskId}/files/${Date.now()}_${file.name}`;
+await db.putFile(path, new Uint8Array(await file.arrayBuffer()), file.type);
+await db.table('tasks').patch(taskId, {
+  file_paths: [...(task.file_paths ?? []), path],
+});
+```
+
+For image UI in React apps, render a stored image with
+`useImage(db, path)` from `@interocitor/react`. For non-image attachments,
+read bytes directly with `db.getFile(path)` and build your own download UI.
+
 ## Mutation policy
 
 Normal sync writes are append-only. Administrative cleanup happens through explicit system operations so transport maintenance does not become silent mutation of application state.

@@ -404,23 +404,75 @@ await db.batch(async () => {
 
 ### Files and images
 
-Durable files are application objects stored under the mesh `files/` namespace. They are encrypted with the same mesh key when encryption is enabled, but they are not CRDT rows: no merge, no replay, no compaction, no snapshot membership. A file at a path simply exists until overwritten or deleted.
+Interocitor supports durable files alongside row-based state. Files are
+not row fields and are not part of the CRDT table schema. They live in the
+adapter-backed durable storage namespace under the mesh `files/` prefix and
+are addressed by application-chosen string paths.
+
+Use rows for structured state that participates in schema typing, queries,
+merge behavior, snapshots, and compaction. Use files for binary or large
+opaque payloads such as images, attachments, exported blobs, or durable
+assets that should move with the mesh.
+
+Recommended pattern:
+
+1. Store metadata and references in rows.
+2. Store opaque payloads with `putFile` / `putImage`.
+3. Store the file path in the row.
 
 ```ts
-await db.putFile('attachments/report.pdf', bytes, 'application/pdf');
+type TaskRow = {
+  title: string;
+  file_paths: string[];
+};
 
+const path = `tasks/${taskId}/files/${Date.now()}_${file.name}`;
+await db.putFile(path, new Uint8Array(await file.arrayBuffer()), file.type);
+await db.table('tasks').patch(taskId, {
+  file_paths: [...task.file_paths, path],
+});
+```
+
+Core file API:
+
+```ts
+const meta = await db.putFile('attachments/report.pdf', bytes, 'application/pdf');
 const bytes = await db.getFile('attachments/report.pdf');
-const meta = await db.getFileMetadata('attachments/report.pdf');
-
+const metadata = await db.getFileMetadata('attachments/report.pdf');
 await db.deleteFile('attachments/report.pdf');
 ```
 
-`StoredFileMetadata` includes path, size, content type, uploader device, upload time, stored/plaintext byte sizes, and backend-tracked access counters when available.
+`putFile(path, data, contentType?)` accepts `Uint8Array | string` and returns
+`StoredFileMetadata`. `getFile(path)` returns decoded `Uint8Array` bytes.
+`getFileMetadata(path)` returns `StoredFileMetadata | null` without
+downloading the payload. `deleteFile(path)` treats a missing file as already
+deleted.
 
-Images are convenience wrappers over files:
+`StoredFileMetadata` includes the adapter `FileEntry` fields (`name`,
+`path`, `size`, `modifiedTime`, optional `etag` / `revision`) plus durable
+file fields when known: `uploadedByDeviceId`, `uploadedAt`,
+`lastAccessedAt`, `useCount`, `plaintextSize`, `storedSize`, and
+`contentType`.
+
+File semantics and caveats:
+
+- Files are encrypted with the mesh key when encryption is enabled.
+- File paths are metadata; choose paths as if the remote owner can observe
+  them.
+- Files are not CRDT-merged. A write to the same path replaces the object
+  according to adapter semantics; coordinate path ownership in app code.
+- Files are not included in row snapshots or compaction. A file exists until
+  overwritten or deleted.
+- Deleting a row does not automatically delete referenced files. Applications
+  must perform that cleanup explicitly.
+- File references are usually stored in rows as strings. Define a path
+  convention such as `users/{userId}/avatar` or
+  `tasks/{taskId}/files/{filename}`.
+
+Images are convenience wrappers over durable files:
 
 ```ts
-await db.putImage('avatars/me.png', file); // File, Blob, ArrayBuffer, Uint8Array, data URL, or SVG string
+await db.putImage('avatars/me.png', file);
 
 const image = await db.getImage('avatars/me.png');
 // image.data: Uint8Array
@@ -431,6 +483,15 @@ const view = await db.getImageBlobUrl('avatars/me.png');
 img.src = view.url;
 view.revoke();
 ```
+
+`putImage(path, image, options?)` accepts `Blob`, `ArrayBuffer`, `Uint8Array`,
+data URLs, and plain strings. Plain strings are encoded as text and default
+to `image/svg+xml` unless `options.contentType` or the path extension says
+otherwise. Explicit image content types must start with `image/`.
+
+Use `putFile` for arbitrary non-image files. Use `getImageBlobUrl` /
+`@interocitor/react`'s `useImage` for display scenarios that need a browser
+`blob:` URL, and always revoke blob URLs you create manually.
 
 ### Schema typing
 
@@ -540,6 +601,35 @@ const db = new Interocitor(adapter, {
   }),
 });
 ```
+
+### Connection status
+
+Core exposes a small user-facing primitive status via
+`db.getConnectionStatus()` and `connection:status` events:
+
+```ts
+const status = db.getConnectionStatus();
+// 'offline' | 'connecting' | 'syncing' | 'idle'
+```
+
+- `offline` means local work is available but remote sync is not connected.
+- `connecting` means `connect()` is in progress.
+- `syncing` means a connected engine is pulling or flushing.
+- `idle` means connected and no sync work is active.
+
+For nuance, use the imperative details call:
+
+```ts
+const details = db.getConnectionStatusDetails();
+// { status, solo, ready, connected, remotePath, meshId, deviceId }
+```
+
+`solo` is a separate gate: true means no remote mesh path is configured. It
+is not a communication status and should not be shown as a sync banner.
+
+React apps usually consume communication state through
+`useConnectionStatus(db)` and the solo gate through `useIsSolo(db)` from
+`@interocitor/react`.
 
 ### Connect-stage degradation
 

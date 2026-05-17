@@ -41,6 +41,24 @@ Then open:
 5. Inspect `examples/todo-webdav/webdav-data/` to see the mailbox artifacts.
 6. Create another session in tab C to verify remote path isolation.
 
+## Durable files pattern
+
+The TODO UI intentionally stays row-only, but this example's WebDAV mailbox
+also supports durable files. Use rows for structured state and store file
+paths in those rows; use file storage for the opaque payload.
+
+```js
+const path = `tasks/${taskId}/files/${Date.now()}_${file.name}`;
+await db.putFile(path, new Uint8Array(await file.arrayBuffer()), file.type);
+await db.table('tasks').patch(taskId, {
+  file_paths: [...(task.file_paths ?? []), path],
+});
+```
+
+For image UI in React apps, render a stored image with
+`useImage(db, path)` from `@interocitor/react`. For non-image attachments,
+read bytes directly with `db.getFile(path)` and build your own download UI.
+
 ## Notes
 
 - Join token includes `baseUrl`, `remotePath`, and key passphrase.

@@ -186,6 +186,8 @@ export type {
   // Events
   SyncEvent,
   SyncEventListener,
+  ConnectionStatus,
+  ConnectionStatusDetails,
 
   // Data model
   Row,

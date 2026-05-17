@@ -13,8 +13,14 @@ App code owns order:
 - create engine
 - `configureMesh(...)` or `resolveInitialState(...)`
 - `setRemoteStorage(...)`
-- `connect()`
-- provide engine to React
+- `init()`
+- optionally call `connect()` to start remote sync
+- provide the initialized engine to React
+
+`connect()` is opportunistic: if cloud setup stalls, core may return in
+offline-ready mode. React hooks still work against local state after
+`init()`; app bootstrap/UI owns any `onLocalDegraded` or
+`onConnectStalled` banner.
 
 Low-level primitives:
 - typed React context factory
@@ -67,7 +73,8 @@ db.configureMesh({
 });
 
 await db.setRemoteStorage(adapter);
-await db.connect();
+await db.init();
+await db.connect(); // starts remote sync; may return offline-ready on stalled cloud setup
 ```
 
 ```tsx

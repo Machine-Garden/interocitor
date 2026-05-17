@@ -14,7 +14,8 @@ import type { Interocitor } from '@interocitor/core';
  * const db = new Interocitor<DB>({ appName: 'Meal Planner', dbName: 'meal' });
  * db.configureMesh({ remotePath: '/MealPlanner', passphrase, encrypted: true });
  * await db.setRemoteStorage(adapter);
- * await db.connect();
+ * await db.init();
+ * await db.connect(); // starts remote sync; may return offline-ready
  *
  * // App.tsx
  * <MealDbProvider value={db}><App /></MealDbProvider>
@@ -34,7 +35,7 @@ export function createInterocitorContext<
   function useDb(): Interocitor<S> {
     const db = useContext(ctx);
     if (!db) {
-      throw new Error('Interocitor not provided. Build and connect the engine first, then wrap your app with the provider.');
+      throw new Error('Interocitor not provided. Build and initialize the engine first, then wrap your app with the provider. connect() can run before or after providing depending on your app bootstrap.');
     }
     return db;
   }

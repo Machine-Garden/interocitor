@@ -1,6 +1,10 @@
 /**
  * React bindings only. Engine lifecycle stays in app code:
- * create engine → configureMesh/resolveInitialState → setRemoteStorage → connect → provide.
+ * create engine → configureMesh/resolveInitialState → setRemoteStorage → init → optional connect → provide.
+ */
+/**
+ * `connect()` may return offline-ready if cloud setup stalls; hooks operate
+ * against local state once the engine has initialized.
  */
 export { createInterocitorContext } from './context.ts';
 export { useLiveQuery } from './use-live-query.ts';

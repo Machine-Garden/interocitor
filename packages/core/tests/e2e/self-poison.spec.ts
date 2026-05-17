@@ -301,7 +301,143 @@ test.describe('Mesh self-poison + diagnostics', () => {
     }
   });
 
-  test('E. connect() is idempotent on already-connected mesh: no transport restart, emits connect:noop', async ({ browser, baseURL }) => {
+  test('E. joining an existing mesh defaults to resetting local data to remote before sync', async ({ browser, baseURL }) => {
+    const cloud: WebDavRouteState = createWebDavRouteState();
+    const ctxRemote = await browser.newContext();
+    const ctxJoiner = await browser.newContext();
+    try {
+      await attachWebDavRouteMock(ctxRemote, cloud, '/__dav_join_default__');
+      await attachWebDavRouteMock(ctxJoiner, cloud, '/__dav_join_default__');
+      const pageRemote = await ctxRemote.newPage();
+      const pageJoiner = await ctxJoiner.newPage();
+      const harness = `${baseURL}/packages/core/tests/e2e/fixtures/harness-plain.html`;
+      await Promise.all([pageRemote.goto(harness), pageJoiner.goto(harness)]);
+      await Promise.all([
+        clearAllLocalState(pageRemote, ['join-default-remote']),
+        clearAllLocalState(pageJoiner, ['join-default-local']),
+      ]);
+
+      await pageRemote.evaluate(async () => {
+        const { Interocitor } = await import('/packages/core/dist/index.js');
+        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
+        const adapter = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_join_default__`, auth: { username: 'u', password: 'p' } });
+        const engine = new Interocitor(adapter, {
+          remotePath: '/JoinDefault', dbName: 'join-default-remote', deviceId: 'remote_default', encrypted: false,
+          pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+        });
+        await engine.init();
+        await engine.connect();
+        await engine.put('settings', 'theme', { value: 'remote-theme' });
+        await engine.flush();
+        await engine.disconnect();
+      });
+
+      const result = await pageJoiner.evaluate(async () => {
+        const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
+        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
+        const adapter = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_join_default__`, auth: { username: 'u', password: 'p' } });
+        const engine = new Interocitor(adapter, {
+          remotePath: '/JoinDefault', dbName: 'join-default-local', deviceId: 'joiner_default', encrypted: false,
+          pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+        });
+        const events: any[] = [];
+        engine.on((e) => events.push(e));
+        await engine.init();
+        await engine.put('settings', 'local-only', { value: 'local-theme' });
+        await engine.connect();
+        const rows = await engine.query('settings');
+        const values = rows.map((r: any) => readColumn(r, 'value')).toSorted();
+        await engine.disconnect();
+        const joins = events.filter((e) => e.type === 'join:existing-mesh');
+        return {
+          values,
+          joinCount: joins.length,
+          policy: joins[0]?.policy,
+          localRowCount: joins[0]?.localRowCount,
+          queuedChangeCount: joins[0]?.queuedChangeCount,
+        };
+      });
+
+      expect(result.values).toEqual(['remote-theme']);
+      expect(result.joinCount).toBe(1);
+      expect(result.policy).toBe('reset-to-remote');
+      expect(result.localRowCount).toBe(1);
+      expect(result.queuedChangeCount).toBe(1);
+    } finally {
+      await ctxRemote.close();
+      await ctxJoiner.close();
+    }
+  });
+
+  test('F. joining an existing mesh can merge local data with remote for explicit merge flows', async ({ browser, baseURL }) => {
+    const cloud: WebDavRouteState = createWebDavRouteState();
+    const ctxRemote = await browser.newContext();
+    const ctxJoiner = await browser.newContext();
+    try {
+      await attachWebDavRouteMock(ctxRemote, cloud, '/__dav_join_preserve__');
+      await attachWebDavRouteMock(ctxJoiner, cloud, '/__dav_join_preserve__');
+      const pageRemote = await ctxRemote.newPage();
+      const pageJoiner = await ctxJoiner.newPage();
+      const harness = `${baseURL}/packages/core/tests/e2e/fixtures/harness-plain.html`;
+      await Promise.all([pageRemote.goto(harness), pageJoiner.goto(harness)]);
+      await Promise.all([
+        clearAllLocalState(pageRemote, ['join-preserve-remote']),
+        clearAllLocalState(pageJoiner, ['join-preserve-local']),
+      ]);
+
+      await pageRemote.evaluate(async () => {
+        const { Interocitor } = await import('/packages/core/dist/index.js');
+        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
+        const adapter = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_join_preserve__`, auth: { username: 'u', password: 'p' } });
+        const engine = new Interocitor(adapter, {
+          remotePath: '/JoinPreserve', dbName: 'join-preserve-remote', deviceId: 'remote_preserve', encrypted: false,
+          pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+        });
+        await engine.init();
+        await engine.connect();
+        await engine.put('settings', 'remote', { value: 'remote-setting' });
+        await engine.flush();
+        await engine.disconnect();
+      });
+
+      const result = await pageJoiner.evaluate(async () => {
+        const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
+        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
+        const adapter = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_join_preserve__`, auth: { username: 'u', password: 'p' } });
+        const engine = new Interocitor(adapter, {
+          remotePath: '/JoinPreserve', dbName: 'join-preserve-local', deviceId: 'joiner_preserve', encrypted: false,
+          joinExistingMeshPolicy: 'merge-with-remote', pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+        });
+        const events: any[] = [];
+        engine.on((e) => events.push(e));
+        await engine.init();
+        await engine.put('settings', 'local', { value: 'local-setting' });
+        await engine.connect();
+        const rows = await engine.query('settings');
+        const values = rows.map((r: any) => readColumn(r, 'value')).toSorted();
+        await engine.disconnect();
+        const joins = events.filter((e) => e.type === 'join:existing-mesh');
+        return {
+          values,
+          joinCount: joins.length,
+          policy: joins[0]?.policy,
+          localRowCount: joins[0]?.localRowCount,
+          queuedChangeCount: joins[0]?.queuedChangeCount,
+        };
+      });
+
+      expect(result.values).toEqual(['local-setting', 'remote-setting']);
+      expect(result.joinCount).toBe(1);
+      expect(result.policy).toBe('merge-with-remote');
+      expect(result.localRowCount).toBe(1);
+      expect(result.queuedChangeCount).toBe(1);
+    } finally {
+      await ctxRemote.close();
+      await ctxJoiner.close();
+    }
+  });
+
+  test('G. connect() is idempotent on already-connected mesh: no transport restart, emits connect:noop', async ({ browser, baseURL }) => {
     const cloud: WebDavRouteState = createWebDavRouteState();
     const ctx = await browser.newContext();
     try {

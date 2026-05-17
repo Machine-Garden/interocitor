@@ -52,7 +52,12 @@ flowchart TD
     G1 -- No --> H[createBootstrapManifest\nmanifest-1 + manifest.json]
     H --> G1
     G1 -- Yes --> I[validate content hash\ncheck schema version\ncheck server auth if managed]
-    I --> I1[bounded stage:\nupsertDeviceMetadata]
+    I --> IP{joining existing mesh\nwith different local meshId?}
+    IP -- Yes: reset-to-remote --> IR[clear local rows, outbox, cursors\nand pending writes before pull]
+    IP -- Yes: merge-with-remote --> IM[keep local rows and queued writes\nfor normal CRDT sync]
+    IP -- No --> I1[bounded stage:\nupsertDeviceMetadata]
+    IR --> I1
+    IM --> I1
     I1 --> I2{stage completed\nbefore deadline?}
     I2 -- No --> Z
     I2 -- Yes --> J{localEpoch\n< remoteEpoch?}
@@ -86,13 +91,21 @@ by default). A stalled stage emits `connect:error` and calls
 `onConnectStalled`, then returns offline-ready: `init()` remains complete,
 local writes keep queuing, and the app can retry `connect()` later.
 
+**Join-existing-mesh policy:** after `connect()` loads an existing remote
+manifest and before device metadata, pull, or flush, the engine compares the
+remote `meshId` with local mesh metadata. If they differ,
+`joinExistingMeshPolicy` applies. The default `reset-to-remote` clears local
+rows, outbox, pending writes, cursors, and stale mesh metadata before pulling
+remote data. `merge-with-remote` keeps local rows and queued writes so normal
+CRDT pull/flush can merge them into the joined mesh.
+
 **Failure semantics:** local-store degradation and connect-stage stalls are
 availability fallbacks, not successful sync. A degraded local store may lose
 session-only writes on reload until they have flushed remotely. An
 offline-ready `connect()` means the engine is ready for local work but is
-not yet connected to the remote. Validation errors such as mesh mismatch,
-encryption mismatch, poison, or schema incompatibility are not availability
-fallbacks; they still surface as hard correctness/security errors.
+not yet connected to the remote. Validation errors such as encryption
+mismatch, poison, or schema incompatibility are not availability fallbacks;
+they still surface as hard correctness/security errors.
 
 **Disaster recovery:** the durable local database name is a cache
 namespace, not mesh identity. If a browser keeps a DB blocked or a handle

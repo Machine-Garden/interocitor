@@ -26,6 +26,7 @@ import type {
   ReplicaConfig,
   LocalStoreFactory,
   SyncInitialState,
+  JoinExistingMeshPolicy,
   LogLevel,
   QueryDescriptor,
   QueryExecutionOptions,
@@ -99,6 +100,7 @@ type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> = {
   relayHealthyPollInterval: number;
   connectStageTimeoutMs: number;
   onConnectStalled?: SyncConfig<S>['onConnectStalled'];
+  joinExistingMeshPolicy: JoinExistingMeshPolicy;
 };
 
 const DEFAULT_COMPACT_WARNING_THRESHOLD = 50;
@@ -317,6 +319,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       relayHealthyPollInterval: config.relayHealthyPollInterval ?? Math.max(config.pollInterval ?? 30_000, 300_000),
       connectStageTimeoutMs: config.connectStageTimeoutMs ?? DEFAULT_CONNECT_STAGE_TIMEOUT_MS,
       onConnectStalled: config.onConnectStalled,
+      joinExistingMeshPolicy: config.joinExistingMeshPolicy ?? 'reset-to-remote',
     };
     this.serverId = this.config.serverId;
     this.dbName = this.config.dbName;
@@ -1096,6 +1099,58 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     }
   }
 
+  private async applyJoinExistingMeshPolicy(bootstrapped: boolean): Promise<void> {
+    const nextMeshId = this.manifest?.meshId;
+    if (!nextMeshId || bootstrapped) return;
+
+    const previousMeshIdRaw = await this.local.getMeta('meshId');
+    const previousMeshId = typeof previousMeshIdRaw === 'string' ? previousMeshIdRaw : '';
+    if (previousMeshId === nextMeshId) return;
+
+    const localRows = await this.local.getAllRows();
+    const queuedChangeCount = await this.local.outboxSize() + (this.pendingBatch ? 1 : 0);
+    if (localRows.length === 0 && queuedChangeCount === 0 && !previousMeshId) {
+      await this.local.setMeta('meshId', nextMeshId);
+      return;
+    }
+
+    const policy = this.config.joinExistingMeshPolicy;
+    this.emit({
+      type: 'join:existing-mesh',
+      dbName: this.dbName,
+      remotePath: this.config.remotePath,
+      deviceId: this.deviceId,
+      ...(previousMeshId ? { previousMeshId } : {}),
+      nextMeshId,
+      policy,
+      localRowCount: localRows.length,
+      queuedChangeCount,
+    });
+
+    if (policy === 'merge-with-remote') {
+      await this.local.setMeta('meshId', nextMeshId);
+      return;
+    }
+
+    this.log('info', 'connect() — joining existing mesh, resetting local state to remote before sync', {
+      dbName: this.dbName,
+      remotePath: this.config.remotePath,
+      previousMeshId: previousMeshId || undefined,
+      nextMeshId,
+      localRowCount: localRows.length,
+      queuedChangeCount,
+    });
+    this.clearBatchTimer();
+    this.pendingBatch = null;
+    await this.local.clearAll();
+    if (this.schema?.version !== undefined) {
+      await this.local.setMeta('schema:version', this.schema.version);
+    }
+    await this.local.setMeta('meshId', nextMeshId);
+    await this.loadLocalState();
+    this.pendingCount = 0;
+  }
+
   private async ensureRowsCached(ops: Op[]): Promise<void> {
     for (const op of ops) {
       if (this.tables[op.table]?.[op.rowId] !== undefined) continue;
@@ -1822,7 +1877,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
     this.log('debug', 'connect() — loading/creating manifest');
     let bootstrapped = false;
-    const manifestResult = await this.runConnectStage('loadOrCreateManifest', () => this.doLoadOrCreateManifest('connect', true));
+    const manifestResult = await this.runConnectStage('loadOrCreateManifest', () => this.doLoadOrCreateManifest('connect', true, { assertLocalMeshId: false }));
     if (!manifestResult.ok) {
       if (manifestResult.error instanceof ConnectStageTimeoutError) return; // offline-ready degrade
       this.log('error', 'connect() — loadOrCreateManifest failed', manifestResult.error);
@@ -1830,6 +1885,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     }
     bootstrapped = manifestResult.value.bootstrapped;
     stageOk('loadOrCreateManifest', { bootstrapped, meshId: this.manifest?.meshId, generation: this.manifest?.generation });
+
+    await this.applyJoinExistingMeshPolicy(bootstrapped);
+    stageOk('joinExistingMeshPolicy', { policy: this.config.joinExistingMeshPolicy, meshId: this.manifest?.meshId });
 
     // Post-manifest credential check.
     //
@@ -2114,6 +2172,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   private async doLoadOrCreateManifest(
     reason: string = 'unknown',
     force: boolean = false,
+    options: { assertLocalMeshId?: boolean } = {},
   ): Promise<{ bootstrapped: boolean }> {
     if (!force && this.manifest && !this.remotePoisonError) {
       this.emit({
@@ -2131,6 +2190,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       this.local,
       (err, path) => this.poisonRemote(err, path),
       reason,
+      options,
     );
     this.manifest = manifest;
     this.encrypted = manifest.encrypted || this.encrypted;

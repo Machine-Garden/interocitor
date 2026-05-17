@@ -724,6 +724,17 @@ export interface SyncInitialState {
   deviceId?: string;
 }
 
+/**
+ * Policy for local data already present when this engine joins an existing
+ * remote mesh whose identity differs from the local cache.
+ *
+ * - `'reset-to-remote'` (default): reset local state to the remote mesh. Clear
+ *   local rows, queued writes, cursors, and stale mesh metadata before pulling.
+ * - `'merge-with-remote'`: keep local data and queued writes, allowing normal
+ *   CRDT merge/flush behavior to publish local rows into the joined mesh.
+ */
+export type JoinExistingMeshPolicy = 'reset-to-remote' | 'merge-with-remote';
+
 export type ConnectionStatus = 'offline' | 'connecting' | 'syncing' | 'idle';
 
 export interface ConnectionStatusDetails {
@@ -822,6 +833,18 @@ export interface SyncConfig<
    * Default: "interocitor"
    */
   dbName?: string;
+  /**
+   * What to do with existing local data when connect() joins an existing remote
+   * mesh with a different mesh identity than this local cache.
+   *
+   * Default: `'reset-to-remote'` — reset local state to the remote mesh. Local
+   * rows, queued writes, pending writes, cursors, and stale mesh metadata are
+   * cleared before pulling remote data.
+   *
+   * Use `'merge-with-remote'` for flows that intentionally keep local rows and
+   * queued writes and merge them into the joined mesh via normal CRDT sync.
+   */
+  joinExistingMeshPolicy?: JoinExistingMeshPolicy;
   /**
    * Factory that produces the local store for this engine.
    * When provided, dbName is ignored — the factory is fully responsible
@@ -941,6 +964,7 @@ export type SyncEvent =
   | { type: 'mesh:configured'; dbName: string; remotePath?: string; deviceId: string; encrypted: boolean; hadPassphrase: boolean }
   | { type: 'connection:status'; status: ConnectionStatus }
   | { type: 'connect:state'; dbName: string; remotePath?: string; deviceId: string; localEpoch?: number; remoteEpoch?: number; meshId?: string; encrypted: boolean }
+  | { type: 'join:existing-mesh'; dbName: string; remotePath?: string; deviceId: string; previousMeshId?: string; nextMeshId: string; policy: JoinExistingMeshPolicy; localRowCount: number; queuedChangeCount: number }
   | { type: 'connect:noop'; dbName: string; remotePath?: string; deviceId: string; reason: 'already-connected' }
   | { type: 'connect:error'; error: Error; stage: string; dbName: string; remotePath?: string; deviceId: string }
   | { type: 'transport:teardown'; dbName: string; remotePath?: string; deviceId?: string; reason: 'switch-adapter' | 'disconnect' | 'detach' }

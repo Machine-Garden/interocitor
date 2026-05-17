@@ -127,6 +127,7 @@ export async function loadOrCreateManifest(
   local: import('./types.ts').LocalStoreAdapter,
   poisonRemote: (error: unknown, path?: string) => Promise<Error>,
   reason: string = 'unknown',
+  options: { assertLocalMeshId?: boolean } = {},
 ): Promise<{ manifest: Manifest; bootstrapped: boolean }> {
   const p = paths(ctx.remotePath);
 
@@ -153,10 +154,12 @@ export async function loadOrCreateManifest(
   }
   const manifestPath = `${ctx.remotePath}/${pointer.file}`;
   await validateManifestHash(manifest as unknown as { contentHash: string; [key: string]: unknown });
-  try {
-    await assertExpectedMeshId(local, codecState.manifest, manifest.meshId);
-  } catch (err) {
-    throw await poisonRemote(err, manifestPath);
+  if (options.assertLocalMeshId !== false) {
+    try {
+      await assertExpectedMeshId(local, codecState.manifest, manifest.meshId);
+    } catch (err) {
+      throw await poisonRemote(err, manifestPath);
+    }
   }
 
   if (manifest.version !== 3) {

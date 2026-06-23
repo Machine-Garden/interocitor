@@ -44,9 +44,9 @@ function classifyFallbackReason(error: unknown): string {
   return 'idb-open-stalled-or-unavailable';
 }
 
-import type { DatabaseSchemaDefinition, LocalStoreAdapter } from '../core/types.ts';
-import { LocalStore } from './local-store.ts';
-import { MemoryLocalStore } from './memory-store.ts';
+import type { DatabaseSchemaDefinition, LocalStore } from '@interocitor/core';
+import { MemoryLocalStore } from '@interocitor/core';
+import { IndexedDbLocalStore } from './indexed-db-local-store.ts';
 
 /** Default IDB open deadline. Anything longer is a wedged platform. */
 export const DEFAULT_LOCAL_OPEN_TIMEOUT_MS = 300;
@@ -69,10 +69,10 @@ export interface ResilientLocalStoreOptions {
   schema?: DatabaseSchemaDefinition;
   /** Hard deadline for IndexedDB open. Default 300 ms. */
   openTimeoutMs?: number;
-  /** Override for tests. Defaults to () => new LocalStore(...). */
-  primaryFactory?: () => LocalStoreAdapter;
+  /** Override for tests. Defaults to () => new IndexedDbLocalStore(...). */
+  primaryFactory?: () => LocalStore;
   /** Override for tests. Defaults to () => new MemoryLocalStore(). */
-  fallbackFactory?: () => LocalStoreAdapter;
+  fallbackFactory?: () => LocalStore;
   /**
    * Notified when the resilient store degrades to memory because
    * IndexedDB hung at open or its handle became unusable post-open.
@@ -97,7 +97,7 @@ export interface ResilientLocalStoreOptions {
  * fires at all — blocked, suspended tab, dead worker).
  */
 function openWithProgressDeadline(
-  primary: LocalStoreAdapter,
+  primary: LocalStore,
   ms: number,
   label: string,
 ): Promise<void> {
@@ -107,7 +107,7 @@ function openWithProgressDeadline(
     progressed = true;
     if (timer) { clearTimeout(timer); timer = null; }
   };
-  // Pass onProgress as an extra argument. LocalStore.open accepts it;
+  // Pass onProgress as an extra argument. IndexedDbLocalStore.open accepts it;
   // adapters that strictly type `open(): Promise<void>` will simply
   // ignore it at runtime (JS does not enforce arity).
   const openPromise = (primary.open as (cb?: () => void) => Promise<void>)(onProgress);
@@ -123,21 +123,21 @@ function openWithProgressDeadline(
 }
 
 /**
- * Returns a `LocalStoreAdapter` whose `open()` is bounded and falls back to
+ * Returns a `LocalStore` whose `open()` is bounded and falls back to
  * an in-memory store on any failure (timeout, throw, blocked, missing IDB).
  *
  * After fallback, all subsequent reads/writes hit memory. The original
  * primary handle (if it ever became ready) is closed and discarded.
  */
-export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {}): LocalStoreAdapter {
+export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {}): LocalStore {
   const openTimeoutMs = opts.openTimeoutMs ?? DEFAULT_LOCAL_OPEN_TIMEOUT_MS;
-  const primaryFactory = opts.primaryFactory ?? (() => new LocalStore(opts.dbName, opts.dbVersion, opts.schema));
+  const primaryFactory = opts.primaryFactory ?? (() => new IndexedDbLocalStore(opts.dbName, opts.dbVersion, opts.schema));
   const fallbackFactory = opts.fallbackFactory ?? (() => new MemoryLocalStore());
 
-  let active: LocalStoreAdapter | null = null;
+  let active: LocalStore | null = null;
   let degraded = false;
 
-  const fallback = (reason: unknown, primary: LocalStoreAdapter | null): LocalStoreAdapter => {
+  const fallback = (reason: unknown, primary: LocalStore | null): LocalStore => {
     degraded = true;
     const classifiedReason = classifyFallbackReason(reason);
     // Sentry / monitoring hook. One line, easy to grep.
@@ -159,7 +159,7 @@ export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {})
     return mem;
   };
 
-  const runWithRecovery = async <T>(operation: (store: LocalStoreAdapter) => Promise<T>): Promise<T> => {
+  const runWithRecovery = async <T>(operation: (store: LocalStore) => Promise<T>): Promise<T> => {
     const current = requireActive(active);
     try {
       return await operation(current);
@@ -170,7 +170,7 @@ export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {})
     }
   };
 
-  const adapter: LocalStoreAdapter = {
+  const adapter: LocalStore = {
     async open(): Promise<void> {
       if (active) return;
       // If the platform has no IDB at all (worker without IDB exposed,
@@ -181,7 +181,7 @@ export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {})
       }
       const primary = primaryFactory();
       try {
-        await openWithProgressDeadline(primary, openTimeoutMs, `LocalStore.open(${opts.dbName ?? 'interocitor'})`);
+        await openWithProgressDeadline(primary, openTimeoutMs, `IndexedDbLocalStore.open(${opts.dbName ?? 'interocitor'})`);
         active = primary;
       } catch (err) {
         active = fallback(err, primary);
@@ -227,7 +227,7 @@ export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {})
   return adapter;
 }
 
-function requireActive(active: LocalStoreAdapter | null): LocalStoreAdapter {
+function requireActive(active: LocalStore | null): LocalStore {
   if (!active) throw new Error('LocalStore not opened');
   return active;
 }

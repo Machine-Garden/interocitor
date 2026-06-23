@@ -80,7 +80,7 @@ export interface RowMeta {
   schemaVersion: number;
   /** Device ID that last wrote this row. Set automatically on every write. */
   owner?: string;
-  /** Composite IndexedDB key. Computed by local-store on putRow. */
+  /** Composite local key. Computed by the local store on putRow. */
   key?: string;
 }
 
@@ -179,7 +179,7 @@ export interface SchemaField<T = unknown, K extends SchemaFieldKind = SchemaFiel
 export type OptionalSchemaField<T = unknown, K extends SchemaFieldKind = SchemaFieldKind> =
   SchemaField<T, K> & { readonly optional: true; readonly __optional: true };
 
-/** Narrows kind to the set that IndexedDB can use as a key. */
+/** Narrows kind to the set that local indexes can use as a key. */
 export type IndexableSchemaField<T = unknown> = SchemaField<T, IndexableSchemaFieldKind>;
 
 
@@ -556,34 +556,6 @@ export interface StoredFileWriteOptions {
   contentType?: string;
 }
 
-export type ImageInput = Blob | ArrayBuffer | Uint8Array | string;
-
-export interface PutImageOptions {
-  /** Override content type. Defaults to Blob/File type or data URL media type. */
-  contentType?: string;
-}
-
-export interface StoredImageMetadata extends StoredFileMetadata {
-  contentType: string;
-}
-
-export interface StoredImage {
-  path: string;
-  data: Uint8Array;
-  blob: Blob;
-  metadata: StoredImageMetadata | null;
-  contentType: string;
-}
-
-export interface StoredImageBlobUrl {
-  path: string;
-  url: string;
-  blob: Blob;
-  metadata: StoredImageMetadata | null;
-  contentType: string;
-  revoke(): void;
-}
-
 export interface RemoteInvalidationPayload {
   type: string;
   path: string;
@@ -621,7 +593,7 @@ export interface StorageAdapter {
   listFiles(path: string): Promise<FileEntry[]>;
   listFolders(path: string): Promise<string[]>;
 
-  // File CRUD
+  // Object CRUD
   readFile(path: string): Promise<Uint8Array>;
   writeFile(path: string, data: Uint8Array | string): Promise<void>;
   deleteFile(path: string): Promise<void>;
@@ -664,42 +636,9 @@ export interface StorageAdapter {
   resetFolderCache?(): void;
 }
 
-// ─── Local Storage Adapter ───────────────────────────────────────────
+// ─── Local Store ─────────────────────────────────────────────────────
 
-/**
- * Contract every local store implementation must satisfy.
- * Implement this interface to plug in a custom local backend
- * (e.g. in-memory for tests, SQLite via OPFS, etc.).
- */
-export interface LocalStoreAdapter {
-  open(): Promise<void>;
-  close(): void;
-
-  getRow(table: string, rowId: string): Promise<Row | undefined>;
-  putRow(row: Row): Promise<void>;
-  putRows(rows: Row[]): Promise<void>;
-  getTable(table: string): Promise<Row[]>;
-  queryWhere(table: string, clause: WhereClause): Promise<Row[]>;
-  getAllRows(): Promise<Row[]>;
-  clearRows(): Promise<void>;
-  getTableNames(): Promise<string[]>;
-
-  pushOutbox(entry: ChangeEntry): Promise<void>;
-  pushOutboxEntries(entries: ChangeEntry[]): Promise<void>;
-  drainOutbox(): Promise<ChangeEntry[]>;
-  outboxSize(): Promise<number>;
-
-  getCursor(deviceId: string): Promise<number>;
-  setCursor(deviceId: string, offset: number): Promise<void>;
-  getAllCursors(): Promise<Record<string, number>>;
-
-  getMeta(key: string): Promise<unknown>;
-  setMeta(key: string, value: unknown): Promise<void>;
-  clearAll(): Promise<void>;
-}
-
-/** Factory that creates a local store instance for this engine. */
-export type LocalStoreFactory = () => LocalStoreAdapter;
+export type { LocalStore } from '../storage/local-store.ts';
 
 // ─── Replica ─────────────────────────────────────────────────────────
 
@@ -825,12 +764,16 @@ export interface SyncConfig<
    * must align from the current snapshot before writing again. Default 7 days.
    */
   offlineGraceMs?: number;
-  /** Implicit batch window in ms. All local writes inside the window join one ChangeEntry. Default 1000. */
+  /** Implicit batch period in ms. All local writes inside the period join one ChangeEntry. Default 1000. */
   batchWindowMs?: number;
   /**
-   * Local database name for this engine's local cache.
-   * Use distinct names to isolate multiple engine instances on the same origin.
-   * Default: "interocitor"
+   * Runtime-owned local persistence for rows, outbox, cursors, and metadata.
+   * Core never creates a default local store.
+   */
+  localStore: import('../storage/local-store.ts').LocalStore;
+  /**
+   * Optional label used in diagnostics and credential-store namespacing.
+   * It does not select or create a local backend.
    */
   dbName?: string;
   /**
@@ -846,38 +789,9 @@ export interface SyncConfig<
    */
   joinExistingMeshPolicy?: JoinExistingMeshPolicy;
   /**
-   * Factory that produces the local store for this engine.
-   * When provided, dbName is ignored — the factory is fully responsible
-   * for constructing the store.
-   */
-  localStoreFactory?: LocalStoreFactory;
-  /**
-   * Hard deadline for the local store's `open()` call. Past this, the
-   * engine silently degrades to an in-memory store (no persistence across
-   * reload, but cloud sync still works) and logs a single console.error
-   * for monitoring. Default 300 ms — IndexedDB.open should resolve in
-   * tens of ms on healthy platforms; anything slower indicates a wedged
-   * connection (blocked, suspended tab on iOS, etc.).
-   *
-   * Ignored when `localStoreFactory` is supplied — custom factories own
-   * their own readiness contract.
-   */
-  localOpenTimeoutMs?: number;
-  /**
-   * Called when the local store degrades to in-memory mode because
-   * IndexedDB either failed to open in bounded time or its handle
-   * became unusable post-open. The engine still works after this
-   * fires; the hook is for product-level signalling (e.g. show a
-   * "local cache degraded, continuing" banner, log to Sentry).
-   *
-   * Reasons: 'idb-open-stalled-or-unavailable' | 'idb-handle-closing'.
-   * Ignored when `localStoreFactory` is supplied.
-   */
-  onLocalDegraded?: import('../storage/resilient-store.ts').LocalStoreDegradedHook;
-  /**
    * Per-stage timeout for cloud work performed during connect(). Each
    * connect stage (authenticate, ensureFolder, manifest, device metadata,
-   * pull/rehydrate, first flush) must complete within this window or it
+   * pull/rehydrate, first flush) must complete within this period or it
    * is treated as stalled. Default: 15 000 ms.
    *
    * When a stage stalls the engine enters an offline-ready state:
@@ -928,21 +842,10 @@ export interface SyncConfig<
    */
   replicas?: ReplicaConfig[];
   /**
-   * Credential store for persisting key material (passphrase + device ID).
-   *
-   * Default: auto-detecting store that tries WebAuthn largeBlob (OS keychain,
-   * survives Safari ITP) and falls back to localStorage.
-   *
-   * Pass a custom `CredentialStore` implementation or `null` to disable
-   * credential persistence entirely.
+   * Runtime-owned credential store for key material and device identity.
+   * Pass `null` or omit to disable credential persistence.
    */
   credentialStore?: import('../storage/credential-store.ts').CredentialStore | null;
-
-  /**
-   * Human-readable app name shown in biometric prompts (Touch ID / Face ID)
-   * and OS keychain entries. Used by the default credential store.
-   */
-  appName: string;
 }
 
 // ─── Events ──────────────────────────────────────────────────────────
@@ -954,7 +857,7 @@ export type SyncEvent =
   | { type: 'sync:start' }
   | { type: 'sync:complete'; entriesMerged: number }
   | { type: 'sync:error'; error: Error }
-  | { type: 'credentials:restored'; source: 'silent-store' | 'biometric'; deviceIdChanged: boolean; hadPassphrase: boolean }
+  | { type: 'credentials:restored'; source: 'silent-store'; deviceIdChanged: boolean; hadPassphrase: boolean }
   | { type: 'remote:poisoned'; error: Error; path?: string; context?: Record<string, unknown> }
   | { type: 'decode:error'; error: Error; path?: string; context?: Record<string, unknown> }
   | { type: 'credentials:conflict'; storedDeviceId: string; activeDeviceId: string; dbName: string; remotePath?: string }

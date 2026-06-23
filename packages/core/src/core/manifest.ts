@@ -124,7 +124,7 @@ export async function createBootstrapManifest(
 export async function loadOrCreateManifest(
   ctx: ManifestContext,
   codecState: CodecState,
-  local: import('./types.ts').LocalStoreAdapter,
+  local: import('./types.ts').LocalStore,
   poisonRemote: (error: unknown, path?: string) => Promise<Error>,
   reason: string = 'unknown',
   options: { assertLocalMeshId?: boolean } = {},

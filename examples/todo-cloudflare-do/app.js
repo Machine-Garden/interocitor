@@ -212,7 +212,8 @@ async function autoCreateSession() {
 
 async function connect() {
   const { Interocitor } = await import('../../packages/core/dist/index.js');
-  const { CloudflareAdapter } = await import('../../packages/core/dist/adapters/cloudflare.js');
+  const { CloudflareAdapter } = await import('../../packages/core/dist/index.js');
+  const { IndexedDbLocalStore } = await import('../../packages/web/dist/index.js');
   const { passphraseToKey } = await import('../../packages/core/dist/crypto/keys.js');
 
   const session = readSessionFromUi();
@@ -231,6 +232,7 @@ async function connect() {
   const engine = new Interocitor(adapter, {
     remotePath: session.remotePath,
     dbName: `interocitor-cf-${tabDeviceId}`,
+    localStore: new IndexedDbLocalStore(`interocitor-cf-${tabDeviceId}`),
     pollInterval: runtimeOptions.pollInterval,
     relayEnabled: runtimeOptions.relayEnabled,
     relayHealthyPollInterval: runtimeOptions.relayHealthyPollInterval,

@@ -32,10 +32,6 @@ interface CredentialStore {
   save(creds: StoredCredentials): Promise<void>;
   load(): Promise<StoredCredentials | null>;
   clear(): Promise<void>;
-
-  // Optional, biometric‑gated paths
-  secureWithBiometrics?(): Promise<boolean>;
-  restoreWithBiometrics?(): Promise<StoredCredentials | null>;
 }
 ```
 
@@ -43,12 +39,12 @@ interface CredentialStore {
 
 | Class | Backing store | Auth gate | Survives Safari ITP / cache wipe |
 | --- | --- | --- | --- |
-| `LocalStorageCredentialStore` | `localStorage` | None | No |
-| `WebAuthnCredentialStore` | WebAuthn `largeBlob` (OS keychain) | Touch ID / Face ID | Yes |
-| `createCredentialStore(...)` (default) | WebAuthn if available, else localStorage | Mixed | Best‑effort |
+| `@interocitor/web` `LocalStorageCredentialStore` | `localStorage` | None | No |
+| `@interocitor/web` `WebAuthnCredentialStore` | WebAuthn `largeBlob` (OS keychain) | Touch ID / Face ID | Yes |
+| `@interocitor/web` `createWebCredentialStore(...)` | WebAuthn if available, else localStorage | Mixed | Best‑effort |
 
-The engine wires the default automatically. You only construct a store
-explicitly if you want to:
+Core never wires a browser default automatically. Runtime code constructs a
+store explicitly when it wants to:
 
 - pin a specific implementation (e.g. force biometrics);
 - run tests that need a deterministic store;
@@ -85,15 +81,12 @@ hint in `localStorage` records the credential ID so the engine can find
 the right credential on reload:
 
 ```
-localStorage["interocitor-webauthn-cred:<dbName>"] = base64(rawId)
+localStorage["interocitor-cred:<dbName>"] = base64(rawId)
 ```
 
-Reading the blob requires a fresh user gesture (Touch ID / Face ID).
-The engine therefore exposes two paths:
-
-- `restoreWithBiometrics()` — explicit, prompts the user. Call this from
-  a button click, not at boot.
-- `load()` — silent. Returns `null` if the blob is gated.
+Reading the blob may require a fresh user gesture (Touch ID / Face ID).
+Browser apps should call `load()` from an explicit user action when they
+choose WebAuthn storage.
 
 ### `dbName` is the key
 
@@ -110,7 +103,7 @@ anchor check.
 ## Lifecycle
 
 ```
-construct engine ──► load() ──► (optional) restoreWithBiometrics()
+construct engine ──► credentialStore.load()
                        │
                        ▼
                   apply passphrase ──► resolveEncryption()
@@ -148,7 +141,7 @@ construct engine ──► load() ──► (optional) restoreWithBiometrics()
 ```ts
 const engine = new Interocitor(adapter, {
   dbName: 'demo',
-  appName: 'Demo',
+  localStore,
   credentialStore: null,    // passphrase lives only in memory
 });
 ```
@@ -170,7 +163,7 @@ class MyCustomStore implements CredentialStore {
 
 const engine = new Interocitor(adapter, {
   dbName: 'meal-planner',
-  appName: 'Meal Planner',
+  localStore,
   credentialStore: new MyCustomStore(),
 });
 ```
@@ -180,9 +173,8 @@ Contract:
 - `save()` is called from `init()` (once credentials resolve) and from
   `connect()` (to write the `meshId` anchor). It MUST upsert: writing
   the same `dbName` twice replaces the earlier record.
-- `load()` is silent. It MUST NOT prompt the user. If the data requires
-  a gesture, return `null` here and expose a separate
-  `restoreWithBiometrics()` method.
+- `load()` should document whether it can prompt. Browser apps using WebAuthn
+  should call it from a user action.
 - `clear()` MUST remove every record this store wrote for this `dbName`.
   It MAY keep the global device id; the default stores do.
 

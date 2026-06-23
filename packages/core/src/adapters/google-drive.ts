@@ -5,7 +5,7 @@
  * The app can only see files it created or the user explicitly shared.
  *
  * Requires: Google API client ID from Google Cloud Console.
- * Auth flow: Google Identity Services (GIS) popup or redirect.
+ * Token acquisition is owned by the application/runtime.
  */
 
 import type { StorageAdapter, FileEntry } from '../core/types.ts';
@@ -14,21 +14,24 @@ const SCOPES = 'https://www.googleapis.com/auth/drive.file';
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 
-interface GoogleDriveConfig {
-  clientId: string;
-  /** Redirect URI for OAuth (default: current origin) */
-  redirectUri?: string;
+export interface GoogleDriveConfig {
+  /** Optional OAuth client id for handshake metadata. */
+  clientId?: string;
+  /** Bearer token with `drive.file` access. */
+  accessToken?: string;
+  /** Runtime-owned token supplier. */
+  getAccessToken?: () => string | Promise<string>;
 }
 
 /**
- * Google Drive adapter using the browser OAuth token flow.
+ * Google Drive mailbox adapter using a runtime-supplied OAuth bearer token.
  *
  * This is the easiest zero-infrastructure option when your users already live
  * in Google Workspace or personal Drive.
  *
  * @example
  * ```ts
- * const adapter = new GoogleDriveAdapter({ clientId: 'YOUR_GOOGLE_CLIENT_ID' });
+ * const adapter = new GoogleDriveAdapter({ accessToken });
  * const engine = new Interocitor(adapter, { remotePath: '/MyApp' });
  * ```
  */
@@ -49,59 +52,23 @@ export class GoogleDriveAdapter implements StorageAdapter {
   // ── Auth ─────────────────────────────────────────────────────────
 
   async authenticate(): Promise<void> {
-    // Google Identity Services (GIS) token model
-    // In production, use google.accounts.oauth2.initTokenClient
-    // This is a simplified version using the implicit grant flow
-
-    return new Promise((resolve) => {
-      const params = new URLSearchParams({
-        client_id: this.config.clientId,
-        redirect_uri: this.config.redirectUri || window.location.origin,
-        response_type: 'token',
-        scope: SCOPES,
-        include_granted_scopes: 'true',
-      });
-
-      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
-
-      // Check if we already have a token from a redirect
-      const hash = window.location.hash;
-      if (hash.includes('access_token=')) {
-        const tokenMatch = hash.match(/access_token=([^&]+)/);
-        if (tokenMatch) {
-          this.accessToken = decodeURIComponent(tokenMatch[1]);
-          // Clean the URL
-          window.history.replaceState(null, '', window.location.pathname);
-          resolve();
-          return;
-        }
-      }
-
-      // Check localStorage for cached token
-      const cached = localStorage.getItem('gdrive-access-token');
-      if (cached) {
-        this.accessToken = cached;
-        // Verify token is still valid
-        this.verifyToken().then(valid => {
-          if (valid) {
-            resolve();
-          } else {
-            localStorage.removeItem('gdrive-access-token');
-            window.location.href = authUrl;
-          }
-        });
-        return;
-      }
-
-      // Redirect to Google OAuth
-      window.location.href = authUrl;
-    });
+    if (!this.accessToken && this.config.accessToken) {
+      this.accessToken = this.config.accessToken;
+    }
+    if (!this.accessToken && this.config.getAccessToken) {
+      this.accessToken = await this.config.getAccessToken();
+    }
+    if (!this.accessToken) {
+      throw new Error(`GoogleDriveAdapter requires an OAuth bearer token with ${SCOPES} scope`);
+    }
+    if (!await this.verifyToken()) {
+      throw new Error('Google Drive authentication failed');
+    }
   }
 
-  /** Set token directly (for apps that handle their own OAuth flow). */
+  /** Set token directly after the runtime obtains or refreshes it. */
   setAccessToken(token: string): void {
     this.accessToken = token;
-    localStorage.setItem('gdrive-access-token', token);
   }
 
   /**
@@ -110,7 +77,7 @@ export class GoogleDriveAdapter implements StorageAdapter {
    * The OAuth flow (and resulting access token) is performed separately by the user.
    */
   getHandshakeConfig(): string {
-    return JSON.stringify({ clientId: this.config.clientId });
+    return JSON.stringify(this.config.clientId ? { clientId: this.config.clientId } : {});
   }
 
   isAuthenticated(): boolean {
@@ -133,7 +100,7 @@ export class GoogleDriveAdapter implements StorageAdapter {
     return { Authorization: `Bearer ${this.accessToken}` };
   }
 
-  // ── File ID resolution ───────────────────────────────────────────
+  // ── Drive object ID resolution ───────────────────────────────────
 
   /**
    * Resolve a path like "/Interocitor/changes/dev_abc.ndjson"
@@ -298,7 +265,7 @@ export class GoogleDriveAdapter implements StorageAdapter {
 
   async readFile(path: string): Promise<Uint8Array> {
     const fileId = await this.resolveFileId(path);
-    if (!fileId) throw new Error(`File not found: ${path}`);
+    if (!fileId) throw new Error(`Drive object not found: ${path}`);
 
     const res = await fetch(
       `${DRIVE_API}/files/${fileId}?alt=media`,
@@ -413,7 +380,6 @@ export class GoogleDriveAdapter implements StorageAdapter {
       name: data.name,
       path,
       size: parseInt(data.size ?? '0', 10),
-      
       modifiedTime: data.modifiedTime,
     };
   }

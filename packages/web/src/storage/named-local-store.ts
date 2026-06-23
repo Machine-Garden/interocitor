@@ -1,10 +1,10 @@
-import { LocalStore } from './local-store.ts';
-import { MemoryLocalStore } from './memory-store.ts';
+import { MemoryLocalStore } from '@interocitor/core';
+import { IndexedDbLocalStore } from './indexed-db-local-store.ts';
 import { createResilientLocalStore } from './resilient-store.ts';
 import type {
-  LocalStoreAdapter,
+  LocalStore,
   DatabaseSchemaDefinition,
-} from '../core/types.ts';
+} from '@interocitor/core';
 import type {
   LocalStoreDegradationInfo,
   LocalStoreDegradedHook,
@@ -123,7 +123,7 @@ async function cleanupOlderVersions(baseName: string, currentVersion: number): P
 }
 
 /**
- * Create a `LocalStoreAdapter` that automatically rotates to a new versioned
+ * Create a `LocalStore` that automatically rotates to a new versioned
  * IndexedDB name when the active DB handle becomes unusable. The first
  * `onDegraded` event observed with reason `idb-handle-closing` schedules a
  * rotation: the persisted pointer advances to the next version, so the next
@@ -132,7 +132,7 @@ async function cleanupOlderVersions(baseName: string, currentVersion: number): P
  * The returned store is itself wrapped by `createResilientLocalStore`, so
  * the never-stuck contract still holds for the freshly named DB.
  */
-export function createNamedLocalStore(options: NamedLocalStoreOptions): LocalStoreAdapter {
+export function createNamedLocalStore(options: NamedLocalStoreOptions): LocalStore {
   const pointer = options.pointerStore ?? defaultPointerStore();
   const slot = pointerKey(options.baseName);
 
@@ -169,7 +169,7 @@ export function createNamedLocalStore(options: NamedLocalStoreOptions): LocalSto
     schema: options.schema,
     openTimeoutMs: options.openTimeoutMs,
     onDegraded: wrappedOnDegraded,
-    primaryFactory: () => new LocalStore(activeName, undefined, options.schema),
+    primaryFactory: () => new IndexedDbLocalStore(activeName, undefined, options.schema),
     fallbackFactory: () => new MemoryLocalStore(),
   });
 

@@ -4,13 +4,13 @@
  * For self-hosted clouds: Nextcloud, ownCloud, or any WebDAV server.
  * "My own cloud" option — user runs their own server.
  *
- * WebDAV is HTTP-based, works from any browser.
+ * WebDAV is HTTP-based and works anywhere `fetch` is available.
  * Most implementations support Basic auth or Bearer tokens.
  */
 
 import type { StorageAdapter, FileEntry, StoredFileMetadata, StoredFileWriteOptions } from '../core/types.ts';
 
-interface WebDAVConfig {
+export interface WebDAVConfig {
   /** Base URL of the WebDAV endpoint, e.g. "https://cloud.example.com/remote.php/dav/files/username" */
   baseUrl: string;
   /** Auth: either { username, password } for Basic auth, or { token } for Bearer */
@@ -18,7 +18,7 @@ interface WebDAVConfig {
 }
 
 /**
- * Browser-friendly WebDAV adapter for Nextcloud, ownCloud, and compatible DAV servers.
+ * WebDAV adapter for Nextcloud, ownCloud, and compatible DAV servers.
  *
  * @example
  * ```ts
@@ -55,7 +55,7 @@ export class WebDAVAdapter implements StorageAdapter {
     if ('token' in auth) {
       return `Bearer ${auth.token}`;
     }
-    return `Basic ${btoa(`${auth.username}:${auth.password}`)}`;
+    return `Basic ${encodeBase64(`${auth.username}:${auth.password}`)}`;
   }
 
   private headers(extra?: Record<string, string>): Record<string, string> {
@@ -150,25 +150,22 @@ export class WebDAVAdapter implements StorageAdapter {
   }
 
   private parsePropfindResponse(xml: string, basePath: string): FileEntry[] {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(xml, 'application/xml');
-    const responses = doc.getElementsByTagNameNS('DAV:', 'response');
+    const responses = parseDavResponses(xml);
     const entries: FileEntry[] = [];
 
     for (let i = 0; i < responses.length; i++) {
       const response = responses[i];
-      const href = response.getElementsByTagNameNS('DAV:', 'href')[0]?.textContent || '';
+      const href = tagText(response, 'href') || '';
 
       // Skip the folder itself (first response)
       if (i === 0) continue;
 
       // Skip sub-folders
-      const resourceType = response.getElementsByTagNameNS('DAV:', 'collection');
-      if (resourceType.length > 0) continue;
+      if (hasTag(response, 'collection')) continue;
 
-      const size = response.getElementsByTagNameNS('DAV:', 'getcontentlength')[0]?.textContent || '0';
-      const modified = response.getElementsByTagNameNS('DAV:', 'getlastmodified')[0]?.textContent || '';
-      const etag = response.getElementsByTagNameNS('DAV:', 'getetag')[0]?.textContent || undefined;
+      const size = tagText(response, 'getcontentlength') || '0';
+      const modified = tagText(response, 'getlastmodified') || '';
+      const etag = tagText(response, 'getetag') || undefined;
 
       // Extract filename from href
       const name = decodeURIComponent(href.split('/').filter(Boolean).pop() || '');
@@ -203,16 +200,13 @@ export class WebDAVAdapter implements StorageAdapter {
     if (res.status !== 207) return [];
 
     const xml = await res.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(xml, 'application/xml');
-    const responses = doc.getElementsByTagNameNS('DAV:', 'response');
+    const responses = parseDavResponses(xml);
     const folders: string[] = [];
 
     for (let i = 1; i < responses.length; i++) {
       const response = responses[i];
-      const isCollection = response.getElementsByTagNameNS('DAV:', 'collection').length > 0;
-      if (!isCollection) continue;
-      const href = response.getElementsByTagNameNS('DAV:', 'href')[0]?.textContent || '';
+      if (!hasTag(response, 'collection')) continue;
+      const href = tagText(response, 'href') || '';
       const name = decodeURIComponent(href.split('/').filter(Boolean).pop() || '');
       if (name) folders.push(name);
     }
@@ -343,15 +337,13 @@ export class WebDAVAdapter implements StorageAdapter {
 
     const xml = await res.text();
     // PROPFIND with Depth:0 on a file returns one entry for itself
-    // but our parser skips index 0, so we handle it differently
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(xml, 'application/xml');
-    const response = doc.getElementsByTagNameNS('DAV:', 'response')[0];
+    // but the directory-listing parser skips index 0, so handle it directly.
+    const response = parseDavResponses(xml)[0];
     if (!response) return null;
 
-    const size = response.getElementsByTagNameNS('DAV:', 'getcontentlength')[0]?.textContent || '0';
-    const modified = response.getElementsByTagNameNS('DAV:', 'getlastmodified')[0]?.textContent || '';
-    const etag = response.getElementsByTagNameNS('DAV:', 'getetag')[0]?.textContent || undefined;
+    const size = tagText(response, 'getcontentlength') || '0';
+    const modified = tagText(response, 'getlastmodified') || '';
+    const etag = tagText(response, 'getetag') || undefined;
     const name = path.split('/').filter(Boolean).pop() || '';
 
     return {
@@ -362,4 +354,46 @@ export class WebDAVAdapter implements StorageAdapter {
       etag,
     };
   }
+}
+
+function encodeBase64(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  const browserEncode = (globalThis as { btoa?: (input: string) => string }).btoa;
+  if (browserEncode) {
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return browserEncode(binary);
+  }
+
+  const bufferCtor = (globalThis as {
+    Buffer?: { from(input: Uint8Array): { toString(encoding: 'base64'): string } };
+  }).Buffer;
+  if (bufferCtor) return bufferCtor.from(bytes).toString('base64');
+
+  throw new Error('No base64 encoder is available in this runtime');
+}
+
+function parseDavResponses(xml: string): string[] {
+  return xml.match(/<(?:[\w.-]+:)?response\b[\s\S]*?<\/(?:[\w.-]+:)?response>/gi) ?? [];
+}
+
+function tagText(xml: string, localName: string): string | null {
+  const escaped = localName.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`<(?:[\\w.-]+:)?${escaped}\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?${escaped}>`, 'i').exec(xml);
+  if (!match) return null;
+  return decodeXml(match[1].replaceAll(/<[^>]+>/g, '').trim());
+}
+
+function hasTag(xml: string, localName: string): boolean {
+  const escaped = localName.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`<(?:[\\w.-]+:)?${escaped}\\b`, 'i').test(xml);
+}
+
+function decodeXml(value: string): string {
+  return value
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&apos;', "'")
+    .replaceAll('&amp;', '&');
 }

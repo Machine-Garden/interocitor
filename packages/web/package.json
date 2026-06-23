@@ -1,0 +1,78 @@
+{
+  "name": "@interocitor/web",
+  "version": "0.0.0-beta.11",
+  "description": "Browser runtime stores, credential stores, and UI helpers for Interocitor.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./react": {
+      "import": "./dist/react.js",
+      "types": "./dist/react.d.ts"
+    },
+    "./image": {
+      "import": "./dist/image.js",
+      "types": "./dist/image.d.ts"
+    },
+    "./credential-store": {
+      "import": "./dist/credential-store.js",
+      "types": "./dist/credential-store.d.ts"
+    },
+    "./storage/indexed-db-local-store": {
+      "import": "./dist/storage/indexed-db-local-store.js",
+      "types": "./dist/storage/indexed-db-local-store.d.ts"
+    },
+    "./storage/resilient-store": {
+      "import": "./dist/storage/resilient-store.js",
+      "types": "./dist/storage/resilient-store.d.ts"
+    },
+    "./storage/named-local-store": {
+      "import": "./dist/storage/named-local-store.js",
+      "types": "./dist/storage/named-local-store.d.ts"
+    },
+    "./storage/reset": {
+      "import": "./dist/storage/reset.js",
+      "types": "./dist/storage/reset.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit",
+    "build": "rm -rf ./dist && tsc -p tsconfig.json",
+    "test:e2e": "yarn build && ../../node_modules/.bin/playwright test -c ./playwright.config.ts"
+  },
+  "peerDependencies": {
+    "@interocitor/core": "0.0.0-beta.11",
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
+    "typescript": "^6.0.0"
+  },
+  "keywords": [
+    "local-first",
+    "crdt",
+    "sync",
+    "offline-first",
+    "indexeddb",
+    "browser"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

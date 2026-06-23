@@ -10,6 +10,7 @@ import type {
 } from './types.ts';
 import { types } from './schema-types.ts';
 import type { Interocitor } from './sync-engine.ts';
+import { MemoryLocalStore } from '../storage/memory-store.ts';
 
 // ─── Scalar types carry their generic ────────────────────────────────
 
@@ -153,7 +154,7 @@ void _mismatchedField;
 // Config typed explicitly — schema must match S
 const _config: SyncConfig<{ tasks: { title: string } }> = {
   remotePath: '/App',
-  appName: 'App',
+  localStore: new MemoryLocalStore(),
   schema: {
     tables: { tasks: { fields: { title: types.string } } },
   },
@@ -163,7 +164,7 @@ void _config;
 // Schema field type mismatch caught inline
 const _badConfig: SyncConfig<{ tasks: { title: string } }> = {
   remotePath: '/App',
-  appName: 'App',
+  localStore: new MemoryLocalStore(),
   schema: {
     tables: { tasks: { fields: {
       // @ts-expect-error — IndexableSchemaField<number> is not SchemaField<string>

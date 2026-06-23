@@ -11,7 +11,7 @@ import type { Interocitor } from '@interocitor/core';
  * export { MealDbProvider, useMealDb };
  *
  * // bootstrap.ts
- * const db = new Interocitor<DB>({ appName: 'Meal Planner', dbName: 'meal' });
+ * const db = new Interocitor<DB>({ dbName: 'meal', localStore });
  * db.configureMesh({ remotePath: '/MealPlanner', passphrase, encrypted: true });
  * await db.setRemoteStorage(adapter);
  * await db.init();

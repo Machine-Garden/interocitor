@@ -106,7 +106,8 @@ async function createSession() {
 
 async function connect() {
   const { Interocitor } = await import('/packages/core/dist/index.js');
-  const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
+  const { WebDAVAdapter } = await import('/packages/core/dist/index.js');
+  const { IndexedDbLocalStore } = await import('/packages/web/dist/index.js');
 
   const session = readSessionFromUi();
   await disconnect();
@@ -123,6 +124,7 @@ async function connect() {
   const engine = new Interocitor(adapter, {
     remotePath: session.remotePath,
     dbName,
+    localStore: new IndexedDbLocalStore(dbName),
     deviceId: tabDeviceId,
     passphrase: session.key,
     pollInterval: 5000,   // 5 s: reduces head.json 404 spam during idle periods
@@ -353,4 +355,3 @@ if (!tryApplyTokenFromHash()) {
 window.addEventListener('beforeunload', () => {
   void disconnect();
 });
-

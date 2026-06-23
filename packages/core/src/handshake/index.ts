@@ -83,7 +83,7 @@
  * ```ts
  * import { handleScannedQR, parseQRFromUrl } from 'interocitor';
  *
- * const payload = parseQRFromUrl(window.location.hash);
+ * const payload = parseQRFromUrl(urlFragment);
  * // or: const payload = decodeQRPayload(rawQRString);
  *
  * const result = await handleScannedQR({
@@ -105,7 +105,6 @@
  */
 
 import type { StorageAdapter } from '../core/types.ts';
-import { CloudflareAdapter, type CloudflareHandshakeConfig } from '../adapters/cloudflare.ts';
 import {
   encodeQRPayload,
   buildPairUrl,
@@ -277,25 +276,19 @@ export async function generateJoinQR(options: GenerateJoinQROptions): Promise<Ge
   };
 }
 
-function adapterFromPayloadConfig(payload: HandshakeQRPayload): StorageAdapter | null {
-  if (!payload.adapterConfig) return null;
-  try {
-    const cfg = JSON.parse(payload.adapterConfig) as CloudflareHandshakeConfig;
-    if (cfg?.baseUrl) return new CloudflareAdapter({ baseUrl: cfg.baseUrl });
-  } catch {
-    // ignore and fall through
-  }
-  return null;
-}
-
 // ─── handleScannedQR ─────────────────────────────────────────────────
 
 export interface HandleScannedQROptions {
   /**
    * Storage adapter connected to the shared backend.
-   * Optional when payload.adapterConfig is present and can reconstruct one.
+   * Optional only when `adapterFromConfig` can reconstruct one from the QR.
    */
   adapter?: StorageAdapter;
+  /**
+   * Runtime-owned adapter factory for QR payloads that include adapterConfig.
+   * Core treats the string as opaque.
+   */
+  adapterFromConfig?: (adapterConfig: string) => StorageAdapter | null | Promise<StorageAdapter | null>;
   /**
    * Base path on the backend used for relay files.
    * Must match the relayBase used by the generating device.
@@ -322,10 +315,11 @@ export interface HandleScannedQROptions {
  * because the scanner already has credentials when intent === 'join').
  */
 export async function handleScannedQR(options: HandleScannedQROptions): Promise<HandshakeCredentials | null> {
-  const { adapter: explicitAdapter, relayBase, payload, ownCredentials, pollIntervalMs, timeoutMs } = options;
-  const adapter = explicitAdapter ?? adapterFromPayloadConfig(payload);
+  const { adapter: explicitAdapter, adapterFromConfig, relayBase, payload, ownCredentials, pollIntervalMs, timeoutMs } = options;
+  const adapter = explicitAdapter
+    ?? (payload.adapterConfig && adapterFromConfig ? await adapterFromConfig(payload.adapterConfig) : null);
   if (!adapter) {
-    throw new Error('handleScannedQR: adapter required when payload has no supported adapterConfig');
+    throw new Error('handleScannedQR: adapter required when payload has no runtime adapter factory');
   }
 
   if (payload.intent === 'join' && !ownCredentials) {

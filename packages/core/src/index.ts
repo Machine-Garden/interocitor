@@ -2,18 +2,17 @@
  * interocitor
  *
  * Encrypted local-first CRDT database that syncs over cloud storage.
- * Google Drive is the default path; server-managed compaction is optional.
+ * Runtime packages provide concrete local stores and credential stores.
  *
  * @example
  * ```ts
  * import { Interocitor } from 'interocitor';
- * import { GoogleDriveAdapter } from 'interocitor/adapters/google-drive';
+ * import { MemoryAdapter, MemoryLocalStore } from '@interocitor/core';
  *
- * const adapter = new GoogleDriveAdapter({
- *   clientId: 'YOUR_GOOGLE_CLIENT_ID',
- * });
+ * const adapter = new MemoryAdapter();
  * const engine = new Interocitor(adapter, {
  *   remotePath: '/Interocitor',
+ *   localStore: new MemoryLocalStore(),
  *   encrypted: true, // generates key automatically
  * });
  *
@@ -62,38 +61,30 @@ export {
   Interocitor,
   type InterocitorInitContext,
 } from './core/sync-engine.ts';
-export { LocalStore } from './storage/local-store.ts';
+export type { LocalStore } from './storage/local-store.ts';
 export { MemoryLocalStore } from './storage/memory-store.ts';
+export { MemoryAdapter } from './adapters/memory.ts';
 export {
-  createResilientLocalStore,
-  DEFAULT_LOCAL_OPEN_TIMEOUT_MS,
-  type ResilientLocalStoreOptions,
-  type LocalStoreDegradedHook,
-  type LocalStoreDegradationInfo,
-  type LocalStoreDegradationReason,
-} from './storage/resilient-store.ts';
+  GoogleDriveAdapter,
+  type GoogleDriveConfig,
+} from './adapters/google-drive.ts';
+export {
+  WebDAVAdapter,
+  type WebDAVConfig,
+} from './adapters/webdav.ts';
+export {
+  CloudflareAdapter,
+  type CloudflareAdapterConfig,
+  type CloudflareHandshakeConfig,
+} from './adapters/cloudflare.ts';
 export {
   ConnectStageTimeoutError,
   DEFAULT_CONNECT_STAGE_TIMEOUT_MS,
   withDeadline,
 } from './core/with-deadline.ts';
 export {
-  resetLocalDatabase,
-  resetLocalDatabaseWithDeadline,
-  type ResetLocalDatabaseOutcome,
-} from './storage/reset.ts';
-export {
-  createNamedLocalStore,
-  getActiveLocalDatabaseName,
-  type NamedLocalStoreOptions,
-  type PointerStore,
-} from './storage/named-local-store.ts';
-export {
   type CredentialStore,
   type StoredCredentials,
-  LocalStorageCredentialStore,
-  WebAuthnCredentialStore,
-  createCredentialStore,
 } from './storage/credential-store.ts';
 export { Table, QueryResult, RowResult } from './core/table.ts';
 export { types } from './core/schema-types.ts';
@@ -134,15 +125,6 @@ export type {
   FileEntry,
   StoredFileMetadata,
   StoredFileWriteOptions,
-  ImageInput,
-  PutImageOptions,
-  StoredImageMetadata,
-  StoredImage,
-  StoredImageBlobUrl,
-
-  // Local adapter contract — implement to plug in a custom local backend
-  LocalStoreAdapter,
-  LocalStoreFactory,
 
   // Engine configuration
   SyncConfig,
@@ -188,9 +170,12 @@ export type {
   SyncEventListener,
   ConnectionStatus,
   ConnectionStatusDetails,
+  RemoteInvalidationPayload,
+  RemoteInvalidationHooks,
 
   // Data model
   Row,
+  ChangeEntry,
 
   // Protocol types
   Manifest,

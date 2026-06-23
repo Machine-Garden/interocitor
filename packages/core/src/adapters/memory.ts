@@ -107,7 +107,7 @@ export class MemoryAdapter implements StorageAdapter {
 
   async readFile(path: string): Promise<Uint8Array> {
     const file = this.files.get(path);
-    if (!file) throw new Error(`File not found: ${path}`);
+    if (!file) throw new Error(`Object not found: ${path}`);
     return file.data;
   }
 

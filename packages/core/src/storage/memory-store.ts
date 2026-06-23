@@ -1,24 +1,19 @@
 /**
  * In-memory local store.
  *
- * Implements the same `LocalStoreAdapter` contract as the IndexedDB-backed
- * `LocalStore`, but holds everything in plain JS structures. No persistence.
+ * Implements the `LocalStore` contract, but holds everything in plain JS
+ * structures. No persistence.
  *
- * Used as the ultimate fallback by `createResilientLocalStore` when
- * IndexedDB is unavailable, blocked, or hangs. Local data is lost on
- * page reload, but cloud sync still works — the engine treats local
- * storage as a cache, not the source of truth.
- *
- * Also useful for tests, SSR, and private-browsing modes that disable IDB.
+ * Useful for tests, local-only demos, and runtime fallbacks.
  */
 
 import type {
   Row,
   ChangeEntry,
-  LocalStoreAdapter,
   WhereClause,
   WherePrimitive,
 } from '../core/types.ts';
+import type { LocalStore } from './local-store.ts';
 
 function compare(a: WherePrimitive, b: WherePrimitive): number {
   const av = a instanceof Date ? a.getTime() : a;
@@ -73,7 +68,7 @@ function rowKey(table: string, rowId: string): string {
  * No schema awareness, no indexes — `queryWhere` is a linear scan.
  * That's fine: this store exists for fallback paths, not happy paths.
  */
-export class MemoryLocalStore implements LocalStoreAdapter {
+export class MemoryLocalStore implements LocalStore {
   private rows = new Map<string, Row>();
   private outbox: ChangeEntry[] = [];
   private cursors = new Map<string, number>();

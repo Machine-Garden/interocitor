@@ -17,7 +17,7 @@
 Interocitor is a client-side application data layer with two first-class surfaces:
 
 1. **A CRDT database** for structured state: tables, rows, typed schemas, local queries, per-column conflict resolution, snapshots, and compaction.
-2. **A durable file store** for blobs and images: `PUT`, `GET`, and `DELETE` by path, metadata, image encoding helpers, and browser `blob:` URLs for display.
+2. **A durable file store** for bytes: `PUT`, `GET`, and `DELETE` by path and metadata. Browser image helpers live in `@interocitor/web`.
 
 Both surfaces are local-first and encrypted before they leave the device. They sync through storage you control — WebDAV, Google Drive, Cloudflare Workers/R2, or a custom adapter — without asking that storage layer to understand your app data.
 
@@ -32,7 +32,7 @@ The remote is a mailbox, not a trusted database or media service:
 
 - **Typed CRDT database.** Tables, rows, live queries, schema inference, and deterministic convergence across devices.
 - **Durable file storage.** Path-addressed encrypted blobs with `putFile`, `getFile`, `deleteFile`, and metadata.
-- **First-class images.** Store `Blob`, `File`, bytes, data URLs, or SVG strings; read back bytes, `Blob`, or a revokable `blob:` URL.
+- **Browser image helpers.** `@interocitor/web` stores `Blob`, `File`, bytes, data URLs, or SVG strings on top of core files and returns revokable `blob:` URLs for display.
 - **One mesh.** Rows, files, devices, passphrase, adapters, pairing, and backend policy are part of the same application mesh.
 - **React hooks.** `useLiveQuery`, `useRow`, and `useImage` keep rendering decisions in app code.
 - **Cloudflare backend.** D1 for sync metadata, R2 for durable file bodies, optional Durable Object realtime invalidation, upload quotas, and upload authorization callbacks.
@@ -40,7 +40,7 @@ The remote is a mailbox, not a trusted database or media service:
 ## Install
 
 ```bash
-yarn add @interocitor/core
+yarn add @interocitor/core @interocitor/web
 # optional
 yarn add @interocitor/react @interocitor/workers
 ```
@@ -48,8 +48,8 @@ yarn add @interocitor/react @interocitor/workers
 ## Quick start
 
 ```ts
-import { Interocitor, types, type DatabaseSchemaDefinition, type InferSchemaType } from '@interocitor/core';
-import { WebDAVAdapter } from '@interocitor/core/adapters/webdav';
+import { Interocitor, WebDAVAdapter, types, type DatabaseSchemaDefinition, type InferSchemaType } from '@interocitor/core';
+import { IndexedDbLocalStore, getImageBlobUrl, putImage } from '@interocitor/web';
 
 const schema = {
   tables: {
@@ -66,10 +66,10 @@ const schema = {
 type DB = InferSchemaType<typeof schema>;
 
 const db = new Interocitor<DB>({
-  appName: 'Todo',
   dbName: 'todo',
   schema,
   encrypted: true,
+  localStore: new IndexedDbLocalStore('todo'),
 });
 
 await db.init();
@@ -89,7 +89,7 @@ await db.setRemoteStorage(new WebDAVAdapter({
 await db.connect();
 
 const avatarPath = 'avatars/me.png';
-await db.putImage(avatarPath, avatarFile);
+await putImage(db, avatarPath, avatarFile);
 
 const todoId = await db.table('todos').add({
   text: 'Ship encrypted sync',
@@ -99,7 +99,7 @@ const todoId = await db.table('todos').add({
 
 await db.table('todos').patch(todoId, { done: true });
 
-const avatar = await db.getImageBlobUrl(avatarPath);
+const avatar = await getImageBlobUrl(db, avatarPath);
 img.src = avatar.url;
 ```
 
@@ -121,12 +121,14 @@ await db.deleteFile('receipts/2026-05-03.pdf');
 Image helpers sit on top of file storage:
 
 ```ts
-await db.putImage('avatars/me.png', file); // File, Blob, ArrayBuffer, Uint8Array, data URL, or SVG string
+import { getImage, getImageBlobUrl, putImage } from '@interocitor/web';
 
-const image = await db.getImage('avatars/me.png');
+await putImage(db, 'avatars/me.png', file); // File, Blob, ArrayBuffer, Uint8Array, data URL, or SVG string
+
+const image = await getImage(db, 'avatars/me.png');
 console.log(image.blob, image.metadata?.uploadedByDeviceId);
 
-const rendered = await db.getImageBlobUrl('avatars/me.png');
+const rendered = await getImageBlobUrl(db, 'avatars/me.png');
 img.src = rendered.url;
 rendered.revoke();
 ```
@@ -232,8 +234,8 @@ For row data:
 
 For files:
 
-1. `putFile()`/`putImage()` encrypts the object and uploads it under the mesh `files/` namespace.
-2. `getFile()`/`getImage()` downloads and decrypts it directly.
+1. `putFile()` encrypts the object and uploads it under the mesh `files/` namespace. Browser `putImage()` delegates to this.
+2. `getFile()` downloads and decrypts it directly. Browser `getImage()` delegates to this.
 3. `deleteFile()` removes it directly.
 
 Files are not replayed, merged, compacted, or stored in row snapshots.
@@ -262,15 +264,16 @@ Interocitor does not give you:
 
 | Package / adapter | Use when |
 | --- | --- |
-| `MemoryAdapter` | Tests and local demos. |
-| `WebDAVAdapter` | You have a WebDAV server or want simple self-hosted storage. |
-| `GoogleDriveAdapter` | User-owned Drive as the mailbox. |
-| `CloudflareAdapter` + `@interocitor/workers` | You want a Worker endpoint with D1 sync storage, R2 file storage, quotas, auth callbacks, and optional realtime relay. |
+| `@interocitor/core` `MemoryAdapter` | Tests and local demos. |
+| `@interocitor/core` `WebDAVAdapter` | You have a WebDAV server or want simple self-hosted storage. |
+| `@interocitor/core` `GoogleDriveAdapter` | User-owned Drive as the mailbox; runtime code supplies the OAuth token. |
+| `@interocitor/core` `CloudflareAdapter` + `@interocitor/workers` | You want a Worker endpoint with D1 sync storage, R2 file storage, quotas, auth callbacks, and optional realtime relay. |
 | Custom `StorageAdapter` | You want to bring your own byte store. |
 
 ## Package map
 
-- `packages/core` — `@interocitor/core`, engine, adapters, storage contracts, file/image APIs.
+- `packages/core` — `@interocitor/core`, runtime-neutral engine, mailbox adapters, remote storage adapter contract, local store contract, and byte file APIs.
+- `packages/web` — `@interocitor/web`, browser local stores, browser credential stores, image helpers, and `@interocitor/web/react`.
 - `packages/react` — `@interocitor/react`, context and hooks.
 - `packages/workers` — `@interocitor/workers`, Cloudflare Worker/D1/R2 runtime.
 - `packages/interocitor-swift` — Swift client.

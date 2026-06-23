@@ -134,7 +134,7 @@ export function buildPairUrl(baseUrl: string, payload: HandshakeQRPayload): stri
 
 /**
  * Extract and decode a HandshakeQRPayload from a URL fragment string.
- * Pass `window.location.hash` directly.
+ * Pass the URL fragment string directly.
  * Returns null if no #hs= fragment is present.
  */
 export function parseQRFromUrl(hash: string): HandshakeQRPayload | null {

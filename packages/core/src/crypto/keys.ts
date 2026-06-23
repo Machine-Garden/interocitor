@@ -19,9 +19,6 @@
  * const key = await passphraseToKey(passphrase);
  * engine.setEncryptionKey(key);
  *
- * // Persist across sessions
- * await storeKeyLocally(key);
- * const restored = await loadKeyLocally();
  * ```
  */
 
@@ -45,18 +42,9 @@ export {
   /** Confirm a key can decrypt a known ciphertext (sanity-check on join). */
   verifyKey,
 
-  // ── Local persistence ─────────────────────────────────────────────
-  /** Persist key in localStorage for the current origin. */
-  storeKeyLocally,
-  /** Restore key from localStorage, or null if not present. */
-  loadKeyLocally,
-  /** Remove the persisted key from localStorage. */
-  clearKeyLocally,
-
   // ── Low-level (advanced: custom key transport) ────────────────────
   /** Export key to raw bytes for custom out-of-band transfer. */
   exportKeyRaw,
   /** Import key from raw bytes produced by exportKeyRaw. */
   importKeyRaw,
 } from './encryption.ts';
-

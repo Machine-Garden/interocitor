@@ -257,27 +257,3 @@ export async function verifyKey(key: CryptoKey, sampleEncrypted: string): Promis
     return false;
   }
 }
-
-// ─── Local key persistence ───────────────────────────────────────────
-
-const KEY_STORAGE_KEY = 'interocitor-key';
-
-export async function storeKeyLocally(key: CryptoKey): Promise<void> {
-  if (typeof localStorage === 'undefined') return;
-  const raw = await exportKeyRaw(key);
-  const b64 = uint8ToBase64(raw);
-  localStorage.setItem(KEY_STORAGE_KEY, b64);
-}
-
-export async function loadKeyLocally(): Promise<CryptoKey | null> {
-  if (typeof localStorage === 'undefined') return null;
-  const b64 = localStorage.getItem(KEY_STORAGE_KEY);
-  if (!b64) return null;
-  const raw = base64ToUint8(b64);
-  return importKeyRaw(raw);
-}
-
-export function clearKeyLocally(): void {
-  if (typeof localStorage === 'undefined') return;
-  localStorage.removeItem(KEY_STORAGE_KEY);
-}

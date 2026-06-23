@@ -11,7 +11,7 @@ import type {
   Snapshot,
   MeshChangePayload,
   MeshSnapshotPayload,
-  LocalStoreAdapter,
+  LocalStore,
 } from './types.ts';
 import { encryptEntry, decryptEntry } from '../crypto/encryption.ts';
 
@@ -59,7 +59,7 @@ export async function decodeFromCloud(state: CodecState, data: string): Promise<
 }
 
 export async function assertExpectedMeshId(
-  local: LocalStoreAdapter,
+  local: LocalStore,
   manifest: Manifest | null,
   meshId: string,
 ): Promise<void> {
@@ -92,7 +92,7 @@ export async function encodeChangePayload(state: CodecState, entry: ChangeEntry)
 
 export async function decodeChangePayload(
   state: CodecState,
-  local: LocalStoreAdapter,
+  local: LocalStore,
   data: string,
   path: string,
 ): Promise<ChangeEntry> {
@@ -125,7 +125,7 @@ export async function encodeSnapshotPayload(state: CodecState, snapshot: Snapsho
 
 export async function decodeSnapshotPayload(
   state: CodecState,
-  local: LocalStoreAdapter,
+  local: LocalStore,
   data: string,
   path: string,
 ): Promise<Snapshot> {

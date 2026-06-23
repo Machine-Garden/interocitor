@@ -513,8 +513,25 @@ __metadata:
     react-test-renderer: "npm:^19.0.0"
     typescript: "npm:^6.0.0"
   peerDependencies:
-    "@interocitor/core": 0.0.0-beta.3
+    "@interocitor/core": 0.0.0-beta.11
+    "@interocitor/web": 0.0.0-beta.11
     react: ">=18"
+  languageName: unknown
+  linkType: soft
+
+"@interocitor/web@workspace:packages/web":
+  version: 0.0.0-use.local
+  resolution: "@interocitor/web@workspace:packages/web"
+  dependencies:
+    "@types/react": "npm:^19.0.0"
+    react: "npm:^19.0.0"
+    typescript: "npm:^6.0.0"
+  peerDependencies:
+    "@interocitor/core": 0.0.0-beta.11
+    react: ">=18"
+  peerDependenciesMeta:
+    react:
+      optional: true
   languageName: unknown
   linkType: soft
 

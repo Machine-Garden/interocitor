@@ -6,7 +6,7 @@
 
 import type {
   StorageAdapter,
-  LocalStoreAdapter,
+  LocalStore,
   Row,
   Op,
   ChangesHead,
@@ -23,7 +23,7 @@ import { readJsonIfExists } from './manifest.ts';
 
 export interface PullContext {
   adapter: StorageAdapter;
-  local: LocalStoreAdapter;
+  local: LocalStore;
   remotePath: string;
   codecState: CodecState;
   hlc: HLC;

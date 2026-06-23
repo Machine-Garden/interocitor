@@ -7,13 +7,13 @@
  *  - Rehydration from manifest-authoritative snapshot
  *
  * Network is never required for reads or local writes.
- * All data operations hit IndexedDB first; cloud sync is async.
+ * All data operations hit the configured local store first; cloud sync is async.
  */
 
 import type {
   StorageAdapter,
   SyncConfig,
-  LocalStoreAdapter,
+  LocalStore,
   ChangeEntry,
   Manifest,
   Row,
@@ -24,7 +24,6 @@ import type {
   DatabaseSchemaDefinition,
   WhereClause,
   ReplicaConfig,
-  LocalStoreFactory,
   SyncInitialState,
   JoinExistingMeshPolicy,
   LogLevel,
@@ -37,27 +36,21 @@ import type {
   RemoteInvalidationPayload,
   RemoteInvalidationStorageAdapter,
   StoredFileMetadata,
-  ImageInput,
-  PutImageOptions,
-  StoredImage,
-  StoredImageBlobUrl,
-  StoredImageMetadata,
 } from './types.ts';
 
 import type { HLC } from './types.ts';
 import { hlcInit, hlcNow, hlcSerialize, hlcParse, hlcCompareStr } from './hlc.ts';
 import { Table, computeCacheKey } from './table.ts';
 import { readColumn } from './crdt.ts';
-import { createResilientLocalStore } from '../storage/resilient-store.ts';
 
 // Extracted modules
-import { paths, logAtLevel, normalizeLogLevel, generateId, getDeviceId } from './internals.ts';
+import { paths, logAtLevel, normalizeLogLevel, generateId } from './internals.ts';
 import type { CodecState } from './codec.ts';
 import { loadOrCreateManifest, upsertDeviceMetadata } from './manifest.ts';
 import { decryptBytes, encryptBytes, generateKey, keyToPassphrase, passphraseToKey } from '../crypto/encryption.ts';
 import { MeshCredentialMismatchError } from './errors.ts';
 import { ConnectStageTimeoutError, DEFAULT_CONNECT_STAGE_TIMEOUT_MS, withDeadline } from './with-deadline.ts';
-import { createCredentialStore, type CredentialStore } from '../storage/credential-store.ts';
+import type { CredentialStore } from '../storage/credential-store.ts';
 import type { ManifestContext } from './manifest.ts';
 import { flushToAdapter } from './flush.ts';
 import {
@@ -66,6 +59,7 @@ import {
 } from './connected-stores.ts';
 import { pull as doPull } from './pull.ts';
 import { compact as doCompact, rehydrate as doRehydrate } from './compaction.ts';
+import { createDeviceId } from './ids.ts';
 
 // ─── Config ──────────────────────────────────────────────────────────
 
@@ -89,7 +83,7 @@ type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> = {
   offlineGraceMs: number;
   batchWindowMs: number;
   dbName: string;
-  localStoreFactory: LocalStoreFactory;
+  localStore: LocalStore;
   schema?: DatabaseSchemaDefinition<S>;
   replicas: ReplicaConfig[];
   onInit?: SyncConfig<S>['onInit'];
@@ -104,7 +98,6 @@ type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> = {
 };
 
 const DEFAULT_COMPACT_WARNING_THRESHOLD = 50;
-const POLL_BACKGROUND_MULTIPLIER = 10;
 const DEFAULT_COMPACT_AUTO_THRESHOLD = 50;
 const DEFAULT_COMPACT_AUTO_SAMPLE_NUMERATOR = 10;
 const DEFAULT_COMPACT_AUTO_DEVICE_COUNT = 1;
@@ -131,11 +124,11 @@ const DEFAULT_BATCH_WINDOW_MS = 1_000;
  * type DB = InferSchemaType<typeof schema>;
  *
  * // Local-only (no adapter):
- * const db = new Interocitor<DB>({ schema, dbName: 'myapp', appName: 'My App' });
+ * const db = new Interocitor<DB>({ schema, localStore: new MemoryLocalStore() });
  * const tasks = await db.table('tasks').query(); // ready immediately
  *
  * // With remote sync:
- * const db = new Interocitor<DB>(adapter, { schema, remotePath: '/App', appName: 'App' });
+ * const db = new Interocitor<DB>(adapter, { schema, remotePath: '/App', localStore });
  * await db.connect(); // authenticate + sync
  *
  * db.table('other'); // TS error — 'other' is not keyof DB
@@ -192,7 +185,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   private adapter: StorageAdapter | null;
   private config: ResolvedSyncConfig<S>;
   private serverId: string;
-  private local: LocalStoreAdapter;
+  private local: LocalStore;
   private deviceId: string;
   private hlc: HLC;
   private encryptionKey: CryptoKey | null = null;
@@ -204,7 +197,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   private manifest: Manifest | null = null;
   private remotePoisonError: Error | null = null;
 
-  // Known table names (populated from IDB index on init, updated on writes)
+  // Known table names (populated from the local store on init, updated on writes)
   private knownTables: Set<string> = new Set();
 
   // Flush management
@@ -223,7 +216,6 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   private pollBaseIntervalMs = 0;
   private pollCurrentIntervalMs = 0;
   private pollGeneration: object = {};
-  private visibilityChangeListener: (() => void) | null = null;
   private unsubscribeRemoteInvalidations: (() => void) | null = null;
   private remoteInvalidationPullPromise: Promise<void> | null = null;
   private remoteInvalidationPullQueued = false;
@@ -248,6 +240,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   private readonly schema?: DatabaseSchemaDefinition<S>;
   private readonly credentialStore: CredentialStore | null;
   private readonly dbName: string;
+  private deviceIdConfigured = false;
   private connectedStoresApi: ConnectedStoresApi | null = null;
 
   // Async query cache. cacheKey -> entry. See QueryCacheEntry doc above.
@@ -271,7 +264,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
    * config — no manual type parameter needed:
    *
    * @example
-   * const engine = new Interocitor(adapter, { schema, remotePath: '/App', appName: 'App' });
+   * const engine = new Interocitor(adapter, { schema, remotePath: '/App', localStore });
    * const tasks = engine.table('tasks'); // Table<{ title: string; status: 'open' | 'done' }>
    */
   constructor(config: SyncConfig<S>);
@@ -280,10 +273,12 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     const config = (maybeConfig ?? adapterOrConfig) as SyncConfig<S>;
     const adapter = (maybeConfig ? adapterOrConfig : null) as StorageAdapter | null;
 
+    if (!config.localStore) {
+      throw new Error('SyncConfig.localStore is required');
+    }
+
     this.schema = config.schema;
-    this.credentialStore = config.credentialStore === null
-      ? null
-      : config.credentialStore ?? createCredentialStore(config.dbName ?? 'interocitor', config.appName);
+    this.credentialStore = config.credentialStore ?? null;
     this.adapter = adapter;
     this.config = {
       remotePath: config.remotePath,
@@ -305,12 +300,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       offlineGraceMs: config.offlineGraceMs ?? DEFAULT_OFFLINE_GRACE_MS,
       batchWindowMs: config.batchWindowMs ?? DEFAULT_BATCH_WINDOW_MS,
       dbName: config.dbName ?? 'interocitor',
-      localStoreFactory: config.localStoreFactory ?? (() => createResilientLocalStore({
-        dbName: config.dbName,
-        schema: config.schema,
-        openTimeoutMs: config.localOpenTimeoutMs,
-        onDegraded: config.onLocalDegraded,
-      })),
+      localStore: config.localStore,
       schema: config.schema,
       replicas: config.replicas ?? [],
       onInit: config.onInit,
@@ -324,8 +314,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     this.serverId = this.config.serverId;
     this.dbName = this.config.dbName;
     this.logLevel = normalizeLogLevel(config.logLevel);
-    this.local = this.config.localStoreFactory();
-    this.deviceId = getDeviceId(config.deviceId);
+    this.local = this.config.localStore;
+    this.deviceIdConfigured = Boolean(config.deviceId);
+    this.deviceId = config.deviceId ?? createDeviceId();
     this.hlc = hlcInit(this.deviceId);
 
     // Encryption on by default. Opt out with encrypted: false.
@@ -422,7 +413,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   /**
    * Append the op to the in-flight batch. If we are inside a `batch()` block,
    * the op stays buffered until the block ends. Otherwise it joins an
-   * implicit window of `batchWindowMs`. Either way the result is one
+   * implicit period of `batchWindowMs`. Either way the result is one
    * ChangeEntry per batch instead of one per write.
    */
   private async queueOpForBatchedFlush(op: Op, hlc: string): Promise<void> {
@@ -746,7 +737,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   private storedFilePath(path: string): string {
     const remotePath = this.requireRemotePath('file storage');
     const clean = path.split('/').filter(Boolean).join('/');
-    if (!clean) throw new Error('File path must not be empty');
+    if (!clean) throw new Error('Stored object path must not be empty');
     return `${remotePath.replace(/\/$/, '')}/files/${clean}`;
   }
 
@@ -754,79 +745,15 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
     if (!this.encrypted) return { stored: bytes, plaintextSize: bytes.byteLength };
     if (!this.encryptionKey) await this.resolveEncryption();
-    if (!this.encryptionKey) throw new Error('File storage requires an encryption key');
+    if (!this.encryptionKey) throw new Error('Object storage requires an encryption key');
     return { stored: await encryptBytes(this.encryptionKey, bytes), plaintextSize: bytes.byteLength };
   }
 
   private async decodeStoredFile(data: Uint8Array): Promise<Uint8Array> {
     if (!this.encrypted) return data;
     if (!this.encryptionKey) await this.resolveEncryption();
-    if (!this.encryptionKey) throw new Error('File storage requires an encryption key');
+    if (!this.encryptionKey) throw new Error('Object storage requires an encryption key');
     return decryptBytes(this.encryptionKey, data);
-  }
-
-  private inferImageContentType(path: string, explicit?: string | null): string {
-    if (explicit) {
-      if (!explicit.toLowerCase().startsWith('image/')) throw new Error(`Image content type must start with image/: ${explicit}`);
-      return explicit;
-    }
-    const ext = path.split('?')[0]?.split('#')[0]?.split('.').pop()?.toLowerCase();
-    switch (ext) {
-      case 'jpg':
-      case 'jpeg':
-        return 'image/jpeg';
-      case 'png':
-        return 'image/png';
-      case 'gif':
-        return 'image/gif';
-      case 'webp':
-        return 'image/webp';
-      case 'svg':
-        return 'image/svg+xml';
-      case 'avif':
-        return 'image/avif';
-      case 'bmp':
-        return 'image/bmp';
-      case 'ico':
-        return 'image/x-icon';
-      default:
-        return 'image/png';
-    }
-  }
-
-  private parseImageDataUrl(dataUrl: string): { data: Uint8Array; contentType?: string } | null {
-    const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(dataUrl);
-    if (!match) return null;
-    const contentType = match[1] || undefined;
-    const isBase64 = Boolean(match[2]);
-    const payload = match[3] ?? '';
-    if (isBase64) {
-      const binary = atob(payload.replace(/\s+/g, ''));
-      const data = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i += 1) data[i] = binary.charCodeAt(i);
-      return { data, contentType };
-    }
-    return { data: new TextEncoder().encode(decodeURIComponent(payload)), contentType };
-  }
-
-  private async encodeImageInput(input: ImageInput, path: string, contentType?: string): Promise<{ data: Uint8Array; contentType: string }> {
-    if (typeof Blob !== 'undefined' && input instanceof Blob) {
-      const type = this.inferImageContentType(path, contentType || input.type || undefined);
-      return { data: new Uint8Array(await input.arrayBuffer()), contentType: type };
-    }
-    if (typeof input === 'string') {
-      const parsed = this.parseImageDataUrl(input);
-      if (parsed) return { data: parsed.data, contentType: this.inferImageContentType(path, contentType || parsed.contentType) };
-      return { data: new TextEncoder().encode(input), contentType: this.inferImageContentType(path, contentType || 'image/svg+xml') };
-    }
-    if (input instanceof Uint8Array) return { data: input, contentType: this.inferImageContentType(path, contentType) };
-    if (input instanceof ArrayBuffer) return { data: new Uint8Array(input), contentType: this.inferImageContentType(path, contentType) };
-    throw new Error('Unsupported image input in this runtime');
-  }
-
-  private coerceImageMetadata(meta: StoredFileMetadata | null, contentType: string): StoredImageMetadata | null {
-    if (!meta) return null;
-    return { ...meta, contentType: this.inferImageContentType(meta.path, meta.contentType || contentType) };
   }
 
   private async rebuildOutboxFromLocalState(): Promise<void> {
@@ -1304,6 +1231,23 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     await this.credentialStore.clear();
   }
 
+  private setDeviceId(deviceId: string): void {
+    this.deviceId = deviceId;
+    this.hlc.nodeId = deviceId;
+  }
+
+  private async restoreDeviceIdFromLocalStore(): Promise<void> {
+    if (this.deviceIdConfigured) return;
+    const stored = await this.local.getMeta('deviceId');
+    if (typeof stored === 'string' && stored) {
+      this.setDeviceId(stored);
+    }
+  }
+
+  private async persistDeviceIdToLocalStore(): Promise<void> {
+    await this.local.setMeta('deviceId', this.deviceId);
+  }
+
   private async resolveEncryption(): Promise<void> {
     console.log('[interocitor:cred] resolveEncryption() — entry', {
       dbName: this.dbName,
@@ -1353,8 +1297,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   private applyInitialState(state: SyncInitialState | null | undefined): void {
     if (!state) return;
     if (state.deviceId) {
-      this.deviceId = state.deviceId;
-      this.hlc.nodeId = state.deviceId;
+      this.setDeviceId(state.deviceId);
+      this.deviceIdConfigured = true;
     }
     if (state.remotePath !== undefined) {
       this.config.remotePath = state.remotePath;
@@ -1420,55 +1364,6 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   }
 
   /**
-   * Persist credentials to the OS keychain via biometrics.
-   * Call after pairing, or from a "Secure my keys" UI action.
-   * Returns true if saved, false if unavailable or user cancelled.
-   */
-  async secureWithBiometrics(): Promise<boolean> {
-    return this.credentialStore?.secureWithBiometrics?.() ?? false;
-  }
-
-  /**
-   * Explicit restore path for wiped / returning users.
-   * Call only from intentional app UI: "try restore purchases",
-   * "restore access", etc.
-   *
-   * On success:
-   *  - restores passphrase + device ID from OS keychain
-   *  - re-populates silent local storage
-   *  - derives encryption key
-   *
-   * Returns true if restore succeeded.
-   */
-  async restoreWithBiometrics(): Promise<boolean> {
-    let restored: { passphrase: string; deviceId: string } | null = null;
-    try {
-      restored = await (this.credentialStore?.restoreWithBiometrics?.() ?? Promise.resolve(null));
-    } catch (err) {
-      this.log('warn', 'restoreWithBiometrics() — failed', err);
-      return false;
-    }
-    if (!restored) return false;
-
-    const deviceIdChanged = restored.deviceId !== this.deviceId;
-    this.deviceId = restored.deviceId;
-    this.hlc.nodeId = restored.deviceId;
-    this.passphrase = restored.passphrase;
-
-    if (this.encrypted) {
-      this.encryptionKey = await passphraseToKey(restored.passphrase);
-    }
-    this.log('info', 'restoreWithBiometrics() — restored', { dbName: this.dbName, deviceIdChanged });
-    this.emit({
-      type: 'credentials:restored',
-      source: 'biometric',
-      deviceIdChanged,
-      hadPassphrase: true,
-    });
-    return true;
-  }
-
-  /**
    * Clear persisted credentials for this mesh.
    * Warning: lost key = lost data. No recovery.
    */
@@ -1504,9 +1399,11 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       const initialState = await this.config.resolveInitialState?.();
       this.applyInitialState(initialState ?? null);
 
+      await this.restoreDeviceIdFromLocalStore();
+
       // Recover credentials from the silent primary store only.
-      // No biometric prompt during normal init.
       await this.restoreCredentials();
+      await this.persistDeviceIdToLocalStore();
 
       // Resolve encryption: derive key from passphrase, load persisted, or generate.
       await this.resolveEncryption();
@@ -1608,11 +1505,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
         dbName: this.dbName,
         remotePath: this.config.remotePath,
       });
-      this.deviceId = stored.deviceId;
-      this.hlc.nodeId = stored.deviceId;
-      try {
-        if (typeof localStorage !== 'undefined') localStorage.setItem('interocitor-device-id', stored.deviceId);
-      } catch { /* ok */ }
+      this.setDeviceId(stored.deviceId);
+      await this.persistDeviceIdToLocalStore();
       deviceIdChanged = true;
     }
 
@@ -1854,7 +1748,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       this.emit({ type: 'auth:complete' });
     }
 
-    // Reload steady-state fast path: local IDB has a cursor, there is no
+    // Reload steady-state fast path: local cache has a cursor, there is no
     // pending outbox, and remote head has not advanced. In that case the
     // client has nothing to publish or merge. After the minimal auth check,
     // probe head and stop — no folder creation, manifest reads, device
@@ -1973,46 +1867,6 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     this.connected = true;
     this.setConnectionStatus('idle');
     this.log('info', 'connect() — connected', { remotePath: this.config.remotePath, deviceId: this.deviceId, pollInterval: this.config.pollInterval });
-
-    this.startVisibilityTracking();
-  }
-
-  private startVisibilityTracking(): void {
-    this.stopVisibilityTracking();
-    if (typeof document === 'undefined') return;
-    const listener = () => {
-      if (document.visibilityState === 'hidden') {
-        // Tab backgrounded: flush pending writes and slow down polling 10×.
-        this.doFlush().catch(() => {});
-        if (this.pollBaseIntervalMs) {
-          this.pollCurrentIntervalMs = Math.min(
-            this.pollCurrentIntervalMs * POLL_BACKGROUND_MULTIPLIER,
-            this.pollBaseIntervalMs * POLL_BACKGROUND_MULTIPLIER,
-          );
-          this.log('debug', '[interocitor:poll] tab hidden, poll interval slowed', { intervalMs: this.pollCurrentIntervalMs });
-        }
-      } else {
-        // Tab foregrounded: pull immediately then reset to base interval.
-        this.log('debug', '[interocitor:poll] tab visible, forcing pull and resetting interval');
-        if (this.pollBaseIntervalMs) {
-          this.pollCurrentIntervalMs = this.pollBaseIntervalMs;
-        }
-        if (this.connected) {
-          this.pull().catch(() => {});
-        }
-      }
-    };
-    this.visibilityChangeListener = listener;
-    document.addEventListener('visibilitychange', listener);
-  }
-
-  private stopVisibilityTracking(): void {
-    if (this.visibilityChangeListener) {
-      if (typeof document !== 'undefined') {
-        document.removeEventListener('visibilitychange', this.visibilityChangeListener);
-      }
-      this.visibilityChangeListener = null;
-    }
   }
 
   async disconnect(): Promise<void> {
@@ -2021,7 +1875,6 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     // poll/push/flush touches the adapter while we are killing the session.
     this.stopPolling();
     this.stopRemoteInvalidations();
-    this.stopVisibilityTracking();
     this.clearScheduledFlush();
     this.clearCompactTimers();
     this.clearBatchTimer();
@@ -2069,7 +1922,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     // Same-adapter no-op. Callers (auto-reconnect, React StrictMode, etc.)
     // commonly re-attach the same adapter on every reload. Without this
     // guard we would tear down the live transport, reset cursor/epoch/meshId,
-    // re-queue every IDB row into the outbox via rebuildOutboxFromLocalState,
+    // re-queue every local row into the outbox via rebuildOutboxFromLocalState,
     // then reconnect — which re-flushes the entire dataset as a fresh batch
     // of change files on every reload.
     if (!switching) {
@@ -2131,7 +1984,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     if (wasConnected && adapter) await this.connect();
   }
 
-  async setLocalStorage(local: LocalStoreAdapter): Promise<void> {
+  async setLocalStore(local: LocalStore): Promise<void> {
     await this.ensureReady();
     const wasConnected = this.connected;
     if (wasConnected) await this.doFlush();
@@ -2240,7 +2093,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   // ── Batched writes ─────────────────────────────────────────────────
   // All writes performed inside `fn` are merged into ONE ChangeEntry.
   // Implicit batching also happens automatically: writes within the
-  // configured batchWindowMs window are flushed into a single ChangeEntry.
+  // configured batch period are flushed into a single ChangeEntry.
 
   private batchDepth = 0;
 
@@ -2580,7 +2433,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     await this.ensureReady();
     // Drain any pending implicit batch first so its ops reach the outbox
     // before we read it. Without this, flush() called from user code right
-    // after a write inside the batch window would skip those writes.
+    // after a write inside the batch period would skip those writes.
     await this.flushPendingBatch();
     return this.doFlush();
   }
@@ -2615,7 +2468,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
     // The manifest GC floor is a point of no return. If this local outbox
     // contains entries at/before the floor, the device missed the retention
-    // window. Do not publish them; align from the canonical snapshot instead.
+      // period. Do not publish them; align from the canonical snapshot instead.
     if (this.hasPreFloorEntries(entries)) {
       this.clearScheduledFlush();
       if (this.manifest?.snapshotPath) {
@@ -2656,7 +2509,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       // and reading change files. Without this, a page reload after a
       // local-only write storm re-lists the changes folder and re-GETs
       // every file we authored ourselves — re-decoding our own writes
-      // through the CRDT path despite local IDB already being canonical.
+      // through the CRDT path despite local cache already being canonical.
       // Monotonic-forward only: never let cursor go backwards on disk.
       let highestFlushedHlc = '';
       for (const entry of entries) {
@@ -2817,47 +2670,6 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     if (adapter.getStoredFileMetadata) return adapter.getStoredFileMetadata(filePath);
     const meta = await adapter.getFileMetadata(filePath);
     return meta ? { ...meta, storedSize: meta.size } : null;
-  }
-
-  // ── First-class image storage ───────────────────────────────────────
-
-  /** Encode and upload an image through durable encrypted file storage. */
-  async putImage(path: string, image: ImageInput, options: PutImageOptions = {}): Promise<StoredImageMetadata> {
-    const encoded = await this.encodeImageInput(image, path, options.contentType);
-    const meta = await this.putFile(path, encoded.data, encoded.contentType);
-    return { ...meta, contentType: encoded.contentType };
-  }
-
-  /** Read an image as decoded bytes plus a browser Blob. */
-  async getImage(path: string): Promise<StoredImage> {
-    const metadata = await this.getFileMetadata(path);
-    const contentType = this.inferImageContentType(path, metadata?.contentType);
-    const data = await this.getFile(path);
-    const blob = new Blob([data as BlobPart], { type: contentType });
-    return {
-      path,
-      data,
-      blob,
-      metadata: this.coerceImageMetadata(metadata, contentType),
-      contentType,
-    };
-  }
-
-  /** Read an image and return a revokable browser blob: URL for UI rendering. */
-  async getImageBlobUrl(path: string): Promise<StoredImageBlobUrl> {
-    if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
-      throw new Error('Blob URLs are not available in this runtime');
-    }
-    const image = await this.getImage(path);
-    const url = URL.createObjectURL(image.blob);
-    return {
-      path,
-      url,
-      blob: image.blob,
-      metadata: image.metadata,
-      contentType: image.contentType,
-      revoke: () => URL.revokeObjectURL(url),
-    };
   }
 
   // ── Mesh management ────────────────────────────────────────────────

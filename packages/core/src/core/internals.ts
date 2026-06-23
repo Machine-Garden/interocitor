@@ -61,7 +61,7 @@ export { LOG_LEVELS };
 
 // ─── ID generation ───────────────────────────────────────────────────
 
-import { uuidv7, createDeviceId } from './ids.ts';
+import { uuidv7 } from './ids.ts';
 
 /**
  * Generate a prefixed ID for internal use (change entries, snapshots, etc).
@@ -69,18 +69,6 @@ import { uuidv7, createDeviceId } from './ids.ts';
  */
 export function generateId(prefix: string): string {
   return `${prefix}_${uuidv7()}`;
-}
-
-export function getDeviceId(override?: string): string {
-  if (override) return override;
-  const KEY = 'interocitor-device-id';
-  const storage = typeof localStorage === 'undefined' ? null : localStorage;
-  let id = storage?.getItem(KEY) ?? null;
-  if (!id) {
-    id = createDeviceId();
-    try { storage?.setItem(KEY, id); } catch { /* ok */ }
-  }
-  return id;
 }
 
 // ─── Encoding / Hashing ─────────────────────────────────────────────

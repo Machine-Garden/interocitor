@@ -10,6 +10,10 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
+    "./adapters/memory": {
+      "import": "./dist/adapters/memory.js",
+      "types": "./dist/adapters/memory.d.ts"
+    },
     "./adapters/google-drive": {
       "import": "./dist/adapters/google-drive.js",
       "types": "./dist/adapters/google-drive.d.ts"
@@ -22,17 +26,9 @@
       "import": "./dist/adapters/cloudflare.js",
       "types": "./dist/adapters/cloudflare.d.ts"
     },
-    "./adapters/memory": {
-      "import": "./dist/adapters/memory.js",
-      "types": "./dist/adapters/memory.d.ts"
-    },
     "./storage/local-store": {
       "import": "./dist/storage/local-store.js",
       "types": "./dist/storage/local-store.d.ts"
-    },
-    "./storage/reset": {
-      "import": "./dist/storage/reset.js",
-      "types": "./dist/storage/reset.d.ts"
     },
     "./handshake/qr": {
       "import": "./dist/handshake/qr-public.js",
@@ -51,8 +47,8 @@
   "scripts": {
     "build": "rm -rf ./dist && tsc -p tsconfig.json",
     "validate": "node ./dist/index.js",
-    "test:e2e": "yarn build && yarn exec playwright test -c ./playwright.config.ts",
-    "test:e2e:todo": "yarn build && yarn exec playwright test -c ./playwright.config.ts tests/e2e/todo-webdav.spec.ts"
+    "test:unit": "yarn build && node --test tests/*.test.mjs",
+    "test:e2e": "yarn test:unit"
   },
   "keywords": [
     "local-first",
@@ -62,8 +58,7 @@
     "google-drive",
     "webdav",
     "encrypted",
-    "mesh",
-    "indexeddb"
+    "mesh"
   ],
   "license": "MIT",
   "devDependencies": {

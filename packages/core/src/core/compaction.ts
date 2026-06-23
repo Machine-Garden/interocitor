@@ -13,7 +13,7 @@
 
 import type {
   StorageAdapter,
-  LocalStoreAdapter,
+  LocalStore,
   Manifest,
   ManifestPointer,
   Snapshot,
@@ -31,7 +31,7 @@ import { hlcParse } from './hlc.ts';
 
 export interface CompactContext {
   adapter: StorageAdapter;
-  local: LocalStoreAdapter;
+  local: LocalStore;
   remotePath: string;
   manifest: Manifest;
   codecState: CodecState;
@@ -59,7 +59,7 @@ async function computeGcFloor(ctx: CompactContext, nowMs: number): Promise<strin
       const lastSeen = Date.parse(meta.lastSeenAt || '');
       if (Number.isFinite(lastSeen) && lastSeen < cutoffMs) continue;
       // Active devices that have not yet acknowledged a watermark block
-      // advancement. They are still inside the offline grace window.
+      // advancement. They are still inside the offline grace period.
       if (!meta.observedWatermarkHlc) return ctx.manifest.gcFloorHlc ?? '';
       floors.push(meta.observedWatermarkHlc);
     }
@@ -93,7 +93,7 @@ export async function compact(ctx: CompactContext): Promise<Manifest> {
   const nextGeneration = manifest.generation + 1;
   const snapshotPath = `${p.mainlineFolder}/snapshot-${nextEpoch}-${serverId}.json`;
 
-  // Build a full snapshot from IDB — the in-memory cache is partial.
+  // Build a full snapshot from the local store; the in-memory merge cache is partial.
   const allRows = await local.getAllRows();
   const snapshotTables: Record<string, Record<string, Row>> = {};
   for (const row of allRows) {
@@ -181,7 +181,7 @@ export async function compact(ctx: CompactContext): Promise<Manifest> {
 
 export interface RehydrateContext {
   adapter: StorageAdapter;
-  local: LocalStoreAdapter;
+  local: LocalStore;
   codecState: CodecState;
   manifest: Manifest | null;
   hlc: HLC;
@@ -215,7 +215,7 @@ export async function rehydrate(ctx: RehydrateContext): Promise<HLC> {
     ctx.tables = {};
     ctx.knownTables.clear();
 
-    // Write snapshot rows to IDB
+    // Write snapshot rows to the local store.
     let rowCount = 0;
     for (const [tableName, rows] of Object.entries(snapshot.tables)) {
       ctx.knownTables.add(tableName);

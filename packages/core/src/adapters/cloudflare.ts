@@ -11,7 +11,14 @@
  *   wss://<worker>/notify/<prefix>  (WebSocket invalidations via InterocitorRelay DO)
  */
 
-import type { StorageAdapter, FileEntry, RemoteInvalidationPayload, RemoteInvalidationHooks, StoredFileMetadata, StoredFileWriteOptions } from '../core/types.ts';
+import type {
+  StorageAdapter,
+  FileEntry,
+  RemoteInvalidationPayload,
+  RemoteInvalidationHooks,
+  StoredFileMetadata,
+  StoredFileWriteOptions,
+} from '../core/types.ts';
 
 export interface CloudflareAdapterConfig {
   /** Worker IO base URL that includes prefix, e.g. https://worker/io/team-a */
@@ -166,6 +173,11 @@ export class CloudflareAdapter implements StorageAdapter {
     hooks?: RemoteInvalidationHooks,
   ): () => void {
     if (this.config.relayEnabled === false) {
+      hooks?.onClose?.();
+      return () => {};
+    }
+    if (typeof WebSocket === 'undefined') {
+      hooks?.onError?.(new Error('Cloudflare relay invalidations require a WebSocket implementation'));
       hooks?.onClose?.();
       return () => {};
     }
@@ -408,4 +420,3 @@ export class CloudflareAdapter implements StorageAdapter {
     return payload.file ?? null;
   }
 }
-

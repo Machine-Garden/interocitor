@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Interocitor } from '@interocitor/core';
-import { getImageBlobUrl, type StoredImageMetadata } from '@interocitor/web';
+import { getImageBlobUrl, type StoredImageMetadata } from './image.ts';
 
 export interface UseImageResult {
-  /** Revokable blob: URL, or null while skipped/loading/error. */
+  /** Revokable blob URL, or null while skipped/loading/error. */
   url: string | null;
   /** Browser Blob backing the URL, or null while unavailable. */
   blob: Blob | null;
@@ -32,9 +32,8 @@ function toError(error: unknown): Error {
 /**
  * React hook for display-only encrypted Interocitor images.
  *
- * Reads `path` via `getImageBlobUrl()`, returns the generated `blob:` URL,
- * and automatically revokes it on unmount/path changes. Rendering stays in app
- * code: `<img src={image.url ?? undefined} />`.
+ * Reads `path` via `getImageBlobUrl()`, returns the generated blob URL, and
+ * automatically revokes it on unmount/path changes.
  */
 export function useImage<
   S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>,
@@ -97,3 +96,4 @@ export function useImage<
 
   return { ...state, revoke };
 }
+

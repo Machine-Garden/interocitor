@@ -31,7 +31,7 @@ Low-level primitives:
 ## Install
 
 ```bash
-yarn add @interocitor/react @interocitor/core react
+yarn add @interocitor/react @interocitor/core @interocitor/web react
 ```
 
 ## Typed context
@@ -60,10 +60,11 @@ export const [InterocitorProvider, useDb] = createInterocitorContext<DB>();
 
 ```ts
 import { Interocitor } from '@interocitor/core';
+import { IndexedDbLocalStore } from '@interocitor/web';
 
 const db = new Interocitor<DB>({
-  appName: 'My App',
   dbName: 'my-app',
+  localStore: new IndexedDbLocalStore('my-app'),
 });
 
 db.configureMesh({
@@ -145,11 +146,12 @@ const { data: task } = useRow(db.table('tasks'), taskId);
 
 ## useImage
 
-Display image files stored with `db.putImage(...)` or `db.putFile(..., 'image/*')`.
+Display image files stored with `@interocitor/web`'s `putImage(...)` or
+`db.putFile(..., 'image/*')`.
 
-`useImage` is image-oriented UI sugar over `db.getImageBlobUrl(path)`. It is
-not a generic attachment downloader: use `db.getFile(path)` for non-image
-files or custom download flows.
+`useImage` is image-oriented UI sugar over `@interocitor/web`'s
+`getImageBlobUrl(db, path)`. It is not a generic attachment downloader: use
+`db.getFile(path)` for non-image files or custom download flows.
 
 ```tsx
 function Avatar({ userId }: { userId: string }) {
@@ -168,8 +170,10 @@ function Avatar({ userId }: { userId: string }) {
 Upload pattern:
 
 ```tsx
+import { putImage } from '@interocitor/web';
+
 const path = `users/${userId}/avatar`;
-await db.putImage(path, file);
+await putImage(db, path, file);
 await db.table('users').patch(userId, { avatar_path: path });
 ```
 

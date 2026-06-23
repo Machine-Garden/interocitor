@@ -5,22 +5,22 @@
 </p>
 
 <p align="center">
-  <em>Encrypted local-first CRDT database and durable file store for browser apps.</em>
+  <em>Runtime-neutral encrypted local-first CRDT database and durable byte file store.</em>
 </p>
 
 # @interocitor/core
 
-End‑to‑end encrypted, local‑first app data over storage you already own
-(Google Drive, WebDAV, Cloudflare R2, your own server). Interocitor gives
-your app both structured CRDT rows and path-addressed files/images. The
-cloud is a mailbox; merge and decryption happen on the device.
+End‑to‑end encrypted, local‑first app data over storage you already own.
+`@interocitor/core` contains the runtime-neutral CRDT engine, sync protocol,
+remote storage contract, local store contract, and path-addressed byte file
+APIs. Runtime-neutral mailbox adapters live in core. Browser stores, browser
+credentials, image helpers, and React image hooks live in `@interocitor/web`.
 
 ## What it is
 
-- A client-side CRDT database for structured state. Local reads/writes go
-  through an embedded store (IndexedDB in the browser). The engine ships
-  diffs, not queries.
-- A durable file store for blobs/images that belong to the same mesh.
+- A CRDT database for structured state. Local reads/writes go through an
+  explicit `LocalStore`. The engine ships diffs, not queries.
+- A durable byte file store for assets that belong to the same mesh.
   Files are encrypted, path-addressed, and overwritten/deleted explicitly;
   they do not merge or compact.
 - A CRDT over per‑column HLC values. Every device converges to the same
@@ -35,9 +35,8 @@ cloud is a mailbox; merge and decryption happen on the device.
 
 - **Offline‑first by construction.** Every read and write hits a local
   store. Network is needed only to share state with other devices.
-- **No server you have to operate.** The remote is dumb storage. You can
-  run the engine against a user's own Google Drive and ship zero
-  backend.
+- **No required backend shape.** The remote is dumb storage. Core adapters can
+  run anywhere the required standard APIs are available.
 - **End‑to‑end encryption by default.** The default config encrypts
   every change file and snapshot before it leaves the device.
 - **Small, embeddable runtime.** No workers, no background services
@@ -46,16 +45,13 @@ cloud is a mailbox; merge and decryption happen on the device.
 ## Quick start
 
 ```ts
-import { Interocitor } from '@interocitor/core';
-import { GoogleDriveAdapter } from '@interocitor/core/adapters/google-drive';
+import { Interocitor, MemoryAdapter, MemoryLocalStore } from '@interocitor/core';
 
-const adapter = new GoogleDriveAdapter({ clientId: 'YOUR_GOOGLE_CLIENT_ID' });
-
-const db = new Interocitor(adapter, {
-  dbName: 'my-app',          // local DB name; keep stable across reloads
-  appName: 'My App',         // shown in biometric prompts / OS keychain
-  remotePath: '/MyApp',      // mesh-scoped folder on the remote
-  encrypted: true,           // E2E encryption (default)
+const db = new Interocitor(new MemoryAdapter(), {
+  dbName: 'my-app',
+  remotePath: '/MyApp',
+  encrypted: true,
+  localStore: new MemoryLocalStore(),
 });
 
 await db.init();
@@ -71,17 +67,19 @@ await db.table('todos').add(
 console.log('Passphrase:', db.getPassphrase());
 ```
 
+Browser apps should import `IndexedDbLocalStore` and browser credential stores
+from `@interocitor/web`; mailbox adapters come from core.
+
 > The constructor accepts either `(adapter, config)` or `(config)` alone.
-> Use the `(config)` form for local‑only mode (no remote). When you
-> attach a remote later, call `setRemoteStorage(adapter)` and then
-> `connect()`.
+> Use the `(config)` form for local‑only mode (no remote). Every runtime must
+> pass `config.localStore`.
 
 ## Mental model
 
 ```mermaid
 flowchart LR
   A[Browser app] --> B[Interocitor engine]
-  B --> C[Local store]
+  B --> C[Runtime-provided local store]
   B --> D[Encrypt locally]
   D --> E[Adapter]
   E --> F[Remote mailbox<br/>ciphertext only]
@@ -100,7 +98,7 @@ Four artifact families live on the remote:
 
 - **change files** — one per write batch, named `<HLC>-chg_<id>.json`;
 - **snapshots** — periodic full row state, written by compaction;
-- **durable files** — app blobs/images under `files/`, addressed by app path;
+- **durable files** — app byte payloads under `files/`, addressed by app path;
 - **a manifest** — pointer to the current generation, plus mesh metadata.
 
 See `docs/adapter-contract.md` for the full layout.
@@ -208,14 +206,9 @@ all automatic — there is no configuration knob.
   interval back to base. The intent is to absorb idle bursts of clients
   without hammering the remote, while still recovering immediately when
   data starts flowing.
-- **Tab visibility.** When the host page is hidden
-  (`document.visibilityState === 'hidden'`) the current poll interval is
-  multiplied by 10 — backgrounded tabs poll lazily. When the tab becomes
-  visible again the interval is reset to base **and** an immediate
-  `pull()` is fired so foregrounded data jumps in without waiting for
-  the next tick. This is a standard SWR‑style refresh‑on‑focus pattern.
-  The listener is wired during `connect()` and torn down by
-  `disconnect()`; environments without `document` (e.g. Node) skip it.
+- **Runtime lifecycle hooks.** Core supports polling and explicit
+  `pull()`/`flush()` calls. Browser visibility handling belongs in
+  `@interocitor/web` or application code.
 - **Push fallback.** Adapters that push invalidations (Cloudflare relay)
   trigger an immediate pull and bypass the polling cadence entirely.
   Polling is the safety net when the push channel is unavailable; the
@@ -317,10 +310,10 @@ After the handshake the new device:
 ```ts
 const db = new Interocitor(adapter, {
   dbName: 'my-app',
-  appName: 'My App',
   remotePath: '/Taska',
   passphrase: 'base58-from-handshake',
   encrypted: true,
+  localStore,
 });
 
 await db.init();
@@ -351,9 +344,9 @@ see `docs/credential-store.md`.
 ```ts
 const db = new Interocitor(adapter, {
   dbName: 'my-app',
-  appName: 'My App',
   remotePath: '/MyApp',
   schema,
+  localStore,
   connectStageTimeoutMs: 15_000,
   onConnectStalled: ({ stage, timeoutMs }) => {
     console.warn(`connect stage stalled: ${stage}`, { timeoutMs });
@@ -382,17 +375,9 @@ const pdf = await db.getFile('receipts/may.pdf');
 const fileMeta = await db.getFileMetadata('receipts/may.pdf');
 await db.deleteFile('receipts/may.pdf');
 
-// Images — first-class file helpers
-await db.putImage('avatars/me.png', fileOrBlob);
-const image = await db.getImage('avatars/me.png');             // { data, blob, metadata }
-const blobUrl = await db.getImageBlobUrl('avatars/me.png');    // { url, revoke }
-blobUrl.revoke();
-
 // Credentials
 db.getPassphrase();
 db.setPassphrase(passphrase);
-await db.secureWithBiometrics();
-await db.restoreWithBiometrics();
 await db.clearCredentials();
 
 // Batched writes — one ChangeEntry per batch
@@ -417,7 +402,8 @@ assets that should move with the mesh.
 Recommended pattern:
 
 1. Store metadata and references in rows.
-2. Store opaque payloads with `putFile` / `putImage`.
+2. Store opaque payloads with `putFile`. Browser image helpers in
+   `@interocitor/web` delegate to this API.
 3. Store the file path in the row.
 
 ```ts
@@ -469,29 +455,34 @@ File semantics and caveats:
   convention such as `users/{userId}/avatar` or
   `tasks/{taskId}/files/{filename}`.
 
-Images are convenience wrappers over durable files:
+Browser image helpers are provided by `@interocitor/web` as convenience
+wrappers over durable files:
 
 ```ts
-await db.putImage('avatars/me.png', file);
+import { getImage, getImageBlobUrl, putImage } from '@interocitor/web';
 
-const image = await db.getImage('avatars/me.png');
+await putImage(db, 'avatars/me.png', file);
+
+const image = await getImage(db, 'avatars/me.png');
 // image.data: Uint8Array
 // image.blob: Blob
 // image.contentType: image/png, image/jpeg, ...
 
-const view = await db.getImageBlobUrl('avatars/me.png');
+const view = await getImageBlobUrl(db, 'avatars/me.png');
 img.src = view.url;
 view.revoke();
 ```
 
-`putImage(path, image, options?)` accepts `Blob`, `ArrayBuffer`, `Uint8Array`,
-data URLs, and plain strings. Plain strings are encoded as text and default
-to `image/svg+xml` unless `options.contentType` or the path extension says
-otherwise. Explicit image content types must start with `image/`.
+`putImage(db, path, image, options?)` accepts `Blob`, `ArrayBuffer`,
+`Uint8Array`, data URLs, and plain strings. Plain strings are encoded as text
+and default to `image/svg+xml` unless `options.contentType` or the path
+extension says otherwise. Explicit image content types must start with
+`image/`.
 
-Use `putFile` for arbitrary non-image files. Use `getImageBlobUrl` /
-`@interocitor/react`'s `useImage` for display scenarios that need a browser
-`blob:` URL, and always revoke blob URLs you create manually.
+Use core `putFile` for arbitrary bytes. Use `@interocitor/web`'s
+`getImageBlobUrl` or `@interocitor/react`'s `useImage` for display scenarios
+that need a browser `blob:` URL, and always revoke blob URLs you create
+manually.
 
 ### Schema typing
 
@@ -571,29 +562,24 @@ rehydrates from the canonical snapshot instead.
 
 ### Local store
 
-The local store is a pluggable `LocalStoreAdapter`. Browser default is
-IndexedDB. The Swift package ships SQLite. Tests use an in‑memory
-implementation. Reads, writes, queries, and the outbox all go through
-this interface.
+The local store is a required pluggable `LocalStore`. Reads, writes, queries,
+outbox entries, cursors, and mesh metadata all go through this interface.
+Core ships `MemoryLocalStore` for tests and demos.
 
-Browser IndexedDB is wrapped by a resilient boundary:
+Runtime packages own durable implementations:
 
-- `createResilientLocalStore()` bounds IndexedDB open time and degrades to
-  memory on blocked/stalled opens or post-open `InvalidStateError` /
-  "database connection is closing" failures.
-- `onLocalDegraded` lets apps log or show a non-fatal banner. The hook must
-  be informational only; the engine has already continued.
-- `createNamedLocalStore()` adds versioned DB-name rotation. Use it when the
-  app prefers abandoning a poisoned cache namespace over waiting for old
-  tabs/workers to release it.
-- `resetLocalDatabaseWithDeadline()` provides a never-hanging destructive
-  reset primitive for user-facing "repair local cache" flows.
+- `@interocitor/web` exports `IndexedDbLocalStore`, resilient wrappers,
+  named-store rotation, and reset helpers.
+- A future `@interocitor/node` package is expected to expose explicit Node
+  stores such as `NodeSqliteLocalStore`.
 
 Example:
 
 ```ts
+import { createNamedLocalStore } from '@interocitor/web';
+
 const db = new Interocitor(adapter, {
-  localStoreFactory: () => createNamedLocalStore({
+  localStore: createNamedLocalStore({
     baseName: 'MealPlannerInterocitor',
     schema,
     onLocalDegraded: ({ reason, error }) => report(reason, error),
@@ -649,10 +635,10 @@ user messaging only. Do not make app correctness depend on the callback.
 
 | Adapter | Use when | Notes |
 | --- | --- | --- |
-| `GoogleDriveAdapter` | You want zero infrastructure | OAuth in the browser; the user owns the data |
+| `MemoryAdapter` | Tests and demos | No remote persistence |
+| `GoogleDriveAdapter` | You want zero infrastructure | Runtime supplies OAuth token; the user owns the data |
 | `WebDAVAdapter` | Self‑hosted (Nextcloud, OwnCloud, custom WebDAV) | Easy to inspect remotely |
 | `CloudflareAdapter` | You operate a worker; want push invalidations | Experimental |
-| `MemoryAdapter` | Tests and demos | No persistence |
 
 Implementing your own adapter: see `docs/adapter-contract.md` for
 required semantics, consistency assumptions, and the contract test
@@ -832,7 +818,7 @@ A short field guide. Detailed mitigations in the linked docs.
 | `MeshEncryptionMismatchError` on connect | App flipped `encrypted` between sessions | Pin `encrypted` per `dbName`, never change |
 | `remote:poisoned` event | Decode failure on a manifest, change file, or snapshot | `docs/security-model.md` — usually wrong key, schema drift, or remote tampering |
 | Writes never appear on peer | Peer never compacted, peer's poll interval is long, remote dropped writes, or `connect()` is offline-ready after a stalled cloud stage | Check `flush:complete`, `connect:error`, `onConnectStalled`; check remote folder by hand |
-| App is unusable after IndexedDB error | Local cache is wedged, blocked by older tab, or connection is closing | Use `createResilientLocalStore` / `createNamedLocalStore`; log `onLocalDegraded`; offer `resetLocalDatabaseWithDeadline` repair |
+| App is unusable after browser local-store error | Local cache is wedged, blocked by older tab, or connection is closing | In `@interocitor/web`, use `createResilientLocalStore` / `createNamedLocalStore`; log `onLocalDegraded`; offer `resetLocalDatabaseWithDeadline` repair |
 | Local store has rows that are "old" after re‑pair | Engine kept local data when you re‑paired with a fresh mesh | Either delete local DB on re‑pair, or accept the merge |
 | Lost passphrase | No recovery | Passphrase is the key. Back it up out of band |
 | Long‑offline device "lost" recent edits | Rehydrate replaced local state with the snapshot | Local writes already in the outbox survive; in‑flight uncommitted UI state does not |

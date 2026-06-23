@@ -18,7 +18,7 @@
  * for derived sub-stores.
  */
 
-import type { LocalStoreAdapter } from './types.ts';
+import type { LocalStore } from './types.ts';
 
 const REGISTRY_META_KEY = 'interocitor:connected-stores';
 
@@ -43,7 +43,7 @@ export interface ConnectedStoreCredentials {
   passphrase: string | null;
   /** Whether the sub-store uses encryption. */
   encrypted: boolean;
-  /** Suggested local IndexedDB name for the sub-store. */
+  /** Suggested local store namespace for the sub-store. */
   dbName: string;
   /** Optional adapter pointer the app can use to materialize a StorageAdapter. */
   adapter?: ConnectedStoreAdapterRef;
@@ -72,7 +72,7 @@ export interface ConnectedStoresApi {
 
 /** LocalStore-backed implementation. JSON list under a single meta key. */
 export class LocalStoreConnectedStoresApi implements ConnectedStoresApi {
-  constructor(private readonly local: LocalStoreAdapter) {}
+  constructor(private readonly local: LocalStore) {}
 
   private async readAll(): Promise<ConnectedStoreCredentials[]> {
     const raw = await this.local.getMeta(REGISTRY_META_KEY);

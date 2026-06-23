@@ -24,9 +24,9 @@ What this gives you:
 - **Confidentiality of row contents.** Field names, field values, and
   table names are inside the encrypted payload. The remote cannot read
   them without the passphrase.
-- **Confidentiality of durable file contents.** `putFile()` and `putImage()`
-  encrypt file bytes with the mesh key before adapter upload when
-  `encrypted: true`.
+- **Confidentiality of durable file contents.** `putFile()` encrypts file
+  bytes with the mesh key before adapter upload when `encrypted: true`.
+  Browser image helpers in `@interocitor/web` delegate to this API.
 - **Integrity of each entry.** AES‑GCM is authenticated; flipped bits in
   ciphertext fail to decrypt and trigger a `decode:error` →
   `remote:poisoned` flow.

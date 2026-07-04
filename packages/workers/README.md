@@ -190,6 +190,7 @@ Worker metadata tracks:
 - upload/modified time
 - last access time
 - total read count
+- `taint` — an opaque label set by the client for [sealed files](../core/docs/tainted-files.md). The worker stores and returns it but never interprets it; the bytes stay opaque to the server regardless.
 
 Uploads are guarded before R2 write:
 
@@ -205,7 +206,7 @@ const mount = createInterocitorMount<Env>({
   runtime: {
     maxStoredFileBytes: env => env.INTEROCITOR_MAX_STORED_FILE_BYTES,
     maxMeshStoredBytes: env => env.INTEROCITOR_MAX_MESH_STORED_BYTES,
-    authorizeFileUpload: async ({ prefix, path, uploadedByDeviceId, size, contentType, request }) => {
+    authorizeFileUpload: async ({ prefix, path, uploadedByDeviceId, size, contentType, taint, request }) => {
       if (!uploadedByDeviceId) return { allowed: false, status: 401, reason: 'missing device' };
       if (contentType?.startsWith('image/') && size > 8 * 1024 * 1024) {
         return { allowed: false, status: 413, reason: 'image too large' };
@@ -240,6 +241,39 @@ runtime: {
 
 Only `db` is required for sync. `files` is required for durable file/image APIs. Everything else is optional.
 
+## Observability (audit)
+
+The worker is the **trusted boundary**: it observes every mesh operation it
+serves, so an `audit` callback is the place to record "who did what" without
+trusting the client. Provide it as a runtime getter; the worker invokes it
+with a typed event after each operation.
+
+```ts
+runtime: {
+  // Simplest useful sink: structured log to `wrangler tail` / Logpush.
+  audit: (event) => console.log(JSON.stringify(event)),
+}
+```
+
+`audit` is a **pure callback** — the worker does not persist events itself, and
+callback failures never fail the request. Each `WorkerAuditEvent` carries
+`op` (write, read, delete, list, metadata, stored-file-\*, system), `prefix`,
+`path`, `status`, `outcome`, optional `bytes`/`taint`, a `requestId`, and an
+ISO `at` timestamp.
+
+What the worker **can** audit: change-file/manifest writes, compaction and
+maintenance, reads, lists, and stored-file upload/download/delete/metadata.
+What it **cannot** see: CRDT row meaning (payloads are encrypted), the `taint`
+→ key mapping, and client-side unlock/decrypt of sealed files. Full event
+shape and boundaries: [Audit](docs/audit.md).
+
+## Catch-up after absence
+
+A device returning after a long absence catches up incrementally: the cursor is
+already in the data model. Change files are HLC-named, and `pull()` merges only
+those newer than the device's cursor — no full re-download unless the needed
+tail was already compacted away. See [Catch-up](docs/catch-up.md).
+
 ## Mesh IDs
 
 Workers issue and validate mesh/team IDs. Each ID is a UUIDv7 with an embedded HMAC tag — only the worker with the secret can mint valid IDs.
@@ -271,6 +305,12 @@ Set `INTEROCITOR_MESH_SECRET` in your Worker environment (wrangler secret or `.d
 Default value is `'interocitor'` — fine for development, **change it in production**.
 
 ⚠️ **Changing this secret invalidates ALL existing mesh IDs.** Peers with previously issued IDs will fail validation. Treat it as permanent.
+
+## Security guardrails
+
+For the current security boundary of the Cloudflare implementation — D1,
+R2, application encryption, metadata exposure, and the limits of current
+server-side access control — see [Security guardrails](docs/security-guardrails.md).
 
 ## License
 

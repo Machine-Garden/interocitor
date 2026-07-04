@@ -1,7 +1,7 @@
 {
   "name": "@interocitor/react",
-  "version": "0.0.0-beta.11",
-  "description": "Encrypted local-first CRDT database that syncs over cloud storage without a purpose-built backend.",
+  "version": "0.0.0-beta.12",
+  "description": "React bindings for Interocitor live queries, rows, images, connected stores, and connection status.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -16,8 +16,8 @@
     "build": "rm -rf ./dist && tsc -p tsconfig.json"
   },
   "peerDependencies": {
-    "@interocitor/core": "0.0.0-beta.11",
-    "@interocitor/web": "0.0.0-beta.11",
+    "@interocitor/core": "0.0.0-beta.12",
+    "@interocitor/web": "0.0.0-beta.12",
     "react": ">=18"
   },
   "devDependencies": {

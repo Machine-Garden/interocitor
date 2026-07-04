@@ -1,7 +1,7 @@
 {
   "name": "interocitor-swift",
   "private": true,
-  "version": "0.0.0-beta.2",
+  "version": "0.0.0-beta.12",
   "description": "Swift workspace for Interocitor with IndexedDB-style storage concepts mapped onto SQLite.",
   "files": [
     "Package.swift",

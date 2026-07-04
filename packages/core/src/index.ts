@@ -1,28 +1,31 @@
 /**
  * interocitor
  *
- * Encrypted local-first CRDT database that syncs over cloud storage.
- * Runtime packages provide concrete local stores and credential stores.
+ * Runtime-neutral encrypted local-first CRDT database and durable byte file store.
+ * Browser packages provide concrete local stores and credential stores.
  *
  * @example
  * ```ts
- * import { Interocitor } from 'interocitor';
- * import { MemoryAdapter, MemoryLocalStore } from '@interocitor/core';
+ * import {
+ *   Interocitor,
+ *   MemoryAdapter,
+ *   MemoryLocalStore,
+ *   PortablePassphraseKeySource,
+ * } from '@interocitor/core';
  *
- * const adapter = new MemoryAdapter();
- * const engine = new Interocitor(adapter, {
- *   remotePath: '/Interocitor',
+ * const portableKey = '...high-entropy-base58...';
+ *
+ * const engine = new Interocitor(new MemoryAdapter(), {
+ *   dbName: 'meals',
+ *   remotePath: '/Meals',
  *   localStore: new MemoryLocalStore(),
- *   encrypted: true, // generates key automatically
+ *   keySource: new PortablePassphraseKeySource({ portableKey }),
  * });
  *
  * await engine.init();
  * await engine.connect();
  *
- * // Share this passphrase with other devices:
- * console.log('Passphrase:', engine.getPassphrase());
- *
- * await engine.put('meals', 'meal_1', { name: 'Butter Chicken', servings: 4 });
+ * await engine.table('meals').add({ name: 'Butter Chicken', servings: 4 });
  *
  * engine.on((event) => {
  *   if (event.type === 'change') {
@@ -83,6 +86,29 @@ export {
   withDeadline,
 } from './core/with-deadline.ts';
 export {
+  BoundSharedKeySource,
+  PortablePassphraseKeySource,
+  type BoundSharedKeySourceOptions,
+  type MeshKeyContext,
+  type MeshKeyMaterial,
+  type MeshKeySource,
+  type PortablePassphraseKeySourceOptions,
+} from './crypto/key-source.ts';
+export {
+  generateSigningKeypair,
+  exportPublicKey,
+  importPublicKey,
+  exportPrivateKey,
+  importPrivateKey,
+  sign,
+  verify,
+  signToken,
+  verifyToken,
+  type SignedClaims,
+  type SignTokenOptions,
+  type VerifyTokenOptions,
+} from './crypto/signing.ts';
+export {
   type CredentialStore,
   type StoredCredentials,
 } from './storage/credential-store.ts';
@@ -125,6 +151,8 @@ export type {
   FileEntry,
   StoredFileMetadata,
   StoredFileWriteOptions,
+  FileSeal,
+  SealedFile,
 
   // Engine configuration
   SyncConfig,

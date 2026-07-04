@@ -59,21 +59,21 @@ export const [InterocitorProvider, useDb] = createInterocitorContext<DB>();
 ```
 
 ```ts
-import { Interocitor } from '@interocitor/core';
-import { IndexedDbLocalStore } from '@interocitor/web';
+import { Interocitor, PortablePassphraseKeySource } from '@interocitor/core';
+import { IndexedDbLocalStore, createWebCredentialStore } from '@interocitor/web';
 
-const db = new Interocitor<DB>({
-  dbName: 'my-app',
-  localStore: new IndexedDbLocalStore('my-app'),
-});
+const dbName = 'my-app';
+const portableKey = '...high-entropy-base58...';
 
-db.configureMesh({
+const db = new Interocitor<DB>(adapter, {
+  dbName,
   remotePath: '/MyApp',
-  passphrase,
-  encrypted: true,
+  localStore: new IndexedDbLocalStore(dbName),
+  keySource: new PortablePassphraseKeySource({
+    portableKey,
+    credentialStore: createWebCredentialStore(dbName, { storage: 'sessionStorage' }),
+  }),
 });
-
-await db.setRemoteStorage(adapter);
 await db.init();
 await db.connect(); // starts remote sync; may return offline-ready on stalled cloud setup
 ```

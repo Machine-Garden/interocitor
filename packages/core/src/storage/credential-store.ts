@@ -1,6 +1,6 @@
 export interface StoredCredentials {
-  /** Base58 passphrase for the mesh encryption key. */
-  passphrase: string;
+  /** Portable high-entropy base58 key material for the mesh. */
+  portableKey: string;
   /** Stable device identifier. */
   deviceId: string;
   /**
@@ -17,7 +17,7 @@ export interface StoredCredentials {
  * Runtime-owned credential persistence contract.
  *
  * Core never creates a default implementation. Browser, Node, and application
- * packages decide where passphrases and device anchors are stored.
+ * packages decide where portable key material and device anchors are stored.
  */
 export interface CredentialStore {
   save(creds: StoredCredentials): Promise<void>;

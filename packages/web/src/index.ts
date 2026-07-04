@@ -22,9 +22,22 @@ export {
 } from './storage/reset.ts';
 
 export {
+  BrowserCredentialEnvelopeStore,
+  EnvelopedCredentialStore,
   LocalStorageCredentialStore,
+  MemoryCredentialEnvelopeStore,
+  MemoryCredentialStore,
+  SessionStorageCredentialStore,
+  StaticEnvelopeKeyProvider,
   WebAuthnCredentialStore,
+  WebAuthnEnvelopeKeyProvider,
   createWebCredentialStore,
+  type CreateWebCredentialStoreOptions,
+  type CredentialEnvelopeKeyProvider,
+  type CredentialEnvelopeKeyPurpose,
+  type CredentialEnvelopeStore,
+  type CredentialStorageLocation,
+  type EnvelopeStorageLocation,
   type WebCredentialStore,
 } from './credential-store.ts';
 

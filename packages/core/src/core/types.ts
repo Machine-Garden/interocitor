@@ -545,6 +545,24 @@ export interface StoredFileMetadata extends FileEntry {
   storedSize?: number;
   /** Application content type, if provided by the uploader. */
   contentType?: string;
+  /** Optional human-readable label for bytes sealed with an extra key. */
+  taint?: string;
+}
+
+export interface FileSeal {
+  /** Human-readable label for the extra key used to seal this file. */
+  taint: string;
+  /** Extra key used instead of the mesh key for this file's bytes. */
+  key: CryptoKey;
+}
+
+export interface SealedFile {
+  /** Metadata returned by the adapter before plaintext is opened. */
+  metadata: StoredFileMetadata;
+  /** Optional human-readable label for bytes sealed with an extra key. */
+  taint?: string;
+  /** Decrypt the downloaded bytes. Tainted files require the matching extra key. */
+  open(key?: CryptoKey): Promise<Uint8Array>;
 }
 
 export interface StoredFileWriteOptions {
@@ -554,6 +572,8 @@ export interface StoredFileWriteOptions {
   plaintextSize?: number;
   /** Application content type. */
   contentType?: string;
+  /** Optional human-readable label for bytes sealed with an extra key. */
+  taint?: string;
 }
 
 export interface RemoteInvalidationPayload {
@@ -701,17 +721,12 @@ export interface SyncConfig<
   /** Cloud folder path prefix, e.g. "/Interocitor" */
   remotePath?: string;
   /**
-   * Base58 passphrase for mesh encryption.
-   * When set, the engine derives the AES-256 key internally and persists
-   * it via the credential store. Implies encrypted = true.
+   * Primary mesh-key configuration.
+   *
+   * Use a `MeshKeySource` to describe how the final mesh key is obtained:
+   * portable shared key, bound shared key, or another runtime-owned strategy.
    */
-  passphrase?: string;
-  /**
-   * Encryption is on by default. Set to false to opt out.
-   * When enabled without a passphrase, the engine generates a fresh key
-   * on first init (retrieve via getPassphrase()).
-   */
-  encrypted?: boolean;
+  keySource: import('../crypto/key-source.ts').MeshKeySource | null;
   /**
    * Override the auto-generated device ID.
    * Primarily for tests. In production, omit — the engine generates
@@ -841,11 +856,6 @@ export interface SyncConfig<
    * fail the primary flush.
    */
   replicas?: ReplicaConfig[];
-  /**
-   * Runtime-owned credential store for key material and device identity.
-   * Pass `null` or omit to disable credential persistence.
-   */
-  credentialStore?: import('../storage/credential-store.ts').CredentialStore | null;
 }
 
 // ─── Events ──────────────────────────────────────────────────────────
@@ -863,7 +873,7 @@ export type SyncEvent =
   | { type: 'credentials:conflict'; storedDeviceId: string; activeDeviceId: string; dbName: string; remotePath?: string }
   | { type: 'credentials:meshMismatch'; dbName: string; remotePath?: string; storedMeshId: string; activeMeshId: string }
   | { type: 'credentials:persisted'; dbName: string; remotePath?: string; deviceId: string; encrypted: boolean }
-  | { type: 'encryption:resolved'; strategy: 'passphrase' | 'existing-key' | 'generated'; dbName: string; remotePath?: string; encrypted: boolean }
+  | { type: 'encryption:resolved'; strategy: 'passphrase' | 'existing-key' | 'generated' | string; dbName: string; remotePath?: string; encrypted: boolean }
   | { type: 'mesh:configured'; dbName: string; remotePath?: string; deviceId: string; encrypted: boolean; hadPassphrase: boolean }
   | { type: 'connection:status'; status: ConnectionStatus }
   | { type: 'connect:state'; dbName: string; remotePath?: string; deviceId: string; localEpoch?: number; remoteEpoch?: number; meshId?: string; encrypted: boolean }

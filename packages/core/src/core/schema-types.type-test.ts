@@ -8,6 +8,7 @@ import type {
   InferFieldType,
   SyncConfig,
 } from './types.ts';
+import { PortablePassphraseKeySource } from '../crypto/key-source.ts';
 import { types } from './schema-types.ts';
 import type { Interocitor } from './sync-engine.ts';
 import { MemoryLocalStore } from '../storage/memory-store.ts';
@@ -155,6 +156,7 @@ void _mismatchedField;
 const _config: SyncConfig<{ tasks: { title: string } }> = {
   remotePath: '/App',
   localStore: new MemoryLocalStore(),
+  keySource: new PortablePassphraseKeySource({ generateIfMissing: false }),
   schema: {
     tables: { tasks: { fields: { title: types.string } } },
   },

@@ -36,6 +36,8 @@ import type {
   RemoteInvalidationPayload,
   RemoteInvalidationStorageAdapter,
   StoredFileMetadata,
+  FileSeal,
+  SealedFile,
 } from './types.ts';
 
 import type { HLC } from './types.ts';
@@ -48,9 +50,9 @@ import { paths, logAtLevel, normalizeLogLevel, generateId } from './internals.ts
 import type { CodecState } from './codec.ts';
 import { loadOrCreateManifest, upsertDeviceMetadata } from './manifest.ts';
 import { decryptBytes, encryptBytes, generateKey, keyToPassphrase, passphraseToKey } from '../crypto/encryption.ts';
+import type { MeshKeySource } from '../crypto/key-source.ts';
 import { MeshCredentialMismatchError } from './errors.ts';
 import { ConnectStageTimeoutError, DEFAULT_CONNECT_STAGE_TIMEOUT_MS, withDeadline } from './with-deadline.ts';
-import type { CredentialStore } from '../storage/credential-store.ts';
 import type { ManifestContext } from './manifest.ts';
 import { flushToAdapter } from './flush.ts';
 import {
@@ -191,6 +193,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   private encryptionKey: CryptoKey | null = null;
   private encrypted = false;
   private passphrase: string | null = null;
+  private keySource: MeshKeySource | null = null;
 
   // In-memory CRDT merge cache — lazily populated on writes and pulls.
   private tables: Record<string, Record<string, Row>> = {};
@@ -238,7 +241,6 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   // Event listeners
   private listeners: Set<SyncEventListener> = new Set();
   private readonly schema?: DatabaseSchemaDefinition<S>;
-  private readonly credentialStore: CredentialStore | null;
   private readonly dbName: string;
   private deviceIdConfigured = false;
   private connectedStoresApi: ConnectedStoresApi | null = null;
@@ -278,7 +280,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     }
 
     this.schema = config.schema;
-    this.credentialStore = config.credentialStore ?? null;
+    this.keySource = config.keySource;
     this.adapter = adapter;
     this.config = {
       remotePath: config.remotePath,
@@ -319,16 +321,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     this.deviceId = config.deviceId ?? createDeviceId();
     this.hlc = hlcInit(this.deviceId);
 
-    // Encryption on by default. Opt out with encrypted: false.
-    if (config.encrypted === false) {
-      this.encrypted = false;
-    } else if (config.passphrase) {
-      this.passphrase = config.passphrase;
-      this.encrypted = true;
-    } else {
-      this.encrypted = true;
-      // Will generate key in doInit() if no persisted key found
-    }
+    this.encrypted = this.keySource !== null;
 
   }
 
@@ -741,19 +734,25 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     return `${remotePath.replace(/\/$/, '')}/files/${clean}`;
   }
 
-  private async encodeStoredFile(data: Uint8Array | string): Promise<{ stored: Uint8Array; plaintextSize: number }> {
-    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
-    if (!this.encrypted) return { stored: bytes, plaintextSize: bytes.byteLength };
+  private async resolveStoredFileKey(key?: CryptoKey): Promise<CryptoKey | null> {
+    if (key) return key;
+    if (!this.encrypted) return null;
     if (!this.encryptionKey) await this.resolveEncryption();
     if (!this.encryptionKey) throw new Error('Object storage requires an encryption key');
-    return { stored: await encryptBytes(this.encryptionKey, bytes), plaintextSize: bytes.byteLength };
+    return this.encryptionKey;
   }
 
-  private async decodeStoredFile(data: Uint8Array): Promise<Uint8Array> {
-    if (!this.encrypted) return data;
-    if (!this.encryptionKey) await this.resolveEncryption();
-    if (!this.encryptionKey) throw new Error('Object storage requires an encryption key');
-    return decryptBytes(this.encryptionKey, data);
+  private async encodeStoredFile(data: Uint8Array | string, key?: CryptoKey): Promise<{ stored: Uint8Array; plaintextSize: number }> {
+    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+    const resolvedKey = await this.resolveStoredFileKey(key);
+    if (!resolvedKey) return { stored: bytes, plaintextSize: bytes.byteLength };
+    return { stored: await encryptBytes(resolvedKey, bytes), plaintextSize: bytes.byteLength };
+  }
+
+  private async decodeStoredFile(data: Uint8Array, key?: CryptoKey): Promise<Uint8Array> {
+    const resolvedKey = await this.resolveStoredFileKey(key);
+    if (!resolvedKey) return data;
+    return decryptBytes(resolvedKey, data);
   }
 
   private async rebuildOutboxFromLocalState(): Promise<void> {
@@ -1152,27 +1151,22 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   // ── Encryption ─────────────────────────────────────────────────────
 
   private async persistCredentials(): Promise<void> {
-    if (!this.credentialStore || !this.passphrase) return;
+    if (!this.keySource || !this.passphrase) return;
     try {
-      // Bind the persisted record to the active meshId when known.
-      // The store keeps ONE record per dbName; meshId lets the engine
-      // detect "wrong mesh" on the next load instead of silently reusing
-      // the previous mesh's key.
-      //
-      // Crucial: do NOT clobber an existing stored meshId when the
-      // engine's manifest has not been loaded yet (e.g. persist runs
-      // during init before connect()). Read-modify-write preserves the
-      // marker so `assertCredentialMeshParity` can still detect a stale
-      // record on the upcoming connect.
       let meshId = this.manifest?.meshId;
       if (!meshId) {
         try {
-          const existing = await this.credentialStore.load();
+          const existing = await this.loadPersistedCredentials();
           if (existing?.meshId) meshId = existing.meshId;
         } catch { /* best-effort merge */ }
       }
-      await this.credentialStore.save({
-        passphrase: this.passphrase,
+      await this.keySource.persist({
+        dbName: this.dbName,
+        remotePath: this.config.remotePath,
+        meshId,
+        deviceId: this.deviceId,
+      }, {
+        portableKey: this.passphrase,
         deviceId: this.deviceId,
         ...(meshId ? { meshId } : {}),
       });
@@ -1186,7 +1180,6 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       });
     } catch (err) {
       this.log('error', 'persistCredentials() — failed', err);
-      // Persistence failure must not break local writes; surface via log only.
     }
   }
 
@@ -1201,14 +1194,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
    */
   private async assertCredentialMeshParity(): Promise<void> {
     const activeMeshId = this.manifest?.meshId;
-    if (!activeMeshId || !this.credentialStore) return;
+    if (!activeMeshId || !this.keySource) return;
     let stored: { meshId?: string } | null = null;
     try {
-      stored = await this.credentialStore.load();
+      stored = await this.loadPersistedCredentials();
     } catch {
-      return; // load failures already surface elsewhere; do not block connect
+      return;
     }
-    if (!stored?.meshId) return; // legacy/no-meshId record: nothing to assert
+    if (!stored?.meshId) return;
     if (stored.meshId === activeMeshId) return;
 
     this.emit({
@@ -1221,14 +1214,20 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     throw new MeshCredentialMismatchError(this.dbName, stored.meshId, activeMeshId);
   }
 
-  private async loadPersistedCredentials(): Promise<{ passphrase: string; deviceId: string; meshId?: string } | null> {
-    if (!this.credentialStore) return null;
-    return this.credentialStore.load();
+  private async loadPersistedCredentials(): Promise<{ portableKey: string; deviceId: string; meshId?: string } | null> {
+    if (!this.keySource) return null;
+    const loaded = await this.keySource.load({
+      dbName: this.dbName,
+      remotePath: this.config.remotePath,
+      meshId: this.manifest?.meshId,
+      deviceId: this.deviceId,
+    });
+    if (!loaded.portableKey) return null;
+    return { portableKey: loaded.portableKey, deviceId: this.deviceId, ...(this.manifest?.meshId ? { meshId: this.manifest.meshId } : {}) };
   }
 
   private async clearPersistedCredentials(): Promise<void> {
-    if (!this.credentialStore) return;
-    await this.credentialStore.clear();
+    await this.keySource?.clear();
   }
 
   private setDeviceId(deviceId: string): void {
@@ -1249,49 +1248,37 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   }
 
   private async resolveEncryption(): Promise<void> {
-    console.log('[interocitor:cred] resolveEncryption() — entry', {
-      dbName: this.dbName,
-      encrypted: this.encrypted,
-      hasPassphrase: !!this.passphrase,
-      hasKey: !!this.encryptionKey,
-      passphraseFingerprint: this.passphrase ? `len=${this.passphrase.length} head=${this.passphrase.slice(0, 8)} tail=${this.passphrase.slice(-4)}` : null,
-    });
     if (!this.encrypted) {
       this.log('debug', 'resolveEncryption() — encryption disabled');
       return;
     }
 
-    // 1. Have passphrase (from config, setPassphrase(), or restoreCredentials())
-    if (this.passphrase && !this.encryptionKey) {
-      this.encryptionKey = await passphraseToKey(this.passphrase);
-      try {
-        const raw = await crypto.subtle.exportKey('raw', this.encryptionKey);
-        const hash = await crypto.subtle.digest('SHA-256', raw);
-        const bytes = new Uint8Array(hash);
-        const hex = Array.from(bytes.slice(0, 6)).map(b => b.toString(16).padStart(2, '0')).join('');
-        console.log('[interocitor:cred] resolveEncryption() — derived key', { dbName: this.dbName, keyFingerprint: `sha256-${hex}` });
-      } catch { /* ignore */ }
-      await this.persistCredentials();
-      this.log('info', 'resolveEncryption() — derived key from passphrase', { dbName: this.dbName });
-      this.emit({ type: 'encryption:resolved', strategy: 'passphrase', dbName: this.dbName, remotePath: this.config.remotePath, encrypted: true });
+    if (this.keySource) {
+      const resolved = await this.keySource.load({
+        dbName: this.dbName,
+        remotePath: this.config.remotePath,
+        meshId: this.manifest?.meshId,
+        deviceId: this.deviceId,
+      });
+      this.encrypted = resolved.encrypted;
+      this.encryptionKey = resolved.key;
+      this.passphrase = resolved.portableKey ?? null;
+      if (this.passphrase && !this.encryptionKey) {
+        this.encryptionKey = await passphraseToKey(this.passphrase);
+      }
+      if (!this.encryptionKey && this.encrypted) {
+        const key = await generateKey();
+        this.encryptionKey = key;
+        this.passphrase = await keyToPassphrase(key);
+      }
+      if (this.encrypted && this.encryptionKey) {
+        await this.persistCredentials();
+        this.emit({ type: 'encryption:resolved', strategy: this.keySource.constructor.name, dbName: this.dbName, remotePath: this.config.remotePath, encrypted: true });
+      }
       return;
     }
 
-    // 2. Already have a key (set via setPassphrase before init)
-    if (this.encryptionKey) {
-      await this.persistCredentials();
-      this.log('info', 'resolveEncryption() — using preset key', { dbName: this.dbName });
-      this.emit({ type: 'encryption:resolved', strategy: 'existing-key', dbName: this.dbName, remotePath: this.config.remotePath, encrypted: true });
-      return;
-    }
-
-    // 3. Generate fresh key (first-time open)
-    const key = await generateKey();
-    this.encryptionKey = key;
-    this.passphrase = await keyToPassphrase(key);
-    await this.persistCredentials();
-    this.log('warn', 'resolveEncryption() — generated fresh key (first-time open). Lose credentials => lose data.', { dbName: this.dbName });
-    this.emit({ type: 'encryption:resolved', strategy: 'generated', dbName: this.dbName, remotePath: this.config.remotePath, encrypted: true });
+    throw new Error('Encrypted meshes require a keySource');
   }
 
   private applyInitialState(state: SyncInitialState | null | undefined): void {
@@ -1331,55 +1318,11 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     });
   }
 
-  /**
-   * Set or replace the mesh encryption passphrase before connecting.
-   *
-   * Apps may call this before init(), after init(), or after credentials
-   * arrive from pairing. It intentionally does not rebuild the engine or
-   * change remotePath/deviceId; it only invalidates the derived key so the
-   * next connect/flush uses the new passphrase.
-   */
-  setPassphrase(passphrase: string): void {
-    if (this.connected) throw new Error('Cannot set passphrase while connected; disconnect first');
-    this.passphrase = passphrase;
-    this.encryptionKey = null;
-    this.encrypted = true;
-    this.emit({
-      type: 'mesh:configured',
-      dbName: this.dbName,
-      remotePath: this.config.remotePath,
-      deviceId: this.deviceId,
-      encrypted: this.encrypted,
-      hadPassphrase: true,
-    });
-  }
-
-  /**
-   * Get the current mesh passphrase.
-   * Returns null if the mesh is unencrypted.
-   * Call after init() to ensure key derivation is complete.
-   */
-  getPassphrase(): string | null {
-    return this.passphrase;
-  }
-
-  /**
-   * Clear persisted credentials for this mesh.
-   * Warning: lost key = lost data. No recovery.
-   */
   async clearCredentials(): Promise<void> {
     await this.clearPersistedCredentials();
     this.encryptionKey = null;
     this.passphrase = null;
     this.encrypted = false;
-  }
-
-  /**
-   * @deprecated Use setPassphrase() instead. Will be removed.
-   */
-  setEncryptionKey(key: CryptoKey): void {
-    this.encryptionKey = key;
-    this.encrypted = true;
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────
@@ -1435,7 +1378,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       hasKey: !!this.encryptionKey,
       encrypted: this.encrypted,
     });
-    let stored: { passphrase: string; deviceId: string; meshId?: string } | null = null;
+    let stored: { portableKey: string; deviceId: string; meshId?: string } | null = null;
     try {
       stored = await this.loadPersistedCredentials();
     } catch (err) {
@@ -1448,7 +1391,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       hasStored: !!stored,
       storedDeviceId: stored?.deviceId,
       storedMeshId: stored?.meshId,
-      storedPassphraseFingerprint: stored?.passphrase ? `len=${stored.passphrase.length} head=${stored.passphrase.slice(0, 8)} tail=${stored.passphrase.slice(-4)}` : null,
+      storedPortableKeyFingerprint: stored?.portableKey ? `len=${stored.portableKey.length} head=${stored.portableKey.slice(0, 8)} tail=${stored.portableKey.slice(-4)}` : null,
     });
     if (!stored) {
       this.log('debug', 'restoreCredentials() — no persisted credentials', { dbName: this.dbName });
@@ -1510,13 +1453,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       deviceIdChanged = true;
     }
 
-    let hadPassphrase = false;
-    if (this.encrypted && stored.passphrase) {
+    let restoredPortableKey = false;
+    if (this.encrypted && stored.portableKey) {
       if (!this.passphrase) {
-        this.passphrase = stored.passphrase;
-        hadPassphrase = true;
-      } else if (this.passphrase !== stored.passphrase) {
-        // Caller passed a different passphrase than the one persisted under
+        this.passphrase = stored.portableKey;
+        restoredPortableKey = true;
+      } else if (this.passphrase !== stored.portableKey) {
+        // Caller passed a different portable key than the one persisted under
         // dbName. This is the classic "self-sabotage": same dbName, two keys.
         // Local rows were written with one key; new flushes will use another;
         // every reload after this will start poisoning remote files.
@@ -1524,8 +1467,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
           dbName: this.dbName,
           remotePath: this.config.remotePath,
         });
-        // Keep caller-provided passphrase; the conflict event lets UI prompt
-        // the user to either clearCredentials() or correct the passphrase.
+        // Keep caller-provided portable key; the conflict event lets UI prompt
+        // the user to either clearCredentials() or correct the portable key.
         this.emit({
           type: 'credentials:conflict',
           storedDeviceId: stored.deviceId,
@@ -1538,7 +1481,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
         // cursor advance under the OLD key hides remote change files
         // from the new (mismatched) key — the engine would never decode
         // them and never surface the decode failure that proves the
-        // passphrase is wrong. Conflict surfaces via decode:error +
+        // portable key is wrong. Conflict surfaces via decode:error +
         // remote:poisoned on the next pull, instead of silently going.
         try { await this.local.setMeta('cursor', ''); } catch { /* best-effort */ }
       }
@@ -1548,7 +1491,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       type: 'credentials:restored',
       source: 'silent-store',
       deviceIdChanged,
-      hadPassphrase,
+      hadPassphrase: restoredPortableKey,
     });
   }
 
@@ -2621,12 +2564,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   // ── Durable file storage ───────────────────────────────────────────
 
   /** Upload a durable application file. Files are encrypted with the mesh key and are never compacted or merged. */
-  async putFile(path: string, data: Uint8Array | string, contentType?: string): Promise<StoredFileMetadata> {
+  async putFile(path: string, data: Uint8Array | string, contentType?: string, seal?: FileSeal): Promise<StoredFileMetadata> {
     await this.ensureReady();
     const adapter = this.requireAdapter('putFile()');
     const filePath = this.storedFilePath(path);
-    const { stored, plaintextSize } = await this.encodeStoredFile(data);
-    const options = { uploadedByDeviceId: this.deviceId, plaintextSize, contentType };
+    if (seal && !seal.taint.trim()) throw new Error('Object seal taint must not be empty');
+    const { stored, plaintextSize } = await this.encodeStoredFile(data, seal?.key);
+    const options = { uploadedByDeviceId: this.deviceId, plaintextSize, contentType, taint: seal?.taint };
     if (adapter.putStoredFile) return adapter.putStoredFile(filePath, stored, options);
     await adapter.ensureFolder(`${this.requireRemotePath('putFile()').replace(/\/$/, '')}/files`);
     await adapter.writeFile(filePath, stored);
@@ -2641,16 +2585,43 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       plaintextSize,
       storedSize: stored.byteLength,
       contentType,
+      taint: seal?.taint,
     };
   }
 
-  /** Read and decrypt a durable application file. */
+  /** Read and decrypt an untainted durable application file with the mesh key. */
   async getFile(path: string): Promise<Uint8Array> {
+    const sealed = await this.openFile(path);
+    if (sealed.taint) throw new Error(`Object ${path} is tainted with ${sealed.taint}; unlock the matching key and call openFile().open(key)`);
+    return sealed.open();
+  }
+
+  /** Download a durable application file and defer plaintext opening until the caller supplies any required key. */
+  async openFile(path: string): Promise<SealedFile> {
     await this.ensureReady();
-    const adapter = this.requireAdapter('getFile()');
+    const adapter = this.requireAdapter('openFile()');
     const filePath = this.storedFilePath(path);
-    const stored = adapter.getStoredFile ? await adapter.getStoredFile(filePath) : await adapter.readFile(filePath);
-    return this.decodeStoredFile(stored);
+    const [stored, metadata] = await Promise.all([
+      adapter.getStoredFile ? adapter.getStoredFile(filePath) : adapter.readFile(filePath),
+      adapter.getStoredFileMetadata ? adapter.getStoredFileMetadata(filePath) : adapter.getFileMetadata(filePath).then((meta): StoredFileMetadata | null => meta ? { ...meta, storedSize: meta.size } : null),
+    ]);
+    const fallbackMetadata: StoredFileMetadata = {
+      name: filePath.split('/').pop() ?? filePath,
+      path: filePath,
+      size: stored.byteLength,
+      modifiedTime: new Date().toISOString(),
+      storedSize: stored.byteLength,
+    };
+    const fileMetadata = metadata ?? fallbackMetadata;
+    const taint = fileMetadata.taint;
+    return {
+      metadata: fileMetadata,
+      taint,
+      open: async (key?: CryptoKey) => {
+        if (taint && !key) throw new Error(`Object ${path} is tainted with ${taint}; a matching key is required`);
+        return this.decodeStoredFile(stored, key);
+      },
+    };
   }
 
   /** Delete a durable application file. Missing files are treated as already deleted. */
@@ -2713,12 +2684,5 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     return this.encrypted;
   }
 
-  /**
-   * Enable encryption on an existing unencrypted mesh.
-   * @deprecated Use setPassphrase() or pass encrypted/passphrase in config.
-   */
-  async enableEncryption(key: CryptoKey): Promise<void> {
-    this.encryptionKey = key;
-    this.encrypted = true;
-  }
 }
+

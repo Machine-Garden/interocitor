@@ -48,6 +48,24 @@ ws://127.0.0.1:<worker-port>/todo-interocitor/notify/<namespace>?access_token=<s
 
 and expects the WebSocket to reach `open`. This proves the example exports `InterocitorRelayDurableObject`, Wrangler binds it, and `withInterocitor(..., { relay })` routes `/notify/<namespace>` into the Durable Object.
 
+## Credential storage modes
+
+The demo wires `credentialStore` explicitly. Use the `credentials` query
+parameter to try different browser key-storage policies without editing code:
+
+```text
+?credentials=session          # default: sessionStorage credential record
+?credentials=memory           # JS memory only; reload needs the join token again
+?credentials=local            # localStorage credential record
+?credentials=passkey          # WebAuthn largeBlob / platform authenticator
+?credentials=memory-envelope  # encrypted envelope in app memory, unwrap key in memory
+```
+
+The actual wiring lives in `app.js#createTodoCredentialStore`. A deployed app
+can replace the memory envelope store with an API-backed
+`CredentialEnvelopeStore`, for example storing only the encrypted envelope in
+the Worker/backend while the unwrap key stays in passkey/biometrics.
+
 ## Durable files pattern
 
 The TODO UI intentionally stays row-only, but the Cloudflare-backed transport

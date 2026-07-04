@@ -25,6 +25,7 @@ const SCHEMA_SQL = [
     size                   INTEGER NOT NULL,
     plaintext_size         INTEGER,
     content_type           TEXT,
+    taint                  TEXT,
     uploaded_by_device_id  TEXT    NOT NULL,
     uploaded_at            TEXT    NOT NULL,
     modified_time          TEXT    NOT NULL,
@@ -65,12 +66,22 @@ const initialized = new WeakSet<D1Database>();
 export async function ensureSchema(db: D1Database): Promise<void> {
   if (initialized.has(db)) return;
   await db.batch(SCHEMA_SQL.map((sql) => db.prepare(sql)));
+  await ensureStoredFilesTaintColumn(db);
   initialized.add(db);
 }
 
 /** Explicit migration entrypoint for ops scripts. */
 export async function applySchema(db: D1Database): Promise<void> {
   await db.batch(SCHEMA_SQL.map((sql) => db.prepare(sql)));
+  await ensureStoredFilesTaintColumn(db);
+}
+
+async function ensureStoredFilesTaintColumn(db: D1Database): Promise<void> {
+  const result = await db.prepare('PRAGMA table_info(stored_files)').all<{ name?: string }>();
+  const columns = result.results ?? [];
+  if (!columns.some((column) => column.name === 'taint')) {
+    await db.prepare('ALTER TABLE stored_files ADD COLUMN taint TEXT').run();
+  }
 }
 
 export const SCHEMA_STATEMENTS: readonly string[] = SCHEMA_SQL;

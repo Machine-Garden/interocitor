@@ -62,10 +62,10 @@ class MemoryD1 {
       const [prefix, path] = params;
       return this.storedFiles.get(this.key(prefix, path)) ?? null;
     }
-    if (sql.includes('SELECT r2_key FROM stored_files')) {
+    if (sql.includes('SELECT r2_key') && sql.includes('FROM stored_files')) {
       const [prefix, path] = params;
       const row = this.storedFiles.get(this.key(prefix, path));
-      return row ? { r2_key: row.r2_key } : null;
+      return row ? { r2_key: row.r2_key, size: row.size, taint: row.taint } : null;
     }
     return null;
   }
@@ -76,7 +76,7 @@ class MemoryD1 {
 
   run(sql, params) {
     if (sql.includes('INSERT INTO stored_files')) {
-      const [prefix, path, r2_key, size, plaintext_size, content_type, uploaded_by_device_id, uploaded_at, etag] = params;
+      const [prefix, path, r2_key, size, plaintext_size, content_type, taint, uploaded_by_device_id, uploaded_at, etag] = params;
       this.storedFiles.set(this.key(prefix, path), {
         prefix,
         path,
@@ -84,6 +84,7 @@ class MemoryD1 {
         size,
         plaintext_size,
         content_type,
+        taint,
         uploaded_by_device_id,
         uploaded_at,
         modified_time: uploaded_at,
@@ -199,12 +200,13 @@ test('R2 stored files support PUT, GET, metadata, use count, and DELETE', async 
   const { env, mount } = createHarness();
   const meshId = await issueMeshId(mount, env);
 
-  const put = await upload(mount, env, meshId, '/docs/a.txt', 'hello');
+  const put = await upload(mount, env, meshId, '/docs/a.txt', 'hello', { 'X-Interocitor-Taint': 'group1' });
   assert.equal(put.status, 201);
   const putJson = await put.json();
   assert.equal(putJson.file.uploadedByDeviceId, 'dev-a');
   assert.equal(putJson.file.size, 5);
   assert.equal(putJson.file.plaintextSize, 5);
+  assert.equal(putJson.file.taint, 'group1');
 
   const get = await mount.fetch(new Request(`https://example.test/io/${encodeURIComponent(meshId)}/stored-file?path=%2Fdocs%2Fa.txt`), env, createCtx());
   assert.equal(get.status, 200);
@@ -218,6 +220,7 @@ test('R2 stored files support PUT, GET, metadata, use count, and DELETE', async 
   assert.equal(metadata.status, 200);
   const metaJson = await metadata.json();
   assert.equal(metaJson.file.useCount, 1);
+  assert.equal(metaJson.file.taint, 'group1');
   assert.ok(metaJson.file.lastAccessedAt);
 
   const del = await mount.fetch(new Request(`https://example.test/io/${encodeURIComponent(meshId)}/stored-file?path=%2Fdocs%2Fa.txt`, { method: 'DELETE' }), env, createCtx());
@@ -227,11 +230,26 @@ test('R2 stored files support PUT, GET, metadata, use count, and DELETE', async 
   assert.equal(missing.status, 404);
 });
 
+test('worker audit callback receives operation events as a pure callback', async () => {
+  const auditEvents = [];
+  const { env, mount } = createHarness({ audit: (event) => auditEvents.push(event) });
+  const meshId = await issueMeshId(mount, env);
+
+  assert.equal((await upload(mount, env, meshId, '/audit.txt', 'hello', { 'X-Interocitor-Taint': 'group-a' })).status, 201);
+
+  const write = auditEvents.find((event) => event.op === 'stored-file-write' && event.path === '/audit.txt');
+  assert.ok(write, 'expected stored-file-write audit event');
+  assert.equal(write.event, 'interocitor.audit');
+  assert.equal(write.taint, 'group-a');
+  assert.equal(write.outcome, 'ok');
+  assert.ok(write.at, 'expected timestamp');
+});
+
 test('R2 stored files enforce device id, file size, mesh quota, callback rejection, and delete quota recovery', async () => {
   const rejected = [];
   const { env, mount } = createHarness({
     authorizeFileUpload: async (upload) => {
-      rejected.push(upload.path);
+      rejected.push({ path: upload.path, taint: upload.taint });
       if (upload.path.includes('blocked')) return { allowed: false, status: 418, reason: 'blocked' };
       return true;
     },
@@ -240,7 +258,7 @@ test('R2 stored files enforce device id, file size, mesh quota, callback rejecti
 
   assert.equal((await upload(mount, env, meshId, '/missing-device.txt', 'x', { 'X-Interocitor-Device-Id': '' })).status, 401);
   assert.equal((await upload(mount, env, meshId, '/too-large.txt', '01234567890')).status, 413);
-  assert.equal((await upload(mount, env, meshId, '/blocked.txt', 'ok')).status, 418);
+  assert.equal((await upload(mount, env, meshId, '/blocked.txt', 'ok', { 'X-Interocitor-Taint': 'group2' })).status, 418);
 
   assert.equal((await upload(mount, env, meshId, '/a.txt', '123456')).status, 201);
   assert.equal((await upload(mount, env, meshId, '/b.txt', '123456')).status, 201);
@@ -249,5 +267,5 @@ test('R2 stored files enforce device id, file size, mesh quota, callback rejecti
   const del = await mount.fetch(new Request(`https://example.test/io/${encodeURIComponent(meshId)}/stored-file?path=%2Fa.txt`, { method: 'DELETE' }), env, createCtx());
   assert.equal(del.status, 204);
   assert.equal((await upload(mount, env, meshId, '/c.txt', '1')).status, 201);
-  assert.ok(rejected.includes('/blocked.txt'));
+  assert.deepEqual(rejected.find((item) => item.path === '/blocked.txt'), { path: '/blocked.txt', taint: 'group2' });
 });

@@ -1,6 +1,6 @@
 {
   "name": "@interocitor/core",
-  "version": "0.0.0-beta.11",
+  "version": "0.0.0-beta.12",
   "description": "Encrypted local-first CRDT database that syncs over cloud storage without a purpose-built backend.",
   "type": "module",
   "main": "dist/index.js",
@@ -37,10 +37,15 @@
     "./crypto/keys": {
       "import": "./dist/crypto/keys.js",
       "types": "./dist/crypto/keys.d.ts"
+    },
+    "./crypto/signing": {
+      "import": "./dist/crypto/signing.js",
+      "types": "./dist/crypto/signing.d.ts"
     }
   },
   "files": [
     "dist",
+    "docs",
     "README.md",
     "LICENSE"
   ],
@@ -48,7 +53,7 @@
     "build": "rm -rf ./dist && tsc -p tsconfig.json",
     "validate": "node ./dist/index.js",
     "test:unit": "yarn build && node --test tests/*.test.mjs",
-    "test:e2e": "yarn test:unit"
+    "test:e2e": "yarn build && ../../node_modules/.bin/playwright test -c ./playwright.config.ts"
   },
   "keywords": [
     "local-first",

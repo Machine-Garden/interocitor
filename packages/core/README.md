@@ -45,13 +45,22 @@ credentials, image helpers, and React image hooks live in `@interocitor/web`.
 ## Quick start
 
 ```ts
-import { Interocitor, MemoryAdapter, MemoryLocalStore } from '@interocitor/core';
+import {
+  Interocitor,
+  MemoryAdapter,
+  MemoryLocalStore,
+  PortablePassphraseKeySource,
+} from '@interocitor/core';
+
+const portableKey = '...high-entropy-base58...';
 
 const db = new Interocitor(new MemoryAdapter(), {
   dbName: 'my-app',
   remotePath: '/MyApp',
-  encrypted: true,
   localStore: new MemoryLocalStore(),
+  keySource: new PortablePassphraseKeySource({
+    portableKey,
+  }),
 });
 
 await db.init();
@@ -62,13 +71,12 @@ await db.table('todos').add(
   { text: 'Ship privacy-first sync', done: false },
   { prefix: 'todo' },
 );
-
-// Share with another device — see "New device / restore" below
-console.log('Passphrase:', db.getPassphrase());
 ```
 
-Browser apps should import `IndexedDbLocalStore` and browser credential stores
-from `@interocitor/web`; mailbox adapters come from core.
+Most browser apps should start with [`@interocitor/web`](../web/README.md).
+It provides the browser runtime pieces — IndexedDB local storage,
+credential-store helpers, image helpers, and reset helpers — that you
+compose into a `keySource`. Mailbox adapters still come from core.
 
 > The constructor accepts either `(adapter, config)` or `(config)` alone.
 > Use the `(config)` form for local‑only mode (no remote). Every runtime must
@@ -101,12 +109,12 @@ Four artifact families live on the remote:
 - **durable files** — app byte payloads under `files/`, addressed by app path;
 - **a manifest** — pointer to the current generation, plus mesh metadata.
 
-See `docs/adapter-contract.md` for the full layout.
+See [Adapter contract](docs/adapter-contract.md) for the full layout.
 
 ## Security model
 
-Encryption is on by default (`encrypted: true`). The engine uses
-**AES‑GCM 256** with a key derived from a base58 passphrase.
+Encryption is on whenever the mesh is configured with a non-null `keySource`. The engine uses
+**AES-GCM 256** with a key supplied by the configured `keySource`.
 
 What it protects:
 
@@ -128,7 +136,7 @@ What a malicious remote can still do:
 - Observe activity timing and device identities.
 
 For the threat model, the metadata table, and full mitigations see
-`docs/security-model.md`.
+[Security model](docs/security-model.md).
 
 ## Offline guarantees
 
@@ -191,8 +199,8 @@ What we do **not** guarantee:
 - Real‑time delivery. The default poll interval is 30 s; some adapters
   (Cloudflare) layer push notifications on top.
 - Recovery if the remote silently lies (drops writes, rolls back the
-  manifest). See `docs/security-model.md`.
-- Recovery if the passphrase is lost — see "New device / restore".
+  manifest). See [Security model](docs/security-model.md).
+- Recovery if portable key material is lost — see "New device / restore".
 
 ### Sync cadence
 
@@ -221,7 +229,7 @@ all automatic — there is no configuration knob.
 new Interocitor(adapter?, config)
         │
         ▼
-  configureMesh({...})       ← optional; pin meshId / passphrase upfront
+  configureMesh({...})       ← optional; pin meshId / keySource upfront
         │
         ▼
        init()                ← opens local store, restores credentials
@@ -236,7 +244,7 @@ new Interocitor(adapter?, config)
 `connect()` will auto‑`init()` if needed. App code should still treat
 init as explicit so credential restore happens before any writes.
 
-The `encrypted` flag is **pinned at mesh bootstrap** and cannot change
+The `keySource` mode is **pinned at mesh bootstrap** and should not change
 between sessions for the same `dbName`. Reconnecting with a different
 mode throws a typed `MeshEncryptionMismatchError`.
 
@@ -258,7 +266,7 @@ try {
 Joining a new device to an existing mesh requires three things:
 
 1. The **`meshId`** of the existing mesh.
-2. The **passphrase** that decrypts the mesh.
+2. The **portable key material** for the mesh.
 3. Access to the same **remote mailbox** (the same `remotePath` on a
    storage backend the new device can reach).
 
@@ -281,12 +289,12 @@ The pairing flow ships credentials over an ECDH relay handshake. The handshake r
 3. Joiner calls `generateJoinQR()`.
 4. Existing paired device scans and pushes credentials.
 5. Joiner receives credentials from `credentials` on the result.
-6. Joiner applies the passphrase and connects to the minted mesh.
+6. Joiner applies the portable key material and connects to the minted mesh.
 
 **Share QR** is for an existing mesh member inviting a new device:
 
 1. Existing device connects to the active mesh.
-2. Existing device calls `generateShareQR()` with `remotePath` and `passphrase`.
+2. Existing device calls `generateShareQR()` with `remotePath` and portable key material.
 3. New device scans and receives credentials from `handleScannedQR()`.
 4. New device applies credentials and connects using the adapter config from the payload.
 
@@ -300,7 +308,7 @@ const payload = parseQRFromUrl(location.hash) ?? decodeQRPayload(rawPastedPayloa
 const received = await handleScannedQR({ adapter, relayBase: '/Taska', payload });
 
 if (received) {
-  if (received.passphrase) db.setPassphrase(received.passphrase);
+  if (received.portableKey) keySource.setPortableKey(received.portableKey);
   await connectFromPayload(received.remotePath);
 }
 ```
@@ -311,8 +319,9 @@ After the handshake the new device:
 const db = new Interocitor(adapter, {
   dbName: 'my-app',
   remotePath: '/Taska',
-  passphrase: 'base58-from-handshake',
-  encrypted: true,
+  keySource: new PortablePassphraseKeySource({
+    portableKey: 'base58-from-handshake',
+  }),
   localStore,
 });
 
@@ -330,14 +339,14 @@ On `connect()` the engine:
 4. Pulls any change files newer than the snapshot watermark.
 5. Starts polling.
 
-> **If the passphrase is lost and no other device holds it, the mesh is
-> unreadable.** The engine has no recovery path — the data is end‑to‑end
-> encrypted and the key is the passphrase. Treat the passphrase as the
-> only thing that matters; back it up out of band (1Password, paper,
-> another device's `WebAuthnCredentialStore`).
+> **If portable key material is lost and no other device holds it, the mesh is
+> unreadable.** The engine has no recovery path — the data is end-to-end
+> encrypted and the portable key material is capability-bearing. Back it up out
+> of band (password manager, paper, or another device's credential store).
 
-For the credential store details (records, anchors, biometric paths)
-see `docs/credential-store.md`.
+For credential store details (records, anchors, biometric paths), see
+[Credential store](docs/credential-store.md). For portable versus bound shared-key deployment modes, see
+[Shared key scenarios](docs/shared-key-scenarios.md).
 
 ## Core API
 
@@ -376,8 +385,8 @@ const fileMeta = await db.getFileMetadata('receipts/may.pdf');
 await db.deleteFile('receipts/may.pdf');
 
 // Credentials
-db.getPassphrase();
-db.setPassphrase(passphrase);
+keySource.getPortableKey();
+keySource.setPortableKey(portableKey);
 await db.clearCredentials();
 
 // Batched writes — one ChangeEntry per batch
@@ -428,11 +437,52 @@ const metadata = await db.getFileMetadata('attachments/report.pdf');
 await db.deleteFile('attachments/report.pdf');
 ```
 
-`putFile(path, data, contentType?)` accepts `Uint8Array | string` and returns
-`StoredFileMetadata`. `getFile(path)` returns decoded `Uint8Array` bytes.
-`getFileMetadata(path)` returns `StoredFileMetadata | null` without
+`putFile(path, data, contentType?, seal?)` accepts `Uint8Array | string` and
+returns `StoredFileMetadata`. `getFile(path)` returns decoded `Uint8Array`
+bytes. `getFileMetadata(path)` returns `StoredFileMetadata | null` without
 downloading the payload. `deleteFile(path)` treats a missing file as already
 deleted.
+
+#### Sealed files (group access / DLP)
+
+By default a file is encrypted with the mesh key, so every mesh member can read
+it. To make a file readable only by holders of an **extra** key — a "group"
+key your app distributes out of band — pass a `seal`:
+
+```ts
+// Writer: seal the bytes under a group key and label them.
+await db.putFile('docs/q3-strategy.pdf', bytes, 'application/pdf', {
+  taint: 'group:leadership',   // human-readable label, never interpreted by core
+  key: leadershipKey,          // the extra CryptoKey the bytes are sealed under
+});
+```
+
+`taint` and `key` are a bound pair: a sealed file always has both. The `taint`
+is echoed into `StoredFileMetadata.taint` so **any** member can discover that a
+file exists and *that it is gated*, without being able to read it:
+
+```ts
+const meta = await db.getFileMetadata('docs/q3-strategy.pdf');
+// meta.taint === 'group:leadership'  → "I need the leadership key"
+```
+
+Reading separates **download** from **unlock** so the key can be released by a
+biometric/keychain prompt only at view time:
+
+```ts
+const sealed = await db.openFile('docs/q3-strategy.pdf'); // downloads, no key
+// sealed.taint tells you which key to unlock
+const bytes = await sealed.open(leadershipKey);           // decrypts now
+```
+
+`getFile()` refuses a sealed file (it would silently fail to decrypt); use
+`openFile()` for anything that may be tainted. A plain `openFile()` on an
+unsealed file returns a `SealedFile` whose `open()` needs no key.
+
+> Core never resolves users, groups, or ACLs. The `taint` is just a string;
+> your app maps it to a key (for example via an ECDH-wrapped grant — see
+> [Tainted files](docs/tainted-files.md) and
+> [Shared key scenarios](docs/shared-key-scenarios.md)).
 
 `StoredFileMetadata` includes the adapter `FileEntry` fields (`name`,
 `path`, `size`, `modifiedTime`, optional `etag` / `revision`) plus durable
@@ -483,6 +533,50 @@ Use core `putFile` for arbitrary bytes. Use `@interocitor/web`'s
 `getImageBlobUrl` or `@interocitor/react`'s `useImage` for display scenarios
 that need a browser `blob:` URL, and always revoke blob URLs you create
 manually.
+
+### Signing
+
+Signing answers one question: **"did the right person produce this record, and
+is it unchanged?"** A private key signs; the matching public key verifies.
+Anyone can hold the public key, so anyone can *check* a signature, but only the
+holder of the private key can *make* one. Algorithm is fixed to **ECDSA P-256 /
+SHA-256 (ES256)**.
+
+This is **identity without identity** — no accounts, no login, no central
+authority. Consider a shared chore list: a parent signs the "allowance paid"
+record with their private key. Every device in the mesh can verify it, but a
+child cannot forge a signed record because they do not have the private key.
+The mesh stays peer-to-peer and offline-first; authority comes from a key, not
+a server.
+
+```ts
+import {
+  generateSigningKeypair,
+  exportPublicKey, importPublicKey,
+  signToken, verifyToken,
+} from '@interocitor/core';
+
+// Parent device, once: create the authority key.
+const { privateKey, publicKey } = await generateSigningKeypair();
+// Publish the public key into the mesh (e.g. a row). It is safe to share.
+const parentPublic = await exportPublicKey(publicKey);
+
+// Parent signs a record so it cannot be faked by other devices.
+const token = await signToken(privateKey, { task: 'chore-42', status: 'approved' });
+
+// Any device verifies against the published public key.
+const verifier = await importPublicKey(parentPublic);
+const record = await verifyToken(verifier, token);
+// → { iat, task: 'chore-42', status: 'approved' }  — or null if forged/altered
+```
+
+Signed payloads are **not secret** (that is the mesh key's job) — they are
+*trustworthy*. There is no JOSE header and no algorithm negotiation, so a token
+cannot be downgraded by rewriting a header. `verifyToken` returns `null` (never
+throws) for a bad signature, malformed token, or expired `exp`; add an `exp`
+with `signToken(..., { expiresInSeconds })`. Raw-byte `sign(key, bytes)` /
+`verify(key, bytes, sig)` are also exported for non-token payloads. Full
+reference: [Signing](docs/signing.md).
 
 ### Schema typing
 
@@ -640,7 +734,7 @@ user messaging only. Do not make app correctness depend on the callback.
 | `WebDAVAdapter` | Self‑hosted (Nextcloud, OwnCloud, custom WebDAV) | Easy to inspect remotely |
 | `CloudflareAdapter` | You operate a worker; want push invalidations | Experimental |
 
-Implementing your own adapter: see `docs/adapter-contract.md` for
+Implementing your own adapter: see [Adapter contract](docs/adapter-contract.md) for
 required semantics, consistency assumptions, and the contract test
 suite.
 
@@ -690,7 +784,7 @@ Both paths are deduped by a single in‑flight guard. You can also call
 > **The auto defaults and the recommended manual policy are different
 > things.** The manual policy ("idle > 1 min, churn > 20") is what to
 > gate a "Sync now" button on. The auto defaults are what runs without
-> any button. See `docs/compaction.md`.
+> any button. See [Compaction](docs/compaction.md).
 
 > **Compaction is not race‑safe across devices.** The adapter contract
 > has no CAS/ETag write, so two simultaneous compactors can both
@@ -699,7 +793,7 @@ Both paths are deduped by a single in‑flight guard. You can also call
 > single authorized writer.
 
 Full protocol, events, lock story, device acknowledgement / GC-floor
-rules, prune invariants, and tuning checklist: **`docs/compaction.md`**.
+rules, prune invariants, and tuning checklist: [Compaction](docs/compaction.md).
 
 ## Connected stores
 
@@ -721,8 +815,9 @@ await db.connectedStores.put({
   id: 'reviews',
   alias: 'family-reviews',
   remotePath: '/family/reviews',
-  passphrase: 'review-pass',
-  encrypted: true,
+  keySource: new PortablePassphraseKeySource({
+    portableKey: 'review-pass',
+  }),
   dbName: 'reviews-db',
   adapter: { kind: 'memory' },
   metadata: { icon: 'star' },
@@ -740,7 +835,7 @@ Notes:
   tables or rows.
 - `put(creds)` upserts by `id`, preserves `createdAt`, and refreshes
   `updatedAt` automatically.
-- The engine never reads `passphrase`/`adapter`/`remotePath` from these
+- The engine never reads `keySource`/`adapter`/`remotePath` from these
   records — apps construct their own `Interocitor` instances from them.
 
 ## Schema migration
@@ -814,15 +909,15 @@ A short field guide. Detailed mitigations in the linked docs.
 
 | Symptom | Likely cause | Where to look |
 | --- | --- | --- |
-| `MeshCredentialMismatchError` on connect | Same `dbName`, new mesh; stale credential record | `engine.clearCredentials()` then reconnect; `docs/credential-store.md` |
-| `MeshEncryptionMismatchError` on connect | App flipped `encrypted` between sessions | Pin `encrypted` per `dbName`, never change |
-| `remote:poisoned` event | Decode failure on a manifest, change file, or snapshot | `docs/security-model.md` — usually wrong key, schema drift, or remote tampering |
+| `MeshCredentialMismatchError` on connect | Same `dbName`, new mesh; stale credential record | `engine.clearCredentials()` then reconnect; [Credential store](docs/credential-store.md) |
+| `MeshEncryptionMismatchError` on connect | App flipped key mode between sessions | Pin one `keySource` mode per `dbName`, never change |
+| `remote:poisoned` event | Decode failure on a manifest, change file, or snapshot | [Security model](docs/security-model.md) — usually wrong key, schema drift, or remote tampering |
 | Writes never appear on peer | Peer never compacted, peer's poll interval is long, remote dropped writes, or `connect()` is offline-ready after a stalled cloud stage | Check `flush:complete`, `connect:error`, `onConnectStalled`; check remote folder by hand |
 | App is unusable after browser local-store error | Local cache is wedged, blocked by older tab, or connection is closing | In `@interocitor/web`, use `createResilientLocalStore` / `createNamedLocalStore`; log `onLocalDegraded`; offer `resetLocalDatabaseWithDeadline` repair |
 | Local store has rows that are "old" after re‑pair | Engine kept local data when you re‑paired with a fresh mesh | Either delete local DB on re‑pair, or accept the merge |
-| Lost passphrase | No recovery | Passphrase is the key. Back it up out of band |
+| Lost portable key | No recovery | Portable key material is the capability. Back it up out of band |
 | Long‑offline device "lost" recent edits | Rehydrate replaced local state with the snapshot | Local writes already in the outbox survive; in‑flight uncommitted UI state does not |
-| Compaction never runs | `autoCompact: false`, or no remote, or `compactAutoThreshold` never reached | `docs/compaction.md` — subscribe to `compact:auto:skip` |
+| Compaction never runs | `autoCompact: false`, or no remote, or `compactAutoThreshold` never reached | [Compaction](docs/compaction.md) — subscribe to `compact:auto:skip` |
 | Two compactors race | No CAS in the adapter; small probability in small meshes | Use `serverManaged: true` for large meshes |
 
 ## Tests
@@ -841,11 +936,15 @@ yarn workspace @interocitor/core test webdav.adapter.contract
 
 Part of the Interocitor monorepo. See:
 
-- root `README.md` — monorepo overview
-- `docs/security-model.md` — threat model
-- `docs/adapter-contract.md` — adapter requirements
-- `docs/compaction.md` — compaction protocol & tuning
-- `docs/credential-store.md` — credential persistence
+- [Root README](../../README.md) — monorepo overview
+- [Security model](docs/security-model.md) — threat model
+- [Shared key scenarios](docs/shared-key-scenarios.md) — portable and bound shared-key deployment modes
+- [Pairing protocol](docs/pairing.md) — QR handshake and device-join flow
+- [Adapter contract](docs/adapter-contract.md) — adapter requirements
+- [Compaction](docs/compaction.md) — compaction protocol and tuning
+- [Credential store](docs/credential-store.md) — credential persistence
+- [Tainted files](docs/tainted-files.md) — per-group sealed files and access grants
+- [Signing](docs/signing.md) — ECDSA authorship/attestation and capability tokens
 
 ## License
 

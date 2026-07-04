@@ -1,18 +1,17 @@
 # Credential store
 
-The credential store is where the engine persists the **passphrase**,
-**device id**, and the **mesh id anchor** between sessions. Without it,
-every reload would force a re‑pair.
+The credential store is where a `MeshKeySource` may persist its portable
+key material, **device id**, and the **mesh id anchor** between sessions.
+Without it, every reload would force a re-pair or another key handoff.
 
-This is the deep document. The README has the day‑to‑day usage.
+This is the deep document. The README has the day‑to‑day usage. For the difference between portable shared keys and bound shared keys, see [Shared key scenarios](shared-key-scenarios.md).
 
 ## Why it exists
 
 Two reasons:
 
-1. **Reload survival.** A user opens the app, the engine needs the same
-   AES key it used yesterday. The key is derived from the passphrase, so
-   the passphrase has to live somewhere durable on the device.
+1. **Reload survival.** A user opens the app, the `MeshKeySource` needs the
+   same portable key component and device id it used yesterday.
 2. **Mesh anchor.** Each `dbName` records the `meshId` it last connected
    to. On the next connect the engine compares stored `meshId` against
    the live one and refuses to silently reuse a stale key. This catches
@@ -23,7 +22,7 @@ Two reasons:
 
 ```ts
 interface StoredCredentials {
-  passphrase: string;
+  portableKey: string;
   deviceId: string;
   meshId?: string;          // anchor, written after manifest is known
 }
@@ -35,20 +34,101 @@ interface CredentialStore {
 }
 ```
 
-## Built‑in implementations
+## Built-in implementations
 
-| Class | Backing store | Auth gate | Survives Safari ITP / cache wipe |
+For browser apps, the primary public entry point is `createWebCredentialStore(...)`.
+The concrete classes below exist as building blocks, but docs and examples should
+prefer the factory unless a caller explicitly needs direct construction.
+
+| Class / factory option | Backing store | Auth gate | Reload scope |
 | --- | --- | --- | --- |
-| `@interocitor/web` `LocalStorageCredentialStore` | `localStorage` | None | No |
-| `@interocitor/web` `WebAuthnCredentialStore` | WebAuthn `largeBlob` (OS keychain) | Touch ID / Face ID | Yes |
-| `@interocitor/web` `createWebCredentialStore(...)` | WebAuthn if available, else localStorage | Mixed | Best‑effort |
+| `LocalStorageCredentialStore` / `{ storage: 'localStorage' }` | `localStorage` plaintext JSON | None | Same origin until browser data is cleared |
+| `SessionStorageCredentialStore` / `{ storage: 'sessionStorage' }` | `sessionStorage` plaintext JSON | None | Same tab/session |
+| `MemoryCredentialStore` / `{ storage: 'memory' }` | JS memory | None | Current engine/process only |
+| `WebAuthnCredentialStore` / `{ storage: 'passkey' }` | WebAuthn `largeBlob` / OS keychain | Touch ID / Face ID / Windows Hello | Passkey/platform credential lifetime |
+| `EnvelopedCredentialStore` / `{ envelope: ... }` | AES-GCM encrypted record in memory, browser storage, backend, or custom `CredentialEnvelopeStore` | Depends on `CredentialEnvelopeKeyProvider` | Envelope-store lifetime plus envelope-key availability |
+| default `createWebCredentialStore(dbName)` | plaintext `localStorage` JSON | None | Same origin until browser data is cleared |
 
 Core never wires a browser default automatically. Runtime code constructs a
-store explicitly when it wants to:
+store explicitly when it builds a `MeshKeySource`, for example to:
 
-- pin a specific implementation (e.g. force biometrics);
+- pin a specific implementation (e.g. memory-only or passkey-backed);
+- wrap the credential with a key obtained from a passkey, native app integration, or app keystore, while storing the encrypted envelope locally, in memory, or behind a backend/custom `CredentialEnvelopeStore`;
 - run tests that need a deterministic store;
-- disable persistence entirely (`credentialStore: null`).
+- disable persistence entirely by using a `MeshKeySource` that keeps key material in memory only.
+
+## Use cases
+
+### Default browser persistence
+
+```ts
+const credentialStore = createWebCredentialStore('meal-planner');
+```
+
+Stores the credential record in `localStorage`.
+
+### Memory-only key material
+
+```ts
+const credentialStore = createWebCredentialStore('meal-planner', {
+  storage: 'memory',
+});
+```
+
+No key material is persisted. Reloading the page requires a portable key
+component from somewhere else: a join token, backend session, native app integration, or another device.
+
+### Tab-session key material
+
+```ts
+const credentialStore = createWebCredentialStore('meal-planner', {
+  storage: 'sessionStorage',
+});
+```
+
+The credential survives reloads in the same tab/session but is not available to
+new tabs after the session ends.
+
+### Passkey/biometric-only credential
+
+```ts
+const credentialStore = createWebCredentialStore('meal-planner', {
+  storage: 'passkey',
+  displayName: 'Meal Planner',
+});
+```
+
+The credential record lives in WebAuthn `largeBlob`. Browser storage may hold a
+credential-id hint, but not the credential payload itself.
+
+### Encrypted envelope from backend or memory
+
+```ts
+const credentialStore = createWebCredentialStore('meal-planner', {
+  envelope: {
+    store: {
+      async save(envelope) {
+        await fetch('/api/interocitor/credential-envelope', {
+          method: 'PUT',
+          body: JSON.stringify(envelope),
+        });
+      },
+      async load() {
+        const res = await fetch('/api/interocitor/credential-envelope');
+        return res.status === 404 ? null : await res.json();
+      },
+      async clear() {
+        await fetch('/api/interocitor/credential-envelope', { method: 'DELETE' });
+      },
+    },
+    keyProvider: new WebAuthnEnvelopeKeyProvider('meal-planner', location.hostname, 'Meal Planner'),
+  },
+});
+```
+
+The encrypted envelope can come from a backend, app memory, native storage, or
+any custom `CredentialEnvelopeStore`. The unwrap key can come from passkey /
+biometrics, native app integration, or a key obtained by the app from elsewhere.
 
 ## Storage layout
 
@@ -58,21 +138,11 @@ One JSON record per `dbName`:
 
 ```
 localStorage["interocitor-creds:<dbName>"]
-  = { "passphrase": "...", "deviceId": "...", "meshId": "..." }
+  = { "portableKey": "...", "deviceId": "...", "meshId": "..." }
 ```
 
-A global device id lives at `localStorage["interocitor-device-id"]` so
-new dbNames on the same origin reuse the same physical device id.
-
-A legacy split format is still **read** for migration:
-
-```
-localStorage["interocitor-key:<dbName>"]    // old: passphrase only
-localStorage["interocitor-device-id"]        // old: global device id
-```
-
-The first successful `save()` upgrades to the unified record and clears
-the legacy entry.
+The credential record is scoped by `dbName`. It stores the portable key material,
+device id, and optional mesh anchor together.
 
 ### `WebAuthnCredentialStore`
 
@@ -103,10 +173,10 @@ anchor check.
 ## Lifecycle
 
 ```
-construct engine ──► credentialStore.load()
+construct engine ──► keySource.load()
                        │
                        ▼
-                  apply passphrase ──► resolveEncryption()
+               resolve mesh key ──► resolveEncryption()
                                             │
                                             ▼
                                           init() done
@@ -142,21 +212,23 @@ construct engine ──► credentialStore.load()
 const engine = new Interocitor(adapter, {
   dbName: 'demo',
   localStore,
-  credentialStore: null,    // passphrase lives only in memory
+  keySource: new PortablePassphraseKeySource({
+    portableKey,
+    credentialStore: new MemoryCredentialStore(),
+  }),
 });
 ```
 
 Useful for:
 
 - demos and tests where reload is not required;
-- apps that manage their own keystore and pass the passphrase via
-  `setPassphrase()` on every load.
+- apps that manage their own keystore and inject key material on every load.
 
 ## Custom implementations
 
 ```ts
 class MyCustomStore implements CredentialStore {
-  async save(creds) { /* write to OS keychain via native bridge */ }
+  async save(creds) { /* write to OS keychain via native app integration */ }
   async load()      { /* read from OS keychain */ }
   async clear()     { /* delete from OS keychain */ }
 }
@@ -164,7 +236,10 @@ class MyCustomStore implements CredentialStore {
 const engine = new Interocitor(adapter, {
   dbName: 'meal-planner',
   localStore,
-  credentialStore: new MyCustomStore(),
+  keySource: new PortablePassphraseKeySource({
+    portableKey,
+    credentialStore: new MyCustomStore(),
+  }),
 });
 ```
 
@@ -180,7 +255,7 @@ Contract:
 
 ## What can go wrong
 
-- **Lost passphrase, no biometrics, no other device.** The mesh is
+- **Lost portable key, no biometrics, no other device.** The mesh is
   unreadable. There is no recovery path inside the library — the data
   is encrypted end‑to‑end and the key is gone.
 - **Two `dbName`s, one mesh.** The credential store does not enforce
@@ -193,5 +268,5 @@ Contract:
   `engine.clearCredentials()` and reconnect.
 - **Origin change.** `localStorage` is origin‑scoped. Moving the app to
   a different domain loses the credential record; user must re‑pair.
-- **WebAuthn‑only device, user denies biometric.** `load()` returns
-  `null`, engine asks the app for a passphrase. Provide a UI.
+- **WebAuthn-only device, user denies biometric.** `load()` returns
+  `null`; the app must provide a recovery or re-pairing flow.

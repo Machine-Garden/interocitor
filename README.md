@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  Interocitor gives apps a local-first encrypted database and a durable encrypted file store that share the same mesh, devices, passphrase, adapters, and backend policy.
+  Interocitor gives apps a local-first encrypted database and a durable encrypted file store that share the same mesh, devices, key source, adapters, and backend policy.
 </p>
 
 ## What Interocitor is
@@ -33,7 +33,7 @@ The remote is a mailbox, not a trusted database or media service:
 - **Typed CRDT database.** Tables, rows, live queries, schema inference, and deterministic convergence across devices.
 - **Durable file storage.** Path-addressed encrypted blobs with `putFile`, `getFile`, `deleteFile`, and metadata.
 - **Browser image helpers.** `@interocitor/web` stores `Blob`, `File`, bytes, data URLs, or SVG strings on top of core files and returns revokable `blob:` URLs for display.
-- **One mesh.** Rows, files, devices, passphrase, adapters, pairing, and backend policy are part of the same application mesh.
+- **One mesh.** Rows, files, devices, key source, adapters, pairing, and backend policy are part of the same application mesh.
 - **React hooks.** `useLiveQuery`, `useRow`, and `useImage` keep rendering decisions in app code.
 - **Cloudflare backend.** D1 for sync metadata, R2 for durable file bodies, optional Durable Object realtime invalidation, upload quotas, and upload authorization callbacks.
 
@@ -48,8 +48,8 @@ yarn add @interocitor/react @interocitor/workers
 ## Quick start
 
 ```ts
-import { Interocitor, WebDAVAdapter, types, type DatabaseSchemaDefinition, type InferSchemaType } from '@interocitor/core';
-import { IndexedDbLocalStore, getImageBlobUrl, putImage } from '@interocitor/web';
+import { Interocitor, PortablePassphraseKeySource, WebDAVAdapter, types, type DatabaseSchemaDefinition, type InferSchemaType } from '@interocitor/core';
+import { IndexedDbLocalStore, createWebCredentialStore, getImageBlobUrl, putImage } from '@interocitor/web';
 
 const schema = {
   tables: {
@@ -65,26 +65,24 @@ const schema = {
 
 type DB = InferSchemaType<typeof schema>;
 
-const db = new Interocitor<DB>({
-  dbName: 'todo',
+const dbName = 'todo';
+const portableKey = '...high-entropy-base58...';
+
+const db = new Interocitor<DB>(new WebDAVAdapter({
+  baseUrl: 'https://dav.example.com',
+  auth: { username: 'user', password: 'pass' },
+}), {
+  dbName,
+  remotePath: '/Todo',
   schema,
-  encrypted: true,
-  localStore: new IndexedDbLocalStore('todo'),
+  localStore: new IndexedDbLocalStore(dbName),
+  keySource: new PortablePassphraseKeySource({
+    portableKey,
+    credentialStore: createWebCredentialStore(dbName, { storage: 'sessionStorage' }),
+  }),
 });
 
 await db.init();
-
-db.configureMesh({
-  remotePath: '/Todo',
-  encrypted: true,
-  // In a real app: restore an existing passphrase or let the first device create one.
-  passphrase,
-});
-
-await db.setRemoteStorage(new WebDAVAdapter({
-  baseUrl: 'https://dav.example.com',
-  auth: { username: 'user', password: 'pass' },
-}));
 
 await db.connect();
 
@@ -249,7 +247,7 @@ Interocitor gives you:
 - bounded `connect()` progress: stalled cloud stages degrade to offline-ready mode instead of wedging the UI
 - background sync after `connect()`
 - eventual convergence for row data when devices observe the same remote artifacts
-- encrypted remote payloads when `encrypted: true`
+- encrypted remote payloads when the mesh has a non-null `keySource`
 - explicit restore/pairing instead of hidden account magic
 
 Interocitor does not give you:
@@ -285,9 +283,12 @@ Interocitor does not give you:
 - Core API and protocol details: [`packages/core/README.md`](packages/core/README.md)
 - Adapter contract: [`packages/core/docs/adapter-contract.md`](packages/core/docs/adapter-contract.md)
 - Security model: [`packages/core/docs/security-model.md`](packages/core/docs/security-model.md)
+- Shared key scenarios: [`packages/core/docs/shared-key-scenarios.md`](packages/core/docs/shared-key-scenarios.md)
+- Pairing protocol: [`packages/core/docs/pairing.md`](packages/core/docs/pairing.md)
 - Compaction: [`packages/core/docs/compaction.md`](packages/core/docs/compaction.md)
 - React bindings: [`packages/react/README.md`](packages/react/README.md)
 - Cloudflare runtime: [`packages/workers/README.md`](packages/workers/README.md)
+- Cloudflare security guardrails: [`packages/workers/docs/security-guardrails.md`](packages/workers/docs/security-guardrails.md)
 - Protocol flows: [`docs/flows.md`](docs/flows.md)
 
 ## Tests

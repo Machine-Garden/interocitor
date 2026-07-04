@@ -30,6 +30,31 @@ let runtime = {
 };
 
 const DEFAULT_BASE_URL = `${location.origin}/__webdav__`;
+const credentialEnvelopeRecords = new Map();
+
+async function createTodoCredentialStore(dbName) {
+  const mode = new URLSearchParams(location.search).get('credentials') || 'session';
+  const {
+    MemoryCredentialEnvelopeStore,
+    StaticEnvelopeKeyProvider,
+    createWebCredentialStore,
+  } = await import('/packages/web/dist/index.js');
+
+  if (mode === 'memory') return createWebCredentialStore(dbName, { storage: 'memory' });
+  if (mode === 'local') return createWebCredentialStore(dbName, { storage: 'localStorage' });
+  if (mode === 'passkey') return createWebCredentialStore(dbName, { storage: 'passkey', displayName: 'Interocitor TODO WebDAV' });
+  if (mode === 'memory-envelope') {
+    const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    return createWebCredentialStore(dbName, {
+      envelope: {
+        store: new MemoryCredentialEnvelopeStore(dbName, credentialEnvelopeRecords),
+        keyProvider: new StaticEnvelopeKeyProvider(key),
+      },
+    });
+  }
+
+  return createWebCredentialStore(dbName, { storage: 'sessionStorage' });
+}
 
 function randomSuffix() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -107,6 +132,7 @@ async function createSession() {
 async function connect() {
   const { Interocitor } = await import('/packages/core/dist/index.js');
   const { WebDAVAdapter } = await import('/packages/core/dist/index.js');
+  const { PortablePassphraseKeySource } = await import('/packages/core/dist/index.js');
   const { IndexedDbLocalStore } = await import('/packages/web/dist/index.js');
 
   const session = readSessionFromUi();
@@ -125,8 +151,11 @@ async function connect() {
     remotePath: session.remotePath,
     dbName,
     localStore: new IndexedDbLocalStore(dbName),
+    keySource: new PortablePassphraseKeySource({
+      passphrase: session.key,
+      credentialStore: await createTodoCredentialStore(dbName),
+    }),
     deviceId: tabDeviceId,
-    passphrase: session.key,
     pollInterval: 5000,   // 5 s: reduces head.json 404 spam during idle periods
     flushDebounce: 200,
     flushThreshold: 50,

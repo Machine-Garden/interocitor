@@ -104,6 +104,31 @@ let runtimeOptions = {
   relayEnabled: true,
   relayHealthyPollInterval: 300000,
 };
+const credentialEnvelopeRecords = new Map();
+
+async function createTodoCredentialStore(dbName) {
+  const mode = new URLSearchParams(location.search).get('credentials') || 'session';
+  const {
+    MemoryCredentialEnvelopeStore,
+    StaticEnvelopeKeyProvider,
+    createWebCredentialStore,
+  } = await import('../../packages/web/dist/index.js');
+
+  if (mode === 'memory') return createWebCredentialStore(dbName, { storage: 'memory' });
+  if (mode === 'local') return createWebCredentialStore(dbName, { storage: 'localStorage' });
+  if (mode === 'passkey') return createWebCredentialStore(dbName, { storage: 'passkey', displayName: 'Interocitor TODO Cloudflare' });
+  if (mode === 'memory-envelope') {
+    const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    return createWebCredentialStore(dbName, {
+      envelope: {
+        store: new MemoryCredentialEnvelopeStore(dbName, credentialEnvelopeRecords),
+        keyProvider: new StaticEnvelopeKeyProvider(key),
+      },
+    });
+  }
+
+  return createWebCredentialStore(dbName, { storage: 'sessionStorage' });
+}
 
 function setStatus(message) {
   els.status.textContent = message;
@@ -213,8 +238,8 @@ async function autoCreateSession() {
 async function connect() {
   const { Interocitor } = await import('../../packages/core/dist/index.js');
   const { CloudflareAdapter } = await import('../../packages/core/dist/index.js');
+  const { PortablePassphraseKeySource } = await import('../../packages/core/dist/index.js');
   const { IndexedDbLocalStore } = await import('../../packages/web/dist/index.js');
-  const { passphraseToKey } = await import('../../packages/core/dist/crypto/keys.js');
 
   const session = readSessionFromUi();
   await disconnect();
@@ -229,18 +254,22 @@ async function connect() {
   sessionStorage.setItem('todo-cf-device-id', tabDeviceId);
   localStorage.setItem('interocitor-device-id', tabDeviceId);
 
+  const dbName = `interocitor-cf-${tabDeviceId}`;
   const engine = new Interocitor(adapter, {
     remotePath: session.remotePath,
-    dbName: `interocitor-cf-${tabDeviceId}`,
-    localStore: new IndexedDbLocalStore(`interocitor-cf-${tabDeviceId}`),
+    dbName,
+    localStore: new IndexedDbLocalStore(dbName),
+    keySource: new PortablePassphraseKeySource({
+      passphrase: session.key,
+      credentialStore: await createTodoCredentialStore(dbName),
+    }),
+    deviceId: tabDeviceId,
     pollInterval: runtimeOptions.pollInterval,
     relayEnabled: runtimeOptions.relayEnabled,
     relayHealthyPollInterval: runtimeOptions.relayHealthyPollInterval,
     flushDebounce: 200,
     flushThreshold: 1,
   });
-
-  engine.setEncryptionKey(await passphraseToKey(session.key));
 
   const eventLog = [];
   let sseReadyResolve;

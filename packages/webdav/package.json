@@ -1,6 +1,6 @@
 {
   "name": "@interocitor/webdav",
-  "version": "0.0.0-beta.2",
+  "version": "0.0.0-beta.12",
   "description": "Local WebDAV server for Interocitor.",
   "type": "module",
   "bin": "./server.mjs",

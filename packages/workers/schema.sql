@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS stored_files (
   size                   INTEGER NOT NULL,
   plaintext_size         INTEGER,
   content_type           TEXT,
+  taint                  TEXT,
   uploaded_by_device_id  TEXT    NOT NULL,
   uploaded_at            TEXT    NOT NULL,
   modified_time          TEXT    NOT NULL,

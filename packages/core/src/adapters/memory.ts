@@ -151,6 +151,7 @@ export class MemoryAdapter implements StorageAdapter {
       plaintextSize: options.plaintextSize,
       storedSize: bytes.byteLength,
       contentType: options.contentType,
+      taint: options.taint,
       lastAccessedAt: undefined,
       useCount: 0,
     };

@@ -42,6 +42,7 @@ interface IoFileMeta {
   plaintextSize?: number;
   storedSize?: number;
   contentType?: string;
+  taint?: string;
 }
 
 /**
@@ -389,6 +390,7 @@ export class CloudflareAdapter implements StorageAdapter {
         'Content-Type': options.contentType || 'application/octet-stream',
         'X-Interocitor-Device-Id': options.uploadedByDeviceId || '',
         'X-Interocitor-Plaintext-Size': String(options.plaintextSize ?? bytes.byteLength),
+        ...(options.taint ? { 'X-Interocitor-Taint': options.taint } : {}),
       }),
       body: bytes as unknown as BodyInit,
     });
@@ -419,4 +421,5 @@ export class CloudflareAdapter implements StorageAdapter {
     const payload = await res.json() as { file?: StoredFileMetadata | null };
     return payload.file ?? null;
   }
+
 }

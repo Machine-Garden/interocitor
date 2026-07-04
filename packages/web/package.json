@@ -1,6 +1,6 @@
 {
   "name": "@interocitor/web",
-  "version": "0.0.0-beta.11",
+  "version": "0.0.0-beta.12",
   "description": "Browser runtime stores, credential stores, and UI helpers for Interocitor.",
   "type": "module",
   "main": "dist/index.js",
@@ -50,7 +50,7 @@
     "test:e2e": "yarn build && ../../node_modules/.bin/playwright test -c ./playwright.config.ts"
   },
   "peerDependencies": {
-    "@interocitor/core": "0.0.0-beta.11",
+    "@interocitor/core": "0.0.0-beta.12",
     "react": ">=18"
   },
   "peerDependenciesMeta": {

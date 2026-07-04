@@ -118,7 +118,7 @@ canonical source of truth when in doubt.
 > **No CAS / ETag.** The interface intentionally does **not** require
 > conditional writes. If your backend supports If‑Match, you may use it
 > internally for retry safety, but the engine never depends on it. See
-> the compaction safety notes in `docs/compaction.md`.
+> the compaction safety notes in [Compaction](compaction.md).
 
 ### `deleteFile(path)`
 

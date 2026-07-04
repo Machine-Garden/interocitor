@@ -128,6 +128,7 @@ export interface FileUploadAuthorizationRequest {
   size: number;
   plaintextSize?: number;
   contentType?: string;
+  taint?: string;
   currentMeshStoredBytes: number;
   maxMeshStoredBytes: number;
   request: Request;
@@ -136,6 +137,24 @@ export interface FileUploadAuthorizationRequest {
 export type FileUploadAuthorizationResult =
   | boolean
   | { allowed: boolean; reason?: string; status?: number };
+
+export type WorkerAuditOutcome = 'ok' | 'error' | 'rejected' | 'not-found';
+
+export interface WorkerAuditEvent {
+  event: 'interocitor.audit';
+  at: string;
+  op: 'read' | 'write' | 'delete' | 'list' | 'metadata' | 'stored-file-read' | 'stored-file-write' | 'stored-file-delete' | 'stored-file-metadata' | 'system';
+  prefix?: string;
+  path?: string;
+  pathType?: string;
+  deviceId?: string;
+  status: number;
+  outcome: WorkerAuditOutcome;
+  bytes?: number;
+  taint?: string;
+  systemOp?: string;
+  requestId?: string;
+}
 
 export interface InterocitorEnv extends Record<string, unknown> {
   /** D1 database binding. Required unless you pass `db` explicitly via mount options. */
@@ -211,6 +230,7 @@ export interface InterocitorRuntimeOptions<Env = unknown> {
   maxStoredFileBytes?: (env: Env) => string | number | undefined;
   maxMeshStoredBytes?: (env: Env) => string | number | undefined;
   authorizeFileUpload?: (request: FileUploadAuthorizationRequest, env: Env) => FileUploadAuthorizationResult | Promise<FileUploadAuthorizationResult>;
+  audit?: (event: WorkerAuditEvent, env: Env) => void | Promise<void>;
   meshSecret?: (env: Env) => string | undefined;
   /** Enable diagnostic logs for request handling and relay delivery. */
   verbose?: (env: Env) => string | number | boolean | undefined;

@@ -1,16 +1,10 @@
 /**
  * Credential Store — pluggable persistence for key material.
  *
- * Safari ITP wipes localStorage after 7 days of inactivity.
- * That kills the passphrase and device ID. Lost key = lost data.
- *
- * This module provides:
- *  - `LocalStorageCredentialStore` — current behaviour, extracted.
- *  - `WebAuthnCredentialStore`    — OS keychain via navigator.credentials + largeBlob.
- *  - `createWebCredentialStore()` — auto-detects best backend.
- *
- * The engine consumes the core `CredentialStore` contract; browser apps
- * choose one of these implementations explicitly.
+ * The engine consumes the core `CredentialStore` contract. This module keeps
+ * the browser-specific choices explicit: memory, sessionStorage,
+ * localStorage, passkey-only WebAuthn, and envelope encryption where a
+ * biometric/external key protects a local credential record.
  */
 
 import type { CredentialStore, StoredCredentials } from '@interocitor/core';
@@ -20,126 +14,305 @@ export interface WebCredentialStore extends CredentialStore {
   restoreWithBiometrics?(): Promise<StoredCredentials | null>;
 }
 
-// ─── localStorage backend ────────────────────────────────────────────
+export type CredentialStorageLocation = 'memory' | 'sessionStorage' | 'localStorage' | 'passkey';
+export type EnvelopeStorageLocation = 'memory' | 'sessionStorage' | 'localStorage';
 
-export class LocalStorageCredentialStore implements CredentialStore {
-  constructor(private readonly dbName: string) {}
+export type CredentialEnvelopeKeyPurpose = 'encrypt' | 'decrypt';
 
-  /**
-   * Single record per dbName. JSON-encoded `{passphrase, deviceId, meshId}`.
-   *
-   * The engine validates `meshId` against the active mesh on load and
-   * refuses to silently swap keys when they differ — preventing the
-   * "create new mesh under same dbName then reload" bug from reusing
-   * the previous mesh's passphrase.
-   */
-  private recordKey(): string { return `interocitor-creds:${this.dbName}`; }
+export interface CredentialEnvelopeKeyProvider {
+  getKey(purpose?: CredentialEnvelopeKeyPurpose): Promise<CryptoKey>;
+  clear?(): Promise<void>;
+}
 
-  // Legacy format (pre-meshId): raw passphrase under one key, device-id
-  // global. Read-only — `save()` always writes the new JSON record.
-  private legacyKeyKey(): string { return `interocitor-key:${this.dbName}`; }
-  private get legacyDeviceKey(): string { return 'interocitor-device-id'; }
+export type StoredCredentialEnvelope = {
+  v: 1;
+  alg: 'AES-GCM';
+  iv: string;
+  ciphertext: string;
+};
+
+export interface CredentialEnvelopeStore {
+  save(envelope: StoredCredentialEnvelope): Promise<void>;
+  load(): Promise<StoredCredentialEnvelope | null>;
+  clear(): Promise<void>;
+}
+
+export interface CreateWebCredentialStoreOptions {
+  /** Where the mesh credential record is stored. Default: localStorage. */
+  storage?: CredentialStorageLocation;
+  /** Human-readable app name shown in biometric prompts. */
+  displayName?: string;
+  /** WebAuthn relying-party id. Defaults to current hostname. */
+  rpId?: string;
+  /** Optional shared map for tests or app-level in-memory vaults. */
+  memory?: Map<string, StoredCredentials>;
+  /** Wrap a credential record with AES-GCM before writing it to a pluggable envelope store. */
+  envelope?: {
+    storage?: EnvelopeStorageLocation;
+    store?: CredentialEnvelopeStore;
+    keyProvider: CredentialEnvelopeKeyProvider;
+  };
+}
+
+type BrowserStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+
+function normalizeStoredCredentials(value: unknown): StoredCredentials | null {
+  if (!value || typeof value !== 'object') return null;
+  const parsed = value as Partial<StoredCredentials>;
+  if (typeof parsed.portableKey !== 'string' || typeof parsed.deviceId !== 'string') return null;
+  return {
+    portableKey: parsed.portableKey,
+    deviceId: parsed.deviceId,
+    ...(typeof parsed.meshId === 'string' && parsed.meshId ? { meshId: parsed.meshId } : {}),
+  };
+}
+
+function encodeBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCodePoint(bytes[i]);
+  return btoa(binary);
+}
+
+function decodeBase64(value: string): Uint8Array<ArrayBuffer> {
+  const decoded = Uint8Array.from(atob(value), c => c.codePointAt(0)!);
+  return new Uint8Array(decoded);
+}
+
+function getNamedStorage(location: EnvelopeStorageLocation | CredentialStorageLocation): BrowserStorage | null {
+  if (location === 'localStorage') return typeof localStorage === 'undefined' ? null : localStorage;
+  if (location === 'sessionStorage') return typeof sessionStorage === 'undefined' ? null : sessionStorage;
+  return null;
+}
+
+class NoopBiometricControls implements WebCredentialStore {
+  constructor(private readonly inner: CredentialStore) {}
+
+  save(creds: StoredCredentials): Promise<void> { return this.inner.save(creds); }
+  load(): Promise<StoredCredentials | null> { return this.inner.load(); }
+  clear(): Promise<void> { return this.inner.clear(); }
+  async secureWithBiometrics(): Promise<boolean> { return false; }
+}
+
+// ─── Plain browser storage backends ───────────────────────────────────
+
+class BrowserStorageCredentialStore implements CredentialStore {
+  constructor(
+    private readonly dbName: string,
+    _storageName: EnvelopeStorageLocation,
+    private readonly storageProvider: () => BrowserStorage | null,
+  ) {}
+
+  /** Single record per dbName. JSON-encoded `{portableKey, deviceId, meshId}`. */
+  protected recordKey(): string { return `interocitor-creds:${this.dbName}`; }
 
   async save(creds: StoredCredentials): Promise<void> {
-    if (typeof localStorage === 'undefined') return;
+    const storage = this.storageProvider();
+    if (!storage) return;
     const payload: StoredCredentials = {
-      passphrase: creds.passphrase,
+      portableKey: creds.portableKey,
       deviceId: creds.deviceId,
-      // Persist meshId when supplied. Older callers that omit it write a
-      // legacy-shaped record; the engine surfaces this as a conflict on
-      // the next load if the live mesh is known.
       ...(creds.meshId ? { meshId: creds.meshId } : {}),
     };
-    localStorage.setItem(this.recordKey(), JSON.stringify(payload));
-    // Drop the legacy keys to prevent stale reads after a re-pair under
-    // the same dbName.
-    localStorage.removeItem(this.legacyKeyKey());
+    storage.setItem(this.recordKey(), JSON.stringify(payload));
   }
 
   async load(): Promise<StoredCredentials | null> {
-    if (typeof localStorage === 'undefined') return null;
+    const storage = this.storageProvider();
+    if (!storage) return null;
 
-    // New format first.
-    const raw = localStorage.getItem(this.recordKey());
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as StoredCredentials;
-        if (typeof parsed?.passphrase === 'string' && typeof parsed?.deviceId === 'string') {
-          return {
-            passphrase: parsed.passphrase,
-            deviceId: parsed.deviceId,
-            ...(typeof parsed.meshId === 'string' && parsed.meshId ? { meshId: parsed.meshId } : {}),
-          };
-        }
-      } catch { /* fall through to legacy */ }
+    const raw = storage.getItem(this.recordKey());
+    if (!raw) return null;
+    try {
+      return normalizeStoredCredentials(JSON.parse(raw));
+    } catch {
+      return null;
     }
-
-    // Legacy fallback. No meshId — caller must treat as unverified.
-    const passphrase = localStorage.getItem(this.legacyKeyKey());
-    const deviceId = localStorage.getItem(this.legacyDeviceKey);
-    if (!passphrase || !deviceId) return null;
-    return { passphrase, deviceId };
   }
 
   async clear(): Promise<void> {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.removeItem(this.recordKey());
-    localStorage.removeItem(this.legacyKeyKey());
-    // Device ID intentionally kept — shared across meshes, survives credential clear.
+    const storage = this.storageProvider();
+    if (!storage) return;
+    storage.removeItem(this.recordKey());
   }
 }
 
-// ─── WebAuthn + largeBlob backend ────────────────────────────────────
+export class LocalStorageCredentialStore extends BrowserStorageCredentialStore {
+  constructor(dbName: string) {
+    super(dbName, 'localStorage', () => getNamedStorage('localStorage'));
+  }
+}
 
-/**
- * Stores credentials in the OS keychain via WebAuthn `largeBlob` extension.
- *
- * Survives Safari ITP, browser data clears, and profile resets.
- * Requires a platform authenticator with largeBlob support (Touch ID,
- * Face ID, Windows Hello). Falls back gracefully — `save()` rejects
- * if the authenticator doesn't support largeBlob.
- *
- * Flow:
- *  1. `save()` → `navigator.credentials.create()` with largeBlob write.
- *     User sees a biometric prompt. Credential ID stored in localStorage
- *     as a hint for faster `load()`, but not required.
- *  2. `load()` → `navigator.credentials.get()` with largeBlob read.
- *     User sees a biometric prompt. Returns the blob.
- *  3. If localStorage hint is gone (ITP wipe), load uses an empty
- *     allowCredentials list — the authenticator picks the right one.
- */
-export class WebAuthnCredentialStore implements CredentialStore {
-  private static readonly CRED_ID_KEY_PREFIX = 'interocitor-cred:';
-  private readonly encoder = new TextEncoder();
-  private readonly decoder = new TextDecoder();
+export class SessionStorageCredentialStore extends BrowserStorageCredentialStore {
+  constructor(dbName: string) {
+    super(dbName, 'sessionStorage', () => getNamedStorage('sessionStorage'));
+  }
+}
 
+export class MemoryCredentialStore implements CredentialStore {
+  private readonly records: Map<string, StoredCredentials>;
+
+  constructor(private readonly dbName: string, records?: Map<string, StoredCredentials>) {
+    this.records = records ?? new Map();
+  }
+
+  private recordKey(): string { return `interocitor-creds:${this.dbName}`; }
+
+  async save(creds: StoredCredentials): Promise<void> {
+    this.records.set(this.recordKey(), {
+      portableKey: creds.portableKey,
+      deviceId: creds.deviceId,
+      ...(creds.meshId ? { meshId: creds.meshId } : {}),
+    });
+  }
+
+  async load(): Promise<StoredCredentials | null> {
+    const stored = this.records.get(this.recordKey());
+    return stored ? { ...stored } : null;
+  }
+
+  async clear(): Promise<void> {
+    this.records.delete(this.recordKey());
+  }
+}
+
+// ─── Envelope encryption over pluggable record storage ────────────────
+
+export class StaticEnvelopeKeyProvider implements CredentialEnvelopeKeyProvider {
+  constructor(private readonly key: CryptoKey) {}
+  async getKey(): Promise<CryptoKey> { return this.key; }
+}
+
+export class BrowserCredentialEnvelopeStore implements CredentialEnvelopeStore {
   constructor(
     private readonly dbName: string,
+    storageName: Exclude<EnvelopeStorageLocation, 'memory'>,
+    private readonly storageProvider: () => BrowserStorage | null = () => getNamedStorage(storageName),
+  ) {}
+
+  private recordKey(): string { return `interocitor-creds-envelope:${this.dbName}`; }
+
+  async save(envelope: StoredCredentialEnvelope): Promise<void> {
+    const storage = this.storageProvider();
+    if (storage) storage.setItem(this.recordKey(), JSON.stringify(envelope));
+  }
+
+  async load(): Promise<StoredCredentialEnvelope | null> {
+    const storage = this.storageProvider();
+    if (!storage) return null;
+    const raw = storage.getItem(this.recordKey());
+    if (!raw) return null;
+    const envelope = JSON.parse(raw) as StoredCredentialEnvelope;
+    return envelope?.v === 1 && envelope.alg === 'AES-GCM' ? envelope : null;
+  }
+
+  async clear(): Promise<void> {
+    const storage = this.storageProvider();
+    if (storage) storage.removeItem(this.recordKey());
+  }
+}
+
+export class MemoryCredentialEnvelopeStore implements CredentialEnvelopeStore {
+  private readonly records: Map<string, StoredCredentialEnvelope>;
+
+  constructor(private readonly dbName: string, records?: Map<string, StoredCredentialEnvelope>) {
+    this.records = records ?? new Map();
+  }
+
+  private recordKey(): string { return `interocitor-creds-envelope:${this.dbName}`; }
+
+  async save(envelope: StoredCredentialEnvelope): Promise<void> {
+    this.records.set(this.recordKey(), { ...envelope });
+  }
+
+  async load(): Promise<StoredCredentialEnvelope | null> {
+    const envelope = this.records.get(this.recordKey());
+    return envelope ? { ...envelope } : null;
+  }
+
+  async clear(): Promise<void> {
+    this.records.delete(this.recordKey());
+  }
+}
+
+function createCredentialEnvelopeStore(dbName: string, location: EnvelopeStorageLocation): CredentialEnvelopeStore {
+  if (location === 'memory') return new MemoryCredentialEnvelopeStore(dbName);
+  return new BrowserCredentialEnvelopeStore(dbName, location);
+}
+
+export class EnvelopedCredentialStore implements CredentialStore {
+  private readonly encoder = new TextEncoder();
+  private readonly decoder = new TextDecoder();
+  private readonly envelopeStore: CredentialEnvelopeStore;
+
+  constructor(
+    dbName: string,
+    storageNameOrStore: EnvelopeStorageLocation | CredentialEnvelopeStore,
+    private readonly keyProvider: CredentialEnvelopeKeyProvider,
+  ) {
+    this.envelopeStore = typeof storageNameOrStore === 'string'
+      ? createCredentialEnvelopeStore(dbName, storageNameOrStore)
+      : storageNameOrStore;
+  }
+
+  async save(creds: StoredCredentials): Promise<void> {
+    const key = await this.keyProvider.getKey('encrypt');
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const payload: StoredCredentials = {
+      portableKey: creds.portableKey,
+      deviceId: creds.deviceId,
+      ...(creds.meshId ? { meshId: creds.meshId } : {}),
+    };
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      this.encoder.encode(JSON.stringify(payload)),
+    );
+    await this.envelopeStore.save({
+      v: 1,
+      alg: 'AES-GCM',
+      iv: encodeBase64(iv),
+      ciphertext: encodeBase64(new Uint8Array(ciphertext)),
+    });
+  }
+
+  async load(): Promise<StoredCredentials | null> {
+    const envelope = await this.envelopeStore.load();
+    if (!envelope) return null;
+    const key = await this.keyProvider.getKey('decrypt');
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: decodeBase64(envelope.iv) },
+      key,
+      decodeBase64(envelope.ciphertext),
+    );
+    return normalizeStoredCredentials(JSON.parse(this.decoder.decode(plaintext)));
+  }
+
+  async clear(): Promise<void> {
+    await this.envelopeStore.clear();
+  }
+}
+
+// ─── WebAuthn + largeBlob primitives ──────────────────────────────────
+
+class WebAuthnLargeBlobStore {
+  private static readonly CRED_ID_KEY_PREFIX = 'interocitor-cred:';
+
+  constructor(
+    private readonly namespace: string,
     private readonly rpId: string = globalThis.location?.hostname ?? 'localhost',
-    /** Human-readable app name shown in biometric prompts and OS keychain. */
     private readonly displayName: string = 'Interocitor',
   ) {}
 
   private credIdKey(): string {
-    return `${WebAuthnCredentialStore.CRED_ID_KEY_PREFIX}${this.dbName}`;
+    return `${WebAuthnLargeBlobStore.CRED_ID_KEY_PREFIX}${this.namespace}`;
   }
 
-  private encode(creds: StoredCredentials): Uint8Array {
-    return this.encoder.encode(JSON.stringify(creds));
-  }
-
-  private decode(blob: ArrayBuffer): StoredCredentials {
-    return JSON.parse(this.decoder.decode(blob));
-  }
-
-  /** Read credential ID hint from localStorage (best-effort, survives only if ITP hasn't wiped). */
   private loadCredentialIdHint(): ArrayBuffer | null {
     if (typeof localStorage === 'undefined') return null;
     try {
       const stored = localStorage.getItem(this.credIdKey());
       if (!stored) return null;
-      const raw = Uint8Array.from(atob(stored), c => c.codePointAt(0)!);
-      return raw.buffer as ArrayBuffer;
+      return decodeBase64(stored).buffer as ArrayBuffer;
     } catch {
       return null;
     }
@@ -147,17 +320,10 @@ export class WebAuthnCredentialStore implements CredentialStore {
 
   private saveCredentialIdHint(rawId: ArrayBuffer): void {
     if (typeof localStorage === 'undefined') return;
-    try {
-      const bytes = new Uint8Array(rawId);
-      let binary = '';
-      for (let i = 0; i < bytes.length; i++) binary += String.fromCodePoint(bytes[i]);
-      const b64 = btoa(binary);
-      localStorage.setItem(this.credIdKey(), b64);
-    } catch { /* best-effort */ }
+    try { localStorage.setItem(this.credIdKey(), encodeBase64(new Uint8Array(rawId))); } catch { /* best-effort */ }
   }
 
-  async save(creds: StoredCredentials): Promise<void> {
-    const blob = this.encode(creds);
+  async save(blob: Uint8Array): Promise<void> {
     const challenge = crypto.getRandomValues(new Uint8Array(32));
     const userId = crypto.getRandomValues(new Uint8Array(16));
 
@@ -166,13 +332,13 @@ export class WebAuthnCredentialStore implements CredentialStore {
         rp: { name: this.displayName, id: this.rpId },
         user: {
           id: userId,
-          name: `${this.displayName.toLowerCase().replaceAll(/\s+/g, '-')}:${this.dbName}`,
+          name: `${this.displayName.toLowerCase().replaceAll(/\s+/g, '-')}:${this.namespace}`,
           displayName: this.displayName,
         },
         challenge,
         pubKeyCredParams: [
-          { type: 'public-key', alg: -7 },   // ES256
-          { type: 'public-key', alg: -257 },  // RS256
+          { type: 'public-key', alg: -7 },
+          { type: 'public-key', alg: -257 },
         ],
         authenticatorSelection: {
           authenticatorAttachment: 'platform',
@@ -186,25 +352,17 @@ export class WebAuthnCredentialStore implements CredentialStore {
     }) as PublicKeyCredential | null;
 
     if (!credential) throw new Error('WebAuthn credential creation cancelled');
-
-    // Write the blob in a separate get() call — largeBlob write requires
-    // an assertion, not registration, on most platforms.
     this.saveCredentialIdHint(credential.rawId);
-
-    await this.writeLargeBlob(credential.rawId, blob);
+    await this.write(credential.rawId, blob);
   }
 
-  private async writeLargeBlob(credentialId: ArrayBuffer, blob: Uint8Array): Promise<void> {
+  private async write(credentialId: ArrayBuffer, blob: Uint8Array): Promise<void> {
     const challenge = crypto.getRandomValues(new Uint8Array(32));
-
     const assertion = await navigator.credentials.get({
       publicKey: {
         challenge,
         rpId: this.rpId,
-        allowCredentials: [{
-          type: 'public-key' as const,
-          id: credentialId,
-        }],
+        allowCredentials: [{ type: 'public-key' as const, id: credentialId }],
         userVerification: 'required',
         extensions: {
           largeBlob: { write: blob },
@@ -213,26 +371,18 @@ export class WebAuthnCredentialStore implements CredentialStore {
     }) as PublicKeyCredential | null;
 
     if (!assertion) throw new Error('WebAuthn assertion cancelled');
-
-    const results = (assertion as any).getClientExtensionResults?.() as any;
-    if (!results?.largeBlob?.written) {
-      throw new Error('largeBlob write failed — authenticator may not support it');
-    }
+    const results = (assertion as { getClientExtensionResults?: () => { largeBlob?: { written?: boolean } } }).getClientExtensionResults?.();
+    if (!results?.largeBlob?.written) throw new Error('largeBlob write failed — authenticator may not support it');
   }
 
-  async load(): Promise<StoredCredentials | null> {
+  async load(): Promise<ArrayBuffer | null> {
     const challenge = crypto.getRandomValues(new Uint8Array(32));
     const credentialIdHint = this.loadCredentialIdHint();
-
     const assertion = await navigator.credentials.get({
       publicKey: {
         challenge,
         rpId: this.rpId,
-        // If we have the hint, scope to it. Otherwise let the authenticator
-        // show all resident credentials for this RP (discoverable flow).
-        allowCredentials: credentialIdHint
-          ? [{ type: 'public-key' as const, id: credentialIdHint }]
-          : [],
+        allowCredentials: credentialIdHint ? [{ type: 'public-key' as const, id: credentialIdHint }] : [],
         userVerification: 'required',
         extensions: {
           largeBlob: { read: true },
@@ -241,139 +391,127 @@ export class WebAuthnCredentialStore implements CredentialStore {
     }) as PublicKeyCredential | null;
 
     if (!assertion) return null;
-
-    const results = (assertion as any).getClientExtensionResults?.() as any;
+    const results = (assertion as { getClientExtensionResults?: () => { largeBlob?: { blob?: ArrayBuffer } } }).getClientExtensionResults?.();
     const blob = results?.largeBlob?.blob;
     if (!blob) return null;
-
-    // Got credentials back — re-save the hint in case localStorage was wiped.
     this.saveCredentialIdHint(assertion.rawId);
-
-    return this.decode(blob);
+    return blob;
   }
 
   async clear(): Promise<void> {
-    // Can't programmatically delete WebAuthn credentials.
-    // Remove the localStorage hint; the credential stays in the keychain
-    // but won't be found without the hint (or user manually picks it).
     try { localStorage.removeItem(this.credIdKey()); } catch { /* ok */ }
   }
 }
 
-// ─── Auto-detection ──────────────────────────────────────────────────
-
-/** Check if WebAuthn with largeBlob is likely available. */
-async function isWebAuthnLargeBlobAvailable(): Promise<boolean> {
-  if (globalThis.PublicKeyCredential === undefined) return false;
-  try {
-    // Check platform authenticator availability
-    const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-    if (!available) return false;
-    // No standard way to check largeBlob support without creating a credential.
-    // We rely on the 'required' support flag during create() to fail fast.
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
- * Create the best available credential store.
- *
- * Prefers WebAuthn (survives ITP) when available, falls back to
- * localStorage. Returns a `FallbackCredentialStore` that tries
- * WebAuthn first and uses localStorage as backup on every operation.
+ * Stores credentials directly in the OS keychain via WebAuthn largeBlob.
+ * No passphrase is written to localStorage/sessionStorage. A localStorage
+ * credential-id hint may be written; the hint is not key material.
  */
-export function createWebCredentialStore(dbName: string, displayName?: string): WebCredentialStore {
-  return new FallbackCredentialStore(dbName, displayName);
-}
-
-/**
- * Tries WebAuthn on save/load; falls back to localStorage on failure.
- *
- * Save: always writes localStorage (silent). WebAuthn only written via
- * explicit `secureWithBiometrics()` call — never automatically on first
- * key generation. This avoids a confusing biometric prompt on first open.
- *
- * Load: tries localStorage first (fast). If empty (ITP wipe?), tries
- * WebAuthn recovery (biometric prompt — user understands why at this point).
- */
-class FallbackCredentialStore implements WebCredentialStore {
-  private readonly ls: LocalStorageCredentialStore;
-  private webauthn: WebAuthnCredentialStore | null = null;
-  private webauthnChecked = false;
+export class WebAuthnCredentialStore implements CredentialStore {
+  private readonly blobStore: WebAuthnLargeBlobStore;
+  private readonly encoder = new TextEncoder();
+  private readonly decoder = new TextDecoder();
 
   constructor(
-    private readonly dbName: string,
-    private readonly displayName?: string,
+    dbName: string,
+    rpId: string = globalThis.location?.hostname ?? 'localhost',
+    displayName: string = 'Interocitor',
   ) {
-    this.ls = new LocalStorageCredentialStore(dbName);
-  }
-
-  private async getWebAuthn(): Promise<WebAuthnCredentialStore | null> {
-    if (this.webauthnChecked) return this.webauthn;
-    this.webauthnChecked = true;
-    if (await isWebAuthnLargeBlobAvailable()) {
-      this.webauthn = new WebAuthnCredentialStore(this.dbName, undefined, this.displayName);
-    }
-    return this.webauthn;
+    this.blobStore = new WebAuthnLargeBlobStore(dbName, rpId, displayName);
   }
 
   async save(creds: StoredCredentials): Promise<void> {
-    // Save to localStorage only (silent, no prompt).
-    // WebAuthn enrollment happens via secureWithBiometrics().
-    await this.ls.save(creds);
-  }
-
-  /**
-   * Persist current credentials to the OS keychain via biometrics.
-   * Call this when the user takes an intentional action — after pairing,
-   * after a "Secure my keys" button press, etc. Not on first open.
-   *
-   * Returns true if saved, false if WebAuthn unavailable or user cancelled.
-   */
-  async secureWithBiometrics(): Promise<boolean> {
-    const creds = await this.ls.load();
-    if (!creds) return false;
-
-    const wa = await this.getWebAuthn();
-    if (!wa) return false;
-
-    try {
-      await wa.save(creds);
-      return true;
-    } catch {
-      return false;
-    }
+    await this.blobStore.save(this.encoder.encode(JSON.stringify(creds)));
   }
 
   async load(): Promise<StoredCredentials | null> {
-    // Silent primary path only. No biometric prompt here.
-    return this.ls.load();
-  }
-
-  async restoreWithBiometrics(): Promise<StoredCredentials | null> {
-    const wa = await this.getWebAuthn();
-    if (!wa) return null;
-
-    try {
-      const restored = await wa.load();
-      if (restored) {
-        // Re-populate localStorage for normal silent opens after restore.
-        await this.ls.save(restored);
-        return restored;
-      }
-    } catch {
-      // unavailable / cancelled / not found
-    }
-    return null;
+    const blob = await this.blobStore.load();
+    if (!blob) return null;
+    return normalizeStoredCredentials(JSON.parse(this.decoder.decode(blob)));
   }
 
   async clear(): Promise<void> {
-    await this.ls.clear();
-    const wa = await this.getWebAuthn();
-    if (wa) {
-      try { await wa.clear(); } catch { /* best-effort */ }
+    await this.blobStore.clear();
+  }
+}
+
+/**
+ * Stores an AES-GCM envelope key in WebAuthn largeBlob. Use with
+ * `EnvelopedCredentialStore` when localStorage/sessionStorage may hold the
+ * encrypted mesh credential but biometric/passkey access is required to unwrap it.
+ */
+export class WebAuthnEnvelopeKeyProvider implements CredentialEnvelopeKeyProvider {
+  private readonly blobStore: WebAuthnLargeBlobStore;
+
+  constructor(
+    dbName: string,
+    rpId: string = globalThis.location?.hostname ?? 'localhost',
+    displayName: string = 'Interocitor',
+  ) {
+    this.blobStore = new WebAuthnLargeBlobStore(`${dbName}:envelope-key`, rpId, displayName);
+  }
+
+  async getKey(purpose: CredentialEnvelopeKeyPurpose = 'decrypt'): Promise<CryptoKey> {
+    const stored = await this.blobStore.load();
+    if (stored) {
+      return crypto.subtle.importKey('raw', stored, 'AES-GCM', false, ['encrypt', 'decrypt']);
     }
+    if (purpose === 'decrypt') {
+      throw new Error('No WebAuthn envelope key is available for decrypt');
+    }
+
+    const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+    const raw = await crypto.subtle.exportKey('raw', key);
+    await this.blobStore.save(new Uint8Array(raw));
+    return key;
+  }
+
+  async clear(): Promise<void> {
+    await this.blobStore.clear();
+  }
+}
+
+// ─── Auto-detection and configuration wiring ──────────────────────────
+
+/**
+ * Create a browser credential store.
+ *
+ * Forms:
+ * - `createWebCredentialStore(dbName)` → localStorage
+ * - `createWebCredentialStore(dbName, 'App Name')` → localStorage with passkey display name
+ * - `{ storage: 'memory' }` → key lives in JS memory only
+ * - `{ storage: 'sessionStorage' }` → key survives reloads in the same tab only
+ * - `{ storage: 'passkey' }` → key lives only in WebAuthn largeBlob
+ * - `{ envelope: { storage, keyProvider } }` → encrypted local/memory record, key from provider
+ * - `{ envelope: { store, keyProvider } }` → encrypted record from app/backend/custom storage
+ */
+export function createWebCredentialStore(dbName: string, displayName?: string): WebCredentialStore;
+export function createWebCredentialStore(dbName: string, options: CreateWebCredentialStoreOptions): WebCredentialStore;
+export function createWebCredentialStore(
+  dbName: string,
+  displayNameOrOptions?: string | CreateWebCredentialStoreOptions,
+): WebCredentialStore {
+  const options: CreateWebCredentialStoreOptions = typeof displayNameOrOptions === 'string'
+    ? { displayName: displayNameOrOptions }
+    : displayNameOrOptions ?? {};
+
+  if (options.envelope) {
+    return new NoopBiometricControls(new EnvelopedCredentialStore(
+      dbName,
+      options.envelope.store ?? options.envelope.storage ?? 'localStorage',
+      options.envelope.keyProvider,
+    ));
+  }
+
+  switch (options.storage ?? 'localStorage') {
+    case 'memory':
+      return new NoopBiometricControls(new MemoryCredentialStore(dbName, options.memory));
+    case 'sessionStorage':
+      return new NoopBiometricControls(new SessionStorageCredentialStore(dbName));
+    case 'passkey':
+      return new NoopBiometricControls(new WebAuthnCredentialStore(dbName, options.rpId, options.displayName));
+    case 'localStorage':
+      return new NoopBiometricControls(new LocalStorageCredentialStore(dbName));
   }
 }

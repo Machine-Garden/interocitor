@@ -41,6 +41,23 @@ Then open:
 5. Inspect `examples/todo-webdav/webdav-data/` to see the mailbox artifacts.
 6. Create another session in tab C to verify remote path isolation.
 
+## Credential storage modes
+
+The demo wires `credentialStore` explicitly. Use the `credentials` query
+parameter to try different browser key-storage policies without editing code:
+
+```text
+?credentials=session          # default: sessionStorage credential record
+?credentials=memory           # JS memory only; reload needs the join token again
+?credentials=local            # localStorage credential record
+?credentials=passkey          # WebAuthn largeBlob / platform authenticator
+?credentials=memory-envelope  # encrypted envelope in app memory, unwrap key in memory
+```
+
+The actual wiring lives in `app.js#createTodoCredentialStore`. Production apps
+can replace the memory envelope store with a backend-backed
+`CredentialEnvelopeStore` while keeping the unwrap key in passkey/biometrics.
+
 ## Durable files pattern
 
 The TODO UI intentionally stays row-only, but this example's WebDAV mailbox
@@ -61,7 +78,7 @@ read bytes directly with `db.getFile(path)` and build your own download UI.
 
 ## Notes
 
-- Join token includes `baseUrl`, `remotePath`, and key passphrase.
+- Join token includes `baseUrl`, `remotePath`, and portable key material.
 - Demo mode is file-backed so you can inspect cloud-side artifacts.
 - Package-level e2e validation uses the in-memory server mode.
 - Server storage remains abstracted for future persistence backends.

@@ -27,6 +27,7 @@ import type {
   WorkerLike,
   R2Bucket,
   FileUploadAuthorizationResult,
+  WorkerAuditEvent,
 } from './types.ts';
 export type { InterocitorEnv, InterocitorMountOptions, InterocitorRuntimeOptions } from './types.ts';
 
@@ -74,6 +75,7 @@ interface ResolvedRuntimeConfig {
   maxStoredFileBytes: number;
   maxMeshStoredBytes: number;
   authorizeFileUpload?: InterocitorRuntimeOptions<unknown>['authorizeFileUpload'];
+  audit?: InterocitorRuntimeOptions<unknown>['audit'];
   meshSecret: string;
   verbose: boolean;
 }
@@ -96,6 +98,7 @@ function resolveRuntimeConfig<Env>(env: Env, runtime?: InterocitorRuntimeOptions
     maxStoredFileBytes: parsePositiveInt(runtime?.maxStoredFileBytes?.(env), DEFAULT_STORED_FILE_BYTES),
     maxMeshStoredBytes: parsePositiveInt(runtime?.maxMeshStoredBytes?.(env), DEFAULT_MESH_STORED_BYTES),
     authorizeFileUpload: runtime?.authorizeFileUpload as InterocitorRuntimeOptions<unknown>['authorizeFileUpload'],
+    audit: runtime?.audit as InterocitorRuntimeOptions<unknown>['audit'],
     meshSecret: runtime?.meshSecret?.(env) || DEFAULT_MESH_SECRET,
     verbose: runtime?.verbose?.(env) === true || runtime?.verbose?.(env) === '1' || runtime?.verbose?.(env) === 1,
   };
@@ -247,6 +250,20 @@ function jsonResponse(payload: unknown, status = 200): Response {
   );
 }
 
+function requestId(request: Request): string | undefined {
+  return request.headers.get('CF-Ray') || request.headers.get('X-Request-Id') || undefined;
+}
+
+async function emitAudit<Env>(runtime: ResolvedRuntimeConfig, env: Env, event: Omit<WorkerAuditEvent, 'event' | 'at'>): Promise<void> {
+  if (!runtime.audit) return;
+  const auditEvent: WorkerAuditEvent = { event: 'interocitor.audit', at: new Date().toISOString(), ...event };
+  try {
+    await runtime.audit(auditEvent, env);
+  } catch (error) {
+    if (runtime.verbose) console.warn('[interocitor:audit] callback failed', error);
+  }
+}
+
 function bodyForEmptyResponse(status: number): null | '' {
   return status === 204 || status === 205 || status === 304 ? null : '';
 }
@@ -279,10 +296,14 @@ async function readBytes(request: Request): Promise<Uint8Array | null> {
   }
 }
 
-async function handleGetFile(db: DatabaseAdapter, prefix: string, path: string): Promise<Response> {
+async function handleGetFile<Env>(db: DatabaseAdapter, prefix: string, path: string, request: Request, runtime: ResolvedRuntimeConfig, env: Env): Promise<Response> {
   const pathType = classifyPath(path);
   const result = await opGetFile(db.raw, prefix, path, pathType);
-  if (!result.found) return withCors(new Response('Not found', { status: 404 }));
+  if (!result.found) {
+    await emitAudit(runtime, env, { op: 'read', prefix, path: normalizePath(path), pathType, status: 404, outcome: 'not-found', requestId: requestId(request) });
+    return withCors(new Response('Not found', { status: 404 }));
+  }
+  await emitAudit(runtime, env, { op: 'read', prefix, path: normalizePath(path), pathType, status: 200, outcome: 'ok', bytes: result.size, requestId: requestId(request) });
   return withCors(
     new Response(result.bytes as unknown as BodyInit, {
       status: 200,
@@ -296,10 +317,14 @@ async function handleGetFile(db: DatabaseAdapter, prefix: string, path: string):
   );
 }
 
-async function handleMetadata(db: DatabaseAdapter, prefix: string, path: string): Promise<Response> {
+async function handleMetadata<Env>(db: DatabaseAdapter, prefix: string, path: string, request: Request, runtime: ResolvedRuntimeConfig, env: Env): Promise<Response> {
   const pathType = classifyPath(path);
   const result = await opGetFile(db.raw, prefix, path, pathType);
-  if (!result.found) return jsonResponse({ file: null }, 404);
+  if (!result.found) {
+    await emitAudit(runtime, env, { op: 'metadata', prefix, path: normalizePath(path), pathType, status: 404, outcome: 'not-found', requestId: requestId(request) });
+    return jsonResponse({ file: null }, 404);
+  }
+  await emitAudit(runtime, env, { op: 'metadata', prefix, path: normalizePath(path), pathType, status: 200, outcome: 'ok', bytes: result.size, requestId: requestId(request) });
   return jsonResponse({
     file: {
       name: fileNameFromPath(path),
@@ -311,14 +336,16 @@ async function handleMetadata(db: DatabaseAdapter, prefix: string, path: string)
   }, 200);
 }
 
-async function handleWriteFile(
+async function handleWriteFile<Env>(
   db: DatabaseAdapter,
   prefix: string,
   path: string,
   request: Request,
   runtime: ResolvedRuntimeConfig,
   ctx: ExecutionContextLike,
-  relay?: DurableObjectNamespace,
+  relay: DurableObjectNamespace | undefined,
+  env: Env,
+  requestIdValue?: string,
 ): Promise<Response> {
   const bytes = await readBytes(request);
   if (!bytes) return jsonResponse({ error: 'Invalid request body' }, 400);
@@ -330,8 +357,9 @@ async function handleWriteFile(
     PATH_TYPE.DEVICE_HEARTBEAT,
     PATH_TYPE.MANIFEST_SNAPSHOT,
   ].includes(pathType as never);
-  const notify = (status: number): Response => {
-    if (shouldBroadcast && status >= 200 && status < 300) {
+  const notify = async (status: number, wrote = true): Promise<Response> => {
+    await emitAudit(runtime, env, { op: 'write', prefix, path: normalizePath(path), pathType, status, outcome: status >= 200 && status < 300 ? 'ok' : 'rejected', bytes: bytes.byteLength, requestId: requestIdValue });
+    if (wrote && shouldBroadcast && status >= 200 && status < 300) {
       const payload = { type: 'invalidation', op: 'write', path: normalizePath(path), pathType, ts: Date.now() };
       broadcast(relay, ctx, prefix, payload, { verbose: runtime.verbose });
     }
@@ -349,28 +377,33 @@ async function handleWriteFile(
   return notify(result.status);
 }
 
-async function handleListFiles(db: DatabaseAdapter, prefix: string, body: Record<string, unknown>): Promise<Response> {
+async function handleListFiles<Env>(db: DatabaseAdapter, prefix: string, body: Record<string, unknown>, request: Request, runtime: ResolvedRuntimeConfig, env: Env): Promise<Response> {
   const path = normalizePath(String(body?.path || '/'));
   const listing = await opListChildren(db.raw, prefix, path);
+  await emitAudit(runtime, env, { op: 'list', prefix, path, status: 200, outcome: 'ok', requestId: requestId(request) });
   return jsonResponse({ files: listing.files }, 200);
 }
 
-async function handleListFolders(db: DatabaseAdapter, prefix: string, body: Record<string, unknown>): Promise<Response> {
+async function handleListFolders<Env>(db: DatabaseAdapter, prefix: string, body: Record<string, unknown>, request: Request, runtime: ResolvedRuntimeConfig, env: Env): Promise<Response> {
   const path = normalizePath(String(body?.path || '/'));
   const listing = await opListChildren(db.raw, prefix, path);
+  await emitAudit(runtime, env, { op: 'list', prefix, path, status: 200, outcome: 'ok', requestId: requestId(request) });
   return jsonResponse({ folders: listing.folders }, 200);
 }
 
-async function handleDelete(
+async function handleDelete<Env>(
   db: DatabaseAdapter,
   prefix: string,
   path: string,
   ctx: ExecutionContextLike,
   runtime: ResolvedRuntimeConfig,
-  relay?: DurableObjectNamespace,
+  relay: DurableObjectNamespace | undefined,
+  env: Env,
+  requestIdValue?: string,
 ): Promise<Response> {
   const remoteRoot = meshRootForPath(path);
   const deleted = await opDeletePath(db.raw, prefix, path, remoteRoot);
+  await emitAudit(runtime, env, { op: 'delete', prefix, path: normalizePath(path), status: deleted ? 204 : 404, outcome: deleted ? 'ok' : 'not-found', requestId: requestIdValue });
   if (deleted) {
     broadcast(relay, ctx, prefix, { type: 'invalidation', op: 'delete', path: normalizePath(path), ts: Date.now() }, { verbose: runtime.verbose });
   }
@@ -385,6 +418,7 @@ interface StoredFileRow {
   size?: number;
   plaintext_size?: number | null;
   content_type?: string | null;
+  taint?: string | null;
   uploaded_by_device_id?: string;
   uploaded_at?: string;
   modified_time?: string;
@@ -412,6 +446,7 @@ function storedFileMetadata(row: StoredFileRow): Record<string, unknown> {
     plaintextSize: row.plaintext_size == null ? undefined : Number(row.plaintext_size),
     storedSize: Number(row.size ?? 0),
     contentType: row.content_type || undefined,
+    taint: row.taint || undefined,
   };
 }
 
@@ -420,22 +455,33 @@ async function currentStoredBytes(db: DatabaseAdapter, prefix: string): Promise<
   return Number(row?.total ?? 0);
 }
 
-async function handleStoredFileMetadata(db: DatabaseAdapter, prefix: string, path: string): Promise<Response> {
+async function handleStoredFileMetadata<Env>(db: DatabaseAdapter, prefix: string, path: string, request: Request, runtime: ResolvedRuntimeConfig, env: Env): Promise<Response> {
   const normalized = normalizePath(path);
   const row = await db.first<StoredFileRow>('SELECT * FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
-  if (!row) return jsonResponse({ file: null }, 404);
+  if (!row) {
+    await emitAudit(runtime, env, { op: 'stored-file-metadata', prefix, path: normalized, status: 404, outcome: 'not-found', requestId: requestId(request) });
+    return jsonResponse({ file: null }, 404);
+  }
+  await emitAudit(runtime, env, { op: 'stored-file-metadata', prefix, path: normalized, status: 200, outcome: 'ok', bytes: Number(row.size ?? 0), taint: row.taint || undefined, requestId: requestId(request) });
   return jsonResponse({ file: storedFileMetadata(row) }, 200);
 }
 
-async function handleGetStoredFile(db: DatabaseAdapter, bucket: R2Bucket | undefined, prefix: string, path: string): Promise<Response> {
+async function handleGetStoredFile<Env>(db: DatabaseAdapter, bucket: R2Bucket | undefined, prefix: string, path: string, request: Request, runtime: ResolvedRuntimeConfig, env: Env): Promise<Response> {
   if (!bucket) return jsonResponse({ error: 'File storage bucket not configured' }, 501);
   const normalized = normalizePath(path);
   const row = await db.first<StoredFileRow>('SELECT * FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
-  if (!row?.r2_key) return withCors(new Response('Not found', { status: 404 }));
+  if (!row?.r2_key) {
+    await emitAudit(runtime, env, { op: 'stored-file-read', prefix, path: normalized, status: 404, outcome: 'not-found', requestId: requestId(request) });
+    return withCors(new Response('Not found', { status: 404 }));
+  }
   const object = await bucket.get(String(row.r2_key));
-  if (!object) return withCors(new Response('Not found', { status: 404 }));
+  if (!object) {
+    await emitAudit(runtime, env, { op: 'stored-file-read', prefix, path: normalized, status: 404, outcome: 'not-found', taint: row.taint || undefined, requestId: requestId(request) });
+    return withCors(new Response('Not found', { status: 404 }));
+  }
   const now = new Date().toISOString();
   await db.run('UPDATE stored_files SET last_accessed_at=?3, use_count=use_count+1 WHERE prefix=?1 AND path=?2', prefix, normalized, now);
+  await emitAudit(runtime, env, { op: 'stored-file-read', prefix, path: normalized, status: 200, outcome: 'ok', bytes: Number(row.size ?? object.size), taint: row.taint || undefined, requestId: requestId(request) });
   const headers = new Headers({
     'Content-Type': String(row.content_type || 'application/octet-stream'),
     'Content-Length': String(object.size),
@@ -466,6 +512,7 @@ async function handlePutStoredFile<Env>(
   const uploadedByDeviceId = String(request.headers.get('X-Interocitor-Device-Id') || '').trim();
   if (!uploadedByDeviceId) return jsonResponse({ error: 'Missing X-Interocitor-Device-Id' }, 401);
   const contentType = request.headers.get('Content-Type') || 'application/octet-stream';
+  const taint = String(request.headers.get('X-Interocitor-Taint') || '').trim() || null;
   const plaintextSizeHeader = request.headers.get('X-Interocitor-Plaintext-Size');
   const plaintextSize = plaintextSizeHeader ? Number.parseInt(plaintextSizeHeader, 10) : undefined;
   const existing = await db.first<StoredFileRow>('SELECT size, r2_key FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
@@ -480,6 +527,7 @@ async function handlePutStoredFile<Env>(
       size: bytes.byteLength,
       plaintextSize: Number.isFinite(plaintextSize) ? plaintextSize : undefined,
       contentType,
+      taint: taint ?? undefined,
       currentMeshStoredBytes: current,
       maxMeshStoredBytes: runtime.maxMeshStoredBytes,
       request,
@@ -494,11 +542,12 @@ async function handlePutStoredFile<Env>(
   });
   const etag = crypto.randomUUID();
   await db.run(
-    `INSERT INTO stored_files (prefix,path,r2_key,size,plaintext_size,content_type,uploaded_by_device_id,uploaded_at,modified_time,last_accessed_at,use_count,etag)
-     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8,NULL,0,?9)
+    `INSERT INTO stored_files (prefix,path,r2_key,size,plaintext_size,content_type,taint,uploaded_by_device_id,uploaded_at,modified_time,last_accessed_at,use_count,etag)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,NULL,0,?10)
      ON CONFLICT(prefix,path) DO UPDATE SET
        r2_key=excluded.r2_key, size=excluded.size, plaintext_size=excluded.plaintext_size,
-       content_type=excluded.content_type, uploaded_by_device_id=excluded.uploaded_by_device_id,
+       content_type=excluded.content_type, taint=excluded.taint,
+       uploaded_by_device_id=excluded.uploaded_by_device_id,
        uploaded_at=excluded.uploaded_at, modified_time=excluded.modified_time,
        last_accessed_at=NULL, use_count=0, etag=excluded.etag`,
     prefix,
@@ -507,21 +556,28 @@ async function handlePutStoredFile<Env>(
     bytes.byteLength,
     Number.isFinite(plaintextSize) ? plaintextSize : null,
     contentType,
+    taint,
     uploadedByDeviceId,
     now,
     etag,
   );
   const row = await db.first<StoredFileRow>('SELECT * FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
-  return jsonResponse({ file: storedFileMetadata(row ?? { path: normalized, size: bytes.byteLength, uploaded_by_device_id: uploadedByDeviceId, uploaded_at: now, modified_time: now, etag }) }, existing ? 200 : 201);
+  const status = existing ? 200 : 201;
+  await emitAudit(runtime, env, { op: 'stored-file-write', prefix, path: normalized, status, outcome: 'ok', bytes: bytes.byteLength, taint: taint ?? undefined, requestId: requestId(request) });
+  return jsonResponse({ file: storedFileMetadata(row ?? { path: normalized, size: bytes.byteLength, uploaded_by_device_id: uploadedByDeviceId, uploaded_at: now, modified_time: now, etag, taint }) }, status);
 }
 
-async function handleDeleteStoredFile(db: DatabaseAdapter, bucket: R2Bucket | undefined, prefix: string, path: string): Promise<Response> {
+async function handleDeleteStoredFile<Env>(db: DatabaseAdapter, bucket: R2Bucket | undefined, prefix: string, path: string, request: Request, runtime: ResolvedRuntimeConfig, env: Env): Promise<Response> {
   if (!bucket) return jsonResponse({ error: 'File storage bucket not configured' }, 501);
   const normalized = normalizePath(path);
-  const row = await db.first<StoredFileRow>('SELECT r2_key FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
-  if (!row?.r2_key) return emptyResponse(404);
+  const row = await db.first<StoredFileRow>('SELECT r2_key, size, taint FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
+  if (!row?.r2_key) {
+    await emitAudit(runtime, env, { op: 'stored-file-delete', prefix, path: normalized, status: 404, outcome: 'not-found', requestId: requestId(request) });
+    return emptyResponse(404);
+  }
   await bucket.delete(String(row.r2_key));
   await db.run('DELETE FROM stored_files WHERE prefix=?1 AND path=?2', prefix, normalized);
+  await emitAudit(runtime, env, { op: 'stored-file-delete', prefix, path: normalized, status: 204, outcome: 'ok', bytes: Number(row.size ?? 0), taint: row.taint || undefined, requestId: requestId(request) });
   return emptyResponse(204);
 }
 
@@ -657,33 +713,33 @@ async function handleIoRequest<Env>(
   }
   if (op === 'file') {
     const path = normalizePath(url.searchParams.get('path') || '/');
-    if (method === 'GET') return handleGetFile(db, prefix, path);
-    if (method === 'PUT') return handleWriteFile(db, prefix, path, request, runtime, ctx, relay);
-    if (method === 'DELETE') return handleDelete(db, prefix, path, ctx, runtime, relay);
+    if (method === 'GET') return handleGetFile(db, prefix, path, request, runtime, env);
+    if (method === 'PUT') return handleWriteFile(db, prefix, path, request, runtime, ctx, relay, env, requestId(request));
+    if (method === 'DELETE') return handleDelete(db, prefix, path, ctx, runtime, relay, env, requestId(request));
   }
   if (op === 'metadata' && method === 'POST') {
     const body = await readJsonBody(request);
-    return handleMetadata(db, prefix, String(body?.path || '/'));
+    return handleMetadata(db, prefix, String(body?.path || '/'), request, runtime, env);
   }
   if (op === 'stored-file') {
     const path = normalizePath(url.searchParams.get('path') || '/');
-    if (method === 'GET') return handleGetStoredFile(db, files, prefix, path);
+    if (method === 'GET') return handleGetStoredFile(db, files, prefix, path, request, runtime, env);
     if (method === 'PUT') return handlePutStoredFile(db, files, prefix, path, request, runtime, env);
-    if (method === 'DELETE') return handleDeleteStoredFile(db, files, prefix, path);
+    if (method === 'DELETE') return handleDeleteStoredFile(db, files, prefix, path, request, runtime, env);
   }
   if (op === 'stored-file-metadata' && method === 'POST') {
     const body = await readJsonBody(request);
-    return handleStoredFileMetadata(db, prefix, String(body?.path || '/'));
+    return handleStoredFileMetadata(db, prefix, String(body?.path || '/'), request, runtime, env);
   }
   if (op === 'ensure-folder' && method === 'POST') {
     await opListChildren(db.raw, prefix, normalizePath(String((await readJsonBody(request))?.path || '/'))).catch(() => null);
     return emptyResponse(204);
   }
   if (op === 'list-files' && method === 'POST') {
-    return handleListFiles(db, prefix, await readJsonBody(request));
+    return handleListFiles(db, prefix, await readJsonBody(request), request, runtime, env);
   }
   if (op === 'list-folders' && method === 'POST') {
-    return handleListFolders(db, prefix, await readJsonBody(request));
+    return handleListFolders(db, prefix, await readJsonBody(request), request, runtime, env);
   }
   return withCors(new Response('Not found', { status: 404 }));
 }

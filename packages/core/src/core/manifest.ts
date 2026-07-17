@@ -28,7 +28,7 @@ export interface ManifestContext {
   emit: (event: SyncEvent) => void;
 }
 
-export async function readJson<T>(adapter: StorageAdapter, path: string): Promise<T> {
+async function readJson<T>(adapter: StorageAdapter, path: string): Promise<T> {
   const data = await adapter.readFile(path);
   return JSON.parse(textDecoder.decode(data)) as T;
 }
@@ -41,13 +41,13 @@ export async function readJsonIfExists<T>(adapter: StorageAdapter, path: string)
   }
 }
 
-export function assertServerAuth(manifest: { writtenBy: string }, serverId: string): void {
+function assertServerAuth(manifest: { writtenBy: string }, serverId: string): void {
   if (manifest.writtenBy !== serverId) {
     throw new Error(`Unauthorized manifest writer: ${manifest.writtenBy}`);
   }
 }
 
-export async function validateManifestHash(
+async function validateManifestHash(
   manifest: { contentHash: string; [key: string]: unknown },
 ): Promise<void> {
   const { contentHash, ...payload } = manifest;
@@ -62,7 +62,7 @@ export async function writeJson(adapter: StorageAdapter, path: string, value: un
   await adapter.writeFile(path, textEncoder.encode(JSON.stringify(value, null, 2)));
 }
 
-export async function createBootstrapManifest(
+async function createBootstrapManifest(
   ctx: ManifestContext,
   meshId?: string,
 ): Promise<{ pointer: ManifestPointer; manifest: Manifest }> {

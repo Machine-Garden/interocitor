@@ -17,6 +17,7 @@ import type {
   QueryDescriptor,
   QueryExecutionOptions,
   QueryExecutionPolicy,
+  QueryMetadata,
   RowDescriptor,
   WhereClause,
   WherePrimitive,
@@ -57,7 +58,7 @@ export class QueryResult<T extends Record<string, unknown>> implements PromiseLi
   }
 
   /** Public metadata. Mirrors `QueryMetadata` shape. */
-  get metadata() {
+  get metadata(): QueryMetadata {
     return { descriptor: this.descriptor, cacheKey: this.cacheKey };
   }
 
@@ -274,7 +275,7 @@ export class RowResult<T extends Record<string, unknown>> implements PromiseLike
       : `r=${descriptor.table}|id=${descriptor.rowId}`;
   }
 
-  get metadata() {
+  get metadata(): { descriptor: RowDescriptor; cacheKey: string } {
     return { descriptor: this.descriptor, cacheKey: this.cacheKey };
   }
 
@@ -531,4 +532,3 @@ class TableWhere<T extends Record<string, unknown>> {
     return this.run({ op: 'anyOf', values });
   }
 }
-

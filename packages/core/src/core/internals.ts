@@ -56,8 +56,6 @@ export function normalizeLogLevel(level: string | null | undefined): LogLevel {
   return (LOG_LEVELS as readonly string[]).includes(level ?? '') ? (level as LogLevel) : 'info';
 }
 
-export { LOG_LEVELS };
-
 
 // ─── ID generation ───────────────────────────────────────────────────
 
@@ -73,10 +71,10 @@ export function generateId(prefix: string): string {
 
 // ─── Encoding / Hashing ─────────────────────────────────────────────
 
-export const textEncoder = new TextEncoder();
-export const textDecoder = new TextDecoder();
+export const textEncoder: TextEncoder = new TextEncoder();
+export const textDecoder: TextDecoder = new TextDecoder();
 
-export function hexFromBytes(bytes: Uint8Array): string {
+function hexFromBytes(bytes: Uint8Array): string {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 

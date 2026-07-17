@@ -3,40 +3,36 @@
   "version": "0.0.0-beta.12",
   "description": "Browser runtime stores, credential stores, and UI helpers for Interocitor.",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    },
-    "./react": {
-      "import": "./dist/react.js",
-      "types": "./dist/react.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     },
     "./image": {
-      "import": "./dist/image.js",
-      "types": "./dist/image.d.ts"
+      "types": "./dist/image.d.ts",
+      "import": "./dist/image.js"
     },
     "./credential-store": {
-      "import": "./dist/credential-store.js",
-      "types": "./dist/credential-store.d.ts"
+      "types": "./dist/credential-store.d.ts",
+      "import": "./dist/credential-store.js"
     },
     "./storage/indexed-db-local-store": {
-      "import": "./dist/storage/indexed-db-local-store.js",
-      "types": "./dist/storage/indexed-db-local-store.d.ts"
+      "types": "./dist/storage/indexed-db-local-store.d.ts",
+      "import": "./dist/storage/indexed-db-local-store.js"
     },
     "./storage/resilient-store": {
-      "import": "./dist/storage/resilient-store.js",
-      "types": "./dist/storage/resilient-store.d.ts"
+      "types": "./dist/storage/resilient-store.d.ts",
+      "import": "./dist/storage/resilient-store.js"
     },
     "./storage/named-local-store": {
-      "import": "./dist/storage/named-local-store.js",
-      "types": "./dist/storage/named-local-store.d.ts"
+      "types": "./dist/storage/named-local-store.d.ts",
+      "import": "./dist/storage/named-local-store.js"
     },
     "./storage/reset": {
-      "import": "./dist/storage/reset.js",
-      "types": "./dist/storage/reset.d.ts"
+      "types": "./dist/storage/reset.d.ts",
+      "import": "./dist/storage/reset.js"
     }
   },
   "files": [
@@ -50,17 +46,9 @@
     "test:e2e": "yarn build && ../../node_modules/.bin/playwright test -c ./playwright.config.ts"
   },
   "peerDependencies": {
-    "@interocitor/core": "0.0.0-beta.12",
-    "react": ">=18"
-  },
-  "peerDependenciesMeta": {
-    "react": {
-      "optional": true
-    }
+    "@interocitor/core": "0.0.0-beta.12"
   },
   "devDependencies": {
-    "@types/react": "^19.0.0",
-    "react": "^19.0.0",
     "typescript": "^6.0.0"
   },
   "keywords": [

@@ -14,7 +14,8 @@ End‑to‑end encrypted, local‑first app data over storage you already own.
 `@interocitor/core` contains the runtime-neutral CRDT engine, sync protocol,
 remote storage contract, local store contract, and path-addressed byte file
 APIs. Runtime-neutral mailbox adapters live in core. Browser stores, browser
-credentials, image helpers, and React image hooks live in `@interocitor/web`.
+credentials, and image helpers live in `@interocitor/web`; React hooks live in
+`@interocitor/react`.
 
 ## What it is
 
@@ -77,6 +78,27 @@ Most browser apps should start with [`@interocitor/web`](../web/README.md).
 It provides the browser runtime pieces — IndexedDB local storage,
 credential-store helpers, image helpers, and reset helpers — that you
 compose into a `keySource`. Mailbox adapters still come from core.
+
+## Public API
+
+Documented entrypoints in this package:
+
+| API | Use when |
+| --- | --- |
+| `Interocitor` | You want the runtime-neutral engine for local-first rows and durable files |
+| `db.configureMesh(...)` | Mesh identity or credentials become known after construction but before first connect |
+| `db.init()` | The app wants local-first readiness before any remote session starts |
+| `db.connect()` | The app wants to create/resume the remote mesh session |
+| `db.table(name)` | The app wants typed row CRUD, queries, and row handles |
+| `db.putFile`, `db.getFile`, `db.openFile`, `db.deleteFile`, `db.getFileMetadata` | The app stores durable encrypted attachments or sealed files in the same mesh |
+| `PortablePassphraseKeySource`, `BoundSharedKeySource` | The app chooses how mesh key material is restored or derived |
+| `MemoryAdapter`, `WebDAVAdapter`, `GoogleDriveAdapter`, `CloudflareAdapter` | The app chooses a mailbox backend |
+| `generateShareQR`, `generateJoinQR`, `handleScannedQR` | The app wants the high-level QR pairing flow |
+| `createGeneratorSession`, `runScannerHandshake` | The app wants low-level control of the pairing handshake |
+
+The public API is documented in two places:
+- In code, via JSDoc on the exported entrypoints.
+- Outside code, in this README and deeper package docs under `docs/`.
 
 > The constructor accepts either `(adapter, config)` or `(config)` alone.
 > Use the `(config)` form for local‑only mode (no remote). Every runtime must
@@ -674,7 +696,7 @@ import { createNamedLocalStore } from '@interocitor/web';
 
 const db = new Interocitor(adapter, {
   localStore: createNamedLocalStore({
-    baseName: 'MealPlannerInterocitor',
+    baseName: 'CaseVaultInterocitor',
     schema,
     onLocalDegraded: ({ reason, error }) => report(reason, error),
     onRotated: ({ from, to, reason }) => reportRotation(from, to, reason),
@@ -937,6 +959,7 @@ yarn workspace @interocitor/core test webdav.adapter.contract
 Part of the Interocitor monorepo. See:
 
 - [Root README](../../README.md) — monorepo overview
+- [Dictionary](../../docs/dictionary.md) — terminology, including portable keys
 - [Security model](docs/security-model.md) — threat model
 - [Shared key scenarios](docs/shared-key-scenarios.md) — portable and bound shared-key deployment modes
 - [Pairing protocol](docs/pairing.md) — QR handshake and device-join flow

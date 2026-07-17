@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Interocitor - own your personal cloud</title>
+  <meta name="description" content="Interocitor turns WebDAV, Google Drive, Cloudflare, or your own adapter into private sync storage that cannot read encrypted payloads." />
+  <meta name="color-scheme" content="dark" />
+  <meta property="og:title" content="Interocitor - own your personal cloud" />
+  <meta property="og:description" content="Sync encrypted records and files through storage you choose. The relay carries the package, but cannot read the payload." />
+  <meta property="og:type" content="website" />
+  <link rel="icon" href="assets/hero.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="index-variants.css" />
+</head>
+<body class="theme-cloud">
+  <header class="site-header">
+    <a class="brand" href="#top" aria-label="Interocitor home">
+      <img src="assets/hero.svg" alt="" />
+      <span>Interocitor</span>
+    </a>
+    <nav aria-label="Primary navigation">
+      <a href="#clouds">Clouds</a>
+      <a href="#examples">Examples</a>
+      <a href="#boundary">Boundary</a>
+      <a href="#start">Start</a>
+      <a class="pill-link" href="https://github.com/TheUiTeam/interocitor">GitHub</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">Personal cloud - sealed sync - your storage</p>
+        <h1>Your personal cloud is already waiting. Own it.</h1>
+        <p class="lede">
+          Interocitor lets apps sync encrypted records and files through WebDAV, Google Drive, Cloudflare, or your own adapter. The relay moves the package, but <strong>cannot read the encrypted payload</strong>.
+        </p>
+        <div class="actions">
+          <a class="button primary" href="#start">Build with it</a>
+          <a class="button secondary" href="#clouds">Choose the relay</a>
+        </div>
+      </div>
+
+      <div class="hero-panel" aria-label="Personal cloud relay map">
+        <div class="panel-top"><span>personal cloud switchboard</span><span>payload sealed</span></div>
+        <div class="cloud-map">
+          <span>Trusted device</span>
+          <span>Encrypt</span>
+          <span>Drive</span>
+          <span>WebDAV</span>
+          <span>Cloudflare</span>
+          <span>Trusted device</span>
+        </div>
+        <p>The cloud is the courier, not the product database.</p>
+      </div>
+    </section>
+
+    <section id="clouds" class="section">
+      <div class="section-head">
+        <p class="kicker">Bring your own cloud</p>
+        <h2>Storage should be a choice, not a custody trap.</h2>
+        <p>Use the cloud your product, user, or deployment already trusts. Interocitor keeps the exchange model the same: local work, sealed packages, relay storage, trusted-device decrypt.</p>
+      </div>
+      <div class="card-grid four">
+        <article class="card">
+          <span class="num">01</span>
+          <h3>Google Drive for everyday users.</h3>
+          <p>Let a user-owned Drive carry encrypted packages without asking Drive to understand the app.</p>
+        </article>
+        <article class="card">
+          <span class="num">02</span>
+          <h3>WebDAV for self-hosters.</h3>
+          <p>Use a NAS, home server, or commodity hosted folder as private sync transport.</p>
+        </article>
+        <article class="card">
+          <span class="num">03</span>
+          <h3>Cloudflare for product teams.</h3>
+          <p>Workers, D1, and R2 can enforce policy and store ciphertext while clients keep payload custody.</p>
+        </article>
+        <article class="card">
+          <span class="num">04</span>
+          <h3>Custom when the shape matters.</h3>
+          <p>Bring the storage contract that fits your compliance, customer, or deployment reality.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="examples" class="section band">
+      <div class="section-head">
+        <p class="kicker">Use it for</p>
+        <h2>The cloud you already have can become private sync.</h2>
+        <p>Recipes, notes, scans, roadmaps, photos, and field records all move the same way: readable on trusted devices, encrypted in transit and at rest on the relay.</p>
+      </div>
+      <div class="card-grid five">
+        <article class="card story">
+          <h3>Drive-synced recipe vault</h3>
+          <p>Family recipes sync through Google Drive, but the readable cookbook stays on trusted devices.</p>
+        </article>
+        <article class="card story">
+          <h3>WebDAV home archive</h3>
+          <p>Notes, scans, and personal records sync to a NAS without turning it into a readable backend.</p>
+        </article>
+        <article class="card story">
+          <h3>Cloudflare team mesh</h3>
+          <p>A team gets durable sync infrastructure while app payloads stay encrypted outside clients.</p>
+        </article>
+        <article class="card story">
+          <h3>Private field app</h3>
+          <p>Offline records and photos work in the field, then sync later through sealed updates.</p>
+        </article>
+        <article class="card story">
+          <h3>Founder notebook</h3>
+          <p>Roadmaps, customer notes, sketches, and messy plans move without handing plaintext to storage.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="boundary" class="section">
+      <div class="split">
+        <div>
+          <p class="kicker">Boundary</p>
+          <h2>The relay carries ciphertext. It is not blind to everything.</h2>
+        </div>
+        <div class="boundary-list">
+          <article>
+            <h3>Cannot read</h3>
+            <p>Encrypted row contents, file bodies, snapshots, and change payloads without the key.</p>
+          </article>
+          <article>
+            <h3>Can still observe</h3>
+            <p>Operational metadata such as sizes, timing, object names, device activity, and routing data.</p>
+          </article>
+          <article>
+            <h3>Still your job</h3>
+            <p>Device security, key recovery, auth policy, and product-specific threat modeling.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="start" class="cta">
+      <p class="kicker">Own the route</p>
+      <h2>Use your cloud. Keep your payload.</h2>
+      <p>Interocitor gives your app a local-first encrypted exchange path across the storage you choose.</p>
+      <div class="actions">
+        <a class="button primary" href="https://github.com/TheUiTeam/interocitor#readme">Read the overview</a>
+        <a class="button secondary" href="https://github.com/TheUiTeam/interocitor/blob/main/packages/core/docs/adapter-contract.md">Adapter contract</a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

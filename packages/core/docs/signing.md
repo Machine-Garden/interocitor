@@ -40,6 +40,10 @@ Public keys are SPKI; private keys are PKCS#8. Both round-trip through the
 matching `import*` function. Treat the private key like the mesh passphrase:
 custody is the caller's responsibility.
 
+In browser apps, `@interocitor/web` can hold that exported private-key blob
+behind a WebAuthn ceremony via `WebAuthnBlobStore` when signing should require
+biometric or passkey confirmation.
+
 ## Raw bytes
 
 ```ts

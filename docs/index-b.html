@@ -1,0 +1,731 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Interocitor — the actually private database</title>
+  <meta name="description" content="The actually private database. Built so the claim is checkable: plaintext lives on devices, only sealed ciphertext crosses the wire, and the page lists what leaks." />
+  <meta name="color-scheme" content="dark" />
+  <meta property="og:title" content="Interocitor — the actually private database" />
+  <meta property="og:description" content="Built so the claim is checkable. Plaintext on devices, only sealed ciphertext on the wire — and it lists what leaks." />
+  <meta property="og:type" content="website" />
+  <link rel="icon" href="assets/hero.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Saira:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --field:      #0b2545;   /* prussian drafting paper */
+      --field-2:    #0e2e56;   /* raised inset */
+      --field-3:    #123a68;   /* hover / component fill */
+      --ink:        #eaf2fd;   /* primary linework / text */
+      --ink-dim:    #9db9dc;   /* secondary */
+      --ink-faint:  #5f7fa8;   /* tertiary / captions */
+      --amber:      #f4b544;   /* plaintext · the protected, warm thing */
+      --amber-deep: #d8932a;
+      --cyan:       #6fd0e0;   /* ciphertext trace */
+      --alarm:      #e8734f;   /* out-of-scope / leaks */
+      --line:       rgba(210,230,252,0.22);
+      --line-2:     rgba(210,230,252,0.40);
+      --grid:       rgba(150,185,225,0.06);
+      --disp:  "Saira", system-ui, sans-serif;
+      --body:  "IBM Plex Sans", system-ui, sans-serif;
+      --mono:  "IBM Plex Mono", ui-monospace, monospace;
+      --measure: 60ch;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
+
+    body {
+      background:
+        linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 100% 26px,
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 26px 100%,
+        var(--field);
+      color: var(--ink);
+      font-family: var(--body);
+      font-size: 1.02rem; line-height: 1.62;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--cyan); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    a:hover { color: #a6e6f1; }
+    :focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
+    code, pre { font-family: var(--mono); }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 1.6rem; }
+
+    .ref {
+      font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.18em;
+      text-transform: uppercase; color: var(--ink-faint);
+    }
+
+    /* ---------------- header (sheet strip) ---------------- */
+    .sheet-head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 1.5rem; padding: 1.1rem 0; border-bottom: 1px solid var(--line);
+      flex-wrap: wrap;
+    }
+    .mark { display: flex; align-items: baseline; gap: 0.6rem; text-decoration: none; }
+    .mark .glyph {
+      font-family: var(--mono); color: var(--amber); font-size: 1rem; font-weight: 500;
+    }
+    .mark .name {
+      font-family: var(--disp); font-weight: 700; letter-spacing: 0.02em;
+      color: var(--ink); font-size: 1.05rem; text-transform: uppercase;
+    }
+    .sheet-head nav { display: flex; gap: 1.3rem; flex-wrap: wrap; }
+    .sheet-head nav a {
+      font-family: var(--mono); font-size: 0.76rem; letter-spacing: 0.06em;
+      color: var(--ink-dim); text-decoration: none;
+    }
+    .sheet-head nav a:hover { color: var(--ink); }
+
+    /* ---------------- hero ---------------- */
+    .hero { padding: 4rem 0 2rem; }
+    .hero .ref { margin-bottom: 1.3rem; color: var(--amber-deep); }
+    .hero h1 {
+      font-family: var(--disp); font-weight: 700;
+      font-size: clamp(2.4rem, 6vw, 4.6rem);
+      line-height: 0.98; letter-spacing: -0.01em; text-transform: uppercase;
+      max-width: 16ch;
+    }
+    .hero h1 .warm { color: var(--amber); }
+    .lede {
+      margin-top: 1.7rem; max-width: var(--measure);
+      font-size: 1.14rem; color: var(--ink-dim);
+    }
+    .lede strong { color: var(--ink); font-weight: 600; }
+    .lede code {
+      font-size: 0.9em; color: var(--amber); background: rgba(244,181,68,0.08);
+      border: 1px solid rgba(244,181,68,0.25); border-radius: 3px; padding: 0.05em 0.4em;
+    }
+    .actions { margin-top: 2.1rem; display: flex; gap: 0.8rem; flex-wrap: wrap; }
+    .btn {
+      font-family: var(--mono); font-size: 0.84rem; letter-spacing: 0.04em;
+      text-decoration: none; padding: 0.68rem 1.25rem; border-radius: 3px;
+      border: 1px solid transparent;
+    }
+    .btn.solid { background: var(--amber); color: #201400; font-weight: 500; }
+    .btn.solid:hover { background: #ffc75a; color: #201400; }
+    .btn.ghost { border-color: var(--line-2); color: var(--ink); }
+    .btn.ghost:hover { border-color: var(--ink); }
+
+    /* ---------------- schematic (signature) ---------------- */
+    .schematic {
+      margin-top: 3rem; border: 1px solid var(--line-2); border-radius: 6px;
+      background: rgba(4,18,38,0.35);
+    }
+    .schematic .drawing { overflow-x: auto; }
+    .schematic svg { display: block; width: 100%; min-width: 720px; height: auto; }
+    .schematic .titlestrip {
+      display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+      border-top: 1px solid var(--line); padding: 0.6rem 1rem;
+      font-family: var(--mono); font-size: 0.72rem; color: var(--ink-faint);
+    }
+    .schematic .titlestrip b { color: var(--amber); font-weight: 500; }
+    .swipe-hint { display: none; }
+    @media (max-width: 760px) {
+      .swipe-hint {
+        display: block; font-family: var(--mono); font-size: 0.68rem;
+        color: var(--ink-faint); padding: 0.5rem 1rem 0;
+      }
+    }
+
+    /* schematic svg internals */
+    .s-line { stroke: var(--line-2); fill: none; }
+    .s-hair { stroke: var(--line); fill: none; }
+    .s-amber { stroke: var(--amber); fill: none; stroke-width: 2; }
+    .s-cyan  { stroke: var(--cyan);  fill: none; stroke-width: 2; stroke-dasharray: 7 6; }
+    .s-fill-dev { fill: rgba(244,181,68,0.06); stroke: var(--amber); stroke-width: 1.4; }
+    .s-fill-relay { fill: rgba(111,208,224,0.05); stroke: var(--cyan); stroke-width: 1.4; }
+    .t-label { font-family: "IBM Plex Mono", monospace; fill: var(--ink-faint); font-size: 12px; letter-spacing: 0.14em; }
+    .t-plain { font-family: "IBM Plex Mono", monospace; fill: var(--amber); font-size: 13px; }
+    .t-cipher { font-family: "IBM Plex Mono", monospace; fill: var(--cyan); font-size: 12px; opacity: 0.85; }
+    .t-callout { font-family: "IBM Plex Mono", monospace; fill: var(--ink); font-size: 12.5px; }
+    .t-note { font-family: "IBM Plex Mono", monospace; fill: var(--ink-dim); font-size: 11px; }
+    .cnum { fill: var(--amber); }
+    .cnum-txt { fill: #201400; font-family: "IBM Plex Mono", monospace; font-size: 12px; font-weight: 700; }
+    .spark-a { stroke: var(--amber); stroke-width: 3; stroke-linecap: round; fill: none; stroke-dasharray: 2 260; }
+    .spark-c { stroke: #b9f0fa; stroke-width: 3; stroke-linecap: round; fill: none; stroke-dasharray: 2 190; }
+    @media (prefers-reduced-motion: no-preference) {
+      .spark-a { animation: runA 3.6s linear infinite; }
+      .spark-c { animation: runC 3.6s linear infinite; }
+    }
+    @keyframes runA { from { stroke-dashoffset: 262; } to { stroke-dashoffset: 0; } }
+    @keyframes runC { from { stroke-dashoffset: 192; } to { stroke-dashoffset: 0; } }
+
+    /* ---------------- build gallery ---------------- */
+    .gallery { padding: 3.5rem 0 1rem; }
+    .gallery .ref { margin-bottom: 1.2rem; }
+    .build-grid { display: grid; gap: 1.1rem; grid-template-columns: repeat(auto-fit, minmax(232px, 1fr)); }
+    .card {
+      border: 1px solid var(--line); border-radius: 5px; padding: 1rem 1rem 1.2rem;
+      background: var(--field-2);
+    }
+    .card h3 { font-family: var(--disp); font-weight: 600; font-size: 1.12rem; margin-top: 0.9rem; text-transform: uppercase; letter-spacing: 0.01em; }
+    .card p { font-size: 0.88rem; color: var(--ink-dim); margin-top: 0.4rem; }
+    .card .mech { font-family: var(--mono); font-size: 0.7rem; color: var(--amber); margin-top: 0.8rem; letter-spacing: 0.02em; }
+    .card.ghost { border-style: dashed; background: transparent; display: flex; align-items: center; justify-content: center; text-align: center; min-height: 210px; }
+    .card.ghost p { font-family: var(--mono); color: var(--ink-faint); max-width: 22ch; }
+
+    .mini { height: 108px; border: 1px solid var(--line); border-radius: 4px; background: rgba(4,18,38,0.35); padding: 9px; overflow: hidden; }
+    .mini-kanban { display: flex; gap: 7px; }
+    .mini-kanban .col { flex: 1; display: flex; flex-direction: column; gap: 5px; }
+    .mini-kanban .col::before { content: ""; height: 4px; width: 60%; border-radius: 2px; background: var(--line-2); margin-bottom: 2px; }
+    .mini-kanban .cd { height: 13px; border-radius: 2px; border: 1px solid var(--line-2); }
+    .mini-kanban .cd.hot { border-color: var(--amber); background: rgba(244,181,68,0.14); }
+    .mini-docs { display: flex; flex-direction: column; gap: 8px; justify-content: center; }
+    .doc-row { display: flex; align-items: center; gap: 8px; }
+    .doc-row .ic { width: 14px; height: 18px; border: 1.3px solid var(--ink-dim); border-radius: 1px 5px 1px 1px; flex-shrink: 0; }
+    .doc-row .bars { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+    .doc-row .bars i { height: 3px; border-radius: 2px; background: var(--line-2); display: block; }
+    .doc-row .bars i:last-child { width: 60%; }
+    .doc-row .chip { font-family: var(--mono); font-size: 0.54rem; letter-spacing: 0.1em; color: var(--cyan); border: 1px solid var(--cyan); border-radius: 2px; padding: 0 3px; }
+    .mini-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+    .mini-week .d { border: 1px solid var(--line); border-radius: 2px; display: flex; flex-direction: column; gap: 3px; padding: 3px 2px; }
+    .mini-week .d i { height: 5px; border-radius: 1px; background: var(--line-2); display: block; }
+    .mini-week .d i.hot { background: rgba(244,181,68,0.5); }
+
+    /* ---------------- sheet sections ---------------- */
+    .sheet { padding: 4.5rem 0 1rem; border-top: 1px solid var(--line); margin-top: 3.5rem; }
+    .sheet-num {
+      font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.18em;
+      text-transform: uppercase; color: var(--amber-deep); margin-bottom: 0.7rem;
+    }
+    .sheet h2 {
+      font-family: var(--disp); font-weight: 600; text-transform: uppercase;
+      font-size: clamp(1.6rem, 3.6vw, 2.5rem); line-height: 1.08; letter-spacing: 0; max-width: 22ch;
+    }
+    .prose { margin-top: 1.6rem; max-width: var(--measure); }
+    .prose p + p { margin-top: 1rem; }
+    .prose strong { color: var(--ink); font-weight: 600; }
+    .prose code { font-size: 0.9em; color: var(--amber); background: rgba(244,181,68,0.08); border: 1px solid rgba(244,181,68,0.22); border-radius: 3px; padding: 0.03em 0.35em; }
+
+    /* component spec boxes (rows / files) */
+    .specs { margin-top: 2.2rem; display: grid; gap: 1px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); background: var(--line); border: 1px solid var(--line-2); border-radius: 5px; overflow: hidden; }
+    .specs article { background: var(--field-2); padding: 1.4rem 1.5rem; }
+    .specs .tag { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--amber); display: block; margin-bottom: 0.6rem; }
+    .specs h3 { font-family: var(--disp); font-weight: 600; font-size: 1.15rem; text-transform: uppercase; margin-bottom: 0.4rem; }
+    .specs p { font-size: 0.92rem; color: var(--ink-dim); }
+
+    /* bench readout (real crypto) */
+    .bench { margin-top: 2.4rem; border: 1px solid var(--line-2); border-radius: 5px; overflow: hidden; }
+    .bench-head { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: 0.6rem 1rem; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); }
+    .bench-head b { color: var(--amber); font-weight: 500; }
+    .bench-body { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; }
+    .bcell { padding: 1.1rem 1.15rem; }
+    .bcell + .bcell { border-left: 1px solid var(--line); }
+    .bcell .lbl { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.8rem; }
+    .bdot { width: 6px; height: 6px; border-radius: 50%; }
+    .b-in .bdot { background: var(--amber); }
+    .b-mid .bdot { background: var(--cyan); }
+    .b-out .bdot { background: var(--amber); }
+    .b-out.pending .bdot { background: var(--ink-faint); }
+    .bench input[type=text] { width: 100%; font-family: var(--body); font-size: 0.92rem; color: var(--ink); background: rgba(4,18,38,0.4); border: 1px solid var(--line-2); border-radius: 3px; padding: 0.45rem 0.55rem; margin-bottom: 0.7rem; }
+    .bench input[type=text]:focus { outline: none; border-color: var(--amber); }
+    .btoggle { display: flex; align-items: center; gap: 0.5rem; font-size: 0.86rem; color: var(--ink-dim); cursor: pointer; }
+    .btoggle input { width: 14px; height: 14px; accent-color: var(--amber); }
+    .cipher { font-family: var(--mono); font-size: 0.72rem; line-height: 1.7; color: var(--cyan); opacity: 0.85; word-break: break-all; }
+    .cfoot { font-family: var(--mono); font-size: 0.64rem; color: var(--ink-faint); margin-top: 0.8rem; }
+    .b-out .rowline { font-family: var(--mono); font-size: 0.92rem; color: var(--ink); }
+    .b-out.done .rowline { color: var(--ink-dim); text-decoration: line-through; text-decoration-color: var(--amber); }
+    .b-out .rowmeta { font-family: var(--mono); font-size: 0.66rem; color: var(--ink-faint); margin-top: 0.55rem; }
+    .b-out .rowmeta b { color: var(--amber); font-weight: 500; }
+    @media (prefers-reduced-motion: no-preference) {
+      .b-out.flash .rowline { animation: pop 0.55s ease; }
+    }
+    @keyframes pop { 0% { color: var(--amber); } 100% { color: var(--ink); } }
+    @media (max-width: 720px) { .bench-body { grid-template-columns: 1fr; } .bcell + .bcell { border-left: none; border-top: 1px solid var(--line); } }
+
+    /* legend / key (sheet 02) */
+    .primitives { margin-top: 2rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .primitives span { font-family: var(--mono); font-size: 0.78rem; border: 1px solid var(--line-2); border-radius: 999px; padding: 0.32rem 0.85rem; color: var(--ink-dim); }
+    .legend { margin-top: 2.2rem; border: 1px solid var(--line-2); border-radius: 5px; overflow: hidden; }
+    .legend-head { padding: 0.6rem 1.2rem; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-faint); }
+    .legend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    .legend-col { padding: 1.4rem 1.4rem; }
+    .legend-col + .legend-col { border-left: 1px solid var(--line); }
+    .legend-col h4 { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 0.9rem; }
+    .legend-col.p h4 { color: var(--amber); }
+    .legend-col.v h4 { color: var(--cyan); }
+    .legend-col.o h4 { color: var(--alarm); }
+    .legend-col ul { list-style: none; }
+    .legend-col li { display: flex; gap: 0.6rem; align-items: baseline; font-size: 0.88rem; color: var(--ink-dim); padding: 0.32rem 0; }
+    .legend-col li .sym { font-family: var(--mono); font-size: 0.8rem; flex-shrink: 0; }
+    .legend-col.p .sym { color: var(--amber); }
+    .legend-col.v .sym { color: var(--cyan); }
+    .legend-col.o .sym { color: var(--alarm); }
+    @media (max-width: 720px) { .legend-col + .legend-col { border-left: none; border-top: 1px solid var(--line); } }
+    .legend-note { padding: 1.2rem 1.4rem; border-top: 1px solid var(--line); font-size: 0.9rem; color: var(--ink-faint); max-width: var(--measure); }
+
+    /* skip list + install (sheet 03) */
+    .skip { margin-top: 1.9rem; list-style: none; max-width: var(--measure); border: 1px solid var(--line-2); border-radius: 5px; background: var(--field-2); overflow: hidden; }
+    .skip li { display: flex; align-items: baseline; gap: 0.8rem; padding: 0.62rem 1.2rem; font-size: 0.95rem; border-bottom: 1px solid var(--line); }
+    .skip li:last-child { border-bottom: none; }
+    .skip li .x { font-family: var(--mono); color: var(--alarm); flex-shrink: 0; }
+    .skip li em { font-style: normal; color: var(--ink-faint); font-size: 0.86rem; }
+
+    .detail { margin-top: 2.6rem; border: 1px solid var(--line-2); border-radius: 5px; overflow: hidden; }
+    .detail .dlabel { padding: 0.55rem 1rem; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); display: flex; justify-content: space-between; }
+    .install-line { font-family: var(--mono); font-size: 0.86rem; background: rgba(4,18,38,0.5); color: var(--ink); padding: 0.75rem 1rem; border-bottom: 1px solid var(--line); }
+    .install-line::before { content: "$ "; color: var(--ink-faint); }
+    pre.code { background: rgba(4,18,38,0.5); color: var(--ink); padding: 1.2rem 1rem; font-size: 0.8rem; line-height: 1.62; overflow-x: auto; }
+    pre.code .c { color: var(--ink-faint); }
+    pre.code .k { color: var(--cyan); }
+    pre.code .s { color: var(--amber); }
+
+    .adapters { margin-top: 2rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .adapters span { font-family: var(--mono); font-size: 0.8rem; border: 1px solid var(--line-2); border-radius: 3px; padding: 0.42rem 0.85rem; color: var(--ink-dim); }
+    .docs { margin-top: 2.2rem; display: grid; gap: 0.45rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    .docs a { font-family: var(--mono); font-size: 0.82rem; text-decoration: none; border: 1px solid var(--line); border-radius: 3px; padding: 0.65rem 0.9rem; color: var(--ink); }
+    .docs a::before { content: "→ "; color: var(--amber); }
+    .docs a:hover { border-color: var(--amber); }
+
+    /* ---------------- title block footer ---------------- */
+    .titleblock { margin-top: 5rem; border: 1px solid var(--line-2); border-top-width: 2px; border-top-color: var(--amber); display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+    .tb { padding: 0.9rem 1.1rem; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .tb .k { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); display: block; margin-bottom: 0.3rem; }
+    .tb .v { font-family: var(--mono); font-size: 0.86rem; color: var(--ink); }
+    .tb .v.amber { color: var(--amber); }
+    footer.pad { padding: 1.4rem 0 2.4rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <header class="sheet-head">
+      <a class="mark" href="#top">
+        <span class="glyph">~</span><span class="name">Interocitor</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="#s01">01 · what</a>
+        <a href="#s02">02 · threat model</a>
+        <a href="#s03">03 · build</a>
+        <a href="https://github.com/TheUiTeam/interocitor">github</a>
+      </nav>
+    </header>
+
+    <main id="top">
+
+      <!-- HERO -->
+      <section class="hero" aria-labelledby="hero-title">
+        <p class="ref">Sheet 00 · an isolated, secure building block</p>
+        <h1 id="hero-title">The <span class="warm">actually</span> private database.</h1>
+        <p class="lede">
+          Everything claims to be secure. Here, privacy is a property, not a
+          promise: your data is sealed on the device, only ciphertext crosses
+          storage you control, and <strong>the key is the access control</strong>
+          — no key, no data, the server included. To your code it stays an
+          ordinary typed database — <code>db.table('todos').add(...)</code>, live
+          queries, merging across every device. <strong>Multiple users are the
+          expected case.</strong>
+        </p>
+        <div class="actions">
+          <a class="btn solid" href="#s03">Quick start</a>
+          <a class="btn ghost" href="#s02">Threat model</a>
+        </div>
+
+        <!-- SVG schematic: the data path as an engineering drawing -->
+        <figure class="schematic" aria-labelledby="schematic-cap">
+          <p class="swipe-hint">↔ swipe the drawing</p>
+          <div class="drawing">
+            <svg viewBox="0 0 960 340" role="img" aria-describedby="schematic-desc">
+              <desc id="schematic-desc">
+                A plaintext row is written on Device A (warm, readable). It is sealed at a boundary and
+                travels to the central relay as ciphertext (cold, unreadable hex). It crosses a second
+                boundary and is decrypted and merged on Device B.
+              </desc>
+
+              <!-- datum + frame ticks -->
+              <line x1="40" y1="210" x2="920" y2="210" class="s-hair" stroke-dasharray="2 5" />
+              <text x="40" y="330" class="t-label">DATUM · SYNC PATH</text>
+
+              <!-- Device A -->
+              <rect x="60" y="150" width="170" height="120" rx="4" class="s-fill-dev" />
+              <line x1="60" y1="150" x2="72" y2="150" class="s-amber" />
+              <line x1="60" y1="150" x2="60" y2="162" class="s-amber" />
+              <line x1="230" y1="270" x2="218" y2="270" class="s-amber" />
+              <line x1="230" y1="270" x2="230" y2="258" class="s-amber" />
+              <text x="75" y="178" class="t-label" fill="#f4b544">DEVICE A · PLAINTEXT</text>
+              <text x="75" y="205" class="t-plain">text: "buy milk"</text>
+              <text x="75" y="226" class="t-plain">done: false</text>
+              <text x="75" y="252" class="t-note">reads + writes are instant</text>
+
+              <!-- boundary seal 1 -->
+              <g>
+                <rect x="298" y="140" width="16" height="140" fill="none" stroke="#f4b544" stroke-width="1" opacity="0.5" />
+                <path d="M298 140 L314 156 M298 156 L314 172 M298 172 L314 188 M298 188 L314 204 M298 204 L314 220 M298 220 L314 236 M298 236 L314 252 M298 252 L314 268 M298 268 L314 284"
+                      stroke="#f4b544" stroke-width="0.8" opacity="0.45" fill="none" />
+                <text x="306" y="130" class="t-label" text-anchor="middle" fill="#f4b544">SEAL</text>
+              </g>
+
+              <!-- Relay -->
+              <rect x="400" y="150" width="160" height="120" rx="4" class="s-fill-relay" />
+              <text x="480" y="178" class="t-label" text-anchor="middle" fill="#6fd0e0">RELAY · CIPHERTEXT ONLY</text>
+              <text x="480" y="205" class="t-cipher" text-anchor="middle">9f3c a71b 44e0 8c2d</text>
+              <text x="480" y="224" class="t-cipher" text-anchor="middle">e5b7 10af 6cc9 d283</text>
+              <text x="480" y="252" class="t-note" text-anchor="middle">holds no key · cannot open</text>
+
+              <!-- boundary seal 2 -->
+              <g>
+                <rect x="646" y="140" width="16" height="140" fill="none" stroke="#f4b544" stroke-width="1" opacity="0.5" />
+                <path d="M646 140 L662 156 M646 156 L662 172 M646 172 L662 188 M646 188 L662 204 M646 204 L662 220 M646 220 L662 236 M646 236 L662 252 M646 252 L662 268 M646 268 L662 284"
+                      stroke="#f4b544" stroke-width="0.8" opacity="0.45" fill="none" />
+                <text x="654" y="130" class="t-label" text-anchor="middle" fill="#f4b544">SEAL</text>
+              </g>
+
+              <!-- Device B -->
+              <rect x="730" y="150" width="170" height="120" rx="4" class="s-fill-dev" />
+              <line x1="900" y1="150" x2="888" y2="150" class="s-amber" />
+              <line x1="900" y1="150" x2="900" y2="162" class="s-amber" />
+              <line x1="730" y1="270" x2="742" y2="270" class="s-amber" />
+              <line x1="730" y1="270" x2="730" y2="258" class="s-amber" />
+              <text x="745" y="178" class="t-label" fill="#f4b544">DEVICE B · AFTER MERGE</text>
+              <text x="745" y="205" class="t-plain">text: "buy milk"</text>
+              <text x="745" y="226" class="t-plain">done: true</text>
+              <text x="745" y="252" class="t-note">converged · CRDT rules</text>
+
+              <!-- traces -->
+              <line x1="230" y1="210" x2="298" y2="210" class="s-amber" />
+              <line x1="314" y1="210" x2="400" y2="210" class="s-cyan" />
+              <line x1="560" y1="210" x2="646" y2="210" class="s-cyan" />
+              <line x1="662" y1="210" x2="730" y2="210" class="s-amber" />
+
+              <!-- travelling current -->
+              <path class="spark-a" d="M230 210 L298 210" />
+              <path class="spark-c" d="M314 210 L400 210" />
+              <path class="spark-c" d="M560 210 L646 210" />
+              <path class="spark-a" d="M662 210 L730 210" />
+
+              <!-- callouts -->
+              <g>
+                <line x1="145" y1="150" x2="145" y2="86" class="s-hair" />
+                <circle cx="145" cy="74" r="12" class="cnum" />
+                <text x="145" y="78" text-anchor="middle" class="cnum-txt">1</text>
+                <text x="165" y="78" class="t-callout">written &amp; sealed here</text>
+              </g>
+              <g>
+                <line x1="480" y1="150" x2="480" y2="86" class="s-hair" />
+                <circle cx="480" cy="74" r="12" class="cnum" />
+                <text x="480" y="78" text-anchor="middle" class="cnum-txt">2</text>
+                <text x="500" y="78" class="t-callout">the relay only ever holds this</text>
+              </g>
+              <g>
+                <line x1="815" y1="150" x2="815" y2="86" class="s-hair" />
+                <circle cx="815" cy="74" r="12" class="cnum" />
+                <text x="815" y="78" text-anchor="middle" class="cnum-txt">3</text>
+                <text x="835" y="78" class="t-callout">decrypts + merges</text>
+              </g>
+            </svg>
+          </div>
+          <figcaption class="titlestrip" id="schematic-cap">
+            <span>Warm trace = <b>plaintext</b>, on device only · dashed cyan = ciphertext, on the wire</span>
+            <span>GA-00 · rev D</span>
+          </figcaption>
+        </figure>
+      </section>
+
+      <!-- BUILD GALLERY -->
+      <section class="gallery" aria-labelledby="gallery-title">
+        <p class="ref" id="gallery-title">Example assemblies · if it fits in rows + files, you can build it</p>
+        <div class="build-grid">
+          <article class="card">
+            <div class="mini mini-kanban" aria-hidden="true">
+              <div class="col"><span class="cd hot"></span><span class="cd"></span><span class="cd"></span></div>
+              <div class="col"><span class="cd"></span><span class="cd hot"></span></div>
+              <div class="col"><span class="cd"></span><span class="cd"></span><span class="cd"></span><span class="cd"></span></div>
+            </div>
+            <h3>Task tracker like Linear</h3>
+            <p>Issues are rows. Two people move cards at once and the board converges — per-column merge is the conflict resolution, not a backend you write.</p>
+            <p class="mech">CRDT rows · live queries · per-column merge</p>
+          </article>
+
+          <article class="card">
+            <div class="mini mini-docs" aria-hidden="true">
+              <div class="doc-row"><span class="ic"></span><span class="bars"><i></i><i></i></span><span class="chip">enc</span></div>
+              <div class="doc-row"><span class="ic"></span><span class="bars"><i></i><i></i></span><span class="chip">enc</span></div>
+              <div class="doc-row"><span class="ic"></span><span class="bars"><i></i><i></i></span><span class="chip">enc</span></div>
+            </div>
+            <h3>Private document processor</h3>
+            <p>PDFs and images are durable encrypted files; extracted data is rows. Nothing exists in plaintext outside the device — the storage layer holds objects it cannot open.</p>
+            <p class="mech">encrypted files · rows for metadata · no plaintext server-side</p>
+          </article>
+
+          <article class="card">
+            <div class="mini mini-week" aria-hidden="true">
+              <div class="d"><i class="hot"></i><i></i></div>
+              <div class="d"><i></i></div>
+              <div class="d"><i></i><i class="hot"></i></div>
+              <div class="d"><i></i><i></i></div>
+              <div class="d"><i class="hot"></i></div>
+              <div class="d"><i></i></div>
+              <div class="d"><i></i><i></i><i class="hot"></i></div>
+            </div>
+            <h3>Family meal planner</h3>
+            <p>One mesh, every phone in the house. Edits made offline in the supermarket merge when connectivity returns. Pairing a device is the onboarding — there is no account to design.</p>
+            <p class="mech">one shared mesh · offline first · pairing instead of accounts</p>
+          </article>
+
+          <article class="card ghost">
+            <p>yours — anything that is rows + files, private by construction</p>
+          </article>
+        </div>
+      </section>
+
+      <!-- SHEET 01: WHAT -->
+      <section id="s01" class="sheet" aria-labelledby="s01-title">
+        <p class="sheet-num">Sheet 01 · components</p>
+        <h2 id="s01-title">What is this, actually?</h2>
+        <div class="prose">
+          <p>A library with two first-class data surfaces. Each reads and writes on the device instantly and travels encrypted between devices:</p>
+        </div>
+        <div class="specs">
+          <article>
+            <span class="tag">Component · rows</span>
+            <h3>A typed CRDT database</h3>
+            <p>Tables, live queries, schema inference, per-column conflict resolution. State that should converge across devices — and does, deterministically, without a server adjudicating merges.</p>
+          </article>
+          <article>
+            <span class="tag">Component · files</span>
+            <h3>A durable encrypted file store</h3>
+            <p>Images, PDFs, exports — addressed by app paths, encrypted like rows. Files don't merge and don't compact; they exist exactly as uploaded until overwritten or deleted.</p>
+          </article>
+        </div>
+        <div class="prose">
+          <p style="margin-top:2rem;">Between devices sits a <strong>mailbox, not a database</strong>: any dumb storage you already control — WebDAV, Google Drive, a Cloudflare Worker. It forwards envelopes it cannot open. The bench below runs that exact seal step in your browser — edit the row and watch what the relay would store.</p>
+        </div>
+
+        <!-- BENCH: real WebCrypto -->
+        <div class="bench" aria-label="Bench test: a row edited here is encrypted with AES-256-GCM in your browser; the middle cell is the real ciphertext.">
+          <div class="bench-head">
+            <span>Bench test · AES-256-GCM · <b>runs in this browser</b></span>
+            <span>DET-01</span>
+          </div>
+          <div class="bench-body">
+            <div class="bcell b-in">
+              <p class="lbl"><span class="bdot"></span>Input · Device A</p>
+              <input id="bx-text" type="text" value="buy milk" autocomplete="off" spellcheck="false" maxlength="40" />
+              <label class="btoggle"><input id="bx-done" type="checkbox" /> mark done</label>
+            </div>
+            <div class="bcell b-mid" id="bx-relay">
+              <p class="lbl"><span class="bdot"></span>On the wire</p>
+              <div class="cipher" id="bx-cipher" aria-hidden="true">…</div>
+              <p class="cfoot" id="bx-foot">sealed before it leaves</p>
+            </div>
+            <div class="bcell b-out pending" id="bx-out">
+              <p class="lbl"><span class="bdot"></span>Output · Device B</p>
+              <div class="rowline" id="bx-out-text">buy milk</div>
+              <div class="rowmeta"><b id="bx-out-status">syncing…</b> <span id="bx-out-done"></span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SHEET 02: THREAT MODEL -->
+      <section id="s02" class="sheet" aria-labelledby="s02-title">
+        <p class="sheet-num">Sheet 02 · legend</p>
+        <h2 id="s02-title">Why is trusting this not crazy?</h2>
+        <div class="prose">
+          <p>Because none of it is novel cryptography. Interocitor is assembled from primitives auditors already know how to evaluate — and it writes down exactly where the boundary sits, including the parts that leak.</p>
+        </div>
+        <div class="primitives" aria-label="Established building blocks">
+          <span>AES-256-GCM</span><span>CRDTs</span><span>WebAuthn largeBlob</span><span>IndexedDB</span><span>dumb storage as transport</span>
+        </div>
+
+        <div class="legend">
+          <div class="legend-head">Legend · what crosses the boundary</div>
+          <div class="legend-grid">
+            <div class="legend-col p">
+              <h4>Protected</h4>
+              <ul>
+                <li><span class="sym">■</span>Row contents and table fields</li>
+                <li><span class="sym">■</span>File bodies and images</li>
+                <li><span class="sym">■</span>Encrypted sync snapshots</li>
+              </ul>
+            </div>
+            <div class="legend-col v">
+              <h4>Visible to the relay</h4>
+              <ul>
+                <li><span class="sym">◑</span>Object names and sizes</li>
+                <li><span class="sym">◑</span>Timing and routing metadata</li>
+                <li><span class="sym">◑</span>Device activity patterns</li>
+              </ul>
+            </div>
+            <div class="legend-col o">
+              <h4>Out of scope</h4>
+              <ul>
+                <li><span class="sym">✕</span>A hosted backend</li>
+                <li><span class="sym">✕</span>Server-authoritative conflict resolution</li>
+                <li><span class="sym">✕</span>Per-device revocation without a new mesh key</li>
+                <li><span class="sym">✕</span>Malicious code on the device itself</li>
+              </ul>
+            </div>
+          </div>
+          <p class="legend-note">A security page that lists what leaks is worth ten that don't. The full boundary — key custody options, pairing, shared-key scenarios — is specified in the <a href="https://github.com/TheUiTeam/interocitor/tree/main/packages/core/docs/security-model.md">security model</a> and <a href="https://github.com/TheUiTeam/interocitor/tree/main/packages/core/docs/shared-key-scenarios.md">shared key scenarios</a>.</p>
+        </div>
+
+        <div class="prose">
+          <p style="margin-top:2rem;">Key custody is a choice you make, not a default you inherit: memory, session, browser storage, passkey (WebAuthn <code>largeBlob</code>), or an encrypted envelope unwrapped by biometrics. Restore and pairing are explicit protocols — no hidden account magic.</p>
+        </div>
+      </section>
+
+      <!-- SHEET 03: BUILD / SKIP -->
+      <section id="s03" class="sheet" aria-labelledby="s03-title">
+        <p class="sheet-num">Sheet 03 · assembly</p>
+        <h2 id="s03-title">What do I get to skip?</h2>
+        <div class="prose"><p>The infrastructure a synced app normally demands:</p></div>
+        <ul class="skip" aria-label="Infrastructure you do not build">
+          <li><span class="x">✕</span><span>A plaintext application database <em>· the relay stores ciphertext</em></span></li>
+          <li><span class="x">✕</span><span>A media pipeline for user uploads <em>· files are encrypted durable objects</em></span></li>
+          <li><span class="x">✕</span><span>A merge-arbitration backend <em>· devices converge by CRDT rules</em></span></li>
+          <li><span class="x">✕</span><span>An auth service <em>· key custody is the access control</em></span></li>
+        </ul>
+
+        <div class="detail">
+          <div class="dlabel"><span>Detail · initialisation</span><span>n.t.s.</span></div>
+          <div class="install-line">yarn add @interocitor/core @interocitor/web</div>
+          <pre class="code"><span class="c">// Reads and writes never wait for the network.</span>
+<span class="k">import</span> { Interocitor, PortablePassphraseKeySource } <span class="k">from</span> <span class="s">'@interocitor/core'</span>;
+<span class="k">import</span> { IndexedDbLocalStore, createWebCredentialStore } <span class="k">from</span> <span class="s">'@interocitor/web'</span>;
+
+<span class="k">const</span> db = <span class="k">new</span> Interocitor(adapter, {
+  dbName: <span class="s">'case-vault'</span>,
+  remotePath: <span class="s">'/CaseVault'</span>,
+  schema,
+  localStore: <span class="k">new</span> IndexedDbLocalStore(<span class="s">'case-vault'</span>),
+  keySource: <span class="k">new</span> PortablePassphraseKeySource({
+    portableKey,
+    credentialStore: createWebCredentialStore(<span class="s">'case-vault'</span>, { storage: <span class="s">'sessionStorage'</span> }),
+  }),
+});
+
+<span class="k">await</span> db.init();     <span class="c">// app is usable here, offline included</span>
+<span class="k">await</span> db.connect();  <span class="c">// sync starts in the background</span></pre>
+        </div>
+
+        <div class="adapters" aria-label="Relay options">
+          <span>Cloudflare Workers / R2</span><span>WebDAV</span><span>Google Drive</span><span>Custom adapter</span>
+        </div>
+
+        <div class="docs">
+          <a href="https://github.com/TheUiTeam/interocitor#readme">Repository README</a>
+          <a href="https://github.com/TheUiTeam/interocitor/tree/main/packages/core#readme">Core engine</a>
+          <a href="https://github.com/TheUiTeam/interocitor/tree/main/packages/web#readme">Browser package</a>
+          <a href="https://github.com/TheUiTeam/interocitor/tree/main/packages/react#readme">React hooks</a>
+          <a href="https://github.com/TheUiTeam/interocitor/tree/main/packages/workers#readme">Cloudflare backend</a>
+          <a href="https://github.com/TheUiTeam/interocitor/tree/main/docs/flows.md">Protocol flows</a>
+        </div>
+      </section>
+    </main>
+
+    <div class="titleblock">
+      <div class="tb"><span class="k">Project</span><span class="v amber">~interocitor</span></div>
+      <div class="tb"><span class="k">Subject</span><span class="v">private building block · rows + files</span></div>
+      <div class="tb"><span class="k">Transport</span><span class="v">dumb storage · zero custody</span></div>
+      <div class="tb"><span class="k">Scale</span><span class="v">n.t.s.</span></div>
+      <div class="tb"><span class="k">Rev</span><span class="v">D</span></div>
+      <div class="tb"><span class="k">Licence</span><span class="v">MIT</span></div>
+    </div>
+    <footer class="pad"></footer>
+  </div>
+
+  <script>
+    (function () {
+      var textEl = document.getElementById('bx-text');
+      var doneEl = document.getElementById('bx-done');
+      var relayEl = document.getElementById('bx-relay');
+      var cipherEl = document.getElementById('bx-cipher');
+      var footEl = document.getElementById('bx-foot');
+      var out = document.getElementById('bx-out');
+      var outText = document.getElementById('bx-out-text');
+      var outStatus = document.getElementById('bx-out-status');
+      var outDone = document.getElementById('bx-out-done');
+
+      var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var subtle = (window.crypto && window.crypto.subtle) ? window.crypto.subtle : null;
+      var enc = new TextEncoder();
+      var dec = new TextDecoder();
+      var key = null;
+      var seq = 0;
+
+      function toB64(bytes) {
+        var s = '';
+        for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+        return btoa(s);
+      }
+
+      function renderOut(obj, flash) {
+        out.classList.remove('pending');
+        outText.textContent = obj.text.length ? obj.text : '(empty row)';
+        outStatus.textContent = 'merged';
+        outDone.textContent = obj.done ? '· done' : '';
+        out.classList.toggle('done', !!obj.done);
+        if (flash && !reduce) {
+          out.classList.remove('flash');
+          void out.offsetWidth;
+          out.classList.add('flash');
+        }
+      }
+
+      async function tick() {
+        var mine = ++seq;
+        var obj = { text: textEl.value, done: doneEl.checked, avatarPath: 'avatars/me.png' };
+        var payload = enc.encode(JSON.stringify(obj));
+
+        if (!subtle || !key) {
+          cipherEl.textContent = 'ciphertext preview needs a secure context (https)';
+          footEl.textContent = 'AES-256-GCM runs in a secure context';
+          out.classList.add('pending');
+          outStatus.textContent = 'syncing…';
+          setTimeout(function () { if (mine === seq) renderOut(obj, true); }, reduce ? 0 : 500);
+          return;
+        }
+
+        var iv = crypto.getRandomValues(new Uint8Array(12));
+        var ctBuf = await subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, payload);
+        var ct = new Uint8Array(ctBuf);
+        var combined = new Uint8Array(iv.length + ct.length);
+        combined.set(iv, 0);
+        combined.set(ct, iv.length);
+        if (mine !== seq) return;
+
+        cipherEl.textContent = toB64(combined);
+        out.classList.add('pending');
+        outStatus.textContent = 'syncing…';
+
+        setTimeout(async function () {
+          if (mine !== seq) return;
+          try {
+            var recovered = await subtle.decrypt(
+              { name: 'AES-GCM', iv: combined.slice(0, 12) },
+              key,
+              combined.slice(12)
+            );
+            var o = JSON.parse(dec.decode(recovered));
+            if (mine === seq) renderOut(o, true);
+          } catch (e) {
+            if (mine === seq) outStatus.textContent = 'merge failed';
+          }
+        }, reduce ? 0 : 540);
+      }
+
+      var t = null;
+      function schedule() { if (t) clearTimeout(t); t = setTimeout(tick, 140); }
+      textEl.addEventListener('input', schedule);
+      doneEl.addEventListener('change', tick);
+
+      async function boot() {
+        if (subtle) {
+          try { key = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']); }
+          catch (e) { key = null; }
+        }
+        tick();
+      }
+      boot();
+    })();
+  </script>
+</body>
+</html>

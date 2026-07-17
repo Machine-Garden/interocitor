@@ -271,8 +271,8 @@ Interocitor does not give you:
 ## Package map
 
 - `packages/core` — `@interocitor/core`, runtime-neutral engine, mailbox adapters, remote storage adapter contract, local store contract, and byte file APIs.
-- `packages/web` — `@interocitor/web`, browser local stores, browser credential stores, image helpers, and `@interocitor/web/react`.
-- `packages/react` — `@interocitor/react`, context and hooks.
+- `packages/web` — `@interocitor/web`, browser local stores, browser credential stores, and image helpers.
+- `packages/react` — `@interocitor/react`, context, live-query, row, image, connected-store, and connection hooks.
 - `packages/workers` — `@interocitor/workers`, Cloudflare Worker/D1/R2 runtime.
 - `packages/interocitor-swift` — Swift client.
 - `packages/webdav` — local WebDAV server for demos/tests.
@@ -280,6 +280,7 @@ Interocitor does not give you:
 
 ## Deep dives
 
+- Terminology: [`docs/dictionary.md`](docs/dictionary.md)
 - Core API and protocol details: [`packages/core/README.md`](packages/core/README.md)
 - Adapter contract: [`packages/core/docs/adapter-contract.md`](packages/core/docs/adapter-contract.md)
 - Security model: [`packages/core/docs/security-model.md`](packages/core/docs/security-model.md)

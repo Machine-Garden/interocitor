@@ -3,44 +3,44 @@
   "version": "0.0.0-beta.12",
   "description": "Encrypted local-first CRDT database that syncs over cloud storage without a purpose-built backend.",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     },
     "./adapters/memory": {
-      "import": "./dist/adapters/memory.js",
-      "types": "./dist/adapters/memory.d.ts"
+      "types": "./dist/adapters/memory.d.ts",
+      "import": "./dist/adapters/memory.js"
     },
     "./adapters/google-drive": {
-      "import": "./dist/adapters/google-drive.js",
-      "types": "./dist/adapters/google-drive.d.ts"
+      "types": "./dist/adapters/google-drive.d.ts",
+      "import": "./dist/adapters/google-drive.js"
     },
     "./adapters/webdav": {
-      "import": "./dist/adapters/webdav.js",
-      "types": "./dist/adapters/webdav.d.ts"
+      "types": "./dist/adapters/webdav.d.ts",
+      "import": "./dist/adapters/webdav.js"
     },
     "./adapters/cloudflare": {
-      "import": "./dist/adapters/cloudflare.js",
-      "types": "./dist/adapters/cloudflare.d.ts"
+      "types": "./dist/adapters/cloudflare.d.ts",
+      "import": "./dist/adapters/cloudflare.js"
     },
     "./storage/local-store": {
-      "import": "./dist/storage/local-store.js",
-      "types": "./dist/storage/local-store.d.ts"
+      "types": "./dist/storage/local-store.d.ts",
+      "import": "./dist/storage/local-store.js"
     },
     "./handshake/qr": {
-      "import": "./dist/handshake/qr-public.js",
-      "types": "./dist/handshake/qr-public.d.ts"
+      "types": "./dist/handshake/qr-public.d.ts",
+      "import": "./dist/handshake/qr-public.js"
     },
     "./crypto/keys": {
-      "import": "./dist/crypto/keys.js",
-      "types": "./dist/crypto/keys.d.ts"
+      "types": "./dist/crypto/keys.d.ts",
+      "import": "./dist/crypto/keys.js"
     },
     "./crypto/signing": {
-      "import": "./dist/crypto/signing.js",
-      "types": "./dist/crypto/signing.d.ts"
+      "types": "./dist/crypto/signing.d.ts",
+      "import": "./dist/crypto/signing.js"
     }
   },
   "files": [

@@ -7,22 +7,22 @@ import type { Interocitor } from '@interocitor/core';
  *
  * @example
  * // db.ts
- * const [MealDbProvider, useMealDb] = createInterocitorContext<DB>();
- * export { MealDbProvider, useMealDb };
+ * const [CaseVaultProvider, useCaseVault] = createInterocitorContext<DB>();
+ * export { CaseVaultProvider, useCaseVault };
  *
  * // bootstrap.ts
- * const db = new Interocitor<DB>({ dbName: 'meal', localStore });
- * db.configureMesh({ remotePath: '/MealPlanner', passphrase, encrypted: true });
+ * const db = new Interocitor<DB>({ dbName: 'case-vault', localStore });
+ * db.configureMesh({ remotePath: '/CaseVault', passphrase, encrypted: true });
  * await db.setRemoteStorage(adapter);
  * await db.init();
  * await db.connect(); // starts remote sync; may return offline-ready
  *
  * // App.tsx
- * <MealDbProvider value={db}><App /></MealDbProvider>
+ * <CaseVaultProvider value={db}><App /></CaseVaultProvider>
  *
  * // Component.tsx
- * const db = useMealDb();
- * const plans = await db.table('weekPlans').query(); // fully typed
+ * const db = useCaseVault();
+ * const cases = await db.table('cases').query(); // fully typed
  */
 export function createInterocitorContext<
   S extends Record<string, Record<string, unknown>>,

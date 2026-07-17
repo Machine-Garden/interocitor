@@ -11,7 +11,7 @@
 import type { HLC } from './types.ts';
 
 // Guard against poisoned/misconfigured peers that report far-future clocks.
-export const HLC_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
+export const HLC_MAX_FUTURE_SKEW_MS: number = 5 * 60 * 1000;
 
 export function hlcInit(nodeId: string): HLC {
   return { ts: Date.now(), counter: 0, nodeId };

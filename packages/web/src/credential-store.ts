@@ -8,9 +8,34 @@
  */
 
 import type { CredentialStore, StoredCredentials } from '@interocitor/core';
+import {
+  WebAuthnBlobStore,
+  type WebAuthnAttachmentPreference,
+  type WebAuthnBlobStoreOptions,
+} from './webauthn.ts';
 
+/**
+ * Browser-facing credential store contract returned by
+ * {@link createWebCredentialStore}.
+ *
+ * This extends core's neutral `CredentialStore` with optional browser UX
+ * affordances. The stored payload is still Interocitor mesh credentials
+ * (`portableKey`, `deviceId`, optional `meshId`), not an arbitrary signing key
+ * API.
+ */
 export interface WebCredentialStore extends CredentialStore {
+  /**
+   * Ask the store to harden its existing credential record behind a biometric
+   * or passkey-backed mechanism when the concrete implementation supports it.
+   *
+   * Returns `false` when the active store has no stronger biometric mode to
+   * migrate into.
+   */
   secureWithBiometrics(): Promise<boolean>;
+  /**
+   * Restore a credential record through a biometric/passkey ceremony when the
+   * underlying implementation requires one.
+   */
   restoreWithBiometrics?(): Promise<StoredCredentials | null>;
 }
 
@@ -19,6 +44,13 @@ export type EnvelopeStorageLocation = 'memory' | 'sessionStorage' | 'localStorag
 
 export type CredentialEnvelopeKeyPurpose = 'encrypt' | 'decrypt';
 
+/**
+ * Supplies a CryptoKey that protects an encrypted credential envelope.
+ *
+ * This is the right abstraction when a browser biometric/passkey confirmation
+ * should unlock or derive the envelope key, while the encrypted credential
+ * record itself lives in app-selected storage.
+ */
 export interface CredentialEnvelopeKeyProvider {
   getKey(purpose?: CredentialEnvelopeKeyPurpose): Promise<CryptoKey>;
   clear?(): Promise<void>;
@@ -31,12 +63,30 @@ export type StoredCredentialEnvelope = {
   ciphertext: string;
 };
 
+/**
+ * Storage backend for an encrypted credential envelope.
+ *
+ * The envelope contains ciphertext for Interocitor mesh credentials. It does
+ * not need to be secret storage by itself as long as the corresponding
+ * `CredentialEnvelopeKeyProvider` remains separate.
+ */
 export interface CredentialEnvelopeStore {
   save(envelope: StoredCredentialEnvelope): Promise<void>;
   load(): Promise<StoredCredentialEnvelope | null>;
   clear(): Promise<void>;
 }
 
+/**
+ * Browser-specific configuration for {@link createWebCredentialStore}.
+ *
+ * Pick exactly one custody shape for the credential record:
+ * - plain browser storage via `storage`
+ * - passkey/WebAuthn-backed custody via `storage: 'passkey'`
+ * - encrypted envelope storage via `envelope`
+ *
+ * The record being protected is still the Interocitor mesh credential record,
+ * not a general-purpose application private key.
+ */
 export interface CreateWebCredentialStoreOptions {
   /** Where the mesh credential record is stored. Default: localStorage. */
   storage?: CredentialStorageLocation;
@@ -44,6 +94,18 @@ export interface CreateWebCredentialStoreOptions {
   displayName?: string;
   /** WebAuthn relying-party id. Defaults to current hostname. */
   rpId?: string;
+  /**
+   * Which authenticator class the browser should prefer for WebAuthn-backed
+   * credential custody.
+   *
+   * Applies to `storage: 'passkey'` and `WebAuthnEnvelopeKeyProvider`.
+   */
+  authenticatorAttachment?: WebAuthnAttachmentPreference;
+  /**
+   * User verification requirement for WebAuthn read/write ceremonies.
+   * Default: `required`.
+   */
+  userVerification?: UserVerificationRequirement;
   /** Optional shared map for tests or app-level in-memory vaults. */
   memory?: Map<string, StoredCredentials>;
   /** Wrap a credential record with AES-GCM before writing it to a pluggable envelope store. */
@@ -142,12 +204,14 @@ export class LocalStorageCredentialStore extends BrowserStorageCredentialStore {
   }
 }
 
+/** Stores the credential record only for the lifetime of the current tab session. */
 export class SessionStorageCredentialStore extends BrowserStorageCredentialStore {
   constructor(dbName: string) {
     super(dbName, 'sessionStorage', () => getNamedStorage('sessionStorage'));
   }
 }
 
+/** Keeps the credential record only in JS memory owned by the current page. */
 export class MemoryCredentialStore implements CredentialStore {
   private readonly records: Map<string, StoredCredentials>;
 
@@ -182,6 +246,7 @@ export class StaticEnvelopeKeyProvider implements CredentialEnvelopeKeyProvider 
   async getKey(): Promise<CryptoKey> { return this.key; }
 }
 
+/** Persists an encrypted credential envelope in browser storage. */
 export class BrowserCredentialEnvelopeStore implements CredentialEnvelopeStore {
   constructor(
     private readonly dbName: string,
@@ -239,6 +304,14 @@ function createCredentialEnvelopeStore(dbName: string, location: EnvelopeStorage
   return new BrowserCredentialEnvelopeStore(dbName, location);
 }
 
+/**
+ * Wraps a plaintext credential store with AES-GCM envelope encryption.
+ *
+ * The envelope store holds ciphertext only. The caller-provided
+ * `CredentialEnvelopeKeyProvider` decides where the unwrap key comes from:
+ * browser passkey UX, app memory, backend-provided session key, or another
+ * custom source.
+ */
 export class EnvelopedCredentialStore implements CredentialStore {
   private readonly encoder = new TextEncoder();
   private readonly decoder = new TextDecoder();
@@ -294,113 +367,19 @@ export class EnvelopedCredentialStore implements CredentialStore {
 
 // ─── WebAuthn + largeBlob primitives ──────────────────────────────────
 
-class WebAuthnLargeBlobStore {
-  private static readonly CRED_ID_KEY_PREFIX = 'interocitor-cred:';
-
-  constructor(
-    private readonly namespace: string,
-    private readonly rpId: string = globalThis.location?.hostname ?? 'localhost',
-    private readonly displayName: string = 'Interocitor',
-  ) {}
-
-  private credIdKey(): string {
-    return `${WebAuthnLargeBlobStore.CRED_ID_KEY_PREFIX}${this.namespace}`;
+function resolveWebAuthnBlobOptions(
+  rpIdOrOptions?: string | WebAuthnBlobStoreOptions,
+  displayName?: string,
+  options?: Pick<WebAuthnBlobStoreOptions, 'authenticatorAttachment' | 'userVerification'>,
+): WebAuthnBlobStoreOptions {
+  if (typeof rpIdOrOptions === 'string' || rpIdOrOptions === undefined) {
+    return {
+      ...(rpIdOrOptions ? { rpId: rpIdOrOptions } : {}),
+      ...(displayName ? { displayName } : {}),
+      ...options,
+    };
   }
-
-  private loadCredentialIdHint(): ArrayBuffer | null {
-    if (typeof localStorage === 'undefined') return null;
-    try {
-      const stored = localStorage.getItem(this.credIdKey());
-      if (!stored) return null;
-      return decodeBase64(stored).buffer as ArrayBuffer;
-    } catch {
-      return null;
-    }
-  }
-
-  private saveCredentialIdHint(rawId: ArrayBuffer): void {
-    if (typeof localStorage === 'undefined') return;
-    try { localStorage.setItem(this.credIdKey(), encodeBase64(new Uint8Array(rawId))); } catch { /* best-effort */ }
-  }
-
-  async save(blob: Uint8Array): Promise<void> {
-    const challenge = crypto.getRandomValues(new Uint8Array(32));
-    const userId = crypto.getRandomValues(new Uint8Array(16));
-
-    const credential = await navigator.credentials.create({
-      publicKey: {
-        rp: { name: this.displayName, id: this.rpId },
-        user: {
-          id: userId,
-          name: `${this.displayName.toLowerCase().replaceAll(/\s+/g, '-')}:${this.namespace}`,
-          displayName: this.displayName,
-        },
-        challenge,
-        pubKeyCredParams: [
-          { type: 'public-key', alg: -7 },
-          { type: 'public-key', alg: -257 },
-        ],
-        authenticatorSelection: {
-          authenticatorAttachment: 'platform',
-          residentKey: 'required',
-          userVerification: 'required',
-        },
-        extensions: {
-          largeBlob: { support: 'required' },
-        } as AuthenticationExtensionsClientInputs,
-      },
-    }) as PublicKeyCredential | null;
-
-    if (!credential) throw new Error('WebAuthn credential creation cancelled');
-    this.saveCredentialIdHint(credential.rawId);
-    await this.write(credential.rawId, blob);
-  }
-
-  private async write(credentialId: ArrayBuffer, blob: Uint8Array): Promise<void> {
-    const challenge = crypto.getRandomValues(new Uint8Array(32));
-    const assertion = await navigator.credentials.get({
-      publicKey: {
-        challenge,
-        rpId: this.rpId,
-        allowCredentials: [{ type: 'public-key' as const, id: credentialId }],
-        userVerification: 'required',
-        extensions: {
-          largeBlob: { write: blob },
-        } as AuthenticationExtensionsClientInputs,
-      },
-    }) as PublicKeyCredential | null;
-
-    if (!assertion) throw new Error('WebAuthn assertion cancelled');
-    const results = (assertion as { getClientExtensionResults?: () => { largeBlob?: { written?: boolean } } }).getClientExtensionResults?.();
-    if (!results?.largeBlob?.written) throw new Error('largeBlob write failed — authenticator may not support it');
-  }
-
-  async load(): Promise<ArrayBuffer | null> {
-    const challenge = crypto.getRandomValues(new Uint8Array(32));
-    const credentialIdHint = this.loadCredentialIdHint();
-    const assertion = await navigator.credentials.get({
-      publicKey: {
-        challenge,
-        rpId: this.rpId,
-        allowCredentials: credentialIdHint ? [{ type: 'public-key' as const, id: credentialIdHint }] : [],
-        userVerification: 'required',
-        extensions: {
-          largeBlob: { read: true },
-        } as AuthenticationExtensionsClientInputs,
-      },
-    }) as PublicKeyCredential | null;
-
-    if (!assertion) return null;
-    const results = (assertion as { getClientExtensionResults?: () => { largeBlob?: { blob?: ArrayBuffer } } }).getClientExtensionResults?.();
-    const blob = results?.largeBlob?.blob;
-    if (!blob) return null;
-    this.saveCredentialIdHint(assertion.rawId);
-    return blob;
-  }
-
-  async clear(): Promise<void> {
-    try { localStorage.removeItem(this.credIdKey()); } catch { /* ok */ }
-  }
+  return rpIdOrOptions;
 }
 
 /**
@@ -408,17 +387,36 @@ class WebAuthnLargeBlobStore {
  * No passphrase is written to localStorage/sessionStorage. A localStorage
  * credential-id hint may be written; the hint is not key material.
  */
+/**
+ * Stores the Interocitor credential record inside WebAuthn `largeBlob`.
+ *
+ * This is a custody mechanism for the mesh credential record. It does not give
+ * application code a reusable passkey private key or a generic signing API.
+ * The browser/platform owns the credential private key and exposes only the
+ * WebAuthn ceremony needed to read or write the protected blob.
+ */
 export class WebAuthnCredentialStore implements CredentialStore {
-  private readonly blobStore: WebAuthnLargeBlobStore;
+  private readonly blobStore: WebAuthnBlobStore;
   private readonly encoder = new TextEncoder();
   private readonly decoder = new TextDecoder();
 
+  constructor(dbName: string, options?: WebAuthnBlobStoreOptions);
   constructor(
     dbName: string,
-    rpId: string = globalThis.location?.hostname ?? 'localhost',
+    rpId?: string,
+    displayName?: string,
+    options?: Pick<WebAuthnBlobStoreOptions, 'authenticatorAttachment' | 'userVerification'>,
+  );
+  constructor(
+    dbName: string,
+    rpIdOrOptions: string | WebAuthnBlobStoreOptions = globalThis.location?.hostname ?? 'localhost',
     displayName: string = 'Interocitor',
+    options?: Pick<WebAuthnBlobStoreOptions, 'authenticatorAttachment' | 'userVerification'>,
   ) {
-    this.blobStore = new WebAuthnLargeBlobStore(dbName, rpId, displayName);
+    this.blobStore = new WebAuthnBlobStore(
+      dbName,
+      resolveWebAuthnBlobOptions(rpIdOrOptions, displayName, options),
+    );
   }
 
   async save(creds: StoredCredentials): Promise<void> {
@@ -441,15 +439,34 @@ export class WebAuthnCredentialStore implements CredentialStore {
  * `EnvelopedCredentialStore` when localStorage/sessionStorage may hold the
  * encrypted mesh credential but biometric/passkey access is required to unwrap it.
  */
+/**
+ * Uses a WebAuthn ceremony to derive or retrieve the AES key that protects an
+ * encrypted credential envelope.
+ *
+ * Use this when the credential record itself should live in browser storage,
+ * backend storage, or another custom store, but every encrypt/decrypt step
+ * should require a browser-managed biometric/passkey confirmation.
+ */
 export class WebAuthnEnvelopeKeyProvider implements CredentialEnvelopeKeyProvider {
-  private readonly blobStore: WebAuthnLargeBlobStore;
+  private readonly blobStore: WebAuthnBlobStore;
 
+  constructor(dbName: string, options?: WebAuthnBlobStoreOptions);
   constructor(
     dbName: string,
-    rpId: string = globalThis.location?.hostname ?? 'localhost',
+    rpId?: string,
+    displayName?: string,
+    options?: Pick<WebAuthnBlobStoreOptions, 'authenticatorAttachment' | 'userVerification'>,
+  );
+  constructor(
+    dbName: string,
+    rpIdOrOptions: string | WebAuthnBlobStoreOptions = globalThis.location?.hostname ?? 'localhost',
     displayName: string = 'Interocitor',
+    options?: Pick<WebAuthnBlobStoreOptions, 'authenticatorAttachment' | 'userVerification'>,
   ) {
-    this.blobStore = new WebAuthnLargeBlobStore(`${dbName}:envelope-key`, rpId, displayName);
+    this.blobStore = new WebAuthnBlobStore(
+      `${dbName}:envelope-key`,
+      resolveWebAuthnBlobOptions(rpIdOrOptions, displayName, options),
+    );
   }
 
   async getKey(purpose: CredentialEnvelopeKeyPurpose = 'decrypt'): Promise<CryptoKey> {
@@ -485,6 +502,11 @@ export class WebAuthnEnvelopeKeyProvider implements CredentialEnvelopeKeyProvide
  * - `{ storage: 'passkey' }` → key lives only in WebAuthn largeBlob
  * - `{ envelope: { storage, keyProvider } }` → encrypted local/memory record, key from provider
  * - `{ envelope: { store, keyProvider } }` → encrypted record from app/backend/custom storage
+ *
+ * The returned store always manages the Interocitor mesh credential record.
+ * Choose `storage: 'passkey'` when the whole record should live behind
+ * WebAuthn. Choose `envelope` when the record may live elsewhere but unwrap
+ * should be gated by a key provider such as {@link WebAuthnEnvelopeKeyProvider}.
  */
 export function createWebCredentialStore(dbName: string, displayName?: string): WebCredentialStore;
 export function createWebCredentialStore(dbName: string, options: CreateWebCredentialStoreOptions): WebCredentialStore;
@@ -510,7 +532,12 @@ export function createWebCredentialStore(
     case 'sessionStorage':
       return new NoopBiometricControls(new SessionStorageCredentialStore(dbName));
     case 'passkey':
-      return new NoopBiometricControls(new WebAuthnCredentialStore(dbName, options.rpId, options.displayName));
+      return new NoopBiometricControls(new WebAuthnCredentialStore(dbName, {
+        rpId: options.rpId,
+        displayName: options.displayName,
+        authenticatorAttachment: options.authenticatorAttachment,
+        userVerification: options.userVerification,
+      }));
     case 'localStorage':
       return new NoopBiometricControls(new LocalStorageCredentialStore(dbName));
   }

@@ -56,6 +56,23 @@ Interocitor does not constrain your `Env` type. You own your env shape. Pass onl
 
 Interocitor claims `/<prefix>/io/*`, `/<prefix>/notify/*`, `/<prefix>/__interocitor/*`, and `/<prefix>/health`. Everything else goes to your app.
 
+## Public API
+
+Documented entrypoints in this package:
+
+| API | Use when |
+| --- | --- |
+| `withInterocitor` | You want Interocitor to wrap an existing Worker and own one URL prefix |
+| `createInterocitorMount` | You want explicit route matching and manual delegation inside a larger Worker |
+| `InterocitorRelayDurableObject` | You want realtime invalidation over WebSockets in addition to polling |
+| `InterocitorRuntimeOptions` | You need to supply auth, quotas, maintenance, audit, or upload policy from your env |
+| `InterocitorMountOptions` | You need to wire D1, optional R2, and optional relay bindings into the mount |
+| `FileUploadAuthorizationRequest`, `FileUploadAuthorizationResult` | You need app-owned policy before durable file uploads are accepted |
+
+The public API is documented in two places:
+- In code, via JSDoc on the exported entrypoints.
+- Outside code, in this README and package-local deep dives under `docs/`.
+
 ## Runtime
 
 ### Required bindings

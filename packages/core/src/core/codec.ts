@@ -21,12 +21,12 @@ export interface CodecState {
   manifest: Manifest | null;
 }
 
-export async function encodeForCloud(state: CodecState, plaintext: string): Promise<string> {
+async function encodeForCloud(state: CodecState, plaintext: string): Promise<string> {
   if (!state.encrypted || !state.encryptionKey) return plaintext;
   return encryptEntry(state.encryptionKey, plaintext);
 }
 
-export async function decodeFromCloud(state: CodecState, data: string): Promise<string> {
+async function decodeFromCloud(state: CodecState, data: string): Promise<string> {
   if (!state.encrypted || !state.encryptionKey) return data;
   try {
     return await decryptEntry(state.encryptionKey, data);

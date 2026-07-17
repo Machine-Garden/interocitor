@@ -5,6 +5,7 @@
     "strict": true,
     "declaration": true,
     "declarationMap": true,
+    "isolatedDeclarations": true,
     "sourceMap": false,
     "strictFunctionTypes": true,
     "noImplicitThis": true,

@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 /**
  * local-webdav-server.mjs
  *
@@ -609,4 +611,3 @@ server.listen(PORT, '127.0.0.1', () => {
   const modeText = options.mode === 'file' ? `file (${join(ROOT, options.dataRoot)})` : 'memory';
   process.stdout.write(`local webdav server listening on http://127.0.0.1:${PORT} [mode=${modeText}]\n`);
 });
-

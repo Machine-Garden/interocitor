@@ -435,10 +435,17 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     return this.initialized;
   }
 
+  /** Return the current transport state: `offline`, `connecting`, `syncing`, or `idle`. */
   getConnectionStatus(): import('./types.ts').ConnectionStatus {
     return this.connectionStatus;
   }
 
+  /**
+   * Return a fuller connection snapshot for UI/bootstrap decisions.
+   *
+   * This extends `getConnectionStatus()` with local readiness, solo-mode, the
+   * configured remote path, current mesh id, and current device id.
+   */
   getConnectionStatusDetails(): import('./types.ts').ConnectionStatusDetails {
     const solo = !this.config.remotePath;
     return {
@@ -1304,6 +1311,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     }
   }
 
+  /**
+   * Pin the mesh identity and key input before `init()`/`connect()`.
+   *
+   * Use this when the app learns `remotePath`, mesh credentials, or a chosen
+   * mesh id after construction but before the first remote session starts.
+   * Once initialized, create a new engine instead of reconfiguring in place.
+   */
   configureMesh(state: SyncInitialState): void {
     if (this.connected) throw new Error('Cannot configure mesh while connected');
     if (this.initialized) throw new Error('Cannot configure mesh after init(); create a new engine or configure before connect');
@@ -1327,6 +1341,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
   // ── Lifecycle ──────────────────────────────────────────────────────
 
+  /**
+   * Open the local store and restore local credentials/state.
+   *
+   * This is the explicit "local-first ready" boundary. After `init()`, reads,
+   * writes, hooks, and file APIs can operate against local state even if the
+   * network is unavailable.
+   */
   async init(): Promise<void> {
     await this.ensureReady();
   }
@@ -1495,6 +1516,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     });
   }
 
+  /**
+   * Start or resume the remote mesh session.
+   *
+   * `connect()` loads or creates the remote manifest, pulls remote changes,
+   * flushes queued local writes, and starts polling or relay-backed
+   * invalidation. It auto-`init()`s if needed.
+   */
   async connect(): Promise<void> {
     console.log('[interocitor:connect] connect() — entry', {
       dbName: this.dbName,
@@ -1844,6 +1872,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     this.remotePoisonError = null;
   }
 
+  /**
+   * Attach, replace, or remove the current remote storage adapter.
+   *
+   * Use this when the engine is created in local-only mode or when the app
+   * intentionally switches mailbox backends. If a remote session is active,
+   * the engine tears it down and reconnects on the new adapter as needed.
+   */
   async setRemoteStorage(adapter: StorageAdapter | null): Promise<void> {
     console.log('[interocitor:share] setRemoteStorage() — entry', {
       dbName: this.dbName,
@@ -2029,6 +2064,12 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     return Array.from(this.knownTables);
   }
 
+  /**
+   * Return the typed table handle for one table in the schema.
+   *
+   * This is the main entrypoint for row CRUD, live row handles, and query
+   * handles in application code.
+   */
   table<K extends keyof S & string>(name: K): Table<S[K]> {
     return new Table(this, name);
   }
@@ -2563,7 +2604,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
   // ── Durable file storage ───────────────────────────────────────────
 
-  /** Upload a durable application file. Files are encrypted with the mesh key and are never compacted or merged. */
+  /**
+   * Upload a durable application file.
+   *
+   * Files share the same mesh and encryption boundary as row data, but they do
+   * not participate in CRDT merge or compaction. Writing the same path later
+   * overwrites it.
+   */
   async putFile(path: string, data: Uint8Array | string, contentType?: string, seal?: FileSeal): Promise<StoredFileMetadata> {
     await this.ensureReady();
     const adapter = this.requireAdapter('putFile()');
@@ -2589,14 +2636,25 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     };
   }
 
-  /** Read and decrypt an untainted durable application file with the mesh key. */
+  /**
+   * Read and decrypt an untainted durable application file with the mesh key.
+   *
+   * If the stored file is tainted/sealed under another key, call `openFile()`
+   * and provide the matching key explicitly.
+   */
   async getFile(path: string): Promise<Uint8Array> {
     const sealed = await this.openFile(path);
     if (sealed.taint) throw new Error(`Object ${path} is tainted with ${sealed.taint}; unlock the matching key and call openFile().open(key)`);
     return sealed.open();
   }
 
-  /** Download a durable application file and defer plaintext opening until the caller supplies any required key. */
+  /**
+   * Download a durable application file and defer plaintext opening.
+   *
+   * This is the low-level file-read API for sealed/tainted files where the
+   * caller, not the engine, decides when and with which key plaintext should
+   * be opened.
+   */
   async openFile(path: string): Promise<SealedFile> {
     await this.ensureReady();
     const adapter = this.requireAdapter('openFile()');
@@ -2685,4 +2743,3 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   }
 
 }
-

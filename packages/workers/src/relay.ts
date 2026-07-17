@@ -11,6 +11,9 @@ import type {
  * Export this class from your Worker entry and bind it in `wrangler.toml`
  * using any binding name you want. Pass that binding to `withInterocitor(...)`
  * via the `relay` getter.
+ *
+ * This relay carries invalidation signals only. Correctness does not depend on
+ * it: clients can always fall back to polling.
  */
 const RELAY_BROADCAST_BATCH_DELAY_MS = 1_000;
 
@@ -126,6 +129,12 @@ export interface BroadcastDiagnostics {
   logger?: Pick<Console, 'debug' | 'warn'>;
 }
 
+/**
+ * Queue a relay broadcast for one mesh prefix.
+ *
+ * This is intentionally fire-and-forget. Delivery success or failure is
+ * reported only through the optional diagnostics logger and `waitUntil`.
+ */
 export function broadcast(
   relay: DurableObjectNamespace | undefined,
   ctx: ExecutionContextLike | undefined,

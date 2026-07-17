@@ -34,6 +34,23 @@ Low-level primitives:
 yarn add @interocitor/react @interocitor/core @interocitor/web react
 ```
 
+## Public API
+
+Documented entrypoints in this package:
+
+| API | Use when |
+| --- | --- |
+| `createInterocitorContext` | You want one typed provider/hook pair for the engine |
+| `useLiveQuery` | A component should subscribe to a live query cache entry |
+| `useRow` | A component should subscribe to one live row |
+| `useImage` | A component should render an encrypted image file as a revokable `blob:` URL |
+| `useConnectionStatus`, `useIsSolo` | UI should reflect transport state vs local-only mode |
+| `useConnectedStores`, `useConnectedStore` | UI should read or manage connected-store credentials |
+
+The public API is documented in two places:
+- In code, via JSDoc on the exported hooks and helpers.
+- Outside code, in this README.
+
 ## Typed context
 
 Capture DB types once. No generics in components.

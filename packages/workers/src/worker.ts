@@ -747,6 +747,10 @@ async function handleIoRequest<Env>(
 /**
  * Create a self-contained Interocitor mount that handles all IO, notify, and
  * system requests under a single URL prefix.
+ *
+ * Use this when Interocitor should be one routed subsystem inside a larger
+ * Worker. The returned object owns path matching plus request handling for the
+ * claimed prefix, while your app worker keeps ownership of everything else.
  */
 export function createInterocitorMount<Env = unknown>(
   options: InterocitorMountOptions<Env>,
@@ -782,12 +786,27 @@ export function createInterocitorMount<Env = unknown>(
   return Object.freeze({ mountPrefix, healthPath, ioBase, notifyBase, systemBase, matches, fetch });
 }
 
+/**
+ * Options for {@link withInterocitor}.
+ *
+ * This is the same wiring shape as {@link InterocitorMountOptions}; the helper
+ * simply wraps an existing Worker instead of returning a standalone mount.
+ */
 export interface WithInterocitorOptions<Env = unknown> extends InterocitorMountOptions<Env> {}
 
 const EMPTY_WORKER: WorkerLike = {};
 
+/**
+ * Wrap an existing Worker so Interocitor claims one URL prefix and the wrapped
+ * app keeps every other route.
+ *
+ * `fetch()` requests matching the configured mount go to Interocitor first.
+ * Non-matching requests fall through to the wrapped worker. When scheduled
+ * maintenance is enabled, the wrapped worker's `scheduled()` runs first and
+ * Interocitor maintenance runs after it.
+ */
 export function withInterocitor<Env = unknown>(
-  worker: WorkerLike<Env> = EMPTY_WORKER as WorkerLike<Env>,
+  worker: WorkerLike<Env> | undefined,
   options: WithInterocitorOptions<Env>,
 ): WorkerLike<Env> {
   const { mountPrefix, db, relay, files, runtime } = options;
@@ -813,7 +832,7 @@ export function withInterocitor<Env = unknown>(
   };
 }
 
-export const interocitorWorker = {
+const interocitorWorker = {
   async fetch<Env = unknown>(
     request: Request,
     env: Env,

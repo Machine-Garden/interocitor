@@ -41,6 +41,11 @@ export {
   generateShareQR,
   generateJoinQR,
   handleScannedQR,
+  generateECDHKeypair,
+  exportECDHPublicKey,
+  importECDHPublicKey,
+  createGeneratorSession,
+  runScannerHandshake,
   buildPairUrl,
   parseQRFromUrl,
   decodeQRPayload,
@@ -56,6 +61,7 @@ export type {
   GenerateJoinQROptions,
   GenerateJoinQRResult,
   HandleScannedQROptions,
+  GeneratorSession,
 } from './handshake/index.ts';
 
 // ─── Engine ───────────────────────────────────────────────────────────

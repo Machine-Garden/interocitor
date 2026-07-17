@@ -13,6 +13,9 @@
     "build:int": "yarn workspace @interocitor/core build",
     "build:web": "yarn workspace @interocitor/web build",
     "build:all": "yarn build:int && yarn build:web && yarn workspaces foreach --all --exclude @interocitor/core --exclude @interocitor/web -p run build",
+    "check:publint": "publint run packages/core --strict --pack false && publint run packages/web --strict --pack false && publint run packages/react --strict --pack false && publint run packages/workers --strict --pack false && publint run packages/webdav --strict --pack false",
+    "check:types": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/web/tsconfig.json --noEmit && tsc -p packages/react/tsconfig.json --noEmit && tsc -p packages/workers/tsconfig.json --noEmit",
+    "check:knip": "knip --workspace packages/core --workspace packages/web --workspace packages/react --workspace packages/workers --workspace packages/webdav --include files --no-progress --reporter compact",
     "validate": "yarn build:all",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
@@ -41,11 +44,22 @@
   "license": "MIT",
   "devDependencies": {
     "@playwright/test": "^1.54.2",
+    "knip": "6.24.0",
     "oxfmt": "^0.45.0",
     "oxlint": "^1.60.0",
+    "publint": "0.3.21",
     "typescript": "^6.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "knip": {
+    "ignoreFiles": [
+      "packages/core/tests/e2e-disabled/**",
+      "packages/core/tests/e2e/fixtures/todo-webdav.js",
+      "packages/core/tests/e2e/fixtures/webdav-fetch-stub.js",
+      "packages/react/src/*.type-test.tsx",
+      "packages/web/src/*.type-test.ts"
+    ]
   }
 }

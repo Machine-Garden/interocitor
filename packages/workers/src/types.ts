@@ -121,6 +121,14 @@ export interface R2Bucket {
   delete(key: string): Promise<void>;
 }
 
+/**
+ * Information presented to `authorizeFileUpload` before a durable file write.
+ *
+ * This is the server-visible metadata boundary for encrypted durable files.
+ * The worker can inspect path, size, content type, uploader identity, request
+ * headers/cookies, and current quota usage. It cannot inspect plaintext file
+ * contents.
+ */
 export interface FileUploadAuthorizationRequest {
   prefix: string;
   path: string;
@@ -217,25 +225,57 @@ export interface DatabaseAdapter {
   batch(statements: D1PreparedStatement[]): Promise<D1QueryResult[]>;
 }
 
-/** Options accepted by {@link createInterocitorMount} and {@link withInterocitor}. */
+/**
+ * Runtime policy getters accepted by {@link createInterocitorMount} and
+ * {@link withInterocitor}.
+ *
+ * These getters let application code keep ownership of env naming while
+ * Interocitor owns request handling. Each getter resolves against the current
+ * request's `env` so one Worker can host different bindings or policy between
+ * environments.
+ */
 export interface InterocitorRuntimeOptions<Env = unknown> {
+  /** Secret used to authenticate normal `/io` and `/notify` calls. */
   accessToken?: (env: Env) => string | undefined;
+  /** Bearer token used for `/__interocitor/*` maintenance and system ops. */
   systemToken?: (env: Env) => string | undefined;
+  /** Enable scheduled cleanup/maintenance when the wrapped Worker has a `scheduled()` handler. */
   enableScheduledMaintenance?: (env: Env) => string | number | boolean | undefined;
+  /** TTL in hours for cleanup of expired paths when maintenance is enabled. */
   pathTtlHours?: (env: Env) => string | number | undefined;
+  /** Max bytes accepted for control files such as manifests and heads. */
   maxControlBytes?: (env: Env) => string | number | undefined;
+  /** Max bytes accepted for one CRDT change file. */
   maxChangeBytes?: (env: Env) => string | number | undefined;
+  /** Max bytes accepted for one mainline snapshot file. */
   maxMainlineBytes?: (env: Env) => string | number | undefined;
+  /** Max bytes accepted for other sync-file classes. */
   maxGenericFileBytes?: (env: Env) => string | number | undefined;
+  /** Max bytes accepted for one durable file upload. */
   maxStoredFileBytes?: (env: Env) => string | number | undefined;
+  /** Max total durable file bytes allowed for one mesh. */
   maxMeshStoredBytes?: (env: Env) => string | number | undefined;
+  /**
+   * App-owned authorization hook for durable file uploads.
+   *
+   * Return `true` to allow, `false` to reject with default status, or an
+   * explicit `{ allowed, status, reason }` object to control the response.
+   */
   authorizeFileUpload?: (request: FileUploadAuthorizationRequest, env: Env) => FileUploadAuthorizationResult | Promise<FileUploadAuthorizationResult>;
+  /** Fire-and-forget audit sink for accepted/rejected worker operations. */
   audit?: (event: WorkerAuditEvent, env: Env) => void | Promise<void>;
+  /** HMAC secret used for issuing and validating mesh IDs. */
   meshSecret?: (env: Env) => string | undefined;
   /** Enable diagnostic logs for request handling and relay delivery. */
   verbose?: (env: Env) => string | number | boolean | undefined;
 }
 
+/**
+ * Wiring required to mount Interocitor under one Worker URL prefix.
+ *
+ * `db` is the only mandatory getter for CRDT sync. Add `files` for durable
+ * file/image APIs and `relay` for realtime invalidation over WebSockets.
+ */
 export interface InterocitorMountOptions<Env = unknown> {
   /**
    * URL prefix Interocitor will claim, e.g. `'/todo-interocitor'`.
@@ -267,6 +307,7 @@ export interface InterocitorMountOptions<Env = unknown> {
 }
 
 /** A frozen Interocitor mount that can be embedded in any Worker. */
+/** Frozen request handler bundle returned by {@link createInterocitorMount}. */
 export interface InterocitorMount<Env = unknown> {
   /** The normalized URL prefix claimed by this mount, e.g. `'/io'`. */
   mountPrefix: string;

@@ -62,7 +62,7 @@ store explicitly when it builds a `MeshKeySource`, for example to:
 ### Default browser persistence
 
 ```ts
-const credentialStore = createWebCredentialStore('meal-planner');
+const credentialStore = createWebCredentialStore('case-vault');
 ```
 
 Stores the credential record in `localStorage`.
@@ -70,7 +70,7 @@ Stores the credential record in `localStorage`.
 ### Memory-only key material
 
 ```ts
-const credentialStore = createWebCredentialStore('meal-planner', {
+const credentialStore = createWebCredentialStore('case-vault', {
   storage: 'memory',
 });
 ```
@@ -81,7 +81,7 @@ component from somewhere else: a join token, backend session, native app integra
 ### Tab-session key material
 
 ```ts
-const credentialStore = createWebCredentialStore('meal-planner', {
+const credentialStore = createWebCredentialStore('case-vault', {
   storage: 'sessionStorage',
 });
 ```
@@ -92,9 +92,9 @@ new tabs after the session ends.
 ### Passkey/biometric-only credential
 
 ```ts
-const credentialStore = createWebCredentialStore('meal-planner', {
+const credentialStore = createWebCredentialStore('case-vault', {
   storage: 'passkey',
-  displayName: 'Meal Planner',
+  displayName: 'Case Vault',
 });
 ```
 
@@ -104,7 +104,7 @@ credential-id hint, but not the credential payload itself.
 ### Encrypted envelope from backend or memory
 
 ```ts
-const credentialStore = createWebCredentialStore('meal-planner', {
+const credentialStore = createWebCredentialStore('case-vault', {
   envelope: {
     store: {
       async save(envelope) {
@@ -121,7 +121,7 @@ const credentialStore = createWebCredentialStore('meal-planner', {
         await fetch('/api/interocitor/credential-envelope', { method: 'DELETE' });
       },
     },
-    keyProvider: new WebAuthnEnvelopeKeyProvider('meal-planner', location.hostname, 'Meal Planner'),
+    keyProvider: new WebAuthnEnvelopeKeyProvider('case-vault', location.hostname, 'Case Vault'),
   },
 });
 ```
@@ -129,6 +129,10 @@ const credentialStore = createWebCredentialStore('meal-planner', {
 The encrypted envelope can come from a backend, app memory, native storage, or
 any custom `CredentialEnvelopeStore`. The unwrap key can come from passkey /
 biometrics, native app integration, or a key obtained by the app from elsewhere.
+
+If the app needs a second protected secret that is not the Interocitor
+credential record, use `WebAuthnBlobStore` from `@interocitor/web` instead of
+overloading the credential-store API.
 
 ## Storage layout
 
@@ -234,7 +238,7 @@ class MyCustomStore implements CredentialStore {
 }
 
 const engine = new Interocitor(adapter, {
-  dbName: 'meal-planner',
+  dbName: 'case-vault',
   localStore,
   keySource: new PortablePassphraseKeySource({
     portableKey,

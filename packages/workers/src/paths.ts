@@ -1,5 +1,3 @@
-export { normalizePath, fileNameFromPath } from './ops.ts';
-
 /**
  * All recognised Interocitor path types.
  *
@@ -11,7 +9,7 @@ export { normalizePath, fileNameFromPath } from './ops.ts';
  * - `device-heartbeat` — `devices/<id>` (mutable, always overwrite)
  * - `other` — anything not matched above (generic overwrite semantics)
  */
-export const PATH_TYPE = Object.freeze({
+const PATH_TYPE_VALUES = {
   MANIFEST_POINTER: 'manifest-pointer',
   MANIFEST_SNAPSHOT: 'manifest-snapshot',
   HEAD: 'head',
@@ -19,7 +17,9 @@ export const PATH_TYPE = Object.freeze({
   MAINLINE_SNAPSHOT: 'mainline-snapshot',
   DEVICE_HEARTBEAT: 'device-heartbeat',
   OTHER: 'other',
-} as const);
+} as const;
+
+export const PATH_TYPE: Readonly<typeof PATH_TYPE_VALUES> = Object.freeze(PATH_TYPE_VALUES);
 
 /** Union of all valid path type strings. */
 export type PathType = (typeof PATH_TYPE)[keyof typeof PATH_TYPE];
@@ -57,7 +57,7 @@ export function classifyPath(path: string): PathType {
  *
  * @param value - Normalised absolute path.
  */
-export function parentPath(value: string): string | null {
+function parentPath(value: string): string | null {
   if (value === '/') return null;
   const idx = value.lastIndexOf('/');
   return idx <= 0 ? '/' : value.slice(0, idx);

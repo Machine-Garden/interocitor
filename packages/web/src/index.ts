@@ -1,6 +1,4 @@
-export {
-  IndexedDbLocalStore,
-} from './storage/indexed-db-local-store.ts';
+export { IndexedDbLocalStore } from "./storage/indexed-db-local-store.ts";
 export {
   createResilientLocalStore,
   DEFAULT_LOCAL_OPEN_TIMEOUT_MS,
@@ -8,18 +6,38 @@ export {
   type LocalStoreDegradedHook,
   type LocalStoreDegradationInfo,
   type LocalStoreDegradationReason,
-} from './storage/resilient-store.ts';
+} from "./storage/resilient-store.ts";
 export {
   createNamedLocalStore,
   getActiveLocalDatabaseName,
   type NamedLocalStoreOptions,
   type PointerStore,
-} from './storage/named-local-store.ts';
+} from "./storage/named-local-store.ts";
 export {
   resetLocalDatabase,
   resetLocalDatabaseWithDeadline,
   type ResetLocalDatabaseOutcome,
-} from './storage/reset.ts';
+} from "./storage/reset.ts";
+
+export {
+  WebAuthnBlobStore,
+  type WebAuthnAttachmentPreference,
+  type WebAuthnBlobStoreOptions,
+  type WebAuthnCredentialRef,
+  type WebAuthnEnrollOptions,
+  type WebAuthnLoadOptions,
+} from "./webauthn.ts";
+
+export {
+  BrowserStorageSecretStore,
+  WebAuthnCrossPlatformSecretStore,
+  WebAuthnPlatformSecretStore,
+  createWebSecretStore,
+  type CreateWebSecretStoreOptions,
+  type WebAuthnSecretStore,
+  type WebSecretCustody,
+  type WebSecretStore,
+} from "./secret-store.ts";
 
 export {
   BrowserCredentialEnvelopeStore,
@@ -39,7 +57,7 @@ export {
   type CredentialStorageLocation,
   type EnvelopeStorageLocation,
   type WebCredentialStore,
-} from './credential-store.ts';
+} from "./credential-store.ts";
 
 export {
   putImage,
@@ -50,4 +68,4 @@ export {
   type StoredImage,
   type StoredImageBlobUrl,
   type StoredImageMetadata,
-} from './image.ts';
+} from "./image.ts";

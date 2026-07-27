@@ -1,0 +1,140 @@
+# Mesh addresses and access
+
+Named addresses give one mesh a stable application meaning; checksummed IDs
+let an application provision many meshes without admitting arbitrary storage
+namespaces. Integrity gates decide which addresses are valid.
+`meshMiddleware` separately authenticates and authorizes requests to those
+addresses.
+
+The snippets are partial Worker policy fragments. The package names and option
+shapes are checked by the Workers build; supply the surrounding Worker,
+environment bindings, and application identity/policy services. The complete
+runnable deployment is the
+[Cloudflare TODO app example](../../../examples/todo-cloudflare-do/README.md).
+
+## One stable shared database
+
+Use a named address when one mesh has stable application meaning. A Worker
+acting as the shared database for an application can expose that mesh as
+`/sync/io/main`; every client is configured with `main`, with no ID issuance or
+discovery step.
+
+Define the allowed name with an integrity gate:
+
+```ts
+runtime: {
+  meshIntegrityGates: [({ address }) => address === 'main'],
+}
+```
+
+The gate admits the address as written. `main` remains the D1 namespace, R2
+namespace, and relay-object name.
+
+Named addresses are predictable. Apply mesh middleware when the shared
+database is not public.
+
+## Many application-provisioned meshes
+
+Use checksummed IDs when the application creates many meshes and arbitrary
+UUIDs must not create storage namespaces:
+
+```ts
+runtime: {
+  meshIntegrityGates: [checksummedMeshIntegrityGate],
+  meshSecret: (env) => env.INTEROCITOR_MESH_SECRET,
+}
+```
+
+`checksummedMeshIntegrityGate` accepts `<UUIDv7>.<tag>` addresses issued with
+the same `meshSecret`. Route `createInterocitorSystemHandler(...)` behind the
+host application's administrative policy when the host needs the built-in ID
+issue/validate operations.
+
+Knowing a valid checksummed address proves that the address was issued. Mesh
+middleware still decides whether the current request may use it.
+
+## Combining address rules
+
+Gates use OR semantics in array order. This deployment supports a stable
+`main` mesh and provisioned meshes:
+
+```ts
+meshIntegrityGates: [
+  ({ address }) => address === 'main',
+  checksummedMeshIntegrityGate,
+]
+```
+
+If every gate returns `false`, the Worker returns `404` before middleware or
+storage. A gate exception returns `503`.
+
+## Apply application authentication and authorization
+
+The application decides how a request becomes a subject and what that subject
+may do. The authorizer can call any bearer-token verifier, session service,
+identity provider, or policy engine:
+
+```ts
+import {
+  createInterocitorMount,
+  createMeshAuthorizationMiddleware,
+} from '@interocitor/workers';
+
+const authorizeMesh = createMeshAuthorizationMiddleware(
+  async ({ address, request }, env) => {
+    const subject = await env.identity.verify(request);
+    if (!subject) return 'deny';
+
+    const permission = await env.permissions.forMesh(subject, address);
+    if (permission === 'write') return 'full';
+    if (permission === 'read') return 'readonly';
+    return 'deny';
+  },
+);
+
+const mount = createInterocitorMount({
+  mountPrefix: '/sync',
+  db: (env) => env.DB,
+  runtime: {
+    meshIntegrityGates: [({ address }) => address === 'main'],
+    meshMiddleware: [authorizeMesh],
+  },
+});
+```
+
+The four results are:
+
+| Result | Read | Write | Meaning |
+| --- | --- | --- | --- |
+| `none` | allow | allow | This address requires no application authorization. |
+| `readonly` | allow | `403` | The subject may consume the mesh. Notify is also allowed because it is read access. |
+| `full` | allow | allow | The subject may consume and modify the mesh. |
+| `deny` | `403` | `403` | The request has no mesh access. |
+
+An authorizer exception or invalid result returns `503`.
+
+## Compose other request policy
+
+`meshMiddleware` wraps accepted IO and notify requests in array order. Each
+layer can return a response or call `next()` once:
+
+```ts
+meshMiddleware: [
+  async (context, env, next) => {
+    const startedAt = Date.now();
+    const response = await next();
+    await env.audit.record({
+      address: context.address,
+      access: context.access,
+      status: response.status,
+      elapsedMs: Date.now() - startedAt,
+    });
+    return response;
+  },
+  authorizeMesh,
+]
+```
+
+Place audit middleware before authorization when denied requests must be
+recorded. Recovery, global health, preflight, and system routes have separate
+host-owned policy boundaries.

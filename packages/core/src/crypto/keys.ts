@@ -1,5 +1,5 @@
 /**
- * interocitor/crypto/keys
+ * @interocitor/core/crypto/keys
  *
  * Key generation and management for encrypted meshes.
  *
@@ -8,17 +8,22 @@
  *
  * @example
  * ```ts
- * import { generateKey, keyToPassphrase, passphraseToKey } from 'interocitor/crypto/keys';
+ * import {
+ *   generateKey,
+ *   keyToPassphrase,
+ *   passphraseToKey,
+ * } from '@interocitor/core/crypto/keys';
  *
  * // Host: generate and share
  * const key = await generateKey();
  * const passphrase = await keyToPassphrase(key);
- * console.log('Share this with your mesh:', passphrase);
+ * displayForExplicitTransfer(passphrase); // treat as capability-bearing secret
  *
- * // Guest: join with passphrase
- * const key = await passphraseToKey(passphrase);
- * engine.setEncryptionKey(key);
+ * // Import for low-level crypto work.
+ * const importedKey = await passphraseToKey(passphrase);
  *
+ * // To configure an Interocitor mesh, pass the base58 value to a
+ * // PortablePassphraseKeySource rather than mutating an initialized engine.
  * ```
  */
 

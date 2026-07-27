@@ -66,7 +66,7 @@ This is just a recommendation. The engine does not enforce it. If you
 never call `compact()`, the auto‑compaction defaults below will eventually
 run.
 
-### Auto‑compaction defaults
+### Auto-compaction defaults
 
 The engine ships with `autoCompact: true`. The defaults are tuned for a
 small mesh (1–2 devices) doing light writes. Override them only if you
@@ -75,24 +75,25 @@ have measured the actual mesh size.
 | Config | Default | Meaning |
 | --- | --- | --- |
 | `autoCompact` | `true` | Master switch for both auto paths |
-| `compactAutoThreshold` | `50` | Minimum queued local changes before either auto path may fire |
+| `compactAutoThreshold` | `50` | Minimum changes processed by a flush before the immediate sampled path may fire |
 | `compactAutoSampleNumerator` | `10` | Numerator of the per‑flush probability |
 | `compactAutoDeviceCount` | `1` | Estimated mesh size; chance ≈ `numerator / deviceCount` |
 | `firstCompactDelayMs` | `10 * 60_000` (10m) | Base delay before the delayed‑path check |
 | `firstCompactDelayJitterMs` | `5 * 60_000` (±5m) | Jitter on the first delay |
 | `secondCompactDelayMs` | `15 * 60_000` (15m) | Base delay between the check and the actual compact |
 | `secondCompactDelayJitterMs` | `5 * 60_000` (±5m) | Jitter on the second delay |
-| `compactRemoteChangeThreshold` | `2` | Minimum remote change files before the second timer is armed |
+| `compactRemoteChangeThreshold` | `2` | Delayed path skips while remote change-file count is at or below this value; the second timer is armed only above it |
 | `compactWarnThreshold` | `50` | Outbox size that triggers a single `compact:warning` event |
 | `offlineGraceMs` | `7 * 24 * 60 * 60_000` | How long an unseen device remains in GC consensus before it must realign from snapshot |
 
 > **Manual policy ≠ auto defaults.** The manual recommendation above
 > ("> 20 changes, idle > 1 min") is what to gate a button on. The auto
-> defaults ("≥ 50 queued local changes, ≥ 2 remote files, 10–30 min
-> after a write") are what runs on its own. They look different because
-> they solve different problems: the manual gate is "don't compact the
-> active session"; the auto gate is "eventually compact even if nobody
-> presses the button".
+> defaults use two independent paths: an immediate sample after a flush of at
+> least 50 operations, and a per-write delayed check that proceeds only when
+> the remote contains more than 2 change files. They solve different
+> problems: the manual gate is "don't compact the active session"; the auto
+> paths are "compact after large local churn" and "eventually compact after
+> any write when remote history has accumulated".
 
 ### Immediate sampled path
 
@@ -112,6 +113,10 @@ Each write arms a check timer. When it fires:
    `below-remote-threshold`.
 3. Otherwise arm a second timer.
 4. When that fires, run `compact()`.
+
+`compactAutoThreshold` does not gate this delayed path. Even one local write
+arms the first timer; only connection/health checks and the remote file-count
+threshold decide whether it reaches the second timer.
 
 Each new write bumps `compactScheduleVersion`, so a chatty client never
 piles up overlapping schedules — the older one short‑circuits with reason

@@ -1,7 +1,7 @@
 /**
  * Interocitor — Swift native Interocitor sync orchestrator
  *
- * Mirrors packages/interocitor/src/core/sync-engine.ts
+ * Native implementation of Interocitor's local-first row and sync model.
  *
  * Orchestrates:
  *  - Local writes → outbox → flush to cloud (primary + replicas)

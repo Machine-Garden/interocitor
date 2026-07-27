@@ -22,7 +22,7 @@
  *   importPublicKey,
  *   signToken,
  *   verifyToken,
- * } from 'interocitor/crypto/signing';
+ * } from '@interocitor/core/crypto/signing';
  *
  * const { privateKey, publicKey } = await generateSigningKeypair();
  * const token = await signToken(privateKey, { sub: 'device-1', scope: 'read' });

@@ -2,9 +2,7 @@
  * WebDAVStorageAdapter
  *
  * StorageAdapter implementation for Nextcloud, ownCloud, and any
- * WebDAV-compatible server (including the bundled interocitor-webdav Node server).
- *
- * Mirrors packages/interocitor/src/adapters/webdav.ts
+ * WebDAV-compatible server (including the repository's loopback test server).
  *
  * Auth: Basic (username + password) or Bearer token.
  * All I/O is via URLSession — no external dependencies.
@@ -101,7 +99,7 @@ public actor WebDAVStorageAdapter: StorageAdapter {
             let (_, response) = try await session.data(for: req)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             // Acceptable statuses:
-            //   201 — Created (including idempotent re-creation on interocitor-webdav)
+            //   201 — Created (including idempotent re-creation on the repository test server)
             //   405 — Method Not Allowed (Nextcloud: folder already exists)
             //   409 — Conflict (Nextcloud/Apache: parent doesn't exist yet — we walk
             //          from root so this shouldn't happen, but treat as non-fatal)
@@ -125,7 +123,7 @@ public actor WebDAVStorageAdapter: StorageAdapter {
 
         let (data, response) = try await session.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        // 404 on an empty folder is returned by some servers (incl. interocitor-webdav) when
+        // 404 on an empty folder is returned by some servers (including the repository test server) when
         // the folder has no files — treat as empty listing rather than an error.
         if status == 404 { return [] }
         guard status == 207 else { throw WebDAVError.httpError(status, "PROPFIND \(path)") }
@@ -187,7 +185,7 @@ public actor WebDAVStorageAdapter: StorageAdapter {
         let (_, response) = try await session.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         // 204 No Content — success; 404 Not Found — already gone (idempotent)
-        // interocitor-webdav returns 404 for missing files; both are acceptable
+        // The repository test server returns 404 for missing files; both are acceptable.
         if status != 204 && status != 404 && !(200...299).contains(status) {
             throw WebDAVError.httpError(status, "DELETE \(path)")
         }

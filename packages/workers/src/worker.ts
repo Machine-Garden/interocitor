@@ -20,28 +20,43 @@ import type {
   DatabaseAdapter,
   DurableObjectNamespace,
   ExecutionContextLike,
-  InterocitorEnv,
   InterocitorMount,
   InterocitorMountOptions,
+  InterocitorSystemHandlerOptions,
   InterocitorRuntimeOptions,
   WorkerLike,
   R2Bucket,
   FileUploadAuthorizationResult,
+  MeshAccess,
+  MeshAuthorization,
+  MeshAuthorizer,
+  MeshIntegrityContext,
+  MeshIntegrityGate,
+  MeshMiddleware,
+  MeshRequestContext,
+  InterocitorSystemHandler,
   WorkerAuditEvent,
 } from './types.ts';
-export type { InterocitorEnv, InterocitorMountOptions, InterocitorRuntimeOptions } from './types.ts';
-
-interface MaintenanceEnv {
-  INTEROCITOR_PATH_TTL_HOURS?: string | number;
-}
-
-function toMaintenanceEnv(runtime: ResolvedRuntimeConfig): MaintenanceEnv {
-  return { INTEROCITOR_PATH_TTL_HOURS: runtime.pathTtlHours };
-} 
+export type {
+  InterocitorMountOptions,
+  InterocitorSystemHandlerOptions,
+  InterocitorRuntimeOptions,
+  MeshAccess,
+  MeshAuthorization,
+  MeshAuthorizer,
+  MeshIntegrityContext,
+  MeshIntegrityGate,
+  MeshMiddleware,
+  MeshRequestContext,
+  InterocitorSystemHandler,
+} from './types.ts';
 
 const IO_PREFIX = '/io';
 const NOTIFY_PREFIX = '/notify';
+const RECOVERY_PREFIX = '/recovery';
 const SYSTEM_PREFIX = '/__interocitor/system';
+const RECOVERY_STORAGE_PREFIX = '__interocitor_recovery__';
+const RECOVERY_LOCATOR_RE = /^[A-Za-z0-9_-]{43}$/;
 const DEFAULT_CONTROL_BYTES = 256 * 1024;
 const DEFAULT_CHANGE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAINLINE_BYTES = 16 * 1024 * 1024;
@@ -64,8 +79,8 @@ const DEFAULT_STORED_FILE_BYTES = 32 * 1024 * 1024;
 const DEFAULT_MESH_STORED_BYTES = 512 * 1024 * 1024;
 
 interface ResolvedRuntimeConfig {
-  accessToken?: string;
-  systemToken?: string;
+  meshIntegrityGates: readonly MeshIntegrityGate<unknown>[];
+  meshMiddleware: readonly MeshMiddleware<unknown>[];
   enableScheduledMaintenance: boolean;
   pathTtlHours: number;
   maxControlBytes: number;
@@ -75,22 +90,29 @@ interface ResolvedRuntimeConfig {
   maxStoredFileBytes: number;
   maxMeshStoredBytes: number;
   authorizeFileUpload?: InterocitorRuntimeOptions<unknown>['authorizeFileUpload'];
-  audit?: InterocitorRuntimeOptions<unknown>['audit'];
+  storageOperationAudit?: InterocitorRuntimeOptions<unknown>['storageOperationAudit'];
   meshSecret: string;
   verbose: boolean;
 }
 
 function parsePositiveInt(value: string | number | undefined, fallback: number): number {
-  const parsed = Number.parseInt(String(value ?? ''), 10);
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parsePositiveNumber(value: string | number | undefined, fallback: number): number {
+  const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function resolveRuntimeConfig<Env>(env: Env, runtime?: InterocitorRuntimeOptions<Env>): ResolvedRuntimeConfig {
+  const scheduledMaintenance = runtime?.enableScheduledMaintenance?.(env);
+  const verbose = runtime?.verbose?.(env);
   return {
-    accessToken: runtime?.accessToken?.(env),
-    systemToken: runtime?.systemToken?.(env),
-    enableScheduledMaintenance: runtime?.enableScheduledMaintenance?.(env) === true || runtime?.enableScheduledMaintenance?.(env) === '1' || runtime?.enableScheduledMaintenance?.(env) === 1,
-    pathTtlHours: parsePositiveInt(runtime?.pathTtlHours?.(env), 0),
+    meshIntegrityGates: (runtime?.meshIntegrityGates ?? []) as readonly MeshIntegrityGate<unknown>[],
+    meshMiddleware: (runtime?.meshMiddleware ?? []) as readonly MeshMiddleware<unknown>[],
+    enableScheduledMaintenance: scheduledMaintenance === true || scheduledMaintenance === '1' || scheduledMaintenance === 1,
+    pathTtlHours: parsePositiveNumber(runtime?.pathTtlHours?.(env), 0),
     maxControlBytes: parsePositiveInt(runtime?.maxControlBytes?.(env), DEFAULT_CONTROL_BYTES),
     maxChangeBytes: parsePositiveInt(runtime?.maxChangeBytes?.(env), DEFAULT_CHANGE_BYTES),
     maxMainlineBytes: parsePositiveInt(runtime?.maxMainlineBytes?.(env), DEFAULT_MAINLINE_BYTES),
@@ -98,9 +120,9 @@ function resolveRuntimeConfig<Env>(env: Env, runtime?: InterocitorRuntimeOptions
     maxStoredFileBytes: parsePositiveInt(runtime?.maxStoredFileBytes?.(env), DEFAULT_STORED_FILE_BYTES),
     maxMeshStoredBytes: parsePositiveInt(runtime?.maxMeshStoredBytes?.(env), DEFAULT_MESH_STORED_BYTES),
     authorizeFileUpload: runtime?.authorizeFileUpload as InterocitorRuntimeOptions<unknown>['authorizeFileUpload'],
-    audit: runtime?.audit as InterocitorRuntimeOptions<unknown>['audit'],
+    storageOperationAudit: runtime?.storageOperationAudit as InterocitorRuntimeOptions<unknown>['storageOperationAudit'],
     meshSecret: runtime?.meshSecret?.(env) || DEFAULT_MESH_SECRET,
-    verbose: runtime?.verbose?.(env) === true || runtime?.verbose?.(env) === '1' || runtime?.verbose?.(env) === 1,
+    verbose: verbose === true || verbose === '1' || verbose === 1,
   };
 }
 
@@ -127,37 +149,29 @@ async function computeMeshTag(uuid: string, secret: CryptoKey): Promise<string> 
 
 const MESH_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/**
- * Strict validation of a request prefix. Returns null on success, or a 400
- * Response on failure. Fast-fails before D1, cache, or auth work happens.
- *
- * Format: `<uuidv7>.<base64url-tag>` where the tag is HMAC-SHA256(uuid, meshSecret)
- * truncated to 8 bytes. Anything else — wrong shape, bad UUID, or tag mismatch —
- * yields 400 Invalid prefix.
- */
-async function validateMeshPrefix(prefix: string, runtime: ResolvedRuntimeConfig): Promise<Response | null> {
-  if (!prefix) return jsonResponse({ error: 'Missing prefix' }, 400);
+async function isValidChecksummedMesh(prefix: string, meshSecret?: string): Promise<boolean> {
+  if (!prefix) return false;
   const dot = prefix.lastIndexOf('.');
-  if (dot === -1) return jsonResponse({ error: 'Invalid prefix' }, 400);
+  if (dot === -1) return false;
   const uuid = prefix.slice(0, dot);
   const tag = prefix.slice(dot + 1);
-  if (!MESH_UUID_RE.test(uuid) || !tag) return jsonResponse({ error: 'Invalid prefix' }, 400);
-  const secret = await importMeshSecretKey(runtime.meshSecret);
+  if (!MESH_UUID_RE.test(uuid) || !tag) return false;
+  const secret = await importMeshSecretKey(meshSecret);
   const expected = await computeMeshTag(uuid, secret);
   // Constant-time compare.
-  if (tag.length !== expected.length) return jsonResponse({ error: 'Invalid prefix' }, 400);
+  if (tag.length !== expected.length) return false;
   let result = 0;
   for (let i = 0; i < tag.length; i++) result |= tag.codePointAt(i)! ^ expected.codePointAt(i)!;
-  if (result !== 0) return jsonResponse({ error: 'Invalid prefix' }, 400);
-  return null;
+  return result === 0;
 }
 
-async function sha256Hex(input: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', textEncoder.encode(input));
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
+/**
+ * Accept `<UUIDv7>.<tag>` addresses issued with the configured `meshSecret`.
+ * The tag is the first eight HMAC-SHA-256 bytes encoded as base64url. This
+ * establishes address integrity; caller access remains a middleware decision.
+ */
+export const checksummedMeshIntegrityGate: MeshIntegrityGate = async ({ verifyChecksum }) =>
+  verifyChecksum();
 
 function fileSizeLimitForPathType(pathType: string, runtime: ResolvedRuntimeConfig): number {
   if (
@@ -175,27 +189,81 @@ function fileSizeLimitForPathType(pathType: string, runtime: ResolvedRuntimeConf
   return runtime.maxGenericFileBytes;
 }
 
-async function hasAccess(request: Request, runtime: ResolvedRuntimeConfig, prefix: string): Promise<boolean> {
-  const accessSecret = runtime.accessToken;
-  if (!accessSecret) return true;
-  if (!prefix) return false;
-  const auth = request.headers.get('Authorization') || '';
-  const bearerToken = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length).trim() : '';
-  const url = new URL(request.url);
-  const queryToken = url.searchParams.get('access_token') || '';
-  const token = bearerToken || queryToken;
-  if (!token) return false;
-  const expected = await sha256Hex(`${prefix}${accessSecret}`);
-  return token === expected;
+/**
+ * Enforce a four-state application access decision as mesh middleware.
+ *
+ * `none` and `full` continue, `readonly` rejects writes, and `deny` rejects
+ * every request. Authorizer failures and invalid decisions return `503`.
+ */
+export function createMeshAuthorizationMiddleware<Env>(authorizer: MeshAuthorizer<Env>): MeshMiddleware<Env> {
+  return async (context, env, next) => {
+    let decision: MeshAuthorization;
+    try {
+      decision = await authorizer({ ...context, request: context.request.clone() }, env);
+    } catch {
+      return jsonResponse({ error: 'Authorization unavailable' }, 503);
+    }
+    if (decision === 'none' || decision === 'full') return next();
+    if (decision === 'readonly') return context.access === 'write' ? jsonResponse({ error: 'Forbidden' }, 403) : next();
+    if (decision === 'deny') return jsonResponse({ error: 'Forbidden' }, 403);
+    return jsonResponse({ error: 'Authorization unavailable' }, 503);
+  };
 }
 
-function hasSystemAccess(request: Request, runtime: ResolvedRuntimeConfig): boolean {
-  const expected = String(runtime.systemToken || '').trim();
-  if (!expected) return false;
-  const auth = request.headers.get('Authorization') || '';
-  const bearerToken = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length).trim() : '';
-  const headerToken = String(request.headers.get('x-interocitor-system-token') || '').trim();
-  return bearerToken === expected || headerToken === expected;
+async function resolveMesh<Env>(
+  address: string,
+  request: Request,
+  env: Env,
+  runtime: ResolvedRuntimeConfig,
+): Promise<string | Response> {
+  const integrity: MeshIntegrityContext = {
+    address,
+    request: request.clone(),
+    verifyChecksum: () => isValidChecksummedMesh(address, runtime.meshSecret),
+  };
+  try {
+    for (const gate of runtime.meshIntegrityGates) {
+      if (await gate(integrity, env)) return address;
+    }
+  } catch (error) {
+    if (runtime.verbose) console.warn('[interocitor:mesh] integrity gate failed', error);
+    return jsonResponse({ error: 'Mesh integrity unavailable' }, 503);
+  }
+  return jsonResponse({ error: 'Not found' }, 404);
+}
+
+async function runMeshMiddleware<Env>(
+  context: MeshRequestContext,
+  env: Env,
+  middleware: readonly MeshMiddleware<unknown>[],
+  terminal: () => Promise<Response>,
+  index = 0,
+): Promise<Response> {
+  const layer = middleware[index] as MeshMiddleware<Env> | undefined;
+  if (!layer) return terminal();
+  let continued = false;
+  return layer(
+    { ...context, request: context.request.clone() },
+    env,
+    () => {
+      if (continued) return Promise.resolve(jsonResponse({ error: 'Middleware called next() more than once' }, 500));
+      continued = true;
+      return runMeshMiddleware(context, env, middleware, terminal, index + 1);
+    },
+  );
+}
+
+function ioRequestAccess(op: string, method: string): MeshAccess | null {
+  if (op === 'health' && method === 'GET') return 'read';
+  if (op === 'file' || op === 'stored-file') {
+    if (method === 'GET') return 'read';
+    if (method === 'PUT' || method === 'DELETE') return 'write';
+    return null;
+  }
+  if (op === 'metadata' || op === 'stored-file-metadata' || op === 'ensure-folder' || op === 'list-files' || op === 'list-folders') {
+    return method === 'POST' ? 'read' : null;
+  }
+  return null;
 }
 
 function resolveDatabase<Env>(
@@ -255,10 +323,10 @@ function requestId(request: Request): string | undefined {
 }
 
 async function emitAudit<Env>(runtime: ResolvedRuntimeConfig, env: Env, event: Omit<WorkerAuditEvent, 'event' | 'at'>): Promise<void> {
-  if (!runtime.audit) return;
+  if (!runtime.storageOperationAudit) return;
   const auditEvent: WorkerAuditEvent = { event: 'interocitor.audit', at: new Date().toISOString(), ...event };
   try {
-    await runtime.audit(auditEvent, env);
+    await runtime.storageOperationAudit(auditEvent, env);
   } catch (error) {
     if (runtime.verbose) console.warn('[interocitor:audit] callback failed', error);
   }
@@ -300,10 +368,10 @@ async function handleGetFile<Env>(db: DatabaseAdapter, prefix: string, path: str
   const pathType = classifyPath(path);
   const result = await opGetFile(db.raw, prefix, path, pathType);
   if (!result.found) {
-    await emitAudit(runtime, env, { op: 'read', prefix, path: normalizePath(path), pathType, status: 404, outcome: 'not-found', requestId: requestId(request) });
+    await emitAudit(runtime, env, { op: 'read', address: prefix, path: normalizePath(path), pathType, status: 404, outcome: 'not-found', requestId: requestId(request) });
     return withCors(new Response('Not found', { status: 404 }));
   }
-  await emitAudit(runtime, env, { op: 'read', prefix, path: normalizePath(path), pathType, status: 200, outcome: 'ok', bytes: result.size, requestId: requestId(request) });
+  await emitAudit(runtime, env, { op: 'read', address: prefix, path: normalizePath(path), pathType, status: 200, outcome: 'ok', bytes: result.size, requestId: requestId(request) });
   return withCors(
     new Response(result.bytes as unknown as BodyInit, {
       status: 200,
@@ -321,10 +389,10 @@ async function handleMetadata<Env>(db: DatabaseAdapter, prefix: string, path: st
   const pathType = classifyPath(path);
   const result = await opGetFile(db.raw, prefix, path, pathType);
   if (!result.found) {
-    await emitAudit(runtime, env, { op: 'metadata', prefix, path: normalizePath(path), pathType, status: 404, outcome: 'not-found', requestId: requestId(request) });
+    await emitAudit(runtime, env, { op: 'metadata', address: prefix, path: normalizePath(path), pathType, status: 404, outcome: 'not-found', requestId: requestId(request) });
     return jsonResponse({ file: null }, 404);
   }
-  await emitAudit(runtime, env, { op: 'metadata', prefix, path: normalizePath(path), pathType, status: 200, outcome: 'ok', bytes: result.size, requestId: requestId(request) });
+  await emitAudit(runtime, env, { op: 'metadata', address: prefix, path: normalizePath(path), pathType, status: 200, outcome: 'ok', bytes: result.size, requestId: requestId(request) });
   return jsonResponse({
     file: {
       name: fileNameFromPath(path),
@@ -358,7 +426,7 @@ async function handleWriteFile<Env>(
     PATH_TYPE.MANIFEST_SNAPSHOT,
   ].includes(pathType as never);
   const notify = async (status: number, wrote = true): Promise<Response> => {
-    await emitAudit(runtime, env, { op: 'write', prefix, path: normalizePath(path), pathType, status, outcome: status >= 200 && status < 300 ? 'ok' : 'rejected', bytes: bytes.byteLength, requestId: requestIdValue });
+    await emitAudit(runtime, env, { op: 'write', address: prefix, path: normalizePath(path), pathType, status, outcome: status >= 200 && status < 300 ? 'ok' : 'rejected', bytes: bytes.byteLength, requestId: requestIdValue });
     if (wrote && shouldBroadcast && status >= 200 && status < 300) {
       const payload = { type: 'invalidation', op: 'write', path: normalizePath(path), pathType, ts: Date.now() };
       broadcast(relay, ctx, prefix, payload, { verbose: runtime.verbose });
@@ -380,14 +448,14 @@ async function handleWriteFile<Env>(
 async function handleListFiles<Env>(db: DatabaseAdapter, prefix: string, body: Record<string, unknown>, request: Request, runtime: ResolvedRuntimeConfig, env: Env): Promise<Response> {
   const path = normalizePath(String(body?.path || '/'));
   const listing = await opListChildren(db.raw, prefix, path);
-  await emitAudit(runtime, env, { op: 'list', prefix, path, status: 200, outcome: 'ok', requestId: requestId(request) });
+  await emitAudit(runtime, env, { op: 'list', address: prefix, path, status: 200, outcome: 'ok', requestId: requestId(request) });
   return jsonResponse({ files: listing.files }, 200);
 }
 
 async function handleListFolders<Env>(db: DatabaseAdapter, prefix: string, body: Record<string, unknown>, request: Request, runtime: ResolvedRuntimeConfig, env: Env): Promise<Response> {
   const path = normalizePath(String(body?.path || '/'));
   const listing = await opListChildren(db.raw, prefix, path);
-  await emitAudit(runtime, env, { op: 'list', prefix, path, status: 200, outcome: 'ok', requestId: requestId(request) });
+  await emitAudit(runtime, env, { op: 'list', address: prefix, path, status: 200, outcome: 'ok', requestId: requestId(request) });
   return jsonResponse({ folders: listing.folders }, 200);
 }
 
@@ -403,7 +471,7 @@ async function handleDelete<Env>(
 ): Promise<Response> {
   const remoteRoot = meshRootForPath(path);
   const deleted = await opDeletePath(db.raw, prefix, path, remoteRoot);
-  await emitAudit(runtime, env, { op: 'delete', prefix, path: normalizePath(path), status: deleted ? 204 : 404, outcome: deleted ? 'ok' : 'not-found', requestId: requestIdValue });
+  await emitAudit(runtime, env, { op: 'delete', address: prefix, path: normalizePath(path), status: deleted ? 204 : 404, outcome: deleted ? 'ok' : 'not-found', requestId: requestIdValue });
   if (deleted) {
     broadcast(relay, ctx, prefix, { type: 'invalidation', op: 'delete', path: normalizePath(path), ts: Date.now() }, { verbose: runtime.verbose });
   }
@@ -459,10 +527,10 @@ async function handleStoredFileMetadata<Env>(db: DatabaseAdapter, prefix: string
   const normalized = normalizePath(path);
   const row = await db.first<StoredFileRow>('SELECT * FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
   if (!row) {
-    await emitAudit(runtime, env, { op: 'stored-file-metadata', prefix, path: normalized, status: 404, outcome: 'not-found', requestId: requestId(request) });
+    await emitAudit(runtime, env, { op: 'stored-file-metadata', address: prefix, path: normalized, status: 404, outcome: 'not-found', requestId: requestId(request) });
     return jsonResponse({ file: null }, 404);
   }
-  await emitAudit(runtime, env, { op: 'stored-file-metadata', prefix, path: normalized, status: 200, outcome: 'ok', bytes: Number(row.size ?? 0), taint: row.taint || undefined, requestId: requestId(request) });
+  await emitAudit(runtime, env, { op: 'stored-file-metadata', address: prefix, path: normalized, status: 200, outcome: 'ok', bytes: Number(row.size ?? 0), taint: row.taint || undefined, requestId: requestId(request) });
   return jsonResponse({ file: storedFileMetadata(row) }, 200);
 }
 
@@ -471,17 +539,17 @@ async function handleGetStoredFile<Env>(db: DatabaseAdapter, bucket: R2Bucket | 
   const normalized = normalizePath(path);
   const row = await db.first<StoredFileRow>('SELECT * FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
   if (!row?.r2_key) {
-    await emitAudit(runtime, env, { op: 'stored-file-read', prefix, path: normalized, status: 404, outcome: 'not-found', requestId: requestId(request) });
+    await emitAudit(runtime, env, { op: 'stored-file-read', address: prefix, path: normalized, status: 404, outcome: 'not-found', requestId: requestId(request) });
     return withCors(new Response('Not found', { status: 404 }));
   }
   const object = await bucket.get(String(row.r2_key));
   if (!object) {
-    await emitAudit(runtime, env, { op: 'stored-file-read', prefix, path: normalized, status: 404, outcome: 'not-found', taint: row.taint || undefined, requestId: requestId(request) });
+    await emitAudit(runtime, env, { op: 'stored-file-read', address: prefix, path: normalized, status: 404, outcome: 'not-found', taint: row.taint || undefined, requestId: requestId(request) });
     return withCors(new Response('Not found', { status: 404 }));
   }
   const now = new Date().toISOString();
   await db.run('UPDATE stored_files SET last_accessed_at=?3, use_count=use_count+1 WHERE prefix=?1 AND path=?2', prefix, normalized, now);
-  await emitAudit(runtime, env, { op: 'stored-file-read', prefix, path: normalized, status: 200, outcome: 'ok', bytes: Number(row.size ?? object.size), taint: row.taint || undefined, requestId: requestId(request) });
+  await emitAudit(runtime, env, { op: 'stored-file-read', address: prefix, path: normalized, status: 200, outcome: 'ok', bytes: Number(row.size ?? object.size), taint: row.taint || undefined, requestId: requestId(request) });
   const headers = new Headers({
     'Content-Type': String(row.content_type || 'application/octet-stream'),
     'Content-Length': String(object.size),
@@ -521,7 +589,7 @@ async function handlePutStoredFile<Env>(
   if (nextTotal > runtime.maxMeshStoredBytes) return jsonResponse({ error: 'Mesh storage quota exceeded', limit: runtime.maxMeshStoredBytes }, 413);
   if (runtime.authorizeFileUpload) {
     const auth = await normalizeAuthorization(await runtime.authorizeFileUpload({
-      prefix,
+      address: prefix,
       path: normalized,
       uploadedByDeviceId,
       size: bytes.byteLength,
@@ -563,7 +631,7 @@ async function handlePutStoredFile<Env>(
   );
   const row = await db.first<StoredFileRow>('SELECT * FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
   const status = existing ? 200 : 201;
-  await emitAudit(runtime, env, { op: 'stored-file-write', prefix, path: normalized, status, outcome: 'ok', bytes: bytes.byteLength, taint: taint ?? undefined, requestId: requestId(request) });
+  await emitAudit(runtime, env, { op: 'stored-file-write', address: prefix, path: normalized, status, outcome: 'ok', bytes: bytes.byteLength, taint: taint ?? undefined, requestId: requestId(request) });
   return jsonResponse({ file: storedFileMetadata(row ?? { path: normalized, size: bytes.byteLength, uploaded_by_device_id: uploadedByDeviceId, uploaded_at: now, modified_time: now, etag, taint }) }, status);
 }
 
@@ -572,52 +640,50 @@ async function handleDeleteStoredFile<Env>(db: DatabaseAdapter, bucket: R2Bucket
   const normalized = normalizePath(path);
   const row = await db.first<StoredFileRow>('SELECT r2_key, size, taint FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
   if (!row?.r2_key) {
-    await emitAudit(runtime, env, { op: 'stored-file-delete', prefix, path: normalized, status: 404, outcome: 'not-found', requestId: requestId(request) });
+    await emitAudit(runtime, env, { op: 'stored-file-delete', address: prefix, path: normalized, status: 404, outcome: 'not-found', requestId: requestId(request) });
     return emptyResponse(404);
   }
   await bucket.delete(String(row.r2_key));
   await db.run('DELETE FROM stored_files WHERE prefix=?1 AND path=?2', prefix, normalized);
-  await emitAudit(runtime, env, { op: 'stored-file-delete', prefix, path: normalized, status: 204, outcome: 'ok', bytes: Number(row.size ?? 0), taint: row.taint || undefined, requestId: requestId(request) });
+  await emitAudit(runtime, env, { op: 'stored-file-delete', address: prefix, path: normalized, status: 204, outcome: 'ok', bytes: Number(row.size ?? 0), taint: row.taint || undefined, requestId: requestId(request) });
   return emptyResponse(204);
 }
 
-async function handleSystem(
+async function handleSystemOperation<Env>(
   db: DatabaseAdapter,
   request: Request,
   url: URL,
   runtime: ResolvedRuntimeConfig,
+  env: Env,
 ): Promise<Response> {
   try {
-    if (!hasSystemAccess(request, runtime)) return jsonResponse({ error: 'Unauthorized' }, 401);
-    const maintenanceEnv = toMaintenanceEnv(runtime) as InterocitorEnv;
     const meshSecret = runtime.meshSecret;
     const rest = url.pathname.slice(`${SYSTEM_PREFIX}/`.length);
     const prefix = decodeURIComponent(rest.split('/').filter(Boolean)[0] || '');
     const body = await readJsonBody(request);
     const op = String(body?.op || '');
     if (!prefix || !op) return jsonResponse({ error: 'Missing prefix or op' }, 400);
-    // System ops other than `issue-mesh-id` operate against an existing mesh —
-    // validate the prefix integrity. `issue-mesh-id` itself receives an
-    // arbitrary placeholder prefix (not yet minted), so it's exempt.
-    if (op !== 'issue-mesh-id') {
-      const prefixError = await validateMeshPrefix(prefix, runtime);
-      if (prefixError) return prefixError;
+    let storageKey = prefix;
+    if (op !== 'issue-mesh-id' && op !== 'validate-mesh-id') {
+      const mesh = await resolveMesh(prefix, request, env, runtime);
+      if (mesh instanceof Response) return mesh;
+      storageKey = mesh;
     }
     if (op === 'prune-compacted-changes' || op === 'compact') {
       const remotePath = normalizePath(String(body?.remotePath || '/'));
       const watermarkHlc = String(body?.watermarkHlc || '');
-      return jsonResponse(await opPruneCompacted(db.raw, prefix, remotePath, watermarkHlc), 200);
+      return jsonResponse(await opPruneCompacted(db.raw, storageKey, remotePath, watermarkHlc), 200);
     }
     if (op === 'reconcile-metrics') {
       const remotePath = normalizePath(String(body?.remotePath || '/'));
-      return jsonResponse(await opReconcileMetrics(db.raw, prefix, remotePath), 200);
+      return jsonResponse(await opReconcileMetrics(db.raw, storageKey, remotePath), 200);
     }
     if (op === 'run-maintenance') {
-      return jsonResponse(await runMaintenance(db, maintenanceEnv, prefix), 200);
+      return jsonResponse(await runMaintenance(db, runtime.pathTtlHours, storageKey), 200);
     }
     if (op === 'maintenance-status') {
       const remotePath = normalizePath(String(body?.remotePath || '/'));
-      return jsonResponse(await getMaintenanceStatus(db, prefix, remotePath), 200);
+      return jsonResponse(await getMaintenanceStatus(db, storageKey, remotePath), 200);
     }
     if (op === 'issue-mesh-id') {
       const secret = await importMeshSecretKey(meshSecret);
@@ -661,30 +727,29 @@ async function handleWsUpgrade<Env>(
   prefix: string,
   relayGetter?: (env: Env) => DurableObjectNamespace,
 ): Promise<Response> {
-  const prefixError = await validateMeshPrefix(prefix, runtime);
-  if (prefixError) return prefixError;
-  if (!(await hasAccess(request, runtime, prefix))) {
-    if (runtime.verbose) console.warn('[interocitor:relay] unauthorized notify request', { prefix });
-    return new Response('Unauthorized', { status: 401 });
-  }
-  const relay = relayGetter ? relayGetter(env) : undefined;
-  if (!relay) {
-    if (runtime.verbose) console.warn('[interocitor:relay] notify request failed: relay binding not configured', { prefix });
-    return new Response('WebSocket relay not configured', { status: 501 });
-  }
-  const stub = relay.get(relay.idFromName(prefix));
-  const url = new URL(request.url);
-  if (request.method.toUpperCase() === 'GET' && url.pathname.split('/').filter(Boolean)[2] === 'health') {
-    const response = await stub.fetch(new Request('https://internal/__status'));
-    return withCors(response);
-  }
-  if (request.headers.get('Upgrade') !== 'websocket') {
-    return new Response('Expected WebSocket upgrade', { status: 426 });
-  }
-  if (runtime.verbose) console.debug('[interocitor:relay] websocket connect forwarded', { prefix });
-  const connectUrl = new URL(request.url);
-  connectUrl.pathname = '/__connect';
-  return stub.fetch(new Request(connectUrl.toString(), request));
+  const mesh = await resolveMesh(prefix, request, env, runtime);
+  if (mesh instanceof Response) return mesh;
+  return runMeshMiddleware(
+    { address: mesh, request, surface: 'notify', access: 'read' },
+    env,
+    runtime.meshMiddleware,
+    async () => {
+      const relay = relayGetter ? relayGetter(env) : undefined;
+      if (!relay) {
+        if (runtime.verbose) console.warn('[interocitor:relay] notify request failed: relay binding not configured', { prefix });
+        return new Response('WebSocket relay not configured', { status: 501 });
+      }
+      const stub = relay.get(relay.idFromName(mesh));
+      const url = new URL(request.url);
+      if (request.method.toUpperCase() === 'GET' && url.pathname.split('/').filter(Boolean)[2] === 'health') {
+        return withCors(await stub.fetch(new Request('https://internal/__status')));
+      }
+      if (request.headers.get('Upgrade') !== 'websocket') return new Response('Expected WebSocket upgrade', { status: 426 });
+      const connectUrl = new URL(request.url);
+      connectUrl.pathname = '/__connect';
+      return stub.fetch(new Request(connectUrl.toString(), request));
+    },
+  );
 }
 
 async function handleIoRequest<Env>(
@@ -699,54 +764,96 @@ async function handleIoRequest<Env>(
 ): Promise<Response> {
   const method = request.method.toUpperCase();
   const { prefix, op } = parseIo(url);
-  // Strict prefix integrity check — fast-fail BEFORE any D1/auth/cache work.
-  // A tampered prefix never reaches the database or the auth path.
-  const prefixError = await validateMeshPrefix(prefix, runtime);
-  if (prefixError) return prefixError;
-  const db = resolveDatabase(env, dbGetter);
-  const relay = relayGetter ? relayGetter(env) : undefined;
-  const files = filesGetter ? filesGetter(env) : undefined;
-  if (!(await hasAccess(request, runtime, prefix))) return jsonResponse({ error: 'Unauthorized' }, 401);
+  const access = ioRequestAccess(op, method);
+  if (!access) return withCors(new Response('Not found', { status: 404 }));
+  const mesh = await resolveMesh(prefix, request, env, runtime);
+  if (mesh instanceof Response) return mesh;
+  return runMeshMiddleware(
+    { address: mesh, request, surface: 'io', access },
+    env,
+    runtime.meshMiddleware,
+    async () => {
+      const db = resolveDatabase(env, dbGetter);
+      const relay = relayGetter ? relayGetter(env) : undefined;
+      const files = filesGetter ? filesGetter(env) : undefined;
+      const storageKey = mesh;
 
   if (op === 'health' && method === 'GET') {
     return withCors(new Response('interocitor cloudflare worker\n', { status: 200 }));
   }
   if (op === 'file') {
     const path = normalizePath(url.searchParams.get('path') || '/');
-    if (method === 'GET') return handleGetFile(db, prefix, path, request, runtime, env);
-    if (method === 'PUT') return handleWriteFile(db, prefix, path, request, runtime, ctx, relay, env, requestId(request));
-    if (method === 'DELETE') return handleDelete(db, prefix, path, ctx, runtime, relay, env, requestId(request));
+    if (method === 'GET') return handleGetFile(db, storageKey, path, request, runtime, env);
+    if (method === 'PUT') return handleWriteFile(db, storageKey, path, request, runtime, ctx, relay, env, requestId(request));
+    if (method === 'DELETE') return handleDelete(db, storageKey, path, ctx, runtime, relay, env, requestId(request));
   }
   if (op === 'metadata' && method === 'POST') {
     const body = await readJsonBody(request);
-    return handleMetadata(db, prefix, String(body?.path || '/'), request, runtime, env);
+    return handleMetadata(db, storageKey, String(body?.path || '/'), request, runtime, env);
   }
   if (op === 'stored-file') {
     const path = normalizePath(url.searchParams.get('path') || '/');
-    if (method === 'GET') return handleGetStoredFile(db, files, prefix, path, request, runtime, env);
-    if (method === 'PUT') return handlePutStoredFile(db, files, prefix, path, request, runtime, env);
-    if (method === 'DELETE') return handleDeleteStoredFile(db, files, prefix, path, request, runtime, env);
+    if (method === 'GET') return handleGetStoredFile(db, files, storageKey, path, request, runtime, env);
+    if (method === 'PUT') return handlePutStoredFile(db, files, storageKey, path, request, runtime, env);
+    if (method === 'DELETE') return handleDeleteStoredFile(db, files, storageKey, path, request, runtime, env);
   }
   if (op === 'stored-file-metadata' && method === 'POST') {
     const body = await readJsonBody(request);
-    return handleStoredFileMetadata(db, prefix, String(body?.path || '/'), request, runtime, env);
+    return handleStoredFileMetadata(db, storageKey, String(body?.path || '/'), request, runtime, env);
   }
   if (op === 'ensure-folder' && method === 'POST') {
-    await opListChildren(db.raw, prefix, normalizePath(String((await readJsonBody(request))?.path || '/'))).catch(() => null);
+    await opListChildren(db.raw, storageKey, normalizePath(String((await readJsonBody(request))?.path || '/'))).catch(() => null);
     return emptyResponse(204);
   }
   if (op === 'list-files' && method === 'POST') {
-    return handleListFiles(db, prefix, await readJsonBody(request), request, runtime, env);
+    return handleListFiles(db, storageKey, await readJsonBody(request), request, runtime, env);
   }
   if (op === 'list-folders' && method === 'POST') {
-    return handleListFolders(db, prefix, await readJsonBody(request), request, runtime, env);
+    return handleListFolders(db, storageKey, await readJsonBody(request), request, runtime, env);
   }
   return withCors(new Response('Not found', { status: 404 }));
+    },
+  );
 }
 
 /**
- * Create a self-contained Interocitor mount that handles all IO, notify, and
- * system requests under a single URL prefix.
+ * Store opaque recovery wrappers outside mesh-addressed IO. The locator is
+ * derived from client-held recovery words; the Worker never receives either
+ * the words or the decrypted mesh credentials.
+ */
+async function handleRecoveryRequest<Env>(
+  request: Request,
+  env: Env,
+  runtime: ResolvedRuntimeConfig,
+  db: DatabaseAdapter,
+  locator: string,
+): Promise<Response> {
+  if (!RECOVERY_LOCATOR_RE.test(locator)) return jsonResponse({ error: 'Invalid recovery locator' }, 400);
+  const path = `/wrappers/${locator}.json`;
+  if (request.method === 'GET') {
+    const result = await opGetFile(db.raw, RECOVERY_STORAGE_PREFIX, path, PATH_TYPE.OTHER);
+    if (!result.found) {
+      await emitAudit(runtime, env, { op: 'recovery-read', path, status: 404, outcome: 'not-found', requestId: requestId(request) });
+      return withCors(new Response('Not found', { status: 404 }));
+    }
+    await emitAudit(runtime, env, { op: 'recovery-read', path, status: 200, outcome: 'ok', bytes: result.size, requestId: requestId(request) });
+    return withCors(new Response(result.bytes as unknown as BodyInit, { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } }));
+  }
+  if (request.method === 'PUT') {
+    const bytes = await readBytes(request);
+    if (!bytes) return jsonResponse({ error: 'Invalid request body' }, 400);
+    if (bytes.byteLength > runtime.maxControlBytes) return jsonResponse({ error: 'Payload too large', limit: runtime.maxControlBytes }, 413);
+    const result = await opPutImmutable(db.raw, RECOVERY_STORAGE_PREFIX, path, bytes, PATH_TYPE.OTHER, null);
+    const status = result.wrote ? 201 : 409;
+    await emitAudit(runtime, env, { op: 'recovery-write', path, status, outcome: result.wrote ? 'ok' : 'rejected', bytes: bytes.byteLength, requestId: requestId(request) });
+    return emptyResponse(status);
+  }
+  return withCors(new Response('Method not allowed', { status: 405 }));
+}
+
+/**
+ * Create a self-contained Interocitor mount that handles IO, notify, and
+ * recovery requests under a single URL prefix.
  *
  * Use this when Interocitor should be one routed subsystem inside a larger
  * Worker. The returned object owns path matching plus request handling for the
@@ -759,18 +866,18 @@ export function createInterocitorMount<Env = unknown>(
   const mountPrefix = normalizeMountPrefix(options.mountPrefix ?? '');
   const dbGetter = options.db;
   const relayGetter = options.relay;
-  const filesGetter = options.files ?? ((env: Env) => (env as InterocitorEnv).INTEROCITOR_FILES);
+  const filesGetter = options.files;
   const healthPath = joinMountPath(mountPrefix, '/health');
   const ioBase = joinMountPath(mountPrefix, IO_PREFIX);
   const notifyBase = joinMountPath(mountPrefix, NOTIFY_PREFIX);
-  const systemBase = joinMountPath(mountPrefix, '/__interocitor');
+  const recoveryBase = joinMountPath(mountPrefix, RECOVERY_PREFIX);
 
   function matches(pathname: string): boolean {
     return (
       pathname === healthPath ||
       pathname.startsWith(`${ioBase}/`) ||
       pathname.startsWith(`${notifyBase}/`) ||
-      pathname.startsWith(`${systemBase}/`) ||
+      pathname.startsWith(`${recoveryBase}/`) ||
       (!mountPrefix && (pathname === '/' || pathname === '/health'))
     );
   }
@@ -783,7 +890,44 @@ export function createInterocitorMount<Env = unknown>(
     return interocitorWorker.fetch(new Request(url.toString(), request), env, ctx, dbGetter, relayGetter, runtimeOptions, filesGetter);
   }
 
-  return Object.freeze({ mountPrefix, healthPath, ioBase, notifyBase, systemBase, matches, fetch });
+  return Object.freeze({ mountPrefix, healthPath, ioBase, notifyBase, recoveryBase, matches, fetch });
+}
+
+/**
+ * Create an optional route handler for Interocitor maintenance operations.
+ *
+ * Route this handler from the host Worker after the host's administrative
+ * policy. Its `fetch()` method executes matched mesh-ID and maintenance
+ * operations.
+ */
+export function createInterocitorSystemHandler<Env = unknown>(
+  options: InterocitorSystemHandlerOptions<Env>,
+): InterocitorSystemHandler<Env> {
+  const mountPrefix = normalizeMountPrefix(options.mountPrefix ?? '');
+  const systemBase = joinMountPath(mountPrefix, SYSTEM_PREFIX);
+
+  function matches(pathname: string): boolean {
+    return pathname.startsWith(`${systemBase}/`);
+  }
+
+  async function fetch(request: Request, env: Env, _ctx: ExecutionContextLike): Promise<Response> {
+    const url = new URL(request.url);
+    const strippedPath = stripMountPrefix(url.pathname, mountPrefix);
+    if (strippedPath === null || !strippedPath.startsWith(`${SYSTEM_PREFIX}/`)) {
+      return new Response('Not found', { status: 404 });
+    }
+    url.pathname = strippedPath;
+    if (request.method.toUpperCase() === 'OPTIONS') return preflightResponse();
+    return handleSystemOperation(
+      resolveDatabase(env, options.db),
+      new Request(url.toString(), request),
+      url,
+      resolveRuntimeConfig(env, options.runtime),
+      env,
+    );
+  }
+
+  return Object.freeze({ systemBase, matches, fetch });
 }
 
 /**
@@ -826,7 +970,7 @@ export function withInterocitor<Env = unknown>(
       if (typeof baseWorker.scheduled === 'function') await baseWorker.scheduled(event, env, ctx);
       const resolvedRuntime = resolveRuntimeConfig(env, runtimeOptions);
       if (resolvedRuntime.enableScheduledMaintenance) {
-        runMaintenance(resolveDatabase(env, db), toMaintenanceEnv(resolvedRuntime) as InterocitorEnv, null);
+        await runMaintenance(resolveDatabase(env, db), resolvedRuntime.pathTtlHours, null);
       }
     },
   };
@@ -856,10 +1000,11 @@ const interocitorWorker = {
       return handleWsUpgrade(request, env, runtime, ctx, prefix, relayGetter);
     }
     if (url.pathname.startsWith(`${IO_PREFIX}/`)) {
-      return handleIoRequest(request, env, runtime, ctx, url, db, relayGetter, filesGetter ?? ((e: Env) => (e as InterocitorEnv).INTEROCITOR_FILES));
+      return handleIoRequest(request, env, runtime, ctx, url, db, relayGetter, filesGetter);
     }
-    if (url.pathname.startsWith(`${SYSTEM_PREFIX}/`)) {
-      return handleSystem(resolveDatabase(env, db), request, url, runtime);
+    if (url.pathname.startsWith(`${RECOVERY_PREFIX}/`)) {
+      const locator = decodeURIComponent(url.pathname.slice(`${RECOVERY_PREFIX}/`.length).split('/')[0] || '');
+      return handleRecoveryRequest(request, env, runtime, resolveDatabase(env, db), locator);
     }
     return withCors(new Response('Not found', { status: 404 }));
   },

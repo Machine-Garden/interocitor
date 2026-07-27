@@ -1,6 +1,10 @@
-# Protocol Flows
+# Protocol flows
 
-Detailed Mermaid diagrams for row-sync protocol paths. Durable files/images use direct `putFile`/`getFile`/`deleteFile` operations under the mesh `files/` namespace and do not participate in pull/flush/compaction. For the bird's-eye overview see [README.md](../README.md).
+Detailed Mermaid diagrams for row-sync protocol paths. Durable files and
+images use direct `putFile` / `getFile` / `deleteFile` operations under the
+mesh `files/` namespace. They do not participate in the local row outbox,
+pull, flush, or compaction, so callers need live transport and their own retry
+policy. For the project overview, see [README.md](../README.md).
 
 ## Pull — fast-skip and merge
 
@@ -19,7 +23,7 @@ flowchart TD
     H -- change file --> J{file HLC > cursor?}
     J -- No → skip --> H
     J -- Yes --> K[GET + decodeFromCloud + JSON.parse]
-    K --> L[applyChangeEntry\n→ putRows IDB]
+    K --> L[applyChangeEntry\n→ putRows in local store]
     L --> M[emit change/delete events]
     M --> H
 ```
@@ -32,9 +36,10 @@ itself is enough to skip them.
 
 ```mermaid
 flowchart TD
-    A([init]) --> B{open resilient\nlocal store}
-    B -- IDB ok --> B1[restore HLC + table names]
-    B -- IDB blocked / closing / stalled --> B2[degrade to memory\nemit onLocalDegraded]
+    A([init]) --> B{open configured\nlocal store}
+    B -- opened --> B1[restore HLC + table names]
+    B -- resilient wrapper degrades --> B2[use memory for this session\nemit onLocalDegraded]
+    B -- raw store fails --> BX([init rejects])
     B2 --> B1
     B1 --> C([connect])
     C --> D{adapter\nauthenticated?}
@@ -42,7 +47,12 @@ flowchart TD
     E --> E1{stage completed\nbefore deadline?}
     E1 -- No --> Z[offline-ready degrade\nemit connect:error + onConnectStalled]
     E1 -- Yes --> D
-    D -- Yes --> F["bounded stage:\nensureFolder ×4\nremotePath → devices\n→ mainline → changes"]
+    D -- Yes --> FP{cached manifest + cursor\nand empty outbox?}
+    FP -- Yes --> FH[head fast-path probe\noutside stage deadline]
+    FH --> FC{remote head\n≤ cursor?}
+    FC -- Yes --> O
+    FC -- No / read error --> F
+    FP -- No --> F["bounded stage:\nensureFolder ×4\nremotePath → devices\n→ mainline → changes"]
     F --> F1{stage completed\nbefore deadline?}
     F1 -- No --> Z
     F1 -- Yes --> G[bounded stage:\nloadOrCreateManifest]
@@ -79,17 +89,24 @@ flowchart TD
     Z --> Z1([return from connect\nready but not connected])
 ```
 
-**Offline guarantee:** `init()` never touches the network. After `init()`,
-`put()`, `delete()`, `get()`, `query()`, and `queryWhere()` all work
-against the local store. IndexedDB is preferred but not required: if it is
-blocked, closing, unavailable, or fails to make progress, the resilient
-store degrades to memory so the app can continue.
+**Offline row behavior:** `init()` never touches the network. After the
+configured local store initializes successfully, row operations through
+`table(...)`—including `add`, `patch`, `replace`, `delete`, `row`, `query`, and
+`where`—work against that store. Memory fallback is conditional: applications
+must select the resilient local-store wrapper to degrade when its backing
+store is blocked, closing, unavailable, or stalled. A raw
+`IndexedDbLocalStore` does not provide that fallback. Durable file methods are
+direct adapter operations and do not share the offline row behavior.
 
-**Bounded connect guarantee:** `connect()` is the first network call. Each
-cloud stage has a bounded-progress deadline (`connectStageTimeoutMs`, 15s
-by default). A stalled stage emits `connect:error` and calls
-`onConnectStalled`, then returns offline-ready: `init()` remains complete,
-local writes keep queuing, and the app can retry `connect()` later.
+**Connect stage deadlines:** `connect()` begins the row-sync network
+lifecycle. Authentication, folder setup, manifest loading, device metadata,
+rehydration, pull, and flush use `connectStageTimeoutMs` (15s by default). A
+timeout in one of those guarded stages emits `connect:error`, calls
+`onConnectStalled`, and returns offline-ready so the app can retry later. This
+is not a hard wall-clock bound for the whole method: the eligible
+cached-manifest fast path probes `changes/head.json` outside the stage
+deadline. An adapter that never settles that read can leave `connect()`
+pending.
 
 **Join-existing-mesh policy:** after `connect()` loads an existing remote
 manifest and before device metadata, pull, or flush, the engine compares the
@@ -118,7 +135,7 @@ supports IndexedDB enumeration; cleanup must never block app startup.
 ```mermaid
 flowchart TD
     A([flush]) --> A1[reload manifest]
-    A1 --> B[drainOutbox from IDB]
+    A1 --> B[drainOutbox from local store]
     B --> C{entries.length\n== 0?}
     C -- Yes --> DONE([return])
     C -- No --> C1{any entry.hlc\n<= gcFloorHlc?}
@@ -144,7 +161,7 @@ then updates `changes/head.json` with the latest HLC.
 
 ```mermaid
 sequenceDiagram
-    participant E as SyncEngine (compactor)
+    participant E as Interocitor (compactor)
     participant C as Cloud
 
     Note over E: compactInFlight prevents overlap inside one engine instance
@@ -152,7 +169,7 @@ sequenceDiagram
     E->>C: LIST devices/
     E->>E: active = not retired and lastSeenAt inside offlineGraceMs
     E->>E: gcFloorHlc = min(active observedWatermarkHlc)
-    E->>E: getAllRows() — full IDB scan
+    E->>E: getAllRows() — full local-store scan
     E->>E: omit tombstones where deletedHlc <= gcFloorHlc
     E->>C: PUT mainline/snapshot-{epoch}-{writer}.json
     E->>C: PUT manifest-{gen}.json (epoch, watermarkHlc, snapshotPath, gcFloorHlc)
@@ -179,11 +196,18 @@ they `rehydrate()` from the snapshot and then pull deltas above the
 watermark. If their outbox contains entries at or before `gcFloorHlc`,
 flush is refused and the device aligns from the canonical snapshot.
 
+The adapter contract does not provide CAS/ETag writes, so compaction is not
+strictly race-safe across concurrent devices: one valid manifest pointer can
+overwrite another. A single in-flight guard only deduplicates work within one
+Interocitor instance. Use a server-managed single compactor when strict
+coordination is required; see
+[Compaction coordination](../packages/core/docs/compaction.md#coordination--locking).
+
 ## Bootstrap (first-ever connect)
 
 ```mermaid
 sequenceDiagram
-    participant E as SyncEngine
+    participant E as Interocitor
     participant C as Cloud
 
     E->>C: GET {remotePath}/manifest.json
@@ -214,8 +238,8 @@ flowchart TD
     F -- Yes --> G[decodeFromCloud]
     F -- No --> H[parse JSON]
     G --> H
-    H --> I[clearAll IDB]
-    I --> J[write all snapshot rows to IDB]
+    H --> I[clearAll local store]
+    I --> J[write all snapshot rows to local store]
     J --> K[restore HLC from snapshot]
     K --> L[setMeta epoch]
     L --> M[emit rehydrate:complete]
@@ -252,4 +276,3 @@ flowchart LR
 ```
 
 Pull always reads from the primary adapter only.
-

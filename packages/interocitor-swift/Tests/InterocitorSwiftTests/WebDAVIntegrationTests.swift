@@ -1,8 +1,8 @@
 /**
  * WebDAV Integration Tests
  *
- * These tests run against a live `interocitor-webdav` Node server
- * (packages/interocitor-webdav/server.mjs --mode=memory).
+ * These tests run against the repository's live WebDAV Node server
+ * (packages/webdav/server.mjs --mode=memory).
  *
  * Skip when the server is not available (CI without Node, offline, etc.)
  * by setting the env var:
@@ -194,7 +194,7 @@ final class WebDAVAdapterContractTests: XCTestCase {
     }
 }
 
-// MARK: - SyncEngine WebDAV Integration
+// MARK: - Interocitor WebDAV Integration
 
 /// End-to-end sync tests using a real WebDAV server + MemoryLocalStore.
 /// Mirrors sync-engine.webdav.spec.ts from the TypeScript suite.
@@ -202,7 +202,7 @@ final class SyncEngineWebDAVIntegrationTests: XCTestCase {
 
     var serverBase: String { webdavURL() ?? "http://127.0.0.1:4174" }
 
-    private func makeEngine(namespace: String, key: MeshKey? = nil) -> SyncEngine {
+    private func makeEngine(namespace: String, key: MeshKey? = nil) -> Interocitor {
         let adapter = WebDAVStorageAdapter(config: WebDAVConfig(
             baseURL: serverBase + WEBDAV_PREFIX,
             auth: .basic(username: "test", password: "test")
@@ -213,7 +213,7 @@ final class SyncEngineWebDAVIntegrationTests: XCTestCase {
             flushDebounce: 0,
             dbName: "webdav-test-\(namespace)"
         )
-        let engine = SyncEngine(adapter: adapter, config: cfg, localStore: MemoryLocalStore())
+        let engine = Interocitor(adapter: adapter, config: cfg, localStore: MemoryLocalStore())
         if let key { Task { await engine.setEncryptionKey(key) } }
         return engine
     }
@@ -323,7 +323,7 @@ final class SyncEngineWebDAVIntegrationTests: XCTestCase {
             auth: .basic(username: "test", password: "test")
         ))
         let cfg = SyncConfig(remotePath: "/interocitor-\(ns)", pollInterval: 9999, flushDebounce: 0)
-        let engine = SyncEngine(adapter: adapter, config: cfg, localStore: MemoryLocalStore())
+        let engine = Interocitor(adapter: adapter, config: cfg, localStore: MemoryLocalStore())
         await engine.setEncryptionKey(key)
         try await engine.initialize()
         try await engine.connect()
@@ -386,9 +386,16 @@ final class SyncEngineWebDAVIntegrationTests: XCTestCase {
         try await a.put(table: "vault", rowId: "v1", columns: ["secret": .string("shhh")])
         try await a.flush()
 
-        try await b.connect()
-        let row = try await b.get(table: "vault", rowId: "v1")
-        XCTAssertNil(row, "Wrong key must not decrypt entries")
+        do {
+            try await b.connect()
+            XCTFail("Expected connect() to reject the encrypted manifest with the wrong key")
+        } catch {
+            XCTAssertTrue(
+                String(describing: error).contains("authenticationFailure")
+                    || String(describing: error).contains("Remote poisoned"),
+                "Wrong-key rejection should surface as an authentication or poisoned-remote error"
+            )
+        }
     }
 
     // MARK: Compaction + rehydration
@@ -472,7 +479,7 @@ final class SyncEngineWebDAVIntegrationTests: XCTestCase {
         // Start with memory adapter
         let memAdapter = MemoryStorageAdapter()
         let cfg = SyncConfig(remotePath: "/interocitor-\(ns)", pollInterval: 9999, flushDebounce: 0)
-        let engine = SyncEngine(adapter: memAdapter, config: cfg, localStore: MemoryLocalStore())
+        let engine = Interocitor(adapter: memAdapter, config: cfg, localStore: MemoryLocalStore())
         try await engine.initialize()
         try await engine.connect()
         try await engine.put(table: "tasks", rowId: "t1", columns: ["v": .string("original")])
@@ -490,4 +497,3 @@ final class SyncEngineWebDAVIntegrationTests: XCTestCase {
         XCTAssertEqual(row?.columns["v"]?.value, .string("original"))
     }
 }
-

@@ -18,11 +18,8 @@ const els = {
   compactStatus: document.querySelector('#compactStatus'),
 };
 
-/**
- * Backend seam for future migration:
- * keep this module UI-focused and inject a different storage layer later
- * (e.g. SQLite/OPFS local store + D1-backed WebDAV-compatible endpoint).
- */
+// Active page-session handles are installed together after connect and cleared
+// together after disconnect.
 let runtime = {
   engine: null,
   tasks: null,
@@ -152,7 +149,7 @@ async function connect() {
     dbName,
     localStore: new IndexedDbLocalStore(dbName),
     keySource: new PortablePassphraseKeySource({
-      passphrase: session.key,
+      portableKey: session.key,
       credentialStore: await createTodoCredentialStore(dbName),
     }),
     deviceId: tabDeviceId,

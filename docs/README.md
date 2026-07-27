@@ -1,6 +1,13 @@
-# Interocitor documentation site
+# Interocitor public site
 
-This directory is the deployable Cloudflare Pages site for Interocitor.
+Interocitor's public site introduces browser-app teams to local-first rows,
+durable remote files, deployment choices, and client-held encryption
+boundaries. It establishes product fit before routing qualified readers to
+developer documentation.
+
+The deployable files live in this directory. `index.html` is the single product
+landing page. Keep experiments outside this boundary; variants dilute the
+product story and create stale documentation surfaces.
 
 Recommended Cloudflare Pages settings:
 
@@ -10,38 +17,64 @@ Recommended Cloudflare Pages settings:
 
 ## Content boundary
 
-The site is for adoption-level documentation:
+The site is for product discovery and adoption:
 
-- explain the use case;
-- show the first recommended path;
-- give the mental model;
-- point readers to exact package and protocol docs.
+- advertise the product outcome before implementation detail;
+- explain the use cases and trust boundary;
+- show the product surfaces and deployment choices;
+- route qualified readers to focused developer documentation.
 
-The site should not become the API reference or protocol manual. Keep detailed
-behavior in package READMEs, package-local docs, and JSDoc.
+The site must not expose a repository quickstart, package map, API reference, or
+protocol manual as landing-page content. Keep those details in the root README,
+package READMEs, package-local docs, examples, and JSDoc.
 
-## Stable public anchors
+## Landing-page anchors
 
-Use these site anchors from public JSDoc with `@see`:
+Keep these local anchors stable:
 
-| Concept | URL |
+| Concept | Anchor |
 | --- | --- |
-| Product thesis | `https://interocitor.dev/#why` |
-| Rows and files | `https://interocitor.dev/#surfaces` |
-| Browser quickstart | `https://interocitor.dev/#start` |
-| Relay backends | `https://interocitor.dev/#relays` |
-| Security boundary | `https://interocitor.dev/#security` |
-| Deep docs index | `https://interocitor.dev/#docs` |
+| Why Interocitor | `#why` |
+| Use cases | `#use-cases` |
+| Rows and files | `#surfaces` |
+| Data model | `#model` |
+| Remote backends | `#remotes` |
+| Security boundary | `#security` |
+| Developer paths | `#docs` |
 
-If the production domain changes, update this table and public `@see` URLs in
-the same change.
+Do not publish a canonical URL, `og:url`, or public `@see` URL until the
+production domain resolves, serves this page over valid TLS, and passes an
+anonymous link crawl.
+
+Short documentation routes such as `/web`, `/workers`, `/mesh-access`,
+`/recovery`, and `/security` are defined in `_redirects` and lead to the
+corresponding public repository documentation. Cloudflare Pages or Wrangler
+interprets these redirects; a basic static file server does not.
 
 ## Local preview
 
-Any static file server works:
+For the landing page alone:
 
 ```bash
-python3 -m http.server 4173 --directory docs
+python3 -m http.server 4174 --directory docs
 ```
 
-Open `http://127.0.0.1:4173/`.
+Open `http://127.0.0.1:4174/`. Short documentation routes return `404` in this
+mode.
+
+To exercise `_redirects` from the repository root, use the Wrangler binary
+already owned by the Cloudflare example workspace:
+
+```bash
+yarn workspace todo-cloudflare-do-example exec wrangler pages dev ../../docs --port 4174
+```
+
+## Launch gate
+
+Before deploying the public site:
+
+1. make the source and documentation targets anonymously reachable;
+2. verify the repository examples from a clean clone against the homepage's
+   capability claims;
+3. deploy the site and verify every short route;
+4. only then add the production canonical URL.

@@ -1,266 +1,257 @@
 <p align="center">
   <a href="https://github.com/TheUiTeam/interocitor">
-    <img src="https://raw.githubusercontent.com/TheUiTeam/interocitor/main/docs/assets/hero.svg" alt="interocitor" width="560"/>
+    <img src="https://raw.githubusercontent.com/TheUiTeam/interocitor/main/docs/assets/hero.svg" alt="Interocitor" width="560"/>
   </a>
 </p>
 
-# interocitor-swift
+# InterocitorSwift
 
-Swift-native Interocitor runtime for macOS and iOS.
+Swift runtime for local-first row storage and optional encrypted
+mailbox sync on Apple platforms.
 
-Same idea, same trade-off: a mailbox that can't read your mail.
+The package keeps reads, writes, CRDT merge, and decryption on the device. A
+configured WebDAV or Cloudflare adapter moves remote objects; it does not query
+or merge application rows.
 
-## Why this package exists
+> **Public release:** clone the public repository and add
+> `packages/interocitor-swift` as a local Swift package.
 
-`interocitor-swift` brings the Interocitor model to Apple platforms.
+## Requirements
 
-The goal is not to compete with CloudKit, Firebase, or collaborative CRDT platforms on features. The goal is to preserve the same architectural property as the JavaScript package: all meaningful data work stays on the client.
+- Swift tools 5.10 or later
+- macOS 13 or later, or iOS 16 or later
+- SQLite3, supplied by the Apple platform SDK
 
-That means:
+## Add the package from a checkout
 
-- local state lives in SQLite
-- merge happens on the device
-- decryption happens on the device
-- the remote transport only moves opaque bytes
+1. Clone this repository.
+2. In Xcode, choose **File → Add Package Dependencies → Add Local**.
+3. Select the cloned `packages/interocitor-swift` directory.
+4. Add the `InterocitorSwift` product to your app target.
 
-If your app needs true end-to-end encrypted sync across your own Apple devices, this package is the native runtime for that model.
-
-## Platforms
-
-- iOS
-- macOS
-
-## Installation
-
-### Swift Package Manager
+For another local Swift package, use a relative path:
 
 ```swift
 dependencies: [
-  .package(url: "https://github.com/TheUiTeam/interocitor.git", branch: "main")
+    .package(path: "../interocitor/packages/interocitor-swift")
 ]
 ```
 
-Then depend on the `InterocitorSwift` product.
+The repository URL cannot select a nested `Package.swift`, so a remote
+`.package(url: ...)` dependency on the monorepo root is not a working install
+path.
 
-## Quick start
+## Store rows locally
+
+The following is a runnable fragment inside an asynchronous function. It uses
+the persistent SQLite store and performs no network I/O.
 
 ```swift
+import Foundation
 import InterocitorSwift
 
-let config = SyncConfig(
-  remotePath: "/App",
-  dbName: "todos.sqlite",
-  deviceName: "My Device",
-  deviceType: "ios"
+let databaseDirectory = FileManager.default.urls(
+    for: .applicationSupportDirectory,
+    in: .userDomainMask
+)[0].path
+
+let localStore = IndexedSQLiteStore(
+    configuration: IndexedSQLiteStoreConfiguration(
+        databasePath: databaseDirectory,
+        databaseName: "todos.sqlite"
+    )
 )
 
 let db = Interocitor(
-  config: config,
-  localStore: IndexedSQLiteStore(path: "todos.sqlite")
+    config: SyncConfig(remotePath: "/todos", dbName: "todos"),
+    localStore: localStore
 )
 
 try await db.initialize()
 
-try await db.put("todos", rowId: "todo-1", columns: [
-  "text": .string("Ship encrypted sync"),
-  "done": .bool(false),
-  "createdAt": .number(Date().timeIntervalSince1970)
-])
+try await db.put(
+    table: "todos",
+    rowId: "todo-1",
+    columns: [
+        "text": .string("Ship encrypted sync"),
+        "done": .bool(false),
+        "createdAt": .double(Date().timeIntervalSince1970)
+    ]
+)
 
-let rows = try await db.query("todos")
+let rows = try await db.query(table: "todos")
 ```
+
+`initialize()`, `put`, `delete`, `get`, `query`, and `queryWhere` are local
+operations. `MemoryLocalStore` is the non-persistent alternative for tests and
+short-lived processes.
+
+## Connect encrypted remote storage
+
+Remote encryption is opt-in. Set the same `MeshKey` on every peer **before**
+calling `connect()`:
+
+```swift
+let adapter = WebDAVStorageAdapter(
+    config: WebDAVConfig(
+        baseURL: "https://dav.example.test/remote.php/dav/files/alice",
+        auth: .basic(username: "alice", password: webDAVAppPassword)
+    )
+)
+
+let db = Interocitor(
+    adapter: adapter,
+    config: SyncConfig(remotePath: "/Apps/Todos", dbName: "secure-todos"),
+    localStore: localStore
+)
+
+let meshKey = try loadKeyFromKeychain() ?? generateMeshKey()
+try storeKeyInKeychain(meshKey)
+
+await db.setEncryptionKey(meshKey)
+try await db.initialize()
+try await db.connect()
+```
+
+This is a partial integration fragment: the application owns credential
+collection, first-device key creation, peer pairing, lifecycle handling, and
+error presentation.
+
+Without `setEncryptionKey(_:)`, remote changes and snapshots are written
+without Interocitor application-layer encryption. SQLite also stores local
+rows as plaintext. With a key configured, change payloads and snapshots are
+AES-GCM ciphertext before the adapter receives them. Routing paths, object
+names, sizes, timing, device metadata, manifest metadata, and change-head
+metadata remain visible to the remote service.
+
+A database or object-store dump therefore reveals:
+
+- plaintext application rows if encryption was not enabled;
+- ciphertext for protected change and snapshot payloads if it was enabled;
+- operational metadata in either mode.
+
+Key custody stays with the app. A copied mesh key plus the remote objects is
+sufficient to decrypt protected payloads, so use Keychain or an equivalent
+application-owned secret store and never send the key to the storage service.
+If the configured key cannot authenticate the encrypted manifest, `connect()`
+fails with an authentication error instead of presenting an empty database.
+
+## Query and mutate rows
+
+These calls are runnable after `initialize()`:
+
+```swift
+let one = try await db.get(table: "todos", rowId: "todo-1")
+let all = try await db.query(table: "todos")
+
+let done = try await db.queryWhere(
+    table: "todos",
+    clause: WhereClause(
+        field: "done",
+        op: .equals,
+        value: .bool(true)
+    )
+)
+
+try await db.delete(table: "todos", rowId: "todo-1")
+```
+
+Column values use `AnyCodable`: `.string`, `.int`, `.double`, `.bool`, or
+`.null`.
+
+## Sync lifecycle
+
+| Call | Network behavior |
+| --- | --- |
+| `initialize()` | Opens and loads the local store; no network |
+| `put`, `delete`, `get`, `query`, `queryWhere` | Local-only |
+| `connect()` | Authenticates the adapter, creates or loads the remote manifest, catches up, flushes, and starts polling |
+| `flush()` | Writes queued local changes to the primary adapter and configured replicas |
+| `pull()` | Downloads and merges changes newer than the local cursor |
+| `rehydrate()` | Rebuilds local state from the current snapshot, then pulls newer changes |
+| `compact()` | Pulls, publishes a new snapshot and manifest generation, and prunes changes through the watermark |
+| `disconnect()` | Stops polling, flushes when the remote is healthy, and closes the local store |
+| `setRemoteStorage(_:)` | Switches adapters or enters local-only mode |
+
+`compact()` is an explicit maintenance operation. The runtime does not provide
+a distributed compaction lease, idle-time policy, or automatic “20 changes”
+threshold. If multiple peers may compact, the application must coordinate
+that operation.
 
 ## Adapters
 
-### WebDAV
+| Type | Purpose | Important behavior |
+| --- | --- | --- |
+| `WebDAVStorageAdapter` | Basic- or bearer-authenticated WebDAV storage | `baseURL` is the WebDAV service root; the engine appends `remotePath` |
+| `CloudflareStorageAdapter` | An `@interocitor/workers` IO route | `baseURL` includes `/io/<address>`; an optional bearer token is forwarded to host mesh middleware |
+| `StorageAdapter` | Custom byte-oriented transport | Implement authentication, folder, list, read, write, delete, and metadata operations |
 
-Use `WebDAVStorageAdapter` when you want self-hosted sync or an inspectable remote mailbox.
+`CloudflareStorageAdapter.subscribeToInvalidations` exposes WebSocket
+notifications, but `Interocitor` does not subscribe automatically. An app that
+uses it must trigger `pull()` from the callback. Polling remains the correctness
+path.
 
-### Cloudflare Workers (`interocitor-workers`)
+## Main public surface
 
-Use `CloudflareStorageAdapter` when you want an Interocitor-native endpoint with push-style invalidation while preserving client-side merge and decryption.
-
-### Custom adapter
-
-Implement the `StorageAdapter` protocol to target any byte-oriented transport that can list, read, write, and delete remote objects.
-
-## Local store
-
-### SQLite (persistent)
-
-This package maps the Interocitor local-first model onto SQLite for Apple platforms.
-
-### Memory (tests)
-
-Use `MemoryLocalStore` for tests and in-process validation.
-
-## Core API
-
-```swift
-try await db.initialize()
-try await db.put("todos", rowId: "todo-1", columns: columns)
-try await db.delete("todos", rowId: "todo-1")
-let one = try await db.get("todos", rowId: "todo-1")
-let many = try await db.query("todos")
-try await db.flush()
-try await db.compact()
-```
-
-`compact()` is a manual maintenance call. It is not part of normal sync.
-Use it to write a fresh snapshot and prune old remote change files.
-
-```swift
-try await db.flush()
-try await db.compact()
-```
-
-### Compaction policy
-
-Compact only when all are true:
-
-- device idle **> 1 min**
-- last successful pull **< 30 min** ago
-- remote churn **> 20 changes** since last compaction
-- engine connected and healthy
-- no compaction already in progress
-
-### Compaction coordination
-
-`compact()` has no built-in distributed lock. Two clients can race and overwrite the manifest pointer.
-Recommended: coordinate with a remote lease file such as `mainline/compact-lock.json`.
-
-Recommended protocol:
-
-1. Read lock. If present and not expired → skip compaction.
-2. Write lock for self with short TTL.
-3. Re-read lock. If not owned by self → abort.
-4. Re-read manifest/head. If generation changed since lock acquisition → abort.
-5. Run `compact()`.
-6. Delete lock on success, or rely on TTL on crash.
-
-For repo-level diagrams and monorepo context, see the project root: `https://github.com/TheUiTeam/interocitor`.
-
-```mermaid
-sequenceDiagram
-    participant E as SyncEngine (compactor)
-    participant C as Cloud
-
-    E->>C: GET mainline/compact-lock.json
-    C-->>E: 404 / expired / active
-    alt lock active
-        E-->>E: abort compaction
-    else lock available
-        E->>C: PUT mainline/compact-lock.json (owner + expiresAt)
-        E->>C: GET mainline/compact-lock.json
-        alt lock owned by other
-            E-->>E: abort compaction
-        else lock owned by self
-            E->>E: pull() — merge all remote changes first
-            E->>E: build snapshot from local state
-            E->>C: PUT snapshot
-            E->>C: PUT manifest generation file
-            E->>C: PUT manifest pointer
-            E->>C: DELETE old change files ≤ watermarkHlc
-            E->>C: DELETE mainline/compact-lock.json
-        end
-    end
-```
-
-## Where clauses
-
-```swift
-let doneRows = try await db.queryWhere(
-  "todos",
-  clause: WhereClause(field: "done", op: .equals, value: true)
-)
-```
-
-## Encryption
-
-Interocitor only works for its intended purpose if the transport never needs plaintext.
-
-```swift
-let config = SyncConfig(
-  remotePath: "/App",
-  dbName: "secure.sqlite",
-  deviceName: "My Device"
-)
-
-let db = Interocitor(
-  adapter: adapter,
-  config: config,
-  localStore: IndexedSQLiteStore(path: "secure.sqlite")
-)
-```
-
-### Client-side fingerprint verification
-
-As with the JavaScript package, you can expose a key fingerprint in your UI so users can verify device pairing intentionally.
-
-## Device configuration
-
-Pass `deviceName` and `deviceType` in `SyncConfig` to tag this device in the mesh:
-
-```swift
-let config = SyncConfig(
-  remotePath: "/App",
-  dbName: "app.sqlite",
-  deviceName: "Anton's laptop",  // human-readable name
-  deviceType: "desktop"           // 'web' | 'ios' | 'android' | 'desktop' | 'tv' | 'worker'
-)
-```
-
-These are stored in device metadata on the server and visible to all peers.
-
-## Row ownership
-
-Every row written via `put()` automatically sets `_owner` to the current device ID. This allows you to track which device last wrote each row.
-
-## CRDT strategy
-
-This runtime keeps the same core architecture as the JS package: client-side CRDT merge with hybrid logical clocks, remote mailbox only for exchange.
-
-## How sync works
-
-```text
-App
-  -> Interocitor
-  -> local SQLite
-  -> encrypt locally
-  -> remote byte transport
-  -> download ciphertext
-  -> decrypt locally
-  -> merge locally
-```
-
-## Offline guarantee
-
-| Operation | Network? |
+| API | Role |
 | --- | --- |
-| init | No |
-| put / delete | No |
-| get / query | No |
-| sync | Yes, if adapter configured |
+| `Interocitor` | Main actor for local rows and sync lifecycle |
+| `SyncConfig`, `ReplicaConfig` | Remote path, polling/flush defaults, local identity namespace, and optional replicas |
+| `IndexedSQLiteStore`, `IndexedSQLiteStoreConfiguration` | Persistent SQLite local store |
+| `MemoryLocalStore` | In-memory local store |
+| `WebDAVStorageAdapter`, `WebDAVConfig`, `WebDAVAuth` | WebDAV transport |
+| `CloudflareStorageAdapter`, `CloudflareAdapterConfig` | Cloudflare Workers transport |
+| `AnyCodable`, `WhereClause`, `WhereOperator`, `Row`, `SyncEvent` | Row values, local queries, row representation, and events |
+| `generateMeshKey`, `storeKeyInKeychain`, `loadKeyFromKeychain`, `clearKeyFromKeychain` | Mesh-key creation and local custody helpers |
+| `keyToPassphrase`, `passphraseToKey`, `keyToShareURL`, `keyFromFragment` | Portable key export/import helpers; treat their output as a secret |
 
-## Cloud folder layout
+The module also exports low-level protocol, CRDT, HLC, manifest, envelope, and
+adapter-support types. They are implementation-facing APIs rather than the
+supported application surface listed above.
+
+`SyncConfig` defaults are `serverManaged: false`,
+`serverId: "server_relay_1"`, `pollInterval: 30`, `flushDebounce: 2`,
+`flushThreshold: 50`, `dbName: "interocitor"`, and no replicas. The current
+runtime accepts `deviceName` and `deviceType`, but does not propagate those
+values into peer-visible device metadata; do not rely on that behavior yet.
+The `_owner` field assigned to a local write is also not propagated as a
+last-writer identity across peers.
+
+## Remote object layout
 
 ```text
 <remotePath>/
-  snapshot.meta
+  manifest.json
+  manifest-<generation>.json
+  devices/
+    <deviceId>.json
+  mainline/
+    snapshot-<epoch>-<writer>.json
   changes/
-  blobs/
+    head.json
+    <hlc>-<changeId>.json
 ```
 
-## Tests
+Manifest, device, and head files contain operational metadata. The application
+payloads inside change and snapshot files are encrypted only when a mesh key
+has been configured.
 
-Current coverage includes:
+## Validate the package
 
-- SQLite local store behavior
-- HLC behavior and ordering
-- CRDT merge logic
-- WebDAV integration flows
+From `packages/interocitor-swift`:
 
-Run the Swift package tests from the package directory with standard Swift tooling.
+```bash
+swift test
+```
+
+This runs the local, SQLite, CRDT, crypto, and adapter unit tests. Live WebDAV
+tests are skipped unless `INTEROCITOR_WEBDAV_URL` is set.
+
+The companion script starts the repository's loopback-only WebDAV test server:
+
+```bash
+bash Scripts/run-integration-tests.sh
+```
 
 ## Source layout
 
@@ -269,18 +260,21 @@ Sources/InterocitorSwift/
   SyncEngine.swift
   IndexedSQLiteStore.swift
   MemoryLocalStore.swift
+  StorageAdapter.swift
+  WebDAVStorageAdapter.swift
+  CloudflareStorageAdapter.swift
   Crypto.swift
   CRDT.swift
   HLC.swift
-  ...
+  Types.swift
 ```
 
-## Package context
+## Related documentation
 
-- Monorepo root: <https://github.com/TheUiTeam/interocitor>
-- Package home: <https://github.com/TheUiTeam/interocitor/tree/main/packages/interocitor-swift>
-- JS runtime sibling: <https://github.com/TheUiTeam/interocitor/tree/main/packages/interocitor>
-- Workers runtime sibling: <https://github.com/TheUiTeam/interocitor/tree/main/packages/interocitor-workers>
+- [Repository overview](../../README.md)
+- [Core runtime](../core/README.md)
+- [Cloudflare Workers runtime](../workers/README.md)
+- [Loopback WebDAV test server](../webdav/README.md)
 
 ## License
 

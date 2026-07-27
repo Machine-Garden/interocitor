@@ -1,4 +1,4 @@
-import type { DatabaseAdapter, InterocitorEnv, QueryRow } from './types.ts';
+import type { DatabaseAdapter, QueryRow } from './types.ts';
 
 // ─── Internal row types ──────────────────────────────────────────────────────
 
@@ -77,26 +77,23 @@ export interface MaintenanceResult {
  * `null`).
  *
  * A remote root is eligible for deletion when its `last_operation_at`
- * timestamp is older than `INTEROCITOR_PATH_TTL_HOURS` hours and it has not
- * already been soft-deleted.
- *
- * Pass `INTEROCITOR_PATH_TTL_HOURS=0` (or omit it) to disable TTL entirely.
+ * timestamp is older than `pathTtlHours` and it has not already been
+ * soft-deleted. A non-positive value disables TTL deletion.
  *
  * @param db - Database adapter.
- * @param env - Worker environment — reads `INTEROCITOR_PATH_TTL_HOURS`.
+ * @param pathTtlHours - Positive number of inactive hours before deletion.
  * @param prefix - Scope maintenance to a single prefix, or `null` for all.
  */
 export async function runMaintenance(
   db: DatabaseAdapter,
-  env: InterocitorEnv,
+  pathTtlHours: number,
   prefix: string | null = null,
 ): Promise<MaintenanceResult> {
-  const ttlHours = Number.parseFloat(String(env.INTEROCITOR_PATH_TTL_HOURS ?? '0'));
-  if (!(Number.isFinite(ttlHours) && ttlHours >= 0)) {
+  if (!(Number.isFinite(pathTtlHours) && pathTtlHours > 0)) {
     return { ttlCandidates: 0, ttlDeleted: 0, pruned: 0 };
   }
 
-  const threshold = new Date(Date.now() - ttlHours * 3600_000).toISOString();
+  const threshold = new Date(Date.now() - pathTtlHours * 3600_000).toISOString();
   const rows = prefix
     ? await db.all<MaintenanceSweepRow>('SELECT remote_root, last_operation_at, deleted_at FROM mesh_paths WHERE prefix = ?', prefix)
     : await db.all<MaintenanceSweepRow>('SELECT prefix, remote_root, last_operation_at, deleted_at FROM mesh_paths');

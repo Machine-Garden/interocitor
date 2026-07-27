@@ -1,11 +1,11 @@
 /**
- * interocitor/handshake
+ * @interocitor/core handshake API
  *
  * Secure device pairing via QR code.
  *
- * Both devices run an interocitor instance with a preconfigured backend
- * adapter. Neither device needs to know the mesh `remotePath` or master
- * key beforehand — everything is bootstrapped through the handshake.
+ * Both devices must be able to reach and authenticate to the relay backend.
+ * An optional adapterConfig in the payload can identify the endpoint, but it
+ * must not contain storage credentials.
  *
  * ## Two intents
  *
@@ -30,31 +30,32 @@
  *   Mobile wants to join, shows QR to Desktop that is already in mesh
  *     → Mobile generates "join" QR, Desktop scans → Mobile joins.
  *
- * ## QR payload — two pieces
+ * ## QR or pair-link payload
  *
  *   Cloud piece  →  handshakeId
  *                   Scopes two relay files on the shared backend.
  *                   Visible in the cloud but useless without the key.
  *
- *   Eyes-only    →  generatorPub (ephemeral ECDH-P256 public key)
+ *   Invitation   →  generatorPub (ephemeral ECDH-P256 public key)
  *                   The scanner derives a wrapping key from it via ECDH.
- *                   Only someone who physically saw the QR can do this.
  *
- * remotePath and meshKey are NEVER in the QR. They travel through the
- * relay, encrypted with the ECDH-derived wrapping key.
+ * Treat the complete QR or pair URL as a short-lived invitation capability:
+ * anyone who obtains it and can access the relay can act as the scanner.
+ * remotePath and passphrase are not in the payload. They travel through the
+ * relay in the ECDH-encrypted credential envelope.
  *
  * ## Usage
  *
  * ### Generate a "share" QR (device already in mesh)
  *
  * ```ts
- * import { generateShareQR } from 'interocitor';
+ * import { generateShareQR } from '@interocitor/core';
  *
  * const { qrEncoded, pairUrl, complete } = await generateShareQR({
  *   adapter,
  *   relayBase:  '/Interocitor',   // any path on the shared backend
  *   remotePath: '/Interocitor/team-alpha',
- *   meshKey,                       // CryptoKey | null
+ *   passphrase: keySource.getPortableKey(), // base58 string or null
  *   pairBaseUrl: 'https://app.example.com/pair',
  * });
  *
@@ -65,7 +66,11 @@
  * ### Generate a "join" QR (device wanting to join)
  *
  * ```ts
- * import { generateJoinQR } from 'interocitor';
+ * import {
+ *   generateJoinQR,
+ *   Interocitor,
+ *   PortablePassphraseKeySource,
+ * } from '@interocitor/core';
  *
  * const { qrEncoded, pairUrl, credentials } = await generateJoinQR({
  *   adapter,
@@ -74,14 +79,22 @@
  * });
  *
  * renderQR(qrEncoded);
- * const { remotePath, meshKey } = await credentials;
- * // configure engine and connect
+ * const received = await credentials;
+ * const db = new Interocitor(adapter, {
+ *   remotePath: received.remotePath,
+ *   localStore,
+ *   keySource: received.passphrase === null
+ *     ? null
+ *     : new PortablePassphraseKeySource({ portableKey: received.passphrase }),
+ * });
+ * await db.init();
+ * await db.connect();
  * ```
  *
  * ### Handle a scanned QR / opened pair URL
  *
  * ```ts
- * import { handleScannedQR, parseQRFromUrl } from 'interocitor';
+ * import { handleScannedQR, parseQRFromUrl } from '@interocitor/core';
  *
  * const payload = parseQRFromUrl(urlFragment);
  * // or: const payload = decodeQRPayload(rawQRString);
@@ -91,14 +104,12 @@
  *   relayBase: '/Interocitor',
  *   payload,
  *   // required when payload.intent === 'join' (scanner must have credentials):
- *   ownCredentials: { remotePath, meshKey },
+ *   ownCredentials: { remotePath, passphrase: keySource.getPortableKey() },
  * });
  *
  * if (result) {
- *   // intent was 'share' — we received credentials
- *   const { remotePath, meshKey } = result;
- *   if (meshKey) engine.setEncryptionKey(meshKey);
- *   await engine.connect(remotePath);
+ *   // intent was 'share'; this application helper constructs a new engine
+ *   await connectReceivedCredentials(result.remotePath, result.passphrase);
  * }
  * // intent was 'join' — we pushed credentials, nothing to do on scanner side
  * ```

@@ -3,10 +3,8 @@
  *
  * StorageAdapter implementation for interocitor-workers (Cloudflare Worker + D1).
  *
- * Base URL shape:  https://<worker>/io/<prefix>
- * WebSocket URL:   wss://<worker>/notify/<prefix>
- *
- * Mirrors packages/interocitor/src/adapters/cloudflare.ts
+ * Base URL shape:  https://<worker>/io/<address>
+ * WebSocket URL:   wss://<worker>/notify/<address>
  *
  * Includes WebSocket-driven invalidation via `subscribeToInvalidations(onInvalidate:)`
  * using URLSessionWebSocketTask with exponential-backoff reconnection.
@@ -17,9 +15,9 @@ import Foundation
 // MARK: - Config
 
 public struct CloudflareAdapterConfig: Sendable {
-    /// Worker IO base URL including prefix, e.g. "https://worker.example.com/io/team-a"
+    /// Worker IO base URL including a mesh address, e.g. "https://worker.example.com/io/main"
     public let baseURL: String
-    /// Optional bearer token (INTEROCITOR_ACCESS_TOKEN on the worker side).
+    /// Optional bearer token forwarded to the host Worker's mesh middleware.
     public let token: String?
 
     public init(baseURL: String, token: String? = nil) {
@@ -183,7 +181,7 @@ public actor CloudflareStorageAdapter: StorageAdapter {
 
     /// Subscribe to real-time invalidation events from the Cloudflare Worker.
     ///
-    /// Opens a WebSocket to `wss://<worker>/notify/<prefix>` and calls `onInvalidate`
+    /// Opens a WebSocket to `wss://<worker>/notify/<address>` and calls `onInvalidate`
     /// for each invalidation message. Reconnects with exponential backoff on close/error.
     ///
     /// - Returns: A cancellation closure — call it to stop the subscription.

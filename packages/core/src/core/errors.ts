@@ -7,18 +7,6 @@
  */
 
 /**
- * Thrown by `connect()` when the engine's `encrypted` flag does not
- * match the encryption mode the remote mesh was bootstrapped with.
- *
- * Common cause: the app constructs the engine with `encrypted: false`
- * on first run (e.g. before the user supplies a passphrase) and later
- * reconnects with `encrypted: true`. The remote is healthy and is
- * NOT poisoned by this error — the local engine config is wrong.
- *
- * Recovery: rebuild the engine with `encrypted` set to `expectedMode`
- * and supply the matching passphrase when `expectedMode === true`.
- */
-/**
  * Thrown by `connect()` when the credential store has a record under the
  * engine's `dbName` but the stored `meshId` does not match the live mesh
  * the engine is connecting to.
@@ -29,8 +17,9 @@
  * the new mesh's files or, worse, encrypt new writes under the wrong
  * key and poison the remote.
  *
- * Recovery: the caller decides — either `clearCredentials()` and retry,
- * or change `dbName` so the two meshes have isolated credential stores.
+ * Recovery: disconnect, confirm the intended mesh, clear the stale credential
+ * record, and construct a new correctly configured engine. Alternatively use
+ * a different `dbName` so the meshes have isolated credential stores.
  */
 export class MeshCredentialMismatchError extends Error {
   readonly code = 'MESH_CREDENTIAL_MISMATCH' as const;
@@ -43,7 +32,8 @@ export class MeshCredentialMismatchError extends Error {
       `Stored credentials under dbName="${dbName}" belong to meshId="${storedMeshId}" ` +
         `but the active mesh is meshId="${activeMeshId}". ` +
         `Refusing to silently reuse the wrong key. ` +
-        `Call engine.clearCredentials() to drop the stale record, ` +
+        `Disconnect, confirm the intended mesh, clear the stale credential record, ` +
+        `and construct a new configured Interocitor instance; ` +
         `or use a different dbName for the new mesh.`,
     );
     this.name = 'MeshCredentialMismatchError';
@@ -53,6 +43,18 @@ export class MeshCredentialMismatchError extends Error {
   }
 }
 
+/**
+ * Thrown by `connect()` when the configured key-source mode does not
+ * match the encryption mode the remote mesh was bootstrapped with.
+ *
+ * Common cause: the app constructs the engine with `keySource: null` and then
+ * connects to a protected mesh, or supplies a key source for a mesh created
+ * without encryption. The remote is healthy and is not poisoned by this
+ * error; the local engine configuration is wrong.
+ *
+ * Recovery: construct a new engine with the expected key-source mode and the
+ * matching portable key when `expectedMode === true`.
+ */
 export class MeshEncryptionMismatchError extends Error {
   readonly code = 'MESH_ENCRYPTION_MISMATCH' as const;
   readonly expectedMode: boolean;
@@ -63,8 +65,7 @@ export class MeshEncryptionMismatchError extends Error {
       `Mesh encryption mode mismatch: remote mesh was bootstrapped with ` +
         `encrypted=${expectedMode} but this engine was created with ` +
         `encrypted=${actualMode}. Recreate the Interocitor instance with ` +
-        `encrypted=${expectedMode}` +
-        (expectedMode ? ' and supply the matching passphrase' : '') +
+        (expectedMode ? 'a matching non-null keySource' : 'keySource=null') +
         `, or join a fresh mesh. Remote was NOT poisoned.`,
     );
     this.name = 'MeshEncryptionMismatchError';

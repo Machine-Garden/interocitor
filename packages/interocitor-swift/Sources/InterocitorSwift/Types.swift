@@ -1,7 +1,7 @@
 /**
  * interocitor-swift — Core type definitions
  *
- * Mirrors packages/interocitor/src/core/types.ts
+ * Public and protocol-facing values for the Swift runtime.
  */
 
 import Foundation

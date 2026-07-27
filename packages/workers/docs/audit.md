@@ -1,14 +1,24 @@
 # Worker audit
 
-Audit is an operation-level worker contract.
+After terminal mesh, stored-file, or recovery storage operations, the Worker
+can emit a structured event through `runtime.storageOperationAudit`. It does
+not persist those events, identify the caller, or observe client-side decrypt
+outcomes; the host owns the audit sink and any request-identity context.
 
-Configure it with `runtime.audit` when creating the worker mount:
+The first snippet is an illustrative mount fragment; supply the surrounding
+Worker and D1 binding. Import `WorkerAuditEvent` from the package root when
+typing application code; the shape below is a human-readable reference.
+
+Configure it with `runtime.storageOperationAudit` when creating the worker mount:
 
 ```ts
+import { withInterocitor } from '@interocitor/workers';
+
 export default withInterocitor(app, {
   db: (env) => env.DB,
   runtime: {
-    audit: (event, env) => {
+    meshIntegrityGates: [({ address }) => address === 'main'],
+    storageOperationAudit: (event, env) => {
       console.log(JSON.stringify(event));
     },
   },
@@ -27,25 +37,29 @@ interface WorkerAuditEvent {
     | 'delete'
     | 'list'
     | 'metadata'
+    | 'recovery-read'
+    | 'recovery-write'
     | 'stored-file-read'
     | 'stored-file-write'
     | 'stored-file-delete'
-    | 'stored-file-metadata'
-    | 'system';
-  prefix?: string;
+    | 'stored-file-metadata';
+  address?: string;
   path?: string;
   pathType?: string;
-  deviceId?: string;
   status: number;
-  outcome: 'ok' | 'error' | 'rejected' | 'not-found';
+  outcome: 'ok' | 'rejected' | 'not-found';
   bytes?: number;
   taint?: string;
-  systemOp?: string;
   requestId?: string;
 }
 ```
 
-Audit is a pure callback. The worker does not persist audit events itself; it only invokes the callback. Callback failures do not fail the request.
+The callback is awaited, so its latency adds request latency. The Worker does
+not persist events, and callback failures do not fail the request.
+
+For request-level policy auditing, place an audit layer before authorization in
+`runtime.meshMiddleware`. It can call `next()`, observe the final response
+status, and record rejected requests as well as accepted operations.
 
 ## Worker-visible operations
 
@@ -57,8 +71,11 @@ The worker emits audit events for operations it observes:
 | Mesh reads | manifest read, folder list, change file read, snapshot read |
 | Mesh deletes | file/path delete requests |
 | Stored-file operations | stored-file upload, download, delete, metadata fetch |
+| Recovery wrappers | wrapper read and immutable write attempts |
 
-The `op: 'system'` value and `systemOp` field are reserved for system/maintenance handlers that opt into auditing; the standard request handlers above do not emit them.
+This callback runs after terminal storage operations. It does not observe
+integrity rejection, middleware rejection, notify connections, early request
+validation, quota rejection, upload-policy rejection, or system operations.
 
 ## What the worker cannot audit
 

@@ -1,5 +1,5 @@
 /**
- * interocitor/handshake/qr
+ * @interocitor/core/handshake/qr
  *
  * QR code payload encoding and decoding for the handshake protocol.
  *
@@ -9,34 +9,38 @@
  * The intent declares what the QR *generator* wants:
  *
  *   "share" — I already belong to a mesh. Scan me: I will push
- *             remotePath + master key to you via the relay.
+ *             remotePath + passphrase to you via the relay.
  *
  *   "join"  — I want to join a mesh. Scan me: push your mesh
  *             credentials to me via the relay.
  *
- * In both cases the *scanner* is the one that ends up sending data
- * through the cloud relay; the QR generator always receives.
+ * For "share", the generator sends the encrypted credentials and the scanner
+ * receives them. For "join", the scanner sends the encrypted credentials and
+ * the generator receives them. Both sides publish relay artifacts as part of
+ * the ephemeral ECDH exchange.
  *
  * ## Two pieces in the QR
  *
  *   Cloud piece  →  handshakeId
- *                   Scopes two short-lived relay files on the shared
- *                   backend. Anyone with cloud access can see these
+ *                   Scopes two relay files on the shared backend. Polling
+ *                   defaults to a 120,000 ms timeout and cleanup is
+ *                   best-effort. Anyone with cloud access can see these
  *                   files — but cannot decrypt them (see below).
  *
- *   Eyes-only    →  generatorPub (ephemeral ECDH-P256 public key)
+ *   Invitation   →  generatorPub (ephemeral ECDH-P256 public key)
  *                   Used by the scanner to derive a wrapping key via
  *                   ECDH. The corresponding private key never leaves
- *                   the generating device. Without physically seeing
- *                   the QR you cannot derive the wrapping key, so
- *                   the relay payload is opaque even to someone with
- *                   full cloud-folder access.
+ *                   the generating device. Treat the complete QR or pair-link
+ *                   payload as a short-lived invitation capability: anyone
+ *                   who obtains it and can reach the relay can act as the
+ *                   scanner. Relay access alone is insufficient to derive the
+ *                   wrapping key.
  *
  * ## What is NOT in the QR
  *
  *   remotePath   — travels via the relay only, encrypted with the
  *                  ECDH-derived wrapping key.
- *   master key   — same.
+ *   passphrase   — same; null identifies an unencrypted mesh.
  *
  * ## Encoding
  *
@@ -58,13 +62,13 @@ export interface HandshakeQRPayload {
   /**
    * Random hex string scoping the relay files on the shared backend.
    * This is the "cloud piece" — visible to anyone with backend access,
-   * but useless without the eyes-only ECDH private key.
+   * but useless without the generator's ephemeral ECDH private key.
    */
   handshakeId: string;
   /**
    * Generator's ephemeral ECDH-P256 public key, base64url-encoded SPKI.
-   * This is the "eyes-only piece" — must be physically scanned to be useful.
-   * The scanner uses it to derive the shared wrapping key.
+   * This is the invitation piece. It may arrive through a scanned QR or a
+   * copied pair URL. The scanner uses it to derive the shared wrapping key.
    */
   generatorPub: string;
   /**
@@ -78,9 +82,9 @@ export interface HandshakeQRPayload {
    * Absent when the backend is fixed and app-global (e.g. a single CF worker
    * whose URL is baked into the binary).
    *
-   * The scanner passes this to their adapter via the adapter's own
-   * fromHandshakeConfig() static factory or equivalent before starting
-   * the relay exchange.
+   * The application uses this value to construct/authenticate the matching
+   * adapter, or handles it through the high-level `adapterFromConfig`
+   * callback, before starting the relay exchange.
    */
   adapterConfig?: string;
 }

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 import {
   CF_TESTS_ENABLED,
-  accessTokenForNamespace,
+  meshBearerForNamespace,
   applySession,
   connectDemo,
   connectDemoExpectError,
@@ -16,11 +16,11 @@ test.skip(!CF_TESTS_ENABLED, 'Cloudflare example e2e is opt-in; set RUN_CF_EXAMP
 
 test.describe.configure({ mode: 'serial' });
 
-test('Cloudflare TODO demo enforces access-token protected mode', async ({ browser, baseURL }) => {
+test('Cloudflare TODO demo enforces bearer-protected mode', async ({ browser, baseURL }) => {
   const { context, pages: [tab] } = await newDemoPages(browser, baseURL!, 1);
 
   try {
-    const namespace = makeNamespace('team-auth');
+    const namespace = makeNamespace();
     const badToken = 'definitely-wrong';
 
     await createSession(tab, { namespace, token: badToken });
@@ -28,7 +28,7 @@ test('Cloudflare TODO demo enforces access-token protected mode', async ({ brows
     const connectError = await connectDemoExpectError(tab);
     expect(connectError).toContain('Cloudflare Worker auth failed');
 
-    const goodToken = accessTokenForNamespace(namespace);
+    const goodToken = meshBearerForNamespace(namespace);
     const token = await createSession(tab, { namespace, token: goodToken });
     await applySession(tab, token);
     await connectDemo(tab);

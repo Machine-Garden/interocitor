@@ -5,7 +5,7 @@
  * The highest HLC wins for that column independently.
  * Deletes are soft (tombstone with HLC).
  *
- * Mirrors packages/interocitor/src/core/crdt.ts
+ * Implements the Swift runtime's column-level merge rules.
  */
 
 import Foundation

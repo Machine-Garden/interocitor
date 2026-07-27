@@ -94,19 +94,7 @@ export interface WorkerCache {
   delete(input: RequestInfo | URL): Promise<boolean>;
 }
 
-/**
- * Cloudflare Worker environment bindings consumed by Interocitor.
- *
- * All fields are optional — the package fails fast with a clear message
- * when a required binding is missing at runtime.
- *
- * You can extend this interface in your own `wrangler.toml` / env type:
- * ```ts
- * interface MyEnv extends InterocitorEnv {
- *   MY_KV: KVNamespace;
- * }
- * ```
- */
+/** R2 object body shape consumed by durable-file reads. */
 export interface R2ObjectBody {
   body: ReadableStream;
   size: number;
@@ -125,83 +113,136 @@ export interface R2Bucket {
  * Information presented to `authorizeFileUpload` before a durable file write.
  *
  * This is the server-visible metadata boundary for encrypted durable files.
- * The worker can inspect path, size, content type, uploader identity, request
- * headers/cookies, and current quota usage. It cannot inspect plaintext file
- * contents.
+ * The Worker can inspect path, stored size, client-supplied metadata, request
+ * headers/cookies, and current quota usage. Encrypted file contents remain
+ * opaque.
  */
 export interface FileUploadAuthorizationRequest {
-  prefix: string;
+  /** Accepted mesh address whose durable-file namespace receives the write. */
+  address: string;
+  /** Normalized durable-file path. */
   path: string;
+  /** Client-supplied `X-Interocitor-Device-Id` value. */
   uploadedByDeviceId: string;
+  /** Stored request-body bytes. */
   size: number;
+  /** Optional client-supplied plaintext byte count. */
   plaintextSize?: number;
+  /** Client-supplied content type, defaulting to `application/octet-stream`. */
   contentType?: string;
+  /** Optional client-supplied opaque classification. */
   taint?: string;
+  /** Durable-file bytes recorded for the mesh before this write. */
   currentMeshStoredBytes: number;
+  /** Resolved durable-file quota for the mesh. */
   maxMeshStoredBytes: number;
+  /** Incoming request after its body has been consumed; headers remain usable. */
   request: Request;
 }
 
+/**
+ * Durable-file upload decision. `false` rejects with `403`; an object can
+ * supply a rejection status and response reason.
+ */
 export type FileUploadAuthorizationResult =
   | boolean
   | { allowed: boolean; reason?: string; status?: number };
 
-export type WorkerAuditOutcome = 'ok' | 'error' | 'rejected' | 'not-found';
-
-export interface WorkerAuditEvent {
-  event: 'interocitor.audit';
-  at: string;
-  op: 'read' | 'write' | 'delete' | 'list' | 'metadata' | 'stored-file-read' | 'stored-file-write' | 'stored-file-delete' | 'stored-file-metadata' | 'system';
-  prefix?: string;
-  path?: string;
-  pathType?: string;
-  deviceId?: string;
-  status: number;
-  outcome: WorkerAuditOutcome;
-  bytes?: number;
-  taint?: string;
-  systemOp?: string;
-  requestId?: string;
+/** Information available while deciding whether a mesh address exists. */
+export interface MeshIntegrityContext {
+  /** Route segment after `/io/` or `/notify/`, preserved as the storage key. */
+  address: string;
+  /** Clone of the incoming request. */
+  request: Request;
+  /** Validate `address` with the checksum authority configured by `meshSecret`. */
+  verifyChecksum(): Promise<boolean>;
 }
 
-export interface InterocitorEnv extends Record<string, unknown> {
-  /** D1 database binding. Required unless you pass `db` explicitly via mount options. */
-  INTEROCITOR_DB?: D1Database;
-  /** R2 bucket for durable app file bodies. Required for /stored-file routes. */
-  INTEROCITOR_FILES?: R2Bucket;
-  /** Shared secret used to derive per-prefix access tokens. */
-  INTEROCITOR_ACCESS_TOKEN?: string;
-  /** Bearer token required to call system ops (prune, reconcile, maintenance). */
-  INTEROCITOR_SYSTEM_TOKEN?: string;
-  /** Set to `'1'` to enable TTL-based maintenance in the `scheduled` handler. */
-  INTEROCITOR_ENABLE_SCHEDULED_MAINTENANCE?: string;
-  /** Hours after last activity before a path is eligible for TTL deletion. 0 = disabled. */
-  INTEROCITOR_PATH_TTL_HOURS?: string | number;
-  /** Max bytes for control files (manifest pointer, head, device heartbeat). Default 256 KiB. */
-  INTEROCITOR_MAX_CONTROL_BYTES?: string | number;
-  /** Max bytes for change files. Default 8 MiB. */
-  INTEROCITOR_MAX_CHANGE_BYTES?: string | number;
-  /** Max bytes for mainline snapshot files. Default 16 MiB. */
-  INTEROCITOR_MAX_MAINLINE_BYTES?: string | number;
-  /** Max bytes for any other sync file type. Default 8 MiB. */
-  INTEROCITOR_MAX_GENERIC_FILE_BYTES?: string | number;
-  /** Max bytes for one durable app file upload. Default 32 MiB. */
-  INTEROCITOR_MAX_STORED_FILE_BYTES?: string | number;
-  /** Max total durable app file bytes per mesh. Default 512 MiB. */
-  INTEROCITOR_MAX_MESH_STORED_BYTES?: string | number;
-  /**
-   * HMAC secret for issuing and validating mesh/team IDs.
-   *
-   * Worker uses this to mint mesh IDs via `issueMeshId()` and to verify
-   * incoming mesh IDs via `isValidMeshId()`.
-   *
-   * Default: `'interocitor'`.
-   *
-   * ⚠️  Changing this secret invalidates ALL existing mesh IDs.
-   * Peers will fail to join or sync with previously issued IDs.
-   * Treat this as a permanent, deploy-once value.
-   */
-  INTEROCITOR_MESH_SECRET?: string;
+/**
+ * Decide whether an address designates a mesh in this deployment.
+ *
+ * Gates are OR-composed in array order. The first `true` accepts the address
+ * unchanged. If every gate returns `false`, the request receives `404`; a
+ * thrown or rejected gate produces `503`.
+ */
+export type MeshIntegrityGate<Env = unknown> = (
+  context: MeshIntegrityContext,
+  env: Env,
+) => boolean | Promise<boolean>;
+
+/** The access requested from a mesh route. */
+export type MeshAccess = 'read' | 'write';
+
+/** An accepted mesh request passed through application middleware. */
+export interface MeshRequestContext {
+  /** Route segment requested by the client, such as `'main'`. */
+  address: string;
+  /** Clone of the incoming request. */
+  request: Request;
+  /** Route family handling the request. */
+  surface: 'io' | 'notify';
+  /** Operation class determined before middleware runs. */
+  access: MeshAccess;
+}
+
+/**
+ * One ordered layer around an accepted `/io` or `/notify` request.
+ *
+ * Return a response to stop the chain or call `next()` once to continue.
+ * Recovery, global health, preflight, and system routes do not use this chain.
+ */
+export type MeshMiddleware<Env = unknown> = (
+  context: MeshRequestContext,
+  env: Env,
+  next: () => Promise<Response>,
+) => Response | Promise<Response>;
+
+/**
+ * Application access decision for one mesh request.
+ *
+ * - `none`: this mesh needs no application authorization; continue.
+ * - `readonly`: continue reads and reject writes with `403`.
+ * - `full`: continue reads and writes.
+ * - `deny`: reject the request with `403`.
+ */
+export type MeshAuthorization = 'none' | 'readonly' | 'full' | 'deny';
+
+/**
+ * Return application access for one accepted mesh request.
+ * A thrown/rejected authorizer or an invalid result produces `503`.
+ */
+export type MeshAuthorizer<Env = unknown> = (
+  request: MeshRequestContext,
+  env: Env,
+) => MeshAuthorization | Promise<MeshAuthorization>;
+
+/** Outcome recorded after a storage operation completes. */
+export type WorkerAuditOutcome = 'ok' | 'rejected' | 'not-found';
+
+/** Completed sync-storage, durable-file, or recovery operation. */
+export interface WorkerAuditEvent {
+  /** Stable event discriminator. */
+  event: 'interocitor.audit';
+  /** ISO timestamp recorded after the storage operation. */
+  at: string;
+  /** Storage operation observed by the Worker. */
+  op: 'read' | 'write' | 'delete' | 'list' | 'metadata' | 'recovery-read' | 'recovery-write' | 'stored-file-read' | 'stored-file-write' | 'stored-file-delete' | 'stored-file-metadata';
+  /** Accepted mesh address, when the operation is mesh-scoped. */
+  address?: string;
+  /** Normalized object path, when applicable. */
+  path?: string;
+  /** Interocitor sync-object classification, when applicable. */
+  pathType?: string;
+  /** HTTP response status returned for the operation. */
+  status: number;
+  /** Terminal operation outcome. */
+  outcome: WorkerAuditOutcome;
+  /** Stored or transferred bytes, when measured. */
+  bytes?: number;
+  /** Opaque durable-file classification, when supplied. */
+  taint?: string;
+  /** `CF-Ray` or `X-Request-Id`, when supplied by the request. */
+  requestId?: string;
 }
 
 /**
@@ -226,47 +267,64 @@ export interface DatabaseAdapter {
 }
 
 /**
- * Runtime policy getters accepted by {@link createInterocitorMount} and
+ * Runtime behavior accepted by {@link createInterocitorMount} and
  * {@link withInterocitor}.
- *
- * These getters let application code keep ownership of env naming while
- * Interocitor owns request handling. Each getter resolves against the current
- * request's `env` so one Worker can host different bindings or policy between
- * environments.
  */
 export interface InterocitorRuntimeOptions<Env = unknown> {
-  /** Secret used to authenticate normal `/io` and `/notify` calls. */
-  accessToken?: (env: Env) => string | undefined;
-  /** Bearer token used for `/__interocitor/*` maintenance and system ops. */
-  systemToken?: (env: Env) => string | undefined;
-  /** Enable scheduled cleanup/maintenance when the wrapped Worker has a `scheduled()` handler. */
+  /**
+   * Rules defining which mesh addresses exist. Required for mesh IO/notify:
+   * the default empty list rejects every address with `404`.
+   */
+  meshIntegrityGates?: readonly MeshIntegrityGate<Env>[];
+  /**
+   * Ordered application layers around accepted `/io` and `/notify` requests.
+   * The default empty list applies no additional request policy.
+   */
+  meshMiddleware?: readonly MeshMiddleware<Env>[];
+  /**
+   * Run an all-mesh TTL sweep from `withInterocitor(...).scheduled()`.
+   * Enabled by `true`, `1`, or `'1'`; disabled by default.
+   */
   enableScheduledMaintenance?: (env: Env) => string | number | boolean | undefined;
-  /** TTL in hours for cleanup of expired paths when maintenance is enabled. */
+  /**
+   * Inactive hours before maintenance deletes a D1 sync root. A positive
+   * number enables TTL deletion; omitted, invalid, or non-positive disables it.
+   */
   pathTtlHours?: (env: Env) => string | number | undefined;
-  /** Max bytes accepted for control files such as manifests and heads. */
+  /** Max bytes for one control object or recovery wrapper. Default: 256 KiB. */
   maxControlBytes?: (env: Env) => string | number | undefined;
-  /** Max bytes accepted for one CRDT change file. */
+  /** Max bytes for one CRDT change object. Default: 8 MiB. */
   maxChangeBytes?: (env: Env) => string | number | undefined;
-  /** Max bytes accepted for one mainline snapshot file. */
+  /** Max bytes for one mainline snapshot. Default: 16 MiB. */
   maxMainlineBytes?: (env: Env) => string | number | undefined;
-  /** Max bytes accepted for other sync-file classes. */
+  /** Max bytes for another D1 sync object. Default: 8 MiB. */
   maxGenericFileBytes?: (env: Env) => string | number | undefined;
-  /** Max bytes accepted for one durable file upload. */
+  /** Max stored bytes for one R2 durable-file upload. Default: 32 MiB. */
   maxStoredFileBytes?: (env: Env) => string | number | undefined;
-  /** Max total durable file bytes allowed for one mesh. */
+  /** Max aggregate R2 durable-file bytes for one mesh. Default: 512 MiB. */
   maxMeshStoredBytes?: (env: Env) => string | number | undefined;
   /**
-   * App-owned authorization hook for durable file uploads.
+   * Additional application policy for durable-file uploads.
+   *
+   * Runs after size, quota, and required device-header checks and before R2
+   * storage. Request metadata such as device ID and plaintext size is
+   * client-asserted.
    *
    * Return `true` to allow, `false` to reject with default status, or an
    * explicit `{ allowed, status, reason }` object to control the response.
    */
   authorizeFileUpload?: (request: FileUploadAuthorizationRequest, env: Env) => FileUploadAuthorizationResult | Promise<FileUploadAuthorizationResult>;
-  /** Fire-and-forget audit sink for accepted/rejected worker operations. */
-  audit?: (event: WorkerAuditEvent, env: Env) => void | Promise<void>;
-  /** HMAC secret used for issuing and validating mesh IDs. */
+  /**
+   * Awaited instrumentation for completed storage operations. Callback errors
+   * are isolated from the request; callback latency is request latency.
+   */
+  storageOperationAudit?: (event: WorkerAuditEvent, env: Env) => void | Promise<void>;
+  /**
+   * HMAC authority for checksummed mesh IDs. Omitted or empty values use
+   * `'interocitor'` for development; production deployments must supply it.
+   */
   meshSecret?: (env: Env) => string | undefined;
-  /** Enable diagnostic logs for request handling and relay delivery. */
+  /** Enable documented diagnostics with `true`, `1`, or `'1'`. Default: false. */
   verbose?: (env: Env) => string | number | boolean | undefined;
 }
 
@@ -279,7 +337,7 @@ export interface InterocitorRuntimeOptions<Env = unknown> {
 export interface InterocitorMountOptions<Env = unknown> {
   /**
    * URL prefix Interocitor will claim, e.g. `'/todo-interocitor'`.
-   * Omit or pass `null` to mount at the root (handles all paths).
+   * Omit or pass `null` to claim Interocitor routes at the Worker root.
    */
   mountPrefix?: string | null;
   /**
@@ -294,11 +352,12 @@ export interface InterocitorMountOptions<Env = unknown> {
   db: (env: Env) => D1Database;
   /** Resolve the R2 bucket for durable app file bodies. */
   files?: (env: Env) => R2Bucket | undefined;
+  /** Runtime address, access, limits, maintenance, and instrumentation policy. */
   runtime?: InterocitorRuntimeOptions<Env>;
-    /**
+  /**
    * Resolve the relay Durable Object namespace from the Worker env at request time.
    *
-   * Realtime notify routes are enabled only when this getter is provided.
+   * Without this getter, notify routes return `501` and clients use polling.
    * ```ts
    * withInterocitor(appWorker, { mountPrefix: '/sync', relay: (env) => env.MY_RELAY });
    * ```
@@ -306,7 +365,6 @@ export interface InterocitorMountOptions<Env = unknown> {
   relay?: (env: Env) => DurableObjectNamespace;
 }
 
-/** A frozen Interocitor mount that can be embedded in any Worker. */
 /** Frozen request handler bundle returned by {@link createInterocitorMount}. */
 export interface InterocitorMount<Env = unknown> {
   /** The normalized URL prefix claimed by this mount, e.g. `'/io'`. */
@@ -317,14 +375,35 @@ export interface InterocitorMount<Env = unknown> {
   ioBase: string;
   /** Base path of the WebSocket notify subsystem. */
   notifyBase: string;
-  /** Base path of the system ops subsystem. */
-  systemBase: string;
+  /** Base path of the recovery-wrapper subsystem. */
+  recoveryBase: string;
   /** Returns `true` if the given pathname belongs to this mount. */
   matches(pathname: string): boolean;
   /** Handle a request that has already been matched to this mount. */
   fetch(request: Request, env: Env, ctx: ExecutionContextLike): Promise<Response>;
 }
 
-// PathType is defined in paths.ts as a const union — imported from there.
-// Re-exported here so consumers can import everything from one place.
+/** Options consumed by {@link createInterocitorSystemHandler}. */
+export interface InterocitorSystemHandlerOptions<Env = unknown> {
+  /** URL prefix shared with the mesh mount. */
+  mountPrefix?: string | null;
+  /** Resolve the D1 database used by system operations. */
+  db: (env: Env) => D1Database;
+  /** Integrity, TTL, checksum, and diagnostic settings used by system operations. */
+  runtime?: Pick<
+    InterocitorRuntimeOptions<Env>,
+    'meshIntegrityGates' | 'pathTtlHours' | 'meshSecret' | 'verbose'
+  >;
+}
+
+/** Separately routed mesh-ID, compaction, metrics, and maintenance handler. */
+export interface InterocitorSystemHandler<Env = unknown> {
+  /** Base path of the system operation route. */
+  systemBase: string;
+  /** Returns `true` when a pathname belongs to this handler. */
+  matches(pathname: string): boolean;
+  /** Handle a matched request after the host has applied its own policy. */
+  fetch(request: Request, env: Env, ctx: ExecutionContextLike): Promise<Response>;
+}
+
 export type { PathType } from './paths.ts';

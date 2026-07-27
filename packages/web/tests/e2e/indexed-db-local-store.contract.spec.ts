@@ -38,7 +38,7 @@ test('IndexedDbLocalStore satisfies the LocalStore contract and persists across 
     await store.open();
     await store.putRows([
       row('tasks', 'a', { title: 'Alpha', status: 'open', priority: 1 }),
-      row('tasks', 'b', { title: 'Beta', status: 'done', priority: 2 }),
+      row('tasks', 'b', { title: 'Bravo', status: 'done', priority: 2 }),
       row('tasks', 'deleted', { title: 'Removed', status: 'open', priority: 3 }, true),
     ]);
     await store.pushOutbox({ id: 'chg_1', ts: 1, device: 'dev', hlc: 'h1', ops: [] });

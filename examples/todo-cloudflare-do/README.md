@@ -1,76 +1,164 @@
 <p align="center">
   <a href="https://github.com/TheUiTeam/interocitor">
-    <img src="https://raw.githubusercontent.com/TheUiTeam/interocitor/main/docs/assets/hero.svg" alt="interocitor" width="560"/>
+    <img src="https://raw.githubusercontent.com/TheUiTeam/interocitor/main/docs/assets/hero.svg" alt="Interocitor" width="560"/>
   </a>
 </p>
 
-# TODO over Cloudflare Worker + D1
+# TODO over Cloudflare Workers, D1, and R2
 
-GitHub example directory: <https://github.com/TheUiTeam/interocitor/tree/main/examples/todo-cloudflare-do>
+Runnable public example of an app-owned Worker with Interocitor mounted
+at `/todo-interocitor`.
 
-This example shows Interocitor mounted into an app-owned Worker under a prefix, with D1-backed transport state and the optional `InterocitorRelayDurableObject` wired for notify WebSockets.
-
-## What is implemented
-
-- app-owned Worker entry at `todo-interocitor.js`
-- Interocitor mounted under `/todo-interocitor`
-- D1-backed metadata and append-only mutation persistence
-- Interocitor-native endpoints for sync flows
-- `InterocitorRelayDurableObject` exported and bound as `INTEROCITOR_RELAY`
-- `/todo-interocitor/notify/<namespace>` WebSocket route enabled through `relay: (env) => env.INTEROCITOR_RELAY`
-- maintenance and compaction-related cleanup hooks
+The Worker uses D1 for row-sync objects and metadata, R2 for durable files, and
+an optional Durable Object for low-latency invalidations. The browser remains
+responsible for row queries, merge, and application-payload encryption.
 
 ## Route ownership
 
-App owns:
+The host app owns:
+
 - `/`
 - `/api/ping`
+- `/todo-interocitor/__interocitor/system/*`, protected by the example's
+  system bearer before delegation
 
-Interocitor owns:
+The Interocitor mount owns:
+
 - `/todo-interocitor/health`
 - `/todo-interocitor/io/*`
 - `/todo-interocitor/notify/*`
-- `/todo-interocitor/__interocitor/*`
+- `/todo-interocitor/recovery/*`
 
-## Relay proof of work
+## Example policy
 
-The repository includes an opt-in e2e proof that the Durable Object relay is reachable through the mounted Worker route:
+The Worker demonstrates three independent values:
+
+- `INTEROCITOR_MESH_SECRET` signs and validates checksummed mesh addresses;
+- `TODO_MESH_BEARER_SECRET` derives the demo per-mesh bearer as
+  `sha256(meshId + secret)`;
+- `TODO_SYSTEM_BEARER_TOKEN` protects the host-routed system handler.
+
+The committed strings are local-development placeholders, not production
+secrets. The deterministic mesh bearer demonstrates composition but has no
+subject identity, expiry, rotation, or revocation.
+
+TypeScript/JavaScript snippets below are command helpers or partial
+application fragments as labelled. They are not a general production
+authorization design.
+
+## Run locally
+
+### 1. Install and build
+
+From the repository root:
 
 ```bash
-RUN_CF_EXAMPLE_TESTS=1 yarn test:e2e:cloudflare:run --grep "InterocitorRelayDurableObject"
+yarn install
+yarn build:int
+yarn build:web
+yarn workspace @interocitor/workers build
 ```
 
-That test opens:
+The root has no `yarn build` script; use the commands above or `yarn build:all`.
+
+### 2. Create the local D1 schema
+
+Run the example migration for its maintenance tables, then apply the canonical
+Workers schema for the current runtime, including `stored_files`:
+
+```bash
+yarn --cwd examples/todo-cloudflare-do db:migrate:local
+yarn --cwd examples/todo-cloudflare-do exec wrangler d1 execute \
+  INTEROCITOR_DB \
+  --local \
+  --file=../../packages/workers/schema.sql
+```
+
+Both schema steps are required. The example migration creates its maintenance
+tables; the canonical Workers schema creates `stored_files` for R2-backed file
+calls.
+
+### 3. Start the Worker and page server
+
+In one terminal:
+
+```bash
+yarn --cwd examples/todo-cloudflare-do dev
+```
+
+In another terminal from the repository root:
+
+```bash
+PORT=4174 node packages/webdav/server.mjs --mode=memory
+```
+
+The second command is only a loopback static-file server here; do not deploy or
+expose it. Open:
+
+<http://127.0.0.1:4174/examples/todo-cloudflare-do/index.html>
+
+### 4. Provision a mesh address and bearer
+
+The Worker rejects the page's placeholder `team-a` address. Ask the
+host-protected system route for a valid checksummed address:
+
+```bash
+curl --fail-with-body \
+  --request POST \
+  --header 'Authorization: Bearer replace-with-production-system-secret' \
+  --header 'Content-Type: application/json' \
+  --data '{"op":"issue-mesh-id"}' \
+  http://127.0.0.1:8787/todo-interocitor/__interocitor/system/provision
+```
+
+Copy the returned `meshId`. Compute the demo mesh bearer with this runnable
+helper, replacing the first argument:
+
+```bash
+node -e "const {createHash}=require('node:crypto'); console.log(createHash('sha256').update(process.argv[1] + process.argv[2]).digest('hex'))" \
+  '<mesh-id>' \
+  'replace-with-production-secret'
+```
+
+In the page, enter:
+
+| Field | Local value |
+| --- | --- |
+| Worker URL | `http://127.0.0.1:8787/todo-interocitor` |
+| Namespace | returned `meshId` |
+| Remote path | `/todo-app` |
+| Access token | computed SHA-256 hex |
+
+Choose **New session**, copy the resulting join token to another tab, connect
+both, and add tasks. The Worker URL must include the mount prefix; the page's
+bare-origin placeholder is not sufficient.
+
+## Credential modes and join-token custody
+
+The `credentials` query parameter selects browser custody:
 
 ```text
-ws://127.0.0.1:<worker-port>/todo-interocitor/notify/<namespace>?access_token=<sha256(namespace + accessSecret)>
+?credentials=session          # default: plaintext credential record in sessionStorage
+?credentials=memory           # JS memory only
+?credentials=local            # plaintext credential record in localStorage
+?credentials=passkey          # WebAuthn largeBlob, when supported
+?credentials=memory-envelope  # encrypted envelope and unwrap key both in page memory
 ```
 
-and expects the WebSocket to reach `open`. This proves the example exports `InterocitorRelayDurableObject`, Wrangler binds it, and `withInterocitor(..., { relay })` routes `/notify/<namespace>` into the Durable Object.
+The join token contains the Worker URL, mesh address, remote path, application
+bearer, and portable mesh key. Possession grants this demo's network access and
+decryption capability. Treat it as a secret: do not log it, place it in normal
+analytics, or use the clipboard-based flow as a production invitation system.
 
-## Credential storage modes
+Cloudflare sees route/address, object names, sizes, timing, manifest/device
+metadata, and the client-supplied durable-file metadata. With the configured
+portable key source, row change/snapshot and file payloads are encrypted before
+upload. A copied join token plus stored objects is sufficient to decrypt them.
 
-The demo wires `credentialStore` explicitly. Use the `credentials` query
-parameter to try different browser key-storage policies without editing code:
+## Durable-file pattern
 
-```text
-?credentials=session          # default: sessionStorage credential record
-?credentials=memory           # JS memory only; reload needs the join token again
-?credentials=local            # localStorage credential record
-?credentials=passkey          # WebAuthn largeBlob / platform authenticator
-?credentials=memory-envelope  # encrypted envelope in app memory, unwrap key in memory
-```
-
-The actual wiring lives in `app.js#createTodoCredentialStore`. A deployed app
-can replace the memory envelope store with an API-backed
-`CredentialEnvelopeStore`, for example storing only the encrypted envelope in
-the Worker/backend while the unwrap key stays in passkey/biometrics.
-
-## Durable files pattern
-
-The TODO UI intentionally stays row-only, but the Cloudflare-backed transport
-also supports durable file objects under the mesh `files/` namespace. Use
-rows for references and metadata; store large or binary payloads separately.
+The TODO UI is row-only, but the Worker mounts R2-backed file routes. This
+partial fragment assumes `db`, `task`, `taskId`, and `file` exist:
 
 ```js
 const path = `tasks/${taskId}/files/${Date.now()}_${file.name}`;
@@ -80,32 +168,60 @@ await db.table('tasks').patch(taskId, {
 });
 ```
 
-For image UI in React apps, render a stored image with
-`useImage(db, path)` from `@interocitor/react`. For non-image attachments,
-read bytes directly with `db.getFile(path)` and build your own download UI.
+The example currently relies on the package defaults for per-file and
+per-mesh stored-file quotas because `todo-interocitor.js` does not map the
+similarly named Wrangler variables into runtime options.
 
-## Mutation policy
+## Relay and maintenance behavior
 
-Normal sync writes are append-only. Administrative cleanup happens through explicit system operations so transport maintenance does not become silent mutation of application state.
+The exported `InterocitorRelayDurableObject` batches invalidations and improves
+latency; clients still poll for correctness. Change objects and snapshots are
+immutable. Heads, manifest pointers, and device heartbeats overwrite their
+paths. Scheduled TTL cleanup affects D1 sync roots, not R2 durable files.
 
-## Run locally
-
-```bash
-yarn install
-yarn build
-yarn --cwd examples/todo-cloudflare-do db:migrate:local
-yarn --cwd examples/todo-cloudflare-do dev
-```
-
-## Deploy
-
-`wrangler.toml` points at `./todo-interocitor.js`, not directly at the package source.
+The opt-in Playwright suite is executable from the repository root:
 
 ```bash
-yarn --cwd examples/todo-cloudflare-do deploy
+RUN_CF_EXAMPLE_TESTS=1 yarn test:e2e:cloudflare:run
 ```
+
+It provisions test mesh IDs/bearers and covers auth, relay, compaction,
+maintenance, and prefix integrity. It requires Chromium and a working local
+Wrangler runtime.
+
+## Deploy your own copy
+
+This is an operator checklist, not a copy-paste deployment with shared IDs:
+
+1. Create D1 and R2 resources with Wrangler and replace the placeholder D1 IDs
+   and bucket names in `wrangler.toml`.
+2. Remove the three placeholder secret values from `[vars]`, then set
+   `INTEROCITOR_MESH_SECRET`, `TODO_MESH_BEARER_SECRET`, and
+   `TODO_SYSTEM_BEARER_TOKEN` with `wrangler secret put`.
+3. Apply both remote schema steps:
+
+   ```bash
+   yarn --cwd examples/todo-cloudflare-do db:migrate:remote
+   yarn --cwd examples/todo-cloudflare-do exec wrangler d1 execute \
+     INTEROCITOR_DB \
+     --remote \
+     --file=../../packages/workers/schema.sql
+   ```
+
+4. Review the cron TTL, request limits, CORS/origin exposure, audit sink,
+   application identity policy, recovery-wrapper access, and R2 lifecycle.
+5. Deploy:
+
+   ```bash
+   yarn --cwd examples/todo-cloudflare-do deploy
+   ```
+
+`wrangler.toml` points at the example entry
+`examples/todo-cloudflare-do/todo-interocitor.js`, which imports the built
+Workers workspace. Rebuild before every deployment.
 
 ## Related packages
 
-- Core engine: `packages/interocitor`
-- Worker runtime: `packages/interocitor-workers`
+- [Core engine](../../packages/core/README.md)
+- [Browser helpers](../../packages/web/README.md)
+- [Workers runtime](../../packages/workers/README.md)

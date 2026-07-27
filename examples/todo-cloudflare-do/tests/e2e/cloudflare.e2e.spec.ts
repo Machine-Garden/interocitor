@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 import {
   CF_TESTS_ENABLED,
-  accessTokenForNamespace,
+  meshBearerForNamespace,
   addTask,
   applySession,
   connectDemo,
@@ -20,8 +20,8 @@ test('Cloudflare TODO demo syncs across tabs under prefixed worker routes', asyn
   const { context, pages: [tabA, tabB] } = await newDemoPages(browser, baseURL!, 2);
 
   try {
-    const namespace = makeNamespace('team-sync');
-    const tokenValue = accessTokenForNamespace(namespace);
+    const namespace = makeNamespace();
+    const tokenValue = meshBearerForNamespace(namespace);
     const token = await createSession(tabA, { namespace, token: tokenValue });
 
     await applySession(tabB, token);

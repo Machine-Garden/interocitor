@@ -1,67 +1,118 @@
 <p align="center">
   <a href="https://github.com/TheUiTeam/interocitor">
-    <img src="https://raw.githubusercontent.com/TheUiTeam/interocitor/main/docs/assets/hero.svg" alt="interocitor" width="560"/>
+    <img src="https://raw.githubusercontent.com/TheUiTeam/interocitor/main/docs/assets/hero.svg" alt="Interocitor" width="560"/>
   </a>
 </p>
 
-# interocitor-webdav
+# @interocitor/webdav
 
-Local WebDAV server for Interocitor.
+Disposable loopback WebDAV and static-file server for Interocitor development,
+demos, and integration tests.
 
-This package exists for one job: provide a mailbox that still can't read your mail.
+> **Do not deploy this server.** It has no authentication, authorization, TLS,
+> request-size limit, or tenant isolation. It also serves files from the
+> repository root on non-WebDAV routes. The process binds to `127.0.0.1`, but
+> any local process or browser page that can reach the port can use it.
 
-## Why this package exists
+Run the public package from the repository with the commands below.
 
-Interocitor treats remote storage as a dumb byte pipe. WebDAV is a convenient way to provide that pipe when you want:
+## Start the server
 
-- local development
-- self-hosted sync targets
-- easy inspection of remote artifacts on disk
-- integration tests without a purpose-built backend
-
-This server does not merge your data, query your data, or decrypt your data. It simply exposes a WebDAV-compatible surface so Interocitor clients can exchange encrypted sync artifacts.
-
-## CLI
+From the repository root, after `yarn install`:
 
 ```bash
-npx interocitor-webdav --mode=memory
-npx interocitor-webdav --mode=file --data-root=./webdav-data
+node packages/webdav/server.mjs --mode=memory
 ```
 
-## Workspace usage
+The WebDAV base URL is:
 
-From the monorepo root:
+```text
+http://127.0.0.1:4173/__webdav__
+```
+
+Set another loopback port with `PORT`:
 
 ```bash
-yarn workspace interocitor-webdav server --mode=memory
-yarn workspace interocitor-webdav server --mode=file --data-root=./webdav-data
+PORT=4174 node packages/webdav/server.mjs --mode=memory
 ```
 
-## Modes
+These are complete runnable commands. Node.js 18 or later is required.
 
-### Memory mode
+## Storage modes
 
-Useful for tests and disposable local runs.
+### Memory
 
-### File mode
+`--mode=memory` is the default. All WebDAV objects live in process memory and
+disappear when the process exits.
 
-Useful when you want to inspect the mailbox contents on disk. This is especially helpful for demos and debugging because you can verify that remote artifacts are opaque files rather than application-readable rows.
+### File
 
-## Example consumer
+File mode makes remote objects inspectable on disk:
 
-The main demo that uses this package lives here:
+```bash
+node packages/webdav/server.mjs \
+  --mode=file \
+  --data-root=examples/todo-webdav/webdav-data
+```
 
-- GitHub: <https://github.com/TheUiTeam/interocitor/tree/main/examples/todo-webdav>
-- Monorepo path: `examples/todo-webdav`
+The argument parser requires the `--name=value` form shown above. A relative
+`--data-root` is resolved from the repository root, not the current working
+directory.
+
+**File mode deletes the entire resolved data-root directory every time the
+server starts.** Use only a dedicated disposable path. Do not point it at
+source code, a home directory, or data you need to keep.
+
+## Routes and behavior
+
+| Route | Behavior |
+| --- | --- |
+| `/__webdav__/*` | Unauthenticated WebDAV `OPTIONS`, `PROPFIND`, `MKCOL`, `PUT`, `GET`, and `DELETE` |
+| `/` | Serves `examples/index.html` |
+| any other path | Serves the corresponding file below the repository root, or the test harness fallback |
+
+The server is a byte transport. It does not query rows, merge CRDT changes, or
+perform encryption. Interocitor clients encrypt change and snapshot payloads
+only when their engine has been configured with key material. Without client
+encryption, this server stores readable bytes.
+
+## Use it with an Interocitor client
+
+Point a WebDAV adapter at the route base. This partial configuration fragment
+assumes an initialized application and imports from the current source build:
+
+```ts
+import { WebDAVAdapter } from '@interocitor/core';
+
+const adapter = new WebDAVAdapter({
+  baseUrl: 'http://127.0.0.1:4173/__webdav__',
+});
+```
+
+For an end-to-end runnable browser flow, use the
+[WebDAV TODO example](../../examples/todo-webdav/README.md). For test isolation
+and browser-test setup, see
+[Test an Interocitor product](../core/docs/testing.md).
+
+## Validate the package
+
+From the repository root:
+
+```bash
+yarn workspace @interocitor/webdav check
+```
+
+This syntax-checks `server.mjs`. Integration coverage is owned by the root
+WebDAV and browser suites; see the repository `package.json` for the current
+targeted commands.
 
 ## What this package is not
 
-- not a database
-- not a sync engine
-- not an encryption layer
-- not a collaboration server
-
-It is just the transport surface.
+- a production or self-hosted sync service;
+- a database or query server;
+- an authentication layer;
+- an encryption layer;
+- a durable mailbox.
 
 ## License
 

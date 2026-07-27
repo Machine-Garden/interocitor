@@ -1,304 +1,105 @@
 <p align="center">
-  <a href="https://github.com/TheUiTeam/interocitor">
-    <img src="https://raw.githubusercontent.com/TheUiTeam/interocitor/main/docs/assets/hero.svg" alt="interocitor" width="560"/>
-  </a>
+  <img src="docs/assets/hero.svg" alt="Interocitor" width="560" />
 </p>
 
 <p align="center">
-  <strong>CRDT data and files, synced through a mailbox that cannot read them.</strong>
+  <strong>Local-first rows and durable remote files, encrypted on the client.</strong>
 </p>
 
-<p align="center">
-  Interocitor gives apps a local-first encrypted database and a durable encrypted file store that share the same mesh, devices, key source, adapters, and backend policy.
-</p>
+Interocitor is an application data layer for software that needs structured
+state to work offline and converge across devices without giving the storage
+provider plaintext access.
 
-## What Interocitor is
+> **Public release:** the packages in this checkout are one matched
+> `0.1.0` set. The supported distribution for this documentation is
+> the source-checkout workflow below, not independently selected registry tags.
 
-Interocitor is a client-side application data layer with two first-class surfaces:
+## Try the two-tab demo
 
-1. **A CRDT database** for structured state: tables, rows, typed schemas, local queries, per-column conflict resolution, snapshots, and compaction.
-2. **A durable file store** for bytes: `PUT`, `GET`, and `DELETE` by path and metadata. Browser image helpers live in `@interocitor/web`.
-
-Both surfaces are local-first and encrypted before they leave the device. They sync through storage you control — WebDAV, Google Drive, Cloudflare Workers/R2, or a custom adapter — without asking that storage layer to understand your app data.
-
-The remote is a mailbox, not a trusted database or media service:
-
-- CRDT row changes are encrypted, uploaded, pulled, merged, and compacted by devices.
-- Files and images are encrypted, uploaded, read, overwritten, or deleted as durable objects. They do not merge and they do not enter row compaction.
-- Devices keep working offline because reads and writes hit local state first.
-- Cloudflare Workers can enforce upload size, mesh/device authorization, per-mesh quota, and delete accounting without seeing plaintext.
-
-## What you get
-
-- **Typed CRDT database.** Tables, rows, live queries, schema inference, and deterministic convergence across devices.
-- **Durable file storage.** Path-addressed encrypted blobs with `putFile`, `getFile`, `deleteFile`, and metadata.
-- **Browser image helpers.** `@interocitor/web` stores `Blob`, `File`, bytes, data URLs, or SVG strings on top of core files and returns revokable `blob:` URLs for display.
-- **One mesh.** Rows, files, devices, key source, adapters, pairing, and backend policy are part of the same application mesh.
-- **React hooks.** `useLiveQuery`, `useRow`, and `useImage` keep rendering decisions in app code.
-- **Cloudflare backend.** D1 for sync metadata, R2 for durable file bodies, optional Durable Object realtime invalidation, upload quotas, and upload authorization callbacks.
-
-## Install
+From a clean checkout:
 
 ```bash
-yarn add @interocitor/core @interocitor/web
-# optional
-yarn add @interocitor/react @interocitor/workers
+git clone https://github.com/TheUiTeam/interocitor.git
+cd interocitor
+corepack enable
+yarn install
+yarn demo:todo
 ```
 
-## Quick start
+Open
+`http://127.0.0.1:4173/examples/todo-webdav/index.html` in two tabs. In tab A,
+choose **New session**, then **Copy token**. Paste the token into tab B, choose
+**Apply token**, and connect both tabs. A task added in either tab should appear
+in both. The encrypted mailbox artifacts are available for inspection under
+`examples/todo-webdav/webdav-data/`.
 
-```ts
-import { Interocitor, PortablePassphraseKeySource, WebDAVAdapter, types, type DatabaseSchemaDefinition, type InferSchemaType } from '@interocitor/core';
-import { IndexedDbLocalStore, createWebCredentialStore, getImageBlobUrl, putImage } from '@interocitor/web';
+The [complete demo guide](examples/todo-webdav/README.md) explains credential
+storage modes and the durable-file pattern.
 
-const schema = {
-  tables: {
-    todos: {
-      fields: {
-        text: types.string,
-        done: types.boolean,
-        avatarPath: types.string.optional(),
-      },
-    },
-  },
-} satisfies DatabaseSchemaDefinition;
+## Data surfaces
 
-type DB = InferSchemaType<typeof schema>;
+Interocitor exposes two related surfaces with different availability
+guarantees:
 
-const dbName = 'todo';
-const portableKey = '...high-entropy-base58...';
+| Surface | Behavior | Remote storage |
+| --- | --- | --- |
+| CRDT rows | Reads and writes use a caller-supplied local store. An outbox carries encrypted changes when transport is available. | Encrypted changes and snapshots are merged and compacted by clients. |
+| Durable files | `putFile`, `getFile`, `openFile`, and `deleteFile` call the remote adapter directly. There is no core file cache or offline queue. | Encrypted bytes remain at their app path until overwritten or deleted. |
 
-const db = new Interocitor<DB>(new WebDAVAdapter({
-  baseUrl: 'https://dav.example.com',
-  auth: { username: 'user', password: 'pass' },
-}), {
-  dbName,
-  remotePath: '/Todo',
-  schema,
-  localStore: new IndexedDbLocalStore(dbName),
-  keySource: new PortablePassphraseKeySource({
-    portableKey,
-    credentialStore: createWebCredentialStore(dbName, { storage: 'sessionStorage' }),
-  }),
-});
-
-await db.init();
-
-await db.connect();
-
-const avatarPath = 'avatars/me.png';
-await putImage(db, avatarPath, avatarFile);
-
-const todoId = await db.table('todos').add({
-  text: 'Ship encrypted sync',
-  done: false,
-  avatarPath,
-});
-
-await db.table('todos').patch(todoId, { done: true });
-
-const avatar = await getImageBlobUrl(db, avatarPath);
-img.src = avatar.url;
-```
-
-## Files and images
-
-Files are the second half of the app data model, not an implementation detail of the sync backend. Use rows for structured state that should merge; use files for bytes that should exist exactly as uploaded until overwritten or deleted.
-
-Files are encrypted like row data, scoped to the same mesh, and addressed by app paths. They do not participate in CRDT merge, change-log compaction, or snapshots. A file just exists at a path until overwritten or deleted.
-
-```ts
-await db.putFile('receipts/2026-05-03.pdf', pdfBytes, 'application/pdf');
-
-const bytes = await db.getFile('receipts/2026-05-03.pdf');
-const metadata = await db.getFileMetadata('receipts/2026-05-03.pdf');
-
-await db.deleteFile('receipts/2026-05-03.pdf');
-```
-
-Image helpers sit on top of file storage:
-
-```ts
-import { getImage, getImageBlobUrl, putImage } from '@interocitor/web';
-
-await putImage(db, 'avatars/me.png', file); // File, Blob, ArrayBuffer, Uint8Array, data URL, or SVG string
-
-const image = await getImage(db, 'avatars/me.png');
-console.log(image.blob, image.metadata?.uploadedByDeviceId);
-
-const rendered = await getImageBlobUrl(db, 'avatars/me.png');
-img.src = rendered.url;
-rendered.revoke();
-```
-
-Metadata tracks who uploaded the current version, stored/plaintext size, upload time, content type, last access time, and total use count when the backend supports it.
-
-## React
-
-React bindings are deliberately small. App code owns engine lifecycle; hooks consume an already-created engine.
-
-```tsx
-import { createInterocitorContext, useImage, useLiveQuery, useRow } from '@interocitor/react';
-
-export const [InterocitorProvider, useDb] = createInterocitorContext<DB>();
-
-function TodoList() {
-  const db = useDb();
-  const { data: todos = [] } = useLiveQuery(() => db.table('todos').query(), [db]);
-  return todos.map(todo => <TodoRow key={todo.id} id={todo.id} />);
-}
-
-function TodoAvatar({ path }: { path?: string }) {
-  const db = useDb();
-  const image = useImage(db, path);
-  if (image.loading) return <span>Loading…</span>;
-  if (image.error || !image.url) return null;
-  return <img src={image.url} alt="" />;
-}
-```
-
-## Cloudflare Workers backend
-
-`@interocitor/workers` mounts both Interocitor surfaces under your Worker: CRDT sync routes for rows and R2-backed durable file routes for blobs/images. It can provide:
-
-- D1-backed sync object storage
-- R2-backed durable file storage
-- upload size limits and per-mesh total byte quotas
-- upload authorization callbacks that can reject by mesh, device, path, size, content type, or your app auth
-- optional Durable Object realtime invalidation
-- system ops for mesh ID issue/validation and maintenance
-
-```ts
-import { withInterocitor, InterocitorRelayDurableObject } from '@interocitor/workers';
-
-interface Env {
-  DB: D1Database;
-  FILES: R2Bucket;
-  RELAY: DurableObjectNamespace;
-  INTEROCITOR_ACCESS_TOKEN: string;
-}
-
-const appWorker = {
-  async fetch(request: Request) {
-    return new Response('app');
-  },
-};
-
-export { InterocitorRelayDurableObject };
-
-export default withInterocitor(appWorker, {
-  mountPrefix: '/sync',
-  db: env => env.DB,
-  files: env => env.FILES,
-  relay: env => env.RELAY,
-  runtime: {
-    accessToken: env => env.INTEROCITOR_ACCESS_TOKEN,
-    maxStoredFileBytes: () => 32 * 1024 * 1024,
-    maxMeshStoredBytes: () => 512 * 1024 * 1024,
-    authorizeFileUpload: async ({ uploadedByDeviceId, size, contentType }) => {
-      if (!uploadedByDeviceId) return { allowed: false, status: 401, reason: 'missing device' };
-      if (contentType?.startsWith('image/') && size > 8 * 1024 * 1024) {
-        return { allowed: false, status: 413, reason: 'image too large' };
-      }
-      return true;
-    },
-  },
-});
-```
-
-## How app data syncs
-
-Interocitor keeps both structured rows and file metadata local-first. Sync is a mailbox protocol:
-
-```mermaid
-flowchart LR
-  A[App UI] --> B[Interocitor]
-  B --> C[Local store]
-  B --> D[Encrypt changes / files]
-  D --> E[Adapter: WebDAV / Google Drive / Workers / custom]
-  E --> F[Remote mailbox]
-  F --> E
-  E --> G[Download remote artifacts]
-  G --> H[Decrypt on client]
-  H --> B
-```
-
-For row data:
-
-1. Local writes update the local store and queue change ops.
-2. `flush()` uploads encrypted change files.
-3. `pull()` downloads unseen changes and merges rows by CRDT rules.
-4. `compact()` can collapse old change logs into an encrypted snapshot.
-
-For files:
-
-1. `putFile()` encrypts the object and uploads it under the mesh `files/` namespace. Browser `putImage()` delegates to this.
-2. `getFile()` downloads and decrypts it directly. Browser `getImage()` delegates to this.
-3. `deleteFile()` removes it directly.
-
-Files are not replayed, merged, compacted, or stored in row snapshots.
-
-## Guarantees and limits
-
-Interocitor gives you:
-
-- local reads and writes after `init()`
-- **never-stuck local-first operation**: IndexedDB and cloud transport are recoverable details, not prerequisites for using the app
-- bounded `connect()` progress: stalled cloud stages degrade to offline-ready mode instead of wedging the UI
-- background sync after `connect()`
-- eventual convergence for row data when devices observe the same remote artifacts
-- encrypted remote payloads when the mesh has a non-null `keySource`
-- explicit restore/pairing instead of hidden account magic
-
-Interocitor does not give you:
-
-- a hosted backend
-- server-authoritative conflict resolution
-- hidden timing/size/device metadata
-- per-device revocation without creating a new mesh/key
-- protection from malicious code running on the user's device
-
-## Adapters
-
-| Package / adapter | Use when |
-| --- | --- |
-| `@interocitor/core` `MemoryAdapter` | Tests and local demos. |
-| `@interocitor/core` `WebDAVAdapter` | You have a WebDAV server or want simple self-hosted storage. |
-| `@interocitor/core` `GoogleDriveAdapter` | User-owned Drive as the mailbox; runtime code supplies the OAuth token. |
-| `@interocitor/core` `CloudflareAdapter` + `@interocitor/workers` | You want a Worker endpoint with D1 sync storage, R2 file storage, quotas, auth callbacks, and optional realtime relay. |
-| Custom `StorageAdapter` | You want to bring your own byte store. |
+With a non-null key source, row payloads and file bytes are encrypted before
+upload. Storage still observes transport metadata such as object names, sizes,
+timing, and request identity. See the
+[security model](packages/core/docs/security-model.md) for the complete trust
+boundary.
 
 ## Package map
 
-- `packages/core` — `@interocitor/core`, runtime-neutral engine, mailbox adapters, remote storage adapter contract, local store contract, and byte file APIs.
-- `packages/web` — `@interocitor/web`, browser local stores, browser credential stores, and image helpers.
-- `packages/react` — `@interocitor/react`, context, live-query, row, image, connected-store, and connection hooks.
-- `packages/workers` — `@interocitor/workers`, Cloudflare Worker/D1/R2 runtime.
-- `packages/interocitor-swift` — Swift client.
-- `packages/webdav` — local WebDAV server for demos/tests.
-- `examples/` — runnable demos.
+| Package | Start here |
+| --- | --- |
+| `@interocitor/core` | [Engine, schemas, adapters, pairing, recovery, and file APIs](packages/core/README.md) |
+| `@interocitor/web` | [Browser local stores, credential custody, and image helpers](packages/web/README.md) |
+| `@interocitor/react` | [Context and reactive row/image hooks](packages/react/README.md) |
+| `@interocitor/workers` | [Cloudflare D1/R2 runtime, policy, operations, and optional relay](packages/workers/README.md) |
+| `@interocitor/webdav` | [Loopback development and test server](packages/webdav/README.md) |
+| InterocitorSwift | [Swift source package](packages/interocitor-swift/README.md) |
 
-## Deep dives
+The browser package is the recommended entry point for browser applications;
+it supplies the local-store and credential-store implementations used with the
+core engine.
 
-- Terminology: [`docs/dictionary.md`](docs/dictionary.md)
-- Core API and protocol details: [`packages/core/README.md`](packages/core/README.md)
-- Adapter contract: [`packages/core/docs/adapter-contract.md`](packages/core/docs/adapter-contract.md)
-- Security model: [`packages/core/docs/security-model.md`](packages/core/docs/security-model.md)
-- Shared key scenarios: [`packages/core/docs/shared-key-scenarios.md`](packages/core/docs/shared-key-scenarios.md)
-- Pairing protocol: [`packages/core/docs/pairing.md`](packages/core/docs/pairing.md)
-- Compaction: [`packages/core/docs/compaction.md`](packages/core/docs/compaction.md)
-- React bindings: [`packages/react/README.md`](packages/react/README.md)
-- Cloudflare runtime: [`packages/workers/README.md`](packages/workers/README.md)
-- Cloudflare security guardrails: [`packages/workers/docs/security-guardrails.md`](packages/workers/docs/security-guardrails.md)
-- Protocol flows: [`docs/flows.md`](docs/flows.md)
+## Guides and reference
 
-## Tests
+- [Public-offering page source](docs/index.html)
+- [Terminology](docs/dictionary.md)
+- [Protocol flows](docs/flows.md)
+- [Core adapter contract](packages/core/docs/adapter-contract.md)
+- [Pair a device](packages/core/docs/pairing.md)
+- [Publish and use a recovery phrase](packages/core/docs/recovery.md)
+- [Recovery API reference](packages/core/docs/recovery-reference.md)
+- [Compaction](packages/core/docs/compaction.md)
+- [Cloudflare runtime options](packages/workers/docs/runtime-options.md)
+- [Cloudflare security guardrails](packages/workers/docs/security-guardrails.md)
+- [Cloudflare operations and maintenance](packages/workers/docs/maintenance.md)
+
+## Runnable examples
+
+- [`examples/todo-webdav`](examples/todo-webdav/README.md) — smallest two-tab
+  row-sync demo with an inspectable local mailbox.
+- [`examples/biometric-keys`](examples/biometric-keys/README.md) — browser
+  credential custody with WebAuthn.
+- [`examples/todo-cloudflare-do`](examples/todo-cloudflare-do/README.md) —
+  Cloudflare Worker, D1, R2, and optional realtime invalidation.
+
+## Validate this checkout
 
 ```bash
-yarn test
+yarn check:types
+yarn workspace @interocitor/core test:unit
+yarn test:e2e:todo
 ```
 
-Package-specific checks live in each package `package.json`.
+Package-specific commands and environmental prerequisites live with each
+package or example.
 
 ## License
 

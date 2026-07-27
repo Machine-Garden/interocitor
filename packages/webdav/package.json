@@ -1,7 +1,19 @@
 {
   "name": "@interocitor/webdav",
-  "version": "0.0.0-beta.12",
-  "description": "Local WebDAV server for Interocitor.",
+  "version": "0.1.0",
+  "description": "Disposable loopback WebDAV server for Interocitor development and tests.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TheUiTeam/interocitor.git",
+    "directory": "packages/webdav"
+  },
+  "homepage": "https://github.com/TheUiTeam/interocitor/tree/main/packages/webdav#readme",
+  "bugs": {
+    "url": "https://github.com/TheUiTeam/interocitor/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": "./server.mjs",
   "exports": {

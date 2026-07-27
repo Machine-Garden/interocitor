@@ -1,9 +1,17 @@
 {
   "name": "interocitor-monorepo",
   "private": true,
-  "version": "0.0.0-beta.2",
+  "version": "0.1.0",
   "packageManager": "yarn@4.6.0",
-  "description": "Umbrella monorepo for Interocitor packages, runtimes, examples, and future platform ports.",
+  "description": "Interocitor runtime packages, Swift client, documentation, and runnable examples.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TheUiTeam/interocitor.git"
+  },
+  "homepage": "https://github.com/TheUiTeam/interocitor#readme",
+  "bugs": {
+    "url": "https://github.com/TheUiTeam/interocitor/issues"
+  },
   "type": "module",
   "workspaces": [
     "packages/*",
@@ -12,7 +20,7 @@
   "scripts": {
     "build:int": "yarn workspace @interocitor/core build",
     "build:web": "yarn workspace @interocitor/web build",
-    "build:all": "yarn build:int && yarn build:web && yarn workspaces foreach --all --exclude @interocitor/core --exclude @interocitor/web -p run build",
+    "build:all": "yarn workspaces foreach --all --topological-dev --parallel run build",
     "check:publint": "publint run packages/core --strict --pack false && publint run packages/web --strict --pack false && publint run packages/react --strict --pack false && publint run packages/workers --strict --pack false && publint run packages/webdav --strict --pack false",
     "check:types": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/web/tsconfig.json --noEmit && tsc -p packages/react/tsconfig.json --noEmit && tsc -p packages/workers/tsconfig.json --noEmit",
     "check:knip": "knip --workspace packages/core --workspace packages/web --workspace packages/react --workspace packages/workers --workspace packages/webdav --include files --no-progress --reporter compact",
@@ -21,7 +29,7 @@
     "lint:fix": "oxlint . --fix",
     "format": "oxfmt .",
     "format:check": "oxfmt . --check",
-    "demo:todo": "yarn workspace @interocitor/core build && yarn demo:todo:server",
+    "demo:todo": "yarn build:int && yarn build:web && yarn demo:todo:server",
     "demo:todo:server": "yarn workspace todo-webdav-example server:file",
     "test:e2e": "yarn workspace @interocitor/web test:e2e",
     "test:e2e:todo": "yarn build:int && yarn build:web && yarn workspace todo-webdav-example check",

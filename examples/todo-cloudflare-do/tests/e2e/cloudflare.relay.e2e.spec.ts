@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 import {
   CF_TESTS_ENABLED,
   CF_WORKER_BASE_URL,
-  accessTokenForNamespace,
+  meshBearerForNamespace,
   addTask,
   applySession,
   connectDemo,
@@ -21,8 +21,8 @@ test('request budget: Cloudflare reconnect does not rewrite device metadata', as
   const { context, pages: [page] } = await newDemoPages(browser, baseURL!, 1);
 
   try {
-    const namespace = makeNamespace('team-budget-reconnect');
-    const tokenValue = accessTokenForNamespace(namespace);
+    const namespace = makeNamespace();
+    const tokenValue = meshBearerForNamespace(namespace);
     const token = await createSession(page, { namespace, token: tokenValue, pollInterval: 60_000 });
 
     await applySession(page, token, 60_000);
@@ -45,8 +45,8 @@ test('request budget: Cloudflare invalidation delivery stays bounded across two 
   const { context, pages: [tabA, tabB] } = await newDemoPages(browser, baseURL!, 2);
 
   try {
-    const namespace = makeNamespace('team-budget-burst');
-    const tokenValue = accessTokenForNamespace(namespace);
+    const namespace = makeNamespace();
+    const tokenValue = meshBearerForNamespace(namespace);
     const token = await createSession(tabA, { namespace, token: tokenValue, pollInterval: 60_000 });
     await applySession(tabB, token, 60_000);
 
@@ -85,8 +85,8 @@ test('request budget: Cloudflare device metadata writes do not wake other tabs',
   const { context, pages: [tabA, tabB] } = await newDemoPages(browser, baseURL!, 2);
 
   try {
-    const namespace = makeNamespace('team-budget-device');
-    const tokenValue = accessTokenForNamespace(namespace);
+    const namespace = makeNamespace();
+    const tokenValue = meshBearerForNamespace(namespace);
     const token = await createSession(tabA, { namespace, token: tokenValue, pollInterval: 60_000 });
     await applySession(tabB, token, 60_000);
 
@@ -135,8 +135,8 @@ test('request budget: Cloudflare relay-disabled client falls back to polling wit
   const { context, pages: [tabA, tabB] } = await newDemoPages(browser, baseURL!, 2);
 
   try {
-    const namespace = makeNamespace('team-budget-relay-off');
-    const tokenValue = accessTokenForNamespace(namespace);
+    const namespace = makeNamespace();
+    const tokenValue = meshBearerForNamespace(namespace);
     const token = await createSession(tabA, {
       namespace,
       token: tokenValue,
@@ -181,12 +181,12 @@ test('request budget: Cloudflare relay-disabled client falls back to polling wit
   }
 });
 
-test('Cloudflare TODO worker exposes InterocitorRelayDurableObject on /notify/<prefix>', async ({ browser, baseURL }) => {
+test('Cloudflare TODO worker exposes InterocitorRelayDurableObject on /notify/<address>', async ({ browser, baseURL }) => {
   const { context, pages: [page] } = await newDemoPages(browser, baseURL!, 1);
 
   try {
-    const namespace = makeNamespace('team-relay');
-    const token = accessTokenForNamespace(namespace);
+    const namespace = makeNamespace();
+    const token = meshBearerForNamespace(namespace);
     const notifyHttpUrl = `${CF_WORKER_BASE_URL}/notify/${encodeURIComponent(namespace)}/health?access_token=${token}`;
     const health = await page.request.get(notifyHttpUrl);
     expect(health.ok()).toBe(true);

@@ -1,6 +1,9 @@
 # Cloudflare security guardrails
 
-This document explains the current security model of the Cloudflare Workers implementation in plain language, with emphasis on what Cloudflare stores, what Interocitor encrypts itself, and what the current implementation does **not** provide.
+The Cloudflare backend stores sync state and durable-file metadata in D1 and
+file bytes in R2. Protected meshes reach both stores as client-encrypted
+payloads; routing and operational metadata remain visible. Applications keep
+mesh keys on clients and must supply request authentication and authorization.
 
 ## Scope
 
@@ -11,15 +14,16 @@ This document applies to the Cloudflare Workers backend in `@interocitor/workers
 - durable file/image bytes in **R2**;
 - optional realtime relay via Durable Objects.
 
-It describes the implementation as it exists today. It is not a roadmap and not a promise of future access-control features.
+It defines the package's storage, encryption, metadata, and access-control
+boundaries.
 
 ## Executive summary
 
 - **Interocitor encrypts application data on the client before upload** when the mesh is configured with a non-null `keySource`.
-- **Cloudflare D1** stores row/change payloads and file metadata. D1 itself provides encryption at rest managed by Cloudflare, but Interocitor treats that as infrastructure protection, not as application confidentiality. citeturn1search0
-- **Cloudflare R2** stores durable file/image objects. R2 encrypts objects and object metadata at rest with Cloudflare-managed keys, and Interocitor can store already-encrypted bytes there on top of that. citeturn0view1
+- **Cloudflare D1** stores row/change payloads, routing metadata, and durable-file metadata. Interocitor's application confidentiality does not depend on the platform storage layer.
+- **Cloudflare R2** stores durable file/image objects. [R2 encrypts objects and object metadata at rest with Cloudflare-managed keys](https://developers.cloudflare.com/r2/reference/data-security/), while protected Interocitor files arrive as application ciphertext.
 - **The server cannot read protected application payloads** without the mesh key. That includes encrypted row data in D1 and encrypted file bytes in R2.
-- **The current implementation does not provide fine-grained server-enforced data access control.** Access is controlled at the mesh/prefix level by possession of the right mesh secret material and any Worker-side access token checks.
+- **Request access is application policy.** The host supplies AuthN/AuthZ through `meshMiddleware`, at the mesh-address level.
 - **Simple key protection exists, but it is not document-level or row-level ACL.** The main protection is that data is useless without the client-held mesh key (or bound key components in the bound-shared-key scenario).
 
 ## What is stored where
@@ -30,34 +34,35 @@ D1 stores the backend's sync index and mailbox state. At a security-boundary
 level, that means two classes of information:
 
 1. **Application payload objects**
-   - row/change/mainline/manifest payloads for the mesh;
-   - protected meshes store encrypted payloads, not plaintext business data.
+   - change objects and mainline snapshots;
+   - protected meshes store those payloads as ciphertext, not plaintext business data.
 
 2. **Operational metadata**
+   - plaintext manifest contents such as mesh ID, schema version, epoch,
+     watermark, writer, and encryption mode;
    - routing and lookup information needed to find mesh objects;
    - durable-file metadata needed to locate objects in R2;
    - counters, timestamps, sizes, and maintenance bookkeeping.
 
-Do not document the D1 schema field-by-field in this guardrails document. The
-schema may change, but the security boundary should remain stable: D1 is a
-**ciphertext plus metadata store** for protected meshes.
+At the security boundary, D1 is a **ciphertext plus metadata store** for
+protected meshes.
 
 ### R2
 
-R2 stores durable file/image object bytes. For protected meshes, treat those
-objects as Interocitor-encrypted application payloads stored inside R2. R2 still
-applies Cloudflare-managed encryption at rest underneath. citeturn0view1turn1search0
+R2 stores durable file/image object bytes. For protected meshes, those objects
+are Interocitor-encrypted application payloads. R2 also applies its
+[platform-managed encryption at rest](https://developers.cloudflare.com/r2/reference/data-security/).
 
 ## Encryption layers
 
 ### Layer 1: Cloudflare infrastructure encryption
 
-Cloudflare documents that:
+Cloudflare documents automatic encryption at rest for R2 objects and metadata,
+using Cloudflare-managed AES-256 keys with GCM as the preferred mode, plus TLS
+for transport. See [R2 data security](https://developers.cloudflare.com/r2/reference/data-security/).
 
-- **D1** provides encryption at rest and TLS-secured transport inside the Cloudflare environment. citeturn1search0
-- **R2** encrypts stored objects and object metadata at rest with Cloudflare-managed AES-256-GCM keys, and uses TLS for transport. citeturn0view1
-
-This protects against infrastructure-level storage exposure, disk theft, and similar classes of risk. It does **not** mean Cloudflare or Worker code cannot access plaintext that your application sends unencrypted.
+Platform encryption protects the storage service. It does not prevent Worker
+code from reading plaintext that an application uploads as plaintext.
 
 ### Layer 2: Interocitor application encryption
 
@@ -82,6 +87,7 @@ The Worker and platform can read:
 - size, timing, and maintenance signals;
 - file classification metadata when supplied by the client;
 - client/device identifiers used for sync bookkeeping;
+- plaintext manifest contents;
 - whether a request was allowed or denied by Worker-side access checks.
 
 ### The server cannot read
@@ -90,29 +96,36 @@ For an encrypted mesh, the Worker cannot read:
 
 - row field names and values inside encrypted payloads;
 - encrypted change contents;
-- encrypted mainline/manifests where protected by mesh encryption;
+- encrypted mainline snapshots;
 - encrypted durable file/image bytes;
 - the final mesh key.
 
 That statement assumes the mesh key is never sent to the server and the Worker is not modified to exfiltrate client key material.
 
-## Access control: what exists today
+## Access-control boundary
 
-The current Workers implementation has **access checks**, but not rich data ACLs.
+The Workers implementation supports application-defined mesh-level access.
 
 ### What exists
 
-The Worker has request-level access gates such as:
+Two layers answer different questions:
 
-- prefix validation based on mesh id / mesh secret derivation;
-- optional bearer-token style checks through runtime hooks like `hasAccess` / `hasSystemAccess`;
-- upload authorization hooks for stored files.
+- `meshIntegrityGates` decides whether an address designates a mesh;
+- `meshMiddleware` decides what the current request may do with that mesh.
 
-These controls decide whether a request may operate on a mesh/prefix or system endpoint.
+`createMeshAuthorizationMiddleware` applies `'none'`, `'readonly'`, `'full'`,
+or `'deny'` decisions to both `/io/<address>` and `/notify/<address>`.
 
-### What does not exist
+An integrity gate is not authorization. A named address such as `main` is
+predictable and should have application-owned authorization middleware unless
+it is intentionally public. A checksummed mesh ID rejects arbitrary or
+unissued IDs, but anyone who learns a valid ID still needs authorization when
+the mesh is protected. Verify credentials with your AuthN provider and make
+the per-address permission decision in mesh middleware.
 
-The current implementation does **not** provide:
+### What the package does not provide
+
+The package does **not** provide:
 
 - per-row ACLs;
 - per-document ACLs enforced by the Worker;
@@ -122,7 +135,8 @@ The current implementation does **not** provide:
 
 So the right description is:
 
-> The current server model is mesh-level access gating plus client-side key protection, not fine-grained server-enforced data access control.
+> The server model is mesh-level access gating plus client-side key
+> protection, not fine-grained server-enforced data access control.
 
 ## Complementary controls: asymmetric keys and Cloudflare WARP
 
@@ -179,7 +193,7 @@ and key material**.
 
 ## "Simple key protection" — what it means
 
-The main protection today is that possession of storage alone is insufficient.
+Mesh-key protection makes possession of storage alone insufficient.
 
 A database dump of D1 and R2 does **not** reveal protected application data without the client-held mesh key material.
 
@@ -188,7 +202,7 @@ Depending on configuration:
 - in the **portable shared key** scenario, a copied portable key plus dump is sufficient to read the mesh;
 - in the **bound shared key** scenario, a copied portable component plus dump is still insufficient without the bound secret.
 
-See [Shared key scenarios](../packages/core/docs/shared-key-scenarios.md) for the exact distinction.
+See [Shared key scenarios](../../core/docs/shared-key-scenarios.md) for the exact distinction.
 
 This is key protection. It is useful and real. But it is **not** the same thing as document-level authorization.
 
@@ -198,10 +212,10 @@ Use language like this:
 
 - **Correct:** "Cloudflare stores encrypted application payloads in D1 and R2. Interocitor encrypts protected application data on the client before upload."
 - **Correct:** "The server cannot read protected row/file contents without client-held mesh key material."
-- **Correct:** "The current implementation provides mesh-level access gating, not fine-grained server-enforced ACL."
+- **Correct:** "The implementation provides mesh-level access gating, not fine-grained server-enforced ACL."
 - **Incorrect:** "The server has no access to any data."
 - **Incorrect:** "Cloudflare cannot see any metadata."
-- **Incorrect:** "Interocitor currently enforces per-document access control on the backend."
+- **Incorrect:** "Interocitor enforces per-document access control on the backend."
 - **Incorrect:** "R2 encryption at rest means application administrators cannot access object contents."
 
 ## Auditor notes
@@ -212,13 +226,13 @@ For SOC or similar review, the important statements are:
    - Protected business payloads are encrypted by the client before storage in D1/R2.
 
 2. **Platform encryption boundary**
-   - D1 and R2 also apply Cloudflare-managed encryption at rest and TLS in transit. citeturn1search0turn0view1
+   - Platform storage controls complement application encryption; R2 documents encryption at rest and TLS in transit.
 
 3. **Metadata exposure**
    - The backend still sees operational metadata: routing, lookup, size, timing, file classification, device bookkeeping, and maintenance signals.
 
 4. **Server access-control scope**
-   - Current enforcement is request/prefix/mesh scoped, not record/document scoped.
+   - Application middleware enforcement is request/mesh-address scoped, not record/document scoped.
 
 5. **Residual risk**
    - A legitimate client with the right key material can decrypt and export plaintext.
@@ -226,7 +240,7 @@ For SOC or similar review, the important statements are:
 
 ## Recommended product guardrails
 
-If you deploy the Cloudflare backend today:
+For a Cloudflare backend deployment:
 
 - treat D1 and R2 as **ciphertext + metadata stores**, not as trusted confidentiality boundaries by themselves;
 - do not claim document-level or row-level backend ACL unless you actually add it;
@@ -239,3 +253,4 @@ If you deploy the Cloudflare backend today:
 - Root security model: [packages/core/docs/security-model.md](../../core/docs/security-model.md)
 - Shared key scenarios: [packages/core/docs/shared-key-scenarios.md](../../core/docs/shared-key-scenarios.md)
 - Cloudflare Workers runtime: [README.md](../README.md)
+- Cloudflare R2 platform encryption: [R2 data security](https://developers.cloudflare.com/r2/reference/data-security/)

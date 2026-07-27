@@ -1,8 +1,7 @@
 /**
  * StorageAdapter — Remote backend protocol
  *
- * Mirrors packages/interocitor/src/core/types.ts StorageAdapter interface.
- * Implement this protocol to connect Interocitor to a remote backend
+ * Implement this Swift protocol to connect Interocitor to a remote backend
  * (WebDAV, CloudKit, S3, in-memory test double, etc.).
  */
 

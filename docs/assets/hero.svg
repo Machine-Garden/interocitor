@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" fill="none">
+  <title>Interocitor</title>
   <style>
     .title { font-family: 'Courier New', 'Courier', monospace; font-size: 42px; font-weight: bold; letter-spacing: 6px; fill: #1a1a1a; }
     .tagline { font-family: 'Courier New', 'Courier', monospace; font-size: 13px; letter-spacing: 2px; fill: #666; }
@@ -16,29 +17,20 @@
 
   <!-- Interocitor mark: abstracted triangular device with central lens -->
   <g transform="translate(108, 100)">
-    <!-- Outer triangle (the device body) -->
     <polygon points="0,-52 45,26 -45,26" class="mark" stroke-width="2.5" stroke-linejoin="round"/>
-    <!-- Inner triangle -->
     <polygon points="0,-30 26,15 -26,15" class="mark-thin" stroke-width="1" stroke-linejoin="round"/>
-    <!-- Central lens/screen circle -->
     <circle cx="0" cy="2" r="10" class="mark" stroke-width="2"/>
-    <!-- Lens dot -->
     <circle cx="0" cy="2" r="3" class="mark-fill"/>
-    <!-- Signal lines emanating from top -->
     <line x1="0" y1="-58" x2="0" y2="-68" class="mark" stroke-width="1.5"/>
     <line x1="-6" y1="-56" x2="-10" y2="-65" class="mark-thin" stroke-width="1"/>
     <line x1="6" y1="-56" x2="10" y2="-65" class="mark-thin" stroke-width="1"/>
-    <!-- Base platform -->
     <line x1="-50" y1="30" x2="50" y2="30" class="mark" stroke-width="2"/>
     <line x1="-42" y1="36" x2="42" y2="36" class="mark-thin" stroke-width="1"/>
   </g>
 
-  <!-- Title -->
   <text x="178" y="108" class="title">INTEROCITOR</text>
 
-  <!-- Tagline -->
-  <text x="178" y="138" class="tagline">ENCRYPTED LOCAL-FIRST CRDT SYNC OVER CLOUD STORAGE</text>
+  <text x="178" y="138" class="tagline">LOCAL-FIRST ROWS + DURABLE REMOTE FILES</text>
 
-  <!-- Decorative baseline -->
   <line x1="178" y1="148" x2="720" y2="148" stroke="#ccc" stroke-width="0.5"/>
 </svg>

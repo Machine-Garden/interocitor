@@ -2,27 +2,23 @@ import type {
   DurableObjectNamespace,
   DurableObjectStateLike,
   ExecutionContextLike,
-  InterocitorEnv,
 } from './types.ts';
 
-/**
- * Durable Object implementation for the Interocitor WebSocket relay.
- *
- * Export this class from your Worker entry and bind it in `wrangler.toml`
- * using any binding name you want. Pass that binding to `withInterocitor(...)`
- * via the `relay` getter.
- *
- * This relay carries invalidation signals only. Correctness does not depend on
- * it: clients can always fall back to polling.
- */
 const RELAY_BROADCAST_BATCH_DELAY_MS = 1_000;
 
+/**
+ * Durable Object implementation for optional mesh invalidation signals.
+ *
+ * Export this class from the Worker entry, bind it under any environment name,
+ * and pass that binding through the mount's `relay` getter. Sync correctness
+ * remains polling-based when the relay is absent or unavailable.
+ */
 export class InterocitorRelayDurableObject {
   private readonly ctx: DurableObjectStateLike;
   private pendingBroadcastPayload: string | null = null;
   private pendingBroadcastTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(state: DurableObjectStateLike, _env: InterocitorEnv) {
+  constructor(state: DurableObjectStateLike, _env: unknown) {
     this.ctx = state;
   }
 
@@ -120,17 +116,16 @@ export class InterocitorRelayDurableObject {
   }
 }
 
-/**
- * Fan out a JSON payload to all clients connected to the relay instance for
- * the given prefix. Fire-and-forget.
- */
+/** Optional logging controls for {@link broadcast}. */
 export interface BroadcastDiagnostics {
+  /** Log successful delivery and a missing relay binding. Default: `false`. */
   verbose?: boolean;
+  /** Logging sink for relay diagnostics. Default: `console`. */
   logger?: Pick<Console, 'debug' | 'warn'>;
 }
 
 /**
- * Queue a relay broadcast for one mesh prefix.
+ * Queue a relay broadcast for one mesh address.
  *
  * This is intentionally fire-and-forget. Delivery success or failure is
  * reported only through the optional diagnostics logger and `waitUntil`.
@@ -138,17 +133,17 @@ export interface BroadcastDiagnostics {
 export function broadcast(
   relay: DurableObjectNamespace | undefined,
   ctx: ExecutionContextLike | undefined,
-  prefix: string,
+  address: string,
   payload: unknown,
   diagnostics: BroadcastDiagnostics = {},
 ): void {
   const logger = diagnostics.logger ?? console;
   if (!relay) {
-    if (diagnostics.verbose) logger.warn('[interocitor:relay] broadcast skipped: relay binding not configured', { prefix });
+    if (diagnostics.verbose) logger.warn('[interocitor:relay] broadcast skipped: relay binding not configured', { address });
     return;
   }
 
-  const stub = relay.get(relay.idFromName(prefix));
+  const stub = relay.get(relay.idFromName(address));
   const broadcastPromise = stub
     .fetch(
       new Request('https://internal/__broadcast', {
@@ -159,14 +154,14 @@ export function broadcast(
     .then(async (response) => {
       const result = await response.json().catch(() => ({ ok: response.ok }));
       if (!response.ok || (typeof result === 'object' && result !== null && 'failed' in result && Number(result.failed) > 0)) {
-        logger.warn('[interocitor:relay] broadcast incomplete', { prefix, status: response.status, result });
+        logger.warn('[interocitor:relay] broadcast incomplete', { address, status: response.status, result });
         return;
       }
-      if (diagnostics.verbose) logger.debug('[interocitor:relay] broadcast delivered', { prefix, result });
+      if (diagnostics.verbose) logger.debug('[interocitor:relay] broadcast delivered', { address, result });
     })
     .catch((error) => {
       logger.warn('[interocitor:relay] broadcast failed', {
-        prefix,
+        address,
         error: error instanceof Error ? error.message : String(error),
       });
     });

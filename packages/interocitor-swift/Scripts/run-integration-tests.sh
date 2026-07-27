@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run-integration-tests.sh
 #
-# Starts the interocitor-webdav Node server, runs `swift test` with WebDAV
+# Starts the repository WebDAV test server, runs `swift test` with WebDAV
 # integration tests enabled, then tears the server down.
 #
 # Usage:
@@ -18,7 +18,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 MONOREPO_DIR="$(cd "$PACKAGE_DIR/../.." && pwd)"
-SERVER_MJS="$MONOREPO_DIR/packages/interocitor-webdav/server.mjs"
+SERVER_MJS="$MONOREPO_DIR/packages/webdav/server.mjs"
 PORT="${WEBDAV_PORT:-4174}"
 SERVER_PID=""
 
@@ -52,7 +52,7 @@ start_webdav_server() {
         return 1
     fi
 
-    log "Starting interocitor-webdav on port $PORT..."
+    log "Starting the Interocitor WebDAV test server on port $PORT..."
     PORT="$PORT" node "$SERVER_MJS" --mode=memory &
     SERVER_PID=$!
 

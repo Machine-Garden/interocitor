@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 import {
   CF_TESTS_ENABLED,
-  accessTokenForNamespace,
+  meshBearerForNamespace,
   addTask,
   applySession,
   compactDemo,
@@ -22,8 +22,8 @@ test('Cloudflare TODO demo rehydrates a fresh tab from the compacted mainline sn
   const { context, pages: [writer, reader] } = await newDemoPages(browser, baseURL!, 2);
 
   try {
-    const namespace = makeNamespace('team-mainline');
-    const tokenValue = accessTokenForNamespace(namespace);
+    const namespace = makeNamespace();
+    const tokenValue = meshBearerForNamespace(namespace);
 
     const joinToken = await createSession(writer, { namespace, token: tokenValue });
     await applySession(reader, joinToken);

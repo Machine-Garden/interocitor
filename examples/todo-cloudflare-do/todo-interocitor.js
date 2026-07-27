@@ -1,29 +1,32 @@
-import { InterocitorRelayDurableObject, withInterocitor } from '../../packages/workers/dist/index.js';
+import {
+  checksummedMeshIntegrityGate,
+  createMeshAuthorizationMiddleware,
+  createInterocitorSystemHandler,
+  InterocitorRelayDurableObject,
+  withInterocitor,
+} from '../../packages/workers/dist/index.js';
 
-const appWorker = {
-  async fetch(request) {
-    const url = new URL(request.url);
+async function sha256Hex(value) {
+  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
 
-    if (url.pathname === '/') {
-      return new Response('todo app root\n', { status: 200 });
-    }
-    if (url.pathname === '/api/ping') {
-      return Response.json({ ok: true, source: 'app' });
-    }
+const meshBearerAuthorization = createMeshAuthorizationMiddleware(async ({ address, request }, env) => {
+  const authorization = request.headers.get('Authorization') || '';
+  const headerBearer = authorization.startsWith('Bearer ') ? authorization.slice('Bearer '.length).trim() : '';
+  const bearer = headerBearer || new URL(request.url).searchParams.get('access_token') || '';
+  const expected = await sha256Hex(`${address}${env.TODO_MESH_BEARER_SECRET || ''}`);
+  return bearer && bearer === expected ? 'full' : 'deny';
+});
 
-    return new Response('App route not found\n', { status: 404 });
-  },
-};
-
-export { InterocitorRelayDurableObject };
-
-export default withInterocitor(appWorker, {
+const interocitorOptions = {
   mountPrefix: '/todo-interocitor',
   db: (env) => env.INTEROCITOR_DB,
+  files: (env) => env.INTEROCITOR_FILES,
   relay: (env) => env.INTEROCITOR_RELAY,
   runtime: {
-    accessToken: (env) => env.INTEROCITOR_ACCESS_TOKEN,
-    systemToken: (env) => env.INTEROCITOR_SYSTEM_TOKEN,
+    meshIntegrityGates: [checksummedMeshIntegrityGate],
+    meshMiddleware: [meshBearerAuthorization],
     meshSecret: (env) => env.INTEROCITOR_MESH_SECRET,
     verbose: (env) => env.INTEROCITOR_VERBOSE,
     enableScheduledMaintenance: (env) => env.INTEROCITOR_ENABLE_SCHEDULED_MAINTENANCE,
@@ -33,4 +36,25 @@ export default withInterocitor(appWorker, {
     maxMainlineBytes: (env) => env.INTEROCITOR_MAX_MAINLINE_BYTES,
     maxGenericFileBytes: (env) => env.INTEROCITOR_MAX_GENERIC_FILE_BYTES,
   },
-});
+};
+
+const system = createInterocitorSystemHandler(interocitorOptions);
+
+const appWorker = {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    if (system.matches(url.pathname)) {
+      if (request.headers.get('Authorization') !== `Bearer ${env.TODO_SYSTEM_BEARER_TOKEN}`) {
+        return new Response('Unauthorized', { status: 401 });
+      }
+      return system.fetch(request, env, ctx);
+    }
+    if (url.pathname === '/') return new Response('todo app root\n', { status: 200 });
+    if (url.pathname === '/api/ping') return Response.json({ ok: true, source: 'app' });
+    return new Response('App route not found\n', { status: 404 });
+  },
+};
+
+export { InterocitorRelayDurableObject };
+
+export default withInterocitor(appWorker, interocitorOptions);

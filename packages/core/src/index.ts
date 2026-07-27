@@ -115,6 +115,16 @@ export {
   type VerifyTokenOptions,
 } from './crypto/signing.ts';
 export {
+  recoveryLocator,
+  createRecoveryWrapper,
+  unwrapRecoveryWrapper,
+  publishRecoveryWrapper,
+  recoverMeshCredentials,
+  type RecoveredMeshCredentials,
+  type RecoveryStorageAdapter,
+  type RecoveryWrapper,
+} from './crypto/recovery.ts';
+export {
   type CredentialStore,
   type StoredCredentials,
 } from './storage/credential-store.ts';

@@ -35,8 +35,9 @@ const recordSealKeyStore = createWebSecretStore('case-vault:record-seal-key', {
 await recordSealKeyStore.save(recordSealKeyBytes);
 ```
 
-This provisions or reads a platform authenticator such as Touch ID, Face ID, or
-Windows Hello.
+This asks the browser to provision or read a platform authenticator such as
+Touch ID, Face ID, or Windows Hello. The browser may satisfy required user
+verification with another platform-approved method.
 
 ## 3. Enforced security as cross-platform WebAuthn
 
@@ -51,8 +52,11 @@ const signerStore = createWebSecretStore('case-vault:jwt-signer', {
 await signerStore.save(signingKeyBundleBytes);
 ```
 
-This provisions or reads only a cross-platform WebAuthn credential. If no phone
-or hybrid credential has been enrolled yet, `load()` returns `null`.
+This requests a cross-platform WebAuthn credential. If no local credential
+reference matches, `load()` omits `allowCredentials` and lets the browser run a
+discoverable-credential ceremony. It may prompt, reject, return a blob, or
+return `null` when the assertion or `largeBlob` result contains no blob; `null`
+is not a reliable “no phone enrolled” signal.
 
 ## 4. Add phone
 
@@ -74,6 +78,10 @@ The browser owns the actual ceremony. Interocitor requests
 `authenticatorAttachment: 'cross-platform'`, `hints: ['hybrid']`, and
 `transports: ['hybrid']`; on supported browsers this is where a phone-mediated
 passkey flow should appear.
+
+`listAuthenticators()` and `hasAuthenticator(...)` inspect only the
+browser-side credential-reference registry. They do not enumerate or revoke
+credentials held by an authenticator.
 
 ## 5. Keep mesh credential custody separate
 
@@ -137,7 +145,24 @@ const token = await signToken(privateKey, {
 });
 ```
 
+This is a partial application fragment: the app must define serialization,
+rotation, JWT claims, verification policy, and failure handling. The exported
+PKCS#8 bytes are the application signing key and enter JavaScript after the
+WebAuthn ceremony; the authenticator's private WebAuthn credential key is not
+used to sign this JWT.
+
+## Security boundary
+
+- `browserStorage` persists plaintext/base64 application bytes that same-origin
+  script can read.
+- WebAuthn `largeBlob` custody requires a supported browser, relying-party
+  context, authenticator, and successful ceremony.
+- WebAuthn protects retrieval at rest, but the loaded bytes exist in
+  JavaScript. XSS or malicious same-origin code can use or export them while
+  available.
+- `clear()` removes local credential hints; it does not revoke a passkey or
+  securely erase authenticator-managed storage.
+
 ## Example
 
-See the runnable browser page in
-[examples/biometric-keys/index.html](/Users/akorzunov/dev/github/interocitor/examples/biometric-keys/index.html).
+See the [runnable biometric-keys example](../../../examples/biometric-keys/README.md).

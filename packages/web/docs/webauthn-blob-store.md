@@ -36,8 +36,8 @@ const store = new WebAuthnBlobStore(namespace, {
 | Option | Meaning |
 | --- | --- |
 | `rpId` | WebAuthn relying-party id. Defaults to the current hostname. |
-| `displayName` | Human-readable app name shown in passkey / biometric prompts. |
-| `authenticatorAttachment` | Browser preference: `platform`, `cross-platform`, or `auto`. |
+| `displayName` | Human-readable app name shown in passkey / biometric prompts. Defaults to `Interocitor`. |
+| `authenticatorAttachment` | Browser preference: `platform`, `cross-platform`, or `auto`. Defaults to `platform`. |
 | `userVerification` | WebAuthn verification requirement. Default: `required`. |
 | `hints` | Browser UI hints. `['hybrid']` asks for a phone-mediated flow when supported. |
 | `transports` | Credential transport hints. `['hybrid']` narrows read/write ceremonies to hybrid-capable credentials. |
@@ -58,18 +58,30 @@ final authenticator-selection UX.
 ```ts
 await store.save(bytes);
 const bytes = await store.load();
+const platformBytes = await store.load({ authenticatorAttachment: 'platform' });
 const authenticator = await store.enrollAuthenticator(bytes, options);
 const refs = store.listAuthenticators();
+const hasPhoneHint = store.hasAuthenticator({
+  authenticatorAttachment: 'cross-platform',
+});
 await store.clear();
 ```
 
-- `save(bytes)` writes or updates the blob behind the store namespace.
+- `save(bytes)` updates the first matching locally remembered credential, or
+  enrolls a new one when none is remembered.
 - `load()` runs a WebAuthn read ceremony and returns the stored bytes, or
-  `null` when no blob is available.
+  `null` when the assertion is cancelled by returning no credential or its
+  extension result contains no blob. The browser may also reject the promise.
+- `load({ authenticatorAttachment })` filters locally remembered credential
+  references before the ceremony. With no matching references, the browser is
+  still allowed to discover a resident credential.
 - `enrollAuthenticator(bytes, options)` creates a new WebAuthn credential and
-  writes the supplied blob into it.
+  writes the supplied blob into it. Cancellation and missing `largeBlob`
+  support reject.
 - `listAuthenticators()` returns the local credential-id registry for this
   namespace. The registry is a hint, not secret key material.
+- `hasAuthenticator(options)` reports whether that local registry contains a
+  matching hint; it does not query an authenticator.
 - `clear()` removes the browser-side credential-id hint. It does not remotely
   wipe an authenticator-managed credential.
 
@@ -115,3 +127,22 @@ await signer.enrollAuthenticator(signingKeyBundleBytes, {
 The app controls the namespace and blob contents. `hints: ['hybrid']` and
 `transports: ['hybrid']` ask for the phone-mediated WebAuthn path. The browser
 still controls the final ceremony and support matrix.
+
+## Security and failure boundary
+
+`WebAuthnBlobStore` stores application-supplied bytes in the `largeBlob`
+extension. The authenticator's private WebAuthn credential key is not exposed
+and does not become an application signing or encryption key. After a
+successful read, the blob bytes enter JavaScript; same-origin malicious code
+or XSS can access them while they are loaded.
+
+The API requires a secure WebAuthn relying-party context (HTTPS, with localhost
+development exceptions), browser `largeBlob` support, a compatible
+authenticator, and successful user verification. Creation/assertion
+cancellation, browser rejection, unsupported extensions, and a `written:
+false` extension result are normal failure paths that applications must
+surface or recover from.
+
+All code blocks on this page are API fragments. The
+[biometric-keys example](../../../examples/biometric-keys/README.md) supplies a
+runnable browser page and setup commands.

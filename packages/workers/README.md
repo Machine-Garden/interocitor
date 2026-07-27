@@ -8,23 +8,46 @@
 
 Cloudflare Workers runtime for [Interocitor](https://github.com/TheUiTeam/interocitor). Handles both app-data surfaces — CRDT row sync and R2-backed durable file/image storage — plus optional realtime relay, all behind a single URL prefix in your existing Worker.
 
+> **Public release:** build the `0.1.0` API from the matching monorepo
+> workspaces.
+
+From the repository root:
+
+```bash
+yarn install
+yarn workspace @interocitor/workers build
+```
+
+TypeScript and Wrangler fragments in this README are illustrative unless a
+section explicitly links a runnable command. They use the package's current
+API but assume host Worker bindings, environment types, and application policy.
+The [Cloudflare TODO app example](../../examples/todo-cloudflare-do/README.md) is
+the complete runnable deployment.
+
 ## Quick start
 
-Use the Worker package for the concrete sync adapter base URL, for example `/sync/io/{meshId}`. This is separate from the handshake relay base used by QR pairing, which is an app-level logical path such as `/Taska`.
+This illustrative Worker entry serves one protected application database at
+the stable mesh address `main`. It assumes Cloudflare binding types and
+values supplied by the host; the complete runnable deployment is
+[the Cloudflare TODO app example](../../examples/todo-cloudflare-do/README.md).
 
 ```ts
-import { InterocitorRelayDurableObject, withInterocitor } from '@interocitor/workers';
+import {
+  createMeshAuthorizationMiddleware,
+  withInterocitor,
+} from '@interocitor/workers';
 
 interface Env {
   MY_DB: D1Database;
   MY_FILES: R2Bucket;
-  MY_RELAY: DurableObjectNamespace;
-  INTEROCITOR_ACCESS_TOKEN?: string;
-  INTEROCITOR_SYSTEM_TOKEN?: string;
-  INTEROCITOR_MESH_SECRET?: string;
-  INTEROCITOR_ENABLE_SCHEDULED_MAINTENANCE?: string;
-  INTEROCITOR_PATH_TTL_HOURS?: string;
+  MAIN_MESH_TOKEN: string;
 }
+
+const authorizeMain = createMeshAuthorizationMiddleware(({ request }, env: Env) =>
+  request.headers.get('Authorization') === `Bearer ${env.MAIN_MESH_TOKEN}`
+    ? 'full'
+    : 'deny',
+);
 
 const appWorker = {
   async fetch(request: Request) {
@@ -35,26 +58,40 @@ const appWorker = {
   },
 };
 
-export { InterocitorRelayDurableObject };
-
 export default withInterocitor<Env>(appWorker, {
   mountPrefix: '/sync',
   db: (env) => env.MY_DB,
   files: (env) => env.MY_FILES,
-  relay: (env) => env.MY_RELAY,
   runtime: {
-    accessToken: (env) => env.INTEROCITOR_ACCESS_TOKEN,
-    systemToken: (env) => env.INTEROCITOR_SYSTEM_TOKEN,
-    meshSecret: (env) => env.INTEROCITOR_MESH_SECRET,
-    enableScheduledMaintenance: (env) => env.INTEROCITOR_ENABLE_SCHEDULED_MAINTENANCE,
-    pathTtlHours: (env) => env.INTEROCITOR_PATH_TTL_HOURS,
+    meshIntegrityGates: [({ address }) => address === 'main'],
+    meshMiddleware: [authorizeMain],
   },
 });
 ```
 
-Interocitor does not constrain your `Env` type. You own your env shape. Pass only the bindings and settings it needs via getters.
+The exact bearer comparison is a small working application policy. Replace
+the authorizer with the AuthN/AuthZ system used by your host application. See
+[Mesh addresses and access](docs/mesh-access.md).
 
-Interocitor claims `/<prefix>/io/*`, `/<prefix>/notify/*`, `/<prefix>/__interocitor/*`, and `/<prefix>/health`. Everything else goes to your app.
+The Cloudflare adapter base URL is `/sync/io/main`. The QR handshake relay base
+is a separate app-level logical path such as `/Taska`.
+
+Interocitor claims `/<mountPrefix>/io/*`, `/<mountPrefix>/notify/*`,
+`/<mountPrefix>/recovery/*`, and `/<mountPrefix>/health`. Everything else goes
+to your app.
+
+### Recovery wrappers
+
+`/<mountPrefix>/recovery/<locator>` stores an opaque recovery wrapper outside
+the mesh-specific `/io/<address>` namespace. This lets a client recover its
+manifest mesh ID, portable key, and remote path from an
+application-generated recovery phrase. It does not recover a separate Worker
+route address or storage-provider login. The Worker receives only ciphertext and
+the phrase-derived opaque locator, never the words or mesh key.
+
+Recovery wrappers are capability-addressed by their opaque locator. See
+[Recovery phrases](../core/docs/recovery.md) and the
+[route reference](docs/runtime-options.md#recovery-wrapper-route).
 
 ## Public API
 
@@ -64,14 +101,19 @@ Documented entrypoints in this package:
 | --- | --- |
 | `withInterocitor` | You want Interocitor to wrap an existing Worker and own one URL prefix |
 | `createInterocitorMount` | You want explicit route matching and manual delegation inside a larger Worker |
+| `createInterocitorSystemHandler` | You choose to expose maintenance or mesh-ID operations from a host-owned route |
+| `createMeshAuthorizationMiddleware` | You want a four-state `none` / `readonly` / `full` / `deny` application access decision |
+| `checksummedMeshIntegrityGate` | You accept only addresses issued by your checksum authority |
 | `InterocitorRelayDurableObject` | You want realtime invalidation over WebSockets in addition to polling |
-| `InterocitorRuntimeOptions` | You need to supply auth, quotas, maintenance, audit, or upload policy from your env |
-| `InterocitorMountOptions` | You need to wire D1, optional R2, and optional relay bindings into the mount |
+| `broadcast` | You need to enqueue a custom relay invalidation outside the built-in write/delete paths |
+| `applySchema`, `ensureSchema`, `SCHEMA_STATEMENTS` | You need programmatic D1 schema setup instead of the packaged SQL file |
+| `InterocitorMountOptions`, `InterocitorRuntimeOptions`, `InterocitorSystemHandlerOptions` | Configuration contracts; see the [reference](docs/runtime-options.md) |
+| `InterocitorMount`, `InterocitorSystemHandler`, `WithInterocitorOptions` | Returned handler and wrapper contracts |
+| `MeshIntegrityGate`, `MeshMiddleware`, `MeshAuthorizer`, `MeshAuthorization`, `MeshRequestContext`, `MeshIntegrityContext`, `MeshAccess` | Mesh integrity and application-policy contracts |
 | `FileUploadAuthorizationRequest`, `FileUploadAuthorizationResult` | You need app-owned policy before durable file uploads are accepted |
-
-The public API is documented in two places:
-- In code, via JSDoc on the exported entrypoints.
-- Outside code, in this README and package-local deep dives under `docs/`.
+| `WorkerAuditEvent`, `WorkerAuditOutcome` | Completed storage-operation instrumentation contracts |
+| `BroadcastDiagnostics` | Optional logging controls for `broadcast` |
+| `D1Database`, `R2Bucket`, `R2ObjectBody`, `DurableObjectNamespace`, `ExecutionContextLike`, `WorkerLike` | Minimal Cloudflare-compatible structural types used by the package API |
 
 ## Runtime
 
@@ -85,6 +127,10 @@ const mount = createInterocitorMount({
   db: (env) => env.INTEROCITOR_DB,
   files: (env) => env.INTEROCITOR_FILES,
   relay: (env) => env.INTEROCITOR_RELAY,
+  runtime: {
+    meshIntegrityGates: [({ address }) => address === 'main'],
+    meshMiddleware: [authorizeMain],
+  },
 });
 ```
 
@@ -108,69 +154,38 @@ new_classes = ["InterocitorRelayDurableObject"]
 
 Binding names are ultimately yours. Pass them to `withInterocitor(...)` or `createInterocitorMount(...)` via getters. D1 is required for sync; R2 is required only if clients call durable file/image APIs; Durable Objects are required only for realtime relay.
 
-Apply the D1 schema from the package root:
+Apply the canonical D1 schema from the public repository root:
 
 ```bash
-wrangler d1 execute <database-name> --file node_modules/@interocitor/workers/schema.sql
+yarn --cwd examples/todo-cloudflare-do exec wrangler d1 execute \
+  <database-name> \
+  --file=../../packages/workers/schema.sql
 ```
 
-The published package includes `schema.sql` in its `files` list.
+Add `--local` for Wrangler local state and omit it for the configured remote
+database. Replace `<database-name>` and finish the Wrangler binding IDs first.
 
-### Realtime relay: what `InterocitorRelayDurableObject` does
+Programmatic hosts can call `ensureSchema(db)` once per D1 binding object; it
+uses a `WeakSet` fast path and idempotent `CREATE ... IF NOT EXISTS`
+statements. `applySchema(db)` executes the idempotent statements every time.
+`SCHEMA_STATEMENTS` exposes the base statements for tooling; the functions
+also apply the compatibility check for the `stored_files.taint` column.
 
-`InterocitorRelayDurableObject` is the optional Durable Object behind Interocitor's notify WebSocket route.
+### Realtime relay
 
-- `withInterocitor(..., { relay: (env) => env.MY_RELAY })` enables `/<mountPrefix>/notify/<prefix>`.
-- The Worker authenticates that route with the same per-prefix access-token rule as `/<mountPrefix>/io/<prefix>`.
-- The relay stores WebSockets using Cloudflare's hibernation API (`acceptWebSocket`) and fans out tiny invalidation messages after successful file writes/deletes. The package broadcasts internally after successful `PUT` and `DELETE` responses; apps should not wrap these routes just to notify peers.
-- Check relay wiring with `GET /notify/<prefix>/health` using the same bearer/access token. It returns JSON such as `{ "ok": true, "connected": 0 }`; `501` means the relay binding was not configured.
-- Set `runtime.verbose` (for example from `INTEROCITOR_VERBOSE=1`) to emit relay diagnostics to `wrangler tail`: unauthorized notify requests, missing binding, WebSocket forwarding, and broadcast delivery/failure counts.
-- Correctness does not depend on the relay. Clients still poll/pull. The relay is the low-latency path for apps that want push invalidations.
-
-Minimum Worker entry:
-
-```ts
-import { InterocitorRelayDurableObject, withInterocitor } from '@interocitor/workers';
-
-export { InterocitorRelayDurableObject };
-
-export default withInterocitor(appWorker, {
-  mountPrefix: '/sync',
-  db: (env) => env.MY_DB,
-  relay: (env) => env.MY_RELAY,
-});
-```
-
-Minimum Wrangler config:
-
-```toml
-[[durable_objects.bindings]]
-name = "MY_RELAY"
-class_name = "InterocitorRelayDurableObject"
-
-[[migrations]]
-tag = "v1"
-new_classes = ["InterocitorRelayDurableObject"]
-```
-
-Proof that the relay is reachable:
-
-```bash
-# 1. Start the Cloudflare TODO example with RUN_CF_EXAMPLE_TESTS=1.
-RUN_CF_EXAMPLE_TESTS=1 yarn test:e2e:cloudflare:run --grep "InterocitorRelayDurableObject"
-
-# 2. Or open the notify endpoint manually from a browser/client:
-# ws(s)://<worker>/sync/notify/<prefix>?access_token=<sha256(prefix + accessSecret)>
-```
-
-The repository includes this proof as `examples/todo-cloudflare-do/tests/e2e/cloudflare.relay.e2e.spec.ts`: it starts the example Worker, opens `/todo-interocitor/notify/<namespace>` with the valid token, and expects the WebSocket to reach `open`.
+The optional Durable Object relay sends invalidation signals after successful
+writes and deletes. Notify requests pass the same integrity and middleware
+pipeline as IO requests. Clients continue polling when the relay is absent.
+See [Realtime invalidation relay](docs/relay.md) for wiring and verification.
 
 ## Custom routing
 
 If you need manual routing instead of wrapping the whole worker:
 
 ```ts
-import { createInterocitorMount } from '@interocitor/workers';
+import {
+  createInterocitorMount,
+} from '@interocitor/workers';
 
 const mount = createInterocitorMount<Env>({
   mountPrefix: '/sync',
@@ -178,9 +193,8 @@ const mount = createInterocitorMount<Env>({
   files: (env) => env.MY_FILES,
   relay: (env) => env.MY_RELAY,
   runtime: {
-    accessToken: (env) => env.INTEROCITOR_ACCESS_TOKEN,
-    systemToken: (env) => env.INTEROCITOR_SYSTEM_TOKEN,
-    meshSecret: (env) => env.INTEROCITOR_MESH_SECRET,
+    meshIntegrityGates: [({ address }) => address === 'main'],
+    meshMiddleware: [authorizeMain],
   },
 });
 
@@ -213,9 +227,28 @@ Uploads are guarded before R2 write:
 
 - `maxStoredFileBytes` limits one upload.
 - `maxMeshStoredBytes` limits total stored file bytes for a mesh, accounting for overwrites and deletes.
-- `authorizeFileUpload` can reject by mesh prefix, path, uploader device id, size, content type, current mesh usage, or app-specific request auth.
+- `authorizeFileUpload` can reject by mesh address, path, uploader device id, size, content type, current mesh usage, or app-specific request auth.
+
+The following illustrative policy omits the host identity provider and
+environment type. It shows where whole-mesh authorization and
+durable-file-specific policy compose.
 
 ```ts
+import {
+  checksummedMeshIntegrityGate,
+  createInterocitorMount,
+  createMeshAuthorizationMiddleware,
+} from '@interocitor/workers';
+
+const authorizeMesh = createMeshAuthorizationMiddleware(async ({ address, access, request }, env) => {
+  const subject = await verifyBearerWithYourIdentityProvider(request, env);
+  if (!subject) return 'deny';
+  const permission = await meshPermissionFor(subject, address, env);
+  if (permission === 'write') return 'full';
+  if (permission === 'read' && access === 'read') return 'readonly';
+  return 'deny';
+});
+
 const mount = createInterocitorMount<Env>({
   mountPrefix: '/sync',
   db: env => env.INTEROCITOR_DB,
@@ -223,111 +256,95 @@ const mount = createInterocitorMount<Env>({
   runtime: {
     maxStoredFileBytes: env => env.INTEROCITOR_MAX_STORED_FILE_BYTES,
     maxMeshStoredBytes: env => env.INTEROCITOR_MAX_MESH_STORED_BYTES,
-    authorizeFileUpload: async ({ prefix, path, uploadedByDeviceId, size, contentType, taint, request }) => {
-      if (!uploadedByDeviceId) return { allowed: false, status: 401, reason: 'missing device' };
+    meshIntegrityGates: [checksummedMeshIntegrityGate],
+    meshMiddleware: [authorizeMesh],
+    meshSecret: env => env.INTEROCITOR_MESH_SECRET,
+    authorizeFileUpload: async ({ address, path, size, contentType, taint, request }) => {
       if (contentType?.startsWith('image/') && size > 8 * 1024 * 1024) {
         return { allowed: false, status: 413, reason: 'image too large' };
       }
-      // Inspect request headers/cookies here if your app has user auth.
       return true;
     },
   },
 });
 ```
 
-## Runtime getters
+## Runtime options
 
-Interocitor no longer reads magic env variable names by itself. You pass everything explicitly through getters.
+Start with the behavior your deployment needs:
 
-```ts
-runtime: {
-  accessToken: (env) => env.INTEROCITOR_ACCESS_TOKEN,
-  systemToken: (env) => env.INTEROCITOR_SYSTEM_TOKEN,
-  meshSecret: (env) => env.INTEROCITOR_MESH_SECRET,
-  enableScheduledMaintenance: (env) => env.INTEROCITOR_ENABLE_SCHEDULED_MAINTENANCE,
-  pathTtlHours: (env) => env.INTEROCITOR_PATH_TTL_HOURS,
-  maxControlBytes: (env) => env.INTEROCITOR_MAX_CONTROL_BYTES,
-  maxChangeBytes: (env) => env.INTEROCITOR_MAX_CHANGE_BYTES,
-  maxMainlineBytes: (env) => env.INTEROCITOR_MAX_MAINLINE_BYTES,
-  maxGenericFileBytes: (env) => env.INTEROCITOR_MAX_GENERIC_FILE_BYTES,
-  maxStoredFileBytes: (env) => env.INTEROCITOR_MAX_STORED_FILE_BYTES,
-  maxMeshStoredBytes: (env) => env.INTEROCITOR_MAX_MESH_STORED_BYTES,
-  authorizeFileUpload: async (upload, env) => true,
-}
-```
+| Need | Options |
+| --- | --- |
+| Define valid mesh addresses | `meshIntegrityGates` |
+| Apply application access or request policy | `meshMiddleware` |
+| Set D1/R2 request and quota limits | `maxControlBytes`, `maxChangeBytes`, `maxMainlineBytes`, `maxGenericFileBytes`, `maxStoredFileBytes`, `maxMeshStoredBytes` |
+| Add durable-file-specific policy | `authorizeFileUpload` |
+| Reclaim inactive D1 sync roots | `enableScheduledMaintenance`, `pathTtlHours` |
+| Instrument completed storage operations | `storageOperationAudit` |
+| Enable targeted diagnostics | `verbose` |
 
-Only `db` is required for sync. `files` is required for durable file/image APIs. Everything else is optional.
+The [Worker configuration reference](docs/runtime-options.md) defines every
+type, default, route surface, ordering rule, and failure behavior.
 
-## Observability (audit)
+## Mesh addresses and access
 
-The worker is the **trusted boundary**: it observes every mesh operation it
-serves, so an `audit` callback is the place to record "who did what" without
-trusting the client. Provide it as a runtime getter; the worker invokes it
-with a typed event after each operation.
+Use a named address when one mesh has a stable meaning in your application.
+For example, a Worker acting as the shared database for one application can
+serve that database at `/sync/io/main`. Every client can be configured with
+`main`; the application does not need to provision or discover a generated ID.
+
+Use generated, checksummed IDs when the application provisions many meshes and
+arbitrary UUIDs must not create storage namespaces.
+
+For either model, integrity gates define which addresses exist. Mesh
+middleware decides what the current request may do. Read [Mesh addresses and
+access](docs/mesh-access.md) for the complete named/checksummed model,
+four-state authorization, AuthN/AuthZ integration, and middleware composition.
+
+## Maintenance and system operations
+
+Scheduled TTL cleanup and the optional host-routed system handler are covered
+in [Maintenance and system operations](docs/maintenance.md), including exactly
+what TTL deletes and how the host applies its administrative policy.
+
+## Storage operation instrumentation
+
+`storageOperationAudit` is awaited instrumentation for completed storage
+operations:
 
 ```ts
 runtime: {
   // Simplest useful sink: structured log to `wrangler tail` / Logpush.
-  audit: (event) => console.log(JSON.stringify(event)),
+  storageOperationAudit: (event) => console.log(JSON.stringify(event)),
 }
 ```
 
-`audit` is a **pure callback** — the worker does not persist events itself, and
-callback failures never fail the request. Each `WorkerAuditEvent` carries
-`op` (write, read, delete, list, metadata, stored-file-\*, system), `prefix`,
+The Worker does not persist events. Callback failures do not fail the request,
+while callback latency adds request latency. Each `WorkerAuditEvent` carries
+`op` (write, read, delete, list, metadata, recovery, or stored-file variants), `address`,
 `path`, `status`, `outcome`, optional `bytes`/`taint`, a `requestId`, and an
 ISO `at` timestamp.
 
-What the worker **can** audit: change-file/manifest writes, compaction and
-maintenance, reads, lists, and stored-file upload/download/delete/metadata.
+It covers completed sync-object operations, recovery-wrapper operations, and
+stored-file upload/download/delete/metadata. Gate, middleware, validation,
+quota, and system-operation denials require request middleware audit.
 What it **cannot** see: CRDT row meaning (payloads are encrypted), the `taint`
 → key mapping, and client-side unlock/decrypt of sealed files. Full event
 shape and boundaries: [Audit](docs/audit.md).
 
 ## Catch-up after absence
 
-A device returning after a long absence catches up incrementally: the cursor is
-already in the data model. Change files are HLC-named, and `pull()` merges only
-those newer than the device's cursor — no full re-download unless the needed
-tail was already compacted away. See [Catch-up](docs/catch-up.md).
-
-## Mesh IDs
-
-Workers issue and validate mesh/team IDs. Each ID is a UUIDv7 with an embedded HMAC tag — only the worker with the secret can mint valid IDs.
-
-### System ops
-
-Issue a mesh ID (requires `INTEROCITOR_SYSTEM_TOKEN`):
-
-```bash
-curl -X POST https://your-worker/sync/__interocitor/my-prefix \
-  -H "Authorization: Bearer $SYSTEM_TOKEN" \
-  -d '{"op": "issue-mesh-id"}'
-# → { "meshId": "0196745e-...-7abc-...AbCdEfGhIjK" }
-```
-
-Validate a mesh ID:
-
-```bash
-curl -X POST https://your-worker/sync/__interocitor/my-prefix \
-  -H "Authorization: Bearer $SYSTEM_TOKEN" \
-  -d '{"op": "validate-mesh-id", "meshId": "0196745e-...AbCdEfGhIjK"}'
-# → { "valid": true }
-```
-
-### Secret management
-
-Set `INTEROCITOR_MESH_SECRET` in your Worker environment (wrangler secret or `.dev.vars`).
-
-Default value is `'interocitor'` — fine for development, **change it in production**.
-
-⚠️ **Changing this secret invalidates ALL existing mesh IDs.** Peers with previously issued IDs will fail validation. Treat it as permanent.
+A device returning within the current remote epoch catches up incrementally:
+change files are HLC-named and `pull()` merges only those newer than its
+cursor. When compaction advances the remote epoch beyond the local epoch, the
+client rehydrates from the current snapshot and then pulls the newer tail.
+See [Catch-up](docs/catch-up.md).
 
 ## Security guardrails
 
-For the current security boundary of the Cloudflare implementation — D1,
-R2, application encryption, metadata exposure, and the limits of current
-server-side access control — see [Security guardrails](docs/security-guardrails.md).
+For the Cloudflare implementation's security boundary — D1, R2, application
+encryption, metadata exposure, and the limits of server-side access control —
+see [Security guardrails](docs/security-guardrails.md).
 
 ## License
 

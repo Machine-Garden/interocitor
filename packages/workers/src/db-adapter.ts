@@ -1,4 +1,4 @@
-import type { D1Database, DatabaseAdapter, InterocitorEnv, QueryRow } from './types.ts';
+import type { D1Database, DatabaseAdapter, QueryRow } from './types.ts';
 
 /**
  * Create a {@link DatabaseAdapter} from an explicit D1 binding.
@@ -8,23 +8,7 @@ import type { D1Database, DatabaseAdapter, InterocitorEnv, QueryRow } from './ty
  * const db = createDatabaseAdapter(env.MY_DB);
  * ```
  */
-export function createDatabaseAdapter(db: D1Database): DatabaseAdapter;
-
-/**
- * Create a {@link DatabaseAdapter} from a Worker env object.
- *
- * Reads `env.INTEROCITOR_DB`. Throws if the binding is absent.
- * ```ts
- * const db = createDatabaseAdapter(env);
- * ```
- */
-export function createDatabaseAdapter(env: InterocitorEnv): DatabaseAdapter;
-
-export function createDatabaseAdapter(dbOrEnv: D1Database | InterocitorEnv): DatabaseAdapter {
-  const db: D1Database = isD1Database(dbOrEnv)
-    ? dbOrEnv
-    : (dbOrEnv as InterocitorEnv).INTEROCITOR_DB ?? (() => { throw new Error('Missing D1 binding. Pass a D1Database directly or set env.INTEROCITOR_DB.'); })();
-
+export function createDatabaseAdapter(db: D1Database): DatabaseAdapter {
   return {
     kind: 'd1',
     raw: db,
@@ -50,14 +34,4 @@ export function createDatabaseAdapter(dbOrEnv: D1Database | InterocitorEnv): Dat
       return db.batch(statements);
     },
   };
-}
-
-/** Type guard — distinguishes a raw D1Database from a Worker env object. */
-function isD1Database(value: unknown): value is D1Database {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as D1Database).prepare === 'function' &&
-    typeof (value as D1Database).batch === 'function'
-  );
 }

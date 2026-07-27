@@ -14,7 +14,7 @@ A taint is a human-readable label for a non-default file key, such as `group1`.
 Applications should store the authoritative taint in the CRDT row that references the file:
 
 ```ts
-{ path: 'docs/q4.pdf', taint: 'group1' }
+const fileRef = { path: 'docs/q4.pdf', taint: 'group1' };
 ```
 
 That row is the offline-legible access surface. Clients can list files, show lock badges, and decide which key to unlock without downloading the object.

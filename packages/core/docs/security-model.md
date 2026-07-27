@@ -1,10 +1,14 @@
 # Security model
 
-This document is the threat model for `@interocitor/core`. It states what
-the encryption protects, what it does not, and what an attacker who
-controls the remote storage can still observe.
+With a non-null `keySource`, `@interocitor/core` encrypts row changes,
+snapshots, and ordinary durable files before a remote adapter receives them.
+Routing and operational metadata remain visible, and authorized client code
+can read plaintext.
 
-The README has a one‑paragraph summary. This file is the contract. For shared-key deployment modes and auditor-facing scenario language, see [Shared key scenarios](shared-key-scenarios.md).
+The threat model below defines the attacker and protection boundaries. For a
+short orientation, use the package README. For shared-key deployment modes and
+auditor-facing scenarios, see
+[Shared key scenarios](shared-key-scenarios.md).
 
 ## What encryption protects
 
@@ -36,15 +40,12 @@ What this gives you:
 - **Integrity of each entry.** AES‑GCM is authenticated; flipped bits in
   ciphertext fail to decrypt and trigger a `decode:error` →
   `remote:poisoned` flow.
-- **Forward secrecy across key rotations.** Reading mesh-key material issued
-  today does not let you decrypt files written under a previous key epoch.
-  (The engine has no in-place re-encryption tool — use a new mesh and
-  migrate data.)
 
 ## What encryption does not protect
 
-The crypto is end‑to‑end at the row payload boundary. Everything around
-the payload is plaintext on the remote.
+The crypto is end‑to‑end at the row/change, snapshot, and durable-file payload
+boundaries. Routing and operational metadata around those payloads is
+plaintext on the remote.
 
 - **File names.** Change files are named `<HLC>-chg_<id>.json`. The HLC
   encodes a wall‑clock timestamp and a device id. An observer can see
@@ -52,13 +53,13 @@ the payload is plaintext on the remote.
 - **Folder layout.** The remote folder structure (`changes/`, `mainline/`,
   `devices/`, `files/`, `manifest.json`) is fixed and visible.
 - **Manifest contents.** `manifest.json` and `manifest-<gen>.json` are
-  **not encrypted**. They contain `meshId`, `schemaVersion`, `epoch`,
+  **not encrypted**. They contain `meshId`, `schema`, `epoch`,
   `watermarkHlc`, `writtenBy` (device id), `writtenAt`, encryption mode,
   and `server` config. Treat the manifest as public.
 - **Device list.** `devices/<deviceId>.json` files contain
-  `deviceName`, `deviceType`, last‑seen timestamps. Encrypted same way as
-  change files only if the mesh is encrypted, but the device id appears
-  in the file name regardless.
+  `displayName`, `deviceType`, last-seen and acknowledgement timestamps.
+  These metadata files are plaintext, and the device id also appears in the
+  file name.
 - **Sizes & timing.** Sync file sizes leak row sizes. Durable file object
   sizes leak approximate attachment/image sizes. Write/read timing leaks
   user activity patterns.
@@ -78,6 +79,13 @@ the payload is plaintext on the remote.
   `CredentialEnvelopeKeyProvider` and a local, memory-only, backend, or
   custom `CredentialEnvelopeStore` when device-side credential exposure
   matters. See [Credential store](credential-store.md).
+- **Recovery phrases.** An optional recovery wrapper can store an encrypted
+  copy of portable mesh credentials on the remote. The application-generated
+  phrase and derived KEK remain on the client. The remote sees an opaque
+  locator, version and algorithm/KDF metadata, salt, IV, ciphertext, and a
+  client-recorded timestamp. A copied wrapper allows offline guesses, so
+  recovery words must be randomly generated and never user-chosen. See
+  [Recovery phrases](recovery.md).
 
 ## What metadata the remote can still observe
 
@@ -85,9 +93,10 @@ Even with encryption on, a remote with full access to the bucket sees:
 
 | Signal | Source | What it reveals |
 | --- | --- | --- |
-| Mesh ID | `manifest.meshId` | Identity of the mesh (a UUIDv7 + HMAC tag) |
+| Mesh ID | `manifest.meshId` | Logical identity recorded by the mesh manifest |
+| Worker mesh address | `/io/<address>` | D1/R2 namespace selected by the host; it may be a stable name or checksummed ID |
 | Device IDs | `devices/<id>.json`, change‑file names | One value per device joined to the mesh |
-| Device names | `devices/<id>.json` (encrypted) | Hidden when encryption is on |
+| Device metadata | `devices/<id>.json` | Plaintext device ID, optional `displayName`/type, last-seen time, and compaction acknowledgements |
 | Schema version | `manifest.schema` | Optional logical compatibility marker when app code sets `schema.version` |
 | Write timestamps | `<HLC>-chg_<id>.json` names | Activity timeline per device |
 | Write rate | File creation rate | Bursts and idle periods |
@@ -95,6 +104,7 @@ Even with encryption on, a remote with full access to the bucket sees:
 | Snapshot epoch & size | `mainline/snapshot-<epoch>-<serverId>.json` | When compactions happen and how big the dataset is |
 | Compaction author | `manifest.writtenBy`, `serverId` in snapshot file name | Which device compacted |
 | Number of devices | `devices/` listing | Mesh size |
+| Recovery-wrapper record | `/.interocitor/recovery/` or Worker recovery route | Stable opaque locator plus wrapper crypto metadata, ciphertext, and timestamp; not recovery words or mesh ID |
 
 If any of these are sensitive in your threat model, encryption alone is
 not enough — you need a transport that hides metadata (e.g. a relay that
@@ -135,13 +145,17 @@ Drive).
 - **Device identity** is a client-generated UUIDv7 carried by the local runtime
   and credential store. There is no remote registration step. Anyone with write
   access to the remote can claim any device id.
-- **Mesh identity** is `<UUIDv7>.<base64url HMAC tag>`. The HMAC is
-  signed by a server‑side secret (`createMeshSecret`). Use
-  `isValidMeshId(id, secret)` to refuse meshes minted outside your
-  control. Without a worker validating mesh IDs, anyone can mint one.
+- **Manifest mesh identity** is generated by the client and recorded in
+  `manifest.meshId`. It detects accidental credential reuse against a
+  different mesh; it is not requester authentication.
+- **Worker mesh address integrity** is deployment policy. A Worker can admit
+  stable names such as `main`, checksummed IDs issued under its
+  `meshSecret`, or both. Address integrity decides which namespaces
+  exist; `meshMiddleware` separately decides what a request may do.
 - **Portable key material is capability-bearing.** In the portable shared-key
   scenario, knowing the portable key is sufficient to read and write the mesh.
-  Loss of the portable key = loss of the mesh unless another device can share it.
+  Loss of the portable key = loss of the mesh unless another device or a
+  previously published recovery wrapper can restore it.
   Theft of the portable key = silent compromise; rotate by creating a new mesh
   and migrating data out of the old one.
 
@@ -152,7 +166,7 @@ Drive).
 | Protect row contents from the storage operator | Configure a non-null `keySource` |
 | Generate strong portable key material | Use high-entropy generated base58 material |
 | Resist portable-key exfiltration on the device | Use `WebAuthnCredentialStore` or an enveloped credential store |
-| Limit who can mint meshes | Run a worker that holds the mesh HMAC secret |
+| Limit which Worker namespaces may be created | Configure integrity gates; use checksummed IDs with a deployment `meshSecret` when the application provisions them |
 | Limit who can compact | `serverManaged: true` + dedicated `serverId` |
 | Detect remote poisoning early | Subscribe to `remote:poisoned` and `decode:error` |
 | Detect stale credential reuse | Subscribe to `credentials:meshMismatch` |

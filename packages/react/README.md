@@ -11,7 +11,8 @@ React bindings for Interocitor.
 Bindings only. React package does not create, init, configure, or connect the engine for you.
 App code owns order:
 - create engine
-- `configureMesh(...)` or `resolveInitialState(...)`
+- call `configureMesh(...)` before `init()`, or provide `resolveInitialState`
+  in the constructor config so `init()` can invoke it
 - `setRemoteStorage(...)`
 - `init()`
 - optionally call `connect()` to start remote sync
@@ -22,17 +23,26 @@ offline-ready mode. React hooks still work against local state after
 `init()`; app bootstrap/UI owns any `onLocalDegraded` or
 `onConnectStalled` banner.
 
-Low-level primitives:
-- typed React context factory
-- live query hook
-- live row hook
-- image blob URL hook
+The package covers typed context, live queries and rows, image blob URLs,
+connection status, and connected-store credential views. It does not wrap
+mutations or own engine lifecycle.
 
-## Install
+## Build the public release
 
 ```bash
-yarn add @interocitor/react @interocitor/core @interocitor/web react
+yarn install
+yarn workspace @interocitor/core build
+yarn workspace @interocitor/web build
+yarn workspace @interocitor/react build
 ```
+
+The `0.1.0` React package depends on matching monorepo
+workspaces. Build the public repository release with the commands above.
+
+The shell commands above are runnable from the repository root. TypeScript and
+TSX blocks below are partial component fragments; they assume the
+application's schema, initialized engine, provider, component props, and
+surrounding error handling.
 
 ## Public API
 
@@ -43,13 +53,13 @@ Documented entrypoints in this package:
 | `createInterocitorContext` | You want one typed provider/hook pair for the engine |
 | `useLiveQuery` | A component should subscribe to a live query cache entry |
 | `useRow` | A component should subscribe to one live row |
-| `useImage` | A component should render an encrypted image file as a revokable `blob:` URL |
+| `useImage` | A component should render an Interocitor image file as a revokable `blob:` URL |
 | `useConnectionStatus`, `useIsSolo` | UI should reflect transport state vs local-only mode |
 | `useConnectedStores`, `useConnectedStore` | UI should read or manage connected-store credentials |
 
-The public API is documented in two places:
-- In code, via JSDoc on the exported hooks and helpers.
-- Outside code, in this README.
+The package root also exports `UseLiveQueryResult`, `UseRowResult`,
+`UseImageResult`, `UseConnectedStoresResult`, `UseConnectedStoreResult`,
+`ConnectionStatus`, and `ConnectionStatusDetails`.
 
 ## Typed context
 
@@ -74,6 +84,9 @@ type DB = InferSchemaType<typeof schema>;
 
 export const [InterocitorProvider, useDb] = createInterocitorContext<DB>();
 ```
+
+The generated hook throws if it is called outside its matching provider. Create
+the pair once at app level and provide an initialized engine.
 
 ```ts
 import { Interocitor, PortablePassphraseKeySource } from '@interocitor/core';
@@ -128,7 +141,7 @@ Factory + deps. React-first. No render loop.
 ```tsx
 const { data, loading, error } = useLiveQuery(
   () => db.table('tasks').query(),
-  [],
+  [db],
 );
 ```
 
@@ -137,7 +150,7 @@ Filtered query:
 ```tsx
 const { data } = useLiveQuery(
   () => db.table('receipts').where('weekId').equals(weekId).orderBy('uploadedAt', 'desc'),
-  [weekId],
+  [db, weekId],
 );
 ```
 
@@ -146,12 +159,16 @@ Selector:
 ```tsx
 const { data: weekIds } = useLiveQuery(
   () => db.table('weekPlans').query(),
-  [],
+  [db],
   plans => plans.map(plan => plan.weekId),
 );
 ```
 
-`data` is `undefined` until the first fetch resolves.
+Dependencies have the same semantics as `useMemo`: include every reactive
+value captured by the factory. Query descriptors share the core cache and
+in-flight load across components. During refresh, cached rows remain visible;
+`loading` is true only when there is no cached value yet. `data` is `undefined`
+until the first fetch resolves.
 
 ## useRow
 
@@ -159,7 +176,20 @@ const { data: weekIds } = useLiveQuery(
 const { data: task } = useRow(db.table('tasks'), taskId);
 ```
 
-`data` is `undefined` until the first fetch resolves, or if the row does not exist.
+Advanced factory form and selector:
+
+```tsx
+const { data: title } = useRow(
+  () => db.table('tasks').row(taskId),
+  [db, taskId],
+  task => task?.title ?? '',
+);
+```
+
+`data` is `undefined` until the first fetch resolves, or if the row does not
+exist. Passing `undefined` as the table-form row ID skips the read and returns
+`{ data: undefined, loading: false, error: null }`. Rows use the same
+core-owned cache and stale-while-revalidate behavior as live queries.
 
 ## useImage
 
@@ -197,6 +227,42 @@ await db.table('users').patch(userId, { avatar_path: path });
 `useImage` returns `{ url, blob, loading, error, metadata, contentType, revoke }`.
 It automatically revokes the previous `blob:` URL on unmount and path changes. Call `image.revoke()` if you want to clear the current URL earlier. If loading is cancelled after the blob URL is created, the hook revokes it immediately.
 
+Image bytes are encrypted before remote storage only when the supplied engine
+uses an encrypted key source. `useImage` does not add encryption.
+
+## Connected stores
+
+```tsx
+const {
+  credentials,
+  loading,
+  error,
+  refresh,
+  get,
+  put,
+  remove,
+} = useConnectedStores(db);
+```
+
+`useConnectedStores` performs an initial list. Successful `put` and `remove`
+calls refresh the list; `get` reads one entry without refreshing it.
+
+```tsx
+const store = useConnectedStore(db, storeId);
+```
+
+`useConnectedStore` fetches on mount and when `db` or `storeId` changes.
+Connected-store credentials have no change-notification stream, so mutations
+elsewhere are not observed automatically; call `store.refresh()`.
+
+## Testing
+
+For React unit tests, component tests, and Storybook stories, use
+an initialized `Interocitor` with `MemoryLocalStore` and `keySource: null` in
+the provider. That exercises the real hooks without an Interocitor server.
+Use browser storage or remote-sync integration only when the behavior under
+test needs it. See [Test an Interocitor product](../core/docs/testing.md).
+
 ## Mutations
 
 No React wrapper needed.
@@ -209,6 +275,18 @@ await db.table('tasks').delete(taskId);
 ```
 
 Interocitor writes locally first, then syncs in background. Live queries update automatically from engine events.
+
+## Validate the package
+
+These commands are runnable from the repository root after `yarn install`:
+
+```bash
+yarn workspace @interocitor/react check
+yarn workspace @interocitor/react build
+```
+
+The package currently has TypeScript/type-fixture coverage, including
+`useImage`, but no package-owned broad React runtime or browser suite.
 
 ## License
 

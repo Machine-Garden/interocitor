@@ -163,7 +163,6 @@ public actor MemoryLocalStore: LocalStoreAdapter {
     public func getMeta(key: String) async throws -> (any Codable & Sendable)? {
         try ensureOpen()
         guard let data = meta[key] else { return nil }
-        // Decode as AnyCodable and return the underlying value
         let decoded = try JSONDecoder().decode(AnyCodable.self, from: data)
         return decoded
     }
@@ -171,7 +170,6 @@ public actor MemoryLocalStore: LocalStoreAdapter {
     public func setMeta(key: String, value: (any Codable & Sendable)?) async throws {
         try ensureOpen()
         guard let value else { meta.removeValue(forKey: key); return }
-        // Encode generically — store as JSON
         if let codable = value as? AnyCodable {
             meta[key] = try JSONEncoder().encode(codable)
         } else if let str = value as? String {

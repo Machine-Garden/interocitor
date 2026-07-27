@@ -1,14 +1,13 @@
-# Device Pairing
+# Pair devices
 
 Interocitor lets any two devices join the same mesh by scanning a QR code.
-No pairing server. No account. No copy-pasting keys.
+The same payload can also travel in a URL fragment. In both cases, portable
+mesh credentials cross the relay only inside an ephemeral ECDH-encrypted
+envelope.
 
-Each device runs an interocitor instance with a preconfigured backend adapter
-(WebDAV, Cloudflare DO, Google Drive, …). At pairing time neither device needs
-to know the mesh `remotePath` or master key — everything is bootstrapped through
-the handshake.
-
----
+Both devices need a way to reach and authenticate to the relay backend.
+`adapterConfig` can tell the scanner which backend endpoint to use, but it
+never contains a password, OAuth token, or other storage credential.
 
 ## Two intents
 
@@ -25,7 +24,7 @@ intent.
 
 ---
 
-## Scenarios
+## Choose which device shows the payload
 
 ```
 Scenario A — Desktop already in mesh, Mobile wants to join
@@ -35,41 +34,44 @@ Scenario B — Mobile wants to join, shows QR to Desktop
   Mobile generates "join" QR    →  Desktop scans →  Mobile receives credentials
 ```
 
-Same security guarantees both ways.
+Both directions use the same wire protocol.
 
----
+## QR and pair-link payload
 
-## The QR payload — three pieces
-
-The QR encodes at most four fields:
+The encoded payload contains at most four fields:
 
 ```jsonc
 {
   "intent":        "share",          // or "join"
   "handshakeId":   "3f9ac2…e1",      // random 12-byte hex      ← CLOUD PIECE
-  "generatorPub":  "MFkwEwYH…",      // ECDH-P256 public key    ← EYES-ONLY PIECE
+  "generatorPub":  "MFkwEwYH…",      // ECDH-P256 public key    ← INVITATION PIECE
   "adapterConfig": "{\"baseUrl\":…}" // backend connection info  ← WHERE TO RELAY
 }
 ```
 
 ### Cloud piece — `handshakeId`
 
-Scopes two short-lived relay files on the shared backend:
+Scopes two relay files on the shared backend. Polling times out after
+`120000` ms by default; cleanup after a completed exchange is best-effort:
 
 ```
 {adapterRoot}/handshake/{handshakeId}/scanner-pub.json
 {adapterRoot}/handshake/{handshakeId}/credentials.json
 ```
 
-Anyone with backend access can see these files. They cannot decrypt them.
+Anyone with backend access can see these files. Backend access alone is not
+enough to decrypt the credential envelope.
 
-### Eyes-only piece — `generatorPub`
+### Invitation piece — `generatorPub`
 
 The generator's ephemeral ECDH-P256 public key. The scanner uses it to derive
 a wrapping key via ECDH. The corresponding private key never leaves the
-generating device. Without physically scanning the QR you cannot derive the
-wrapping key — so the relay payload is opaque even to someone with full
-backend read access.
+generating device.
+
+Treat the complete QR or pair URL as a short-lived invitation capability.
+Anyone who obtains that payload and can access the relay can act as the
+scanner. Backend access alone is insufficient because `generatorPub` is not
+stored in the relay files.
 
 ### Connection piece — `adapterConfig`
 
@@ -88,19 +90,127 @@ credentials.
 that every app instance already knows. In that case both sides configure their
 adapter independently.
 
-A QR without `adapterConfig` from one Cloudflare shard **will not work** on a
-different shard — providing an implicit security layer: the QR only pairs
-devices that share the same backend.
+A payload without `adapterConfig` works only when both applications already
+select the same backend. Endpoint compatibility is not an authorization
+boundary.
 
 ### What is NOT in the QR
 
-`remotePath` and `meshKey` never appear in the QR. They travel through the
+`remotePath` and `passphrase` never appear in the QR. They travel through the
 relay, encrypted with the ECDH-derived wrapping key. Credentials (passwords,
 tokens, OAuth secrets) never appear in the QR either.
 
----
+## Recommended API flow
 
-## Protocol
+The snippets in this section are partial application flows. They use current
+public names, but the application still owns adapter authentication, local
+store construction, UI, and error handling.
+
+### Generate a share payload
+
+Call this on a device already connected to the mesh:
+
+```ts
+import { generateShareQR } from '@interocitor/core';
+
+const passphrase = keySource.getPortableKey();
+const { qrEncoded, pairUrl, complete } = await generateShareQR({
+  adapter,
+  relayBase: '/Interocitor',
+  remotePath: '/Interocitor/team-a',
+  passphrase, // string for a protected portable-key mesh; null if unencrypted
+  pairBaseUrl: 'https://app.example.com/pair',
+});
+
+renderQR(qrEncoded);
+if (pairUrl) showCopyablePairLink(pairUrl);
+await complete();
+```
+
+### Generate a join payload
+
+Call this on a device that needs credentials:
+
+```ts
+import {
+  generateJoinQR,
+  Interocitor,
+  PortablePassphraseKeySource,
+} from '@interocitor/core';
+
+const { qrEncoded, pairUrl, credentials } = await generateJoinQR({
+  adapter,
+  relayBase: '/Interocitor',
+  pairBaseUrl: 'https://app.example.com/pair',
+});
+
+renderQR(qrEncoded);
+const received = await credentials;
+
+const db = new Interocitor(adapter, {
+  dbName: 'team-a',
+  remotePath: received.remotePath,
+  localStore,
+  keySource: received.passphrase === null
+    ? null
+    : new PortablePassphraseKeySource({
+        portableKey: received.passphrase,
+        credentialStore,
+      }),
+  joinExistingMeshPolicy: 'reset-to-remote',
+});
+
+await db.init();
+await db.connect();
+```
+
+The default join policy clears any existing local rows and queued work before
+pulling a different existing mesh. If this device deliberately needs to
+publish retained local work into that mesh, choose `merge-with-remote`
+explicitly. See
+[Joining an existing mesh with local state](../README.md#joining-an-existing-mesh-with-local-state).
+
+### Handle a scanned QR or opened pair URL
+
+```ts
+import {
+  decodeQRPayload,
+  handleScannedQR,
+  parseQRFromUrl,
+} from '@interocitor/core';
+
+const payload =
+  parseQRFromUrl(window.location.hash) ?? decodeQRPayload(rawQRString);
+
+const result = await handleScannedQR({
+  adapter,
+  relayBase: '/Interocitor',
+  payload,
+  // Required only for a join payload: the scanner already has the mesh.
+  ...(payload.intent === 'join'
+    ? { ownCredentials: { remotePath, passphrase: keySource.getPortableKey() } }
+    : {}),
+});
+
+if (result) {
+  // Share intent: application helper constructs a new key source/engine.
+  await connectReceivedCredentials(result.remotePath, result.passphrase);
+}
+// Join intent: this scanner sent its credentials and receives null.
+```
+
+If the payload includes `adapterConfig`, an application can instead provide
+`adapterFromConfig` to `handleScannedQR`. Core treats the string as opaque; the
+runtime owns adapter construction and authentication.
+
+All three high-level operations accept:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `pollIntervalMs` | `2000` | How often to check the relay (ms) |
+| `timeoutMs` | `120000` | Give up after this long (ms) |
+
+## Protocol reference
 
 ### Wire sequence — `share` intent
 
@@ -120,10 +230,10 @@ encode {intent:"share", handshakeId, Eg}
 read scanner-pub.json → Es
 sharedSecret = ECDH(Es, eg)
 wrappingKey  = HKDF-SHA-256(sharedSecret)       [same key, by ECDH commutativity]
-encrypt {remotePath, meshKey?} with wrappingKey
+encrypt {remotePath, passphrase?} with wrappingKey
                                   credentials.json →
                                                         read credentials.json
-                                                        decrypt → remotePath, meshKey
+                                                        decrypt → remotePath, passphrase
                                                         delete scanner-pub.json, credentials.json
                                                         → configure engine and connect
 ```
@@ -142,14 +252,14 @@ encode {intent:"join", handshakeId, Eg}
                                                         sharedSecret = ECDH(Eg, es)
                                                         wrappingKey  = HKDF-SHA-256(sharedSecret)
                                   ← scanner-pub.json {pub: Es}
-                                                        encrypt {remotePath, meshKey?} with wrappingKey
+                                                        encrypt {remotePath, passphrase?} with wrappingKey
                                   ← credentials.json
 
 read scanner-pub.json → Es
 sharedSecret = ECDH(Es, eg)
 wrappingKey  = HKDF-SHA-256(sharedSecret)
 read credentials.json
-decrypt → remotePath, meshKey
+decrypt → remotePath, passphrase
 delete scanner-pub.json, credentials.json
 → configure engine and connect
 ```
@@ -170,11 +280,10 @@ delete scanner-pub.json, credentials.json
 
 The ciphertext decrypts to:
 ```json
-{ "remotePath": "/team-alpha", "meshKey": "<base64url raw AES-GCM key bytes>" }
+{ "remotePath": "/team-alpha", "passphrase": "<high-entropy base58 value>" }
 ```
-`meshKey` is omitted for unencrypted meshes.
-
----
+`passphrase` is omitted on the wire and returned as `null` for unencrypted
+meshes.
 
 ## Key derivation
 
@@ -192,107 +301,18 @@ commutative:
 ECDH(Eg, es) == ECDH(Es, eg)   ✓
 ```
 
----
-
 ## Security properties
 
 | Property | Mechanism |
 |----------|-----------|
-| Credentials never in the QR | QR carries only the ECDH public key |
+| Mesh credentials never in the payload | Payload carries intent, relay scope, generator public key, and optional non-secret adapter config |
 | Credentials never in plaintext on the relay | AES-GCM-256 encrypted before upload |
 | Forward secrecy | Both ECDH keypairs are ephemeral; discarded after handshake |
-| Cloud access alone is not enough | Wrapping key requires the generator's private key, which never leaves the device |
-| Physical QR scan required | Only the scanner can derive the wrapping key from `generatorPub` |
+| Cloud access alone is not enough | Relay files omit `generatorPub`; deriving the wrapping key requires the invitation payload as well as a scanner private key |
+| Payload possession is sufficient to act as scanner | Treat a QR image or pair URL as a short-lived invitation and do not publish or log it |
 | Session isolation | Each handshake gets a fresh random `handshakeId` |
 | Relay files self-destruct | Deleted on success by the receiving side (best-effort) |
 | No extra server | The mesh's own backend folder is the relay |
-
----
-
-## API
-
-### Generate a "share" QR
-
-Call on a device **already in the mesh** that wants to invite another device.
-
-```ts
-import { generateShareQR } from 'interocitor';
-
-const { qrEncoded, pairUrl, qrPayload, complete } = await generateShareQR({
-  adapter,                             // StorageAdapter for the shared backend
-  relayBase:  '/Interocitor',          // root path on the backend (for relay files)
-  remotePath: '/Interocitor/team-a',   // the mesh path to share
-  meshKey,                             // CryptoKey | null (null = unencrypted)
-  pairBaseUrl: 'https://app.example.com/pair',  // optional — for URL QR
-});
-
-renderQR(qrEncoded);        // pass to any QR library (qrcode.js, etc.)
-console.log(pairUrl);       // https://app.example.com/pair#hs=eyJ…  (deep link)
-
-await complete();           // wait for scanner to pick up credentials
-```
-
-### Generate a "join" QR
-
-Call on a device **without credentials** that wants to join a mesh.
-
-```ts
-import { generateJoinQR } from 'interocitor';
-
-const { qrEncoded, pairUrl, credentials } = await generateJoinQR({
-  adapter,
-  relayBase: '/Interocitor',
-  pairBaseUrl: 'https://app.example.com/pair',  // optional
-});
-
-renderQR(qrEncoded);   // show QR — wait for someone with credentials to scan it
-
-const { remotePath, meshKey } = await credentials;   // resolves when credentials arrive
-if (meshKey) engine.setEncryptionKey(meshKey);
-await engine.connect(remotePath);
-```
-
-### Handle a scanned QR or opened pair URL
-
-```ts
-import { handleScannedQR, parseQRFromUrl, decodeQRPayload } from 'interocitor';
-
-// From a URL opened in the browser:
-const payload = parseQRFromUrl(window.location.hash);
-
-// Or from a raw QR string decoded by a camera library:
-const payload = decodeQRPayload(rawQRString);
-
-if (!payload) throw new Error('No handshake payload');
-
-const result = await handleScannedQR({
-  adapter,
-  relayBase: '/Interocitor',
-  payload,
-  // Required only when payload.intent === 'join'
-  // (the scanner must push credentials to the generator):
-  ownCredentials: { remotePath, meshKey },
-});
-
-if (result) {
-  // payload.intent was 'share' — we received credentials
-  const { remotePath, meshKey } = result;
-  if (meshKey) engine.setEncryptionKey(meshKey);
-  await engine.connect(remotePath);
-}
-// payload.intent was 'join' — we pushed credentials, nothing else to do
-```
-
-### Options
-
-All three functions accept:
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `pollIntervalMs` | `2000` | How often to check the relay (ms) |
-| `timeoutMs` | `120000` | Give up after this long (ms) |
-
----
 
 ## Low-level exports
 

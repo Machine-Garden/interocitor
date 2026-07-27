@@ -47,7 +47,7 @@ async function clearAllLocalState(page: Page, dbNames: string[]): Promise<void> 
   await page.evaluate(() => {
     localStorage.removeItem('interocitor-device-id');
     localStorage.removeItem('interocitor-key:team-alpha');
-    localStorage.removeItem('interocitor-key:team-beta');
+    localStorage.removeItem('interocitor-key:team-bravo');
   });
 }
 
@@ -56,7 +56,7 @@ async function clearAllLocalState(page: Page, dbNames: string[]): Promise<void> 
 test.describe('Multi-device pairing flow', () => {
   test('full lifecycle: setup → join → switch team → reconnect → chain-invite', async ({ browser, baseURL }) => {
     const cloudAlpha: WebDavRouteState = createWebDavRouteState();
-    const cloudBeta: WebDavRouteState = createWebDavRouteState();
+    const cloudBravo: WebDavRouteState = createWebDavRouteState();
 
     const ctx1 = await browser.newContext();
     const ctx2 = await browser.newContext();
@@ -66,7 +66,7 @@ test.describe('Multi-device pairing flow', () => {
     try {
       for (const ctx of [ctx1, ctx2, ctx3, ctx4]) {
         await attachWebDavRouteMock(ctx, cloudAlpha, '/__dav_alpha__');
-        await attachWebDavRouteMock(ctx, cloudBeta, '/__dav_beta__');
+        await attachWebDavRouteMock(ctx, cloudBravo, '/__dav_bravo__');
       }
 
       const page1 = await ctx1.newPage();
@@ -80,7 +80,7 @@ test.describe('Multi-device pairing flow', () => {
         page3.goto(harness), page4.goto(harness),
       ]);
 
-      const allDbs = ['team-alpha', 'team-beta'];
+      const allDbs = ['team-alpha', 'team-bravo'];
       await Promise.all([
         clearAllLocalState(page1, allDbs),
         clearAllLocalState(page2, allDbs),
@@ -238,23 +238,23 @@ test.describe('Multi-device pairing flow', () => {
       expect(step2_device2.remotePath).toBe('/TeamAlpha');
 
       // ──────────────────────────────────────────────────────────────
-      // STEP 3: Device 3 creates team-beta. Device 2 switches teams.
-      //         Old team-alpha data must NOT appear in team-beta.
+      // STEP 3: Device 3 creates team-bravo. Device 2 switches teams.
+      //         Old team-alpha data must NOT appear in team-bravo.
       // ──────────────────────────────────────────────────────────────
 
-      // Device 3: setup team-beta + generate share QR
+      // Device 3: setup team-bravo + generate share QR
       const step3_qr = await page3.evaluate(async () => {
         const { Interocitor, generateShareQR } = await import('/packages/core/dist/index.js');
         const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
         const adapter = new WebDAVAdapter({
-          baseUrl: `${location.origin}/__dav_beta__`,
+          baseUrl: `${location.origin}/__dav_bravo__`,
           auth: { username: 'u', password: 'p' },
         });
 
         const engine = new Interocitor(adapter, {
-          batchWindowMs: 0, remotePath: '/TeamBeta',
-          dbName: 'team-beta',
+          batchWindowMs: 0, remotePath: '/TeamBravo',
+          dbName: 'team-bravo',
           deviceId: 'device_3',
           encrypted: true,
           pollInterval: 600_000,
@@ -264,7 +264,7 @@ test.describe('Multi-device pairing flow', () => {
         await engine.init();
         await engine.connect();
 
-        await engine.put('projects', 'beta_1', { name: 'Public Launch', budget: 50000 });
+        await engine.put('projects', 'bravo_1', { name: 'Public Launch', budget: 50000 });
         await engine.flush();
 
         const meshId = engine.getMeshId();
@@ -272,8 +272,8 @@ test.describe('Multi-device pairing flow', () => {
 
         const { qrPayload, complete } = await generateShareQR({
           adapter,
-          relayBase: '/TeamBeta',
-          remotePath: '/TeamBeta',
+          relayBase: '/TeamBravo',
+          remotePath: '/TeamBravo',
           passphrase,
           pollIntervalMs: 50,
           timeoutMs: 15_000,
@@ -286,11 +286,11 @@ test.describe('Multi-device pairing flow', () => {
         return { meshId, qrPayload };
       });
 
-      const betaMeshId = step3_qr.meshId!;
-      expect(betaMeshId).toBeTruthy();
-      expect(betaMeshId).not.toBe(alphaMeshId);
+      const bravoMeshId = step3_qr.meshId!;
+      expect(bravoMeshId).toBeTruthy();
+      expect(bravoMeshId).not.toBe(alphaMeshId);
 
-      // Device 2: local reset + join team-beta
+      // Device 2: local reset + join team-bravo
       const [, step3_device2] = await Promise.all([
         page3.evaluate(async () => { await (window as any).__hsComplete(); }),
         page2.evaluate(async (payload: any) => {
@@ -299,13 +299,13 @@ test.describe('Multi-device pairing flow', () => {
           const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
 
           const adapter = new WebDAVAdapter({
-            baseUrl: `${location.origin}/__dav_beta__`,
+            baseUrl: `${location.origin}/__dav_bravo__`,
             auth: { username: 'u', password: 'p' },
           });
 
           const credentials = await handleScannedQR({
             adapter,
-            relayBase: '/TeamBeta',
+            relayBase: '/TeamBravo',
             payload,
             pollIntervalMs: 50,
             timeoutMs: 15_000,
@@ -313,10 +313,10 @@ test.describe('Multi-device pairing flow', () => {
 
           if (!credentials) return { error: 'no credentials' };
 
-          // DIFFERENT dbName — team-beta is a separate database.
+          // DIFFERENT dbName — team-bravo is a separate database.
           const engine = new Interocitor(adapter, {
             batchWindowMs: 0, remotePath: credentials.remotePath,
-            dbName: 'team-beta',
+            dbName: 'team-bravo',
             deviceId: 'device_2',
             passphrase: credentials.passphrase,
             pollInterval: 600_000,
@@ -328,7 +328,7 @@ test.describe('Multi-device pairing flow', () => {
 
           const meshId = engine.getMeshId();
           const rows = await engine.query('projects');
-          const betaNames = rows.map((r: any) => readColumn(r, 'name')).toSorted();
+          const bravoNames = rows.map((r: any) => readColumn(r, 'name')).toSorted();
 
           await engine.disconnect();
 
@@ -348,8 +348,8 @@ test.describe('Multi-device pairing flow', () => {
 
           return {
             meshId,
-            betaNames,
-            betaRowCount: rows.length,
+            bravoNames,
+            bravoRowCount: rows.length,
             alphaNames,
             alphaRowCount: alphaRows.length,
             remotePath: credentials.remotePath,
@@ -357,10 +357,10 @@ test.describe('Multi-device pairing flow', () => {
         }, step3_qr.qrPayload),
       ]);
 
-      expect(step3_device2.meshId).toBe(betaMeshId);
-      expect(step3_device2.betaRowCount).toBe(1);
-      expect(step3_device2.betaNames).toEqual(['Public Launch']);
-      expect(step3_device2.remotePath).toBe('/TeamBeta');
+      expect(step3_device2.meshId).toBe(bravoMeshId);
+      expect(step3_device2.bravoRowCount).toBe(1);
+      expect(step3_device2.bravoNames).toEqual(['Public Launch']);
+      expect(step3_device2.remotePath).toBe('/TeamBravo');
       // Old data still in its own local DB — isolated, not leaked.
       expect(step3_device2.alphaRowCount).toBe(2);
       expect(step3_device2.alphaNames).toEqual(['Internal Tool', 'Secret Project']);
@@ -530,31 +530,31 @@ test.describe('Multi-device pairing flow', () => {
       // Data is encrypted, so we can't check plaintext in cloud dumps.
       // Instead verify structural isolation:
       //   - cloudAlpha only has /TeamAlpha/ paths
-      //   - cloudBeta only has /TeamBeta/ paths
+      //   - cloudBravo only has /TeamBravo/ paths
       //   - each cloud has change files (data was actually written)
       // ──────────────────────────────────────────────────────────────
 
       const alphaPaths = [...cloudAlpha.files.keys()];
-      const betaPaths = [...cloudBeta.files.keys()];
+      const bravoPaths = [...cloudBravo.files.keys()];
 
       // Every file in cloudAlpha is under /TeamAlpha/
       for (const p of alphaPaths) {
         expect(p).toMatch(/^\/TeamAlpha\//);
       }
-      // Every file in cloudBeta is under /TeamBeta/
-      for (const p of betaPaths) {
-        expect(p).toMatch(/^\/TeamBeta\//);
+      // Every file in cloudBravo is under /TeamBravo/
+      for (const p of bravoPaths) {
+        expect(p).toMatch(/^\/TeamBravo\//);
       }
 
       // Both clouds have change files (actual data was written)
       const alphaChanges = alphaPaths.filter(p => p.includes('/changes/') && p.endsWith('.json') && !p.endsWith('head.json'));
-      const betaChanges = betaPaths.filter(p => p.includes('/changes/') && p.endsWith('.json') && !p.endsWith('head.json'));
+      const bravoChanges = bravoPaths.filter(p => p.includes('/changes/') && p.endsWith('.json') && !p.endsWith('head.json'));
       expect(alphaChanges.length).toBeGreaterThanOrEqual(3); // proj_1, proj_2, proj_3
-      expect(betaChanges.length).toBeGreaterThanOrEqual(1); // beta_1
+      expect(bravoChanges.length).toBeGreaterThanOrEqual(1); // bravo_1
 
-      // No /TeamBeta/ paths in cloudAlpha and vice versa
-      expect(alphaPaths.some(p => p.startsWith('/TeamBeta/'))).toBe(false);
-      expect(betaPaths.some(p => p.startsWith('/TeamAlpha/'))).toBe(false);
+      // No /TeamBravo/ paths in cloudAlpha and vice versa
+      expect(alphaPaths.some(p => p.startsWith('/TeamBravo/'))).toBe(false);
+      expect(bravoPaths.some(p => p.startsWith('/TeamAlpha/'))).toBe(false);
 
     } finally {
       await Promise.all([ctx1.close(), ctx2.close(), ctx3.close(), ctx4.close()]);

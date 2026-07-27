@@ -56,17 +56,20 @@ interface StoredFileMetadata extends FileEntry {
   plaintextSize?: number;
   storedSize?: number;
   contentType?: string;
+  taint?: string;
 }
 
 interface StoredFileWriteOptions {
   uploadedByDeviceId?: string;
   plaintextSize?: number;
   contentType?: string;
+  taint?: string;
 }
 ```
 
-`MemoryAdapter` is the reference implementation; treat it as the
-canonical source of truth when in doubt.
+`StorageAdapter` in `src/core/types.ts` is the type authority.
+`MemoryAdapter` is a compact reference implementation of the generic object
+semantics.
 
 ## Required semantics
 
@@ -152,22 +155,28 @@ If an adapter does not implement these methods, the engine falls back to `writeF
 
 ### Bounded progress
 
-Adapters should prefer rejecting failed operations over leaving promises
-pending forever. The engine wraps connect-time adapter calls with
-`connectStageTimeoutMs`, but adapter authors should still make network
-requests abortable and give meaningful errors where possible.
+Adapters should reject failed operations instead of leaving promises pending.
+The full connect pipeline wraps its named stages with
+`connectStageTimeoutMs`, but that is not a universal deadline around every
+adapter call. The reload fast-path head read, normal `pull()`/`flush()` calls,
+durable file methods, and adapter-owned authentication requests can still
+depend on adapter progress. Make network operations abortable, impose an
+adapter-level timeout, and return meaningful errors.
 
-A stalled adapter call is treated as an offline-ready condition, not an
-application-fatal condition: the engine emits `connect:error`, calls
-`onConnectStalled`, returns from `connect()`, and keeps local reads/writes
-available for a later retry.
+When a deadline-wrapped connect stage stalls, the engine emits
+`connect:error`, calls `onConnectStalled`, returns from `connect()`, and keeps
+initialized local row operations available for a later retry.
 
 ### `authenticate()` / `isAuthenticated()`
 
-- The engine calls `authenticate()` once before connecting, and again
-  after a 401. Adapters that hold a token should re‑acquire here.
-- `isAuthenticated()` is consulted before every flush/pull to decide
-  whether to trigger an `auth:required` event.
+- At the start of `connect()`, the engine consults `isAuthenticated()`.
+- When it returns false, the engine emits `auth:required`, calls
+  `authenticate()` as a deadline-wrapped connect stage, then emits
+  `auth:complete` on success.
+- Core does not automatically retry a failed operation after a 401, and it
+  does not re-check primary-adapter authentication before every pull or flush.
+- Write-only replica adapters are checked and authenticated before their
+  individual replica flush.
 - Storing credentials is the adapter's problem. The engine does not
   persist tokens.
 
@@ -183,8 +192,18 @@ available for a later retry.
 - Returns an opaque adapter‑specific config string the scanner uses to
   configure their own adapter during pairing.
 - MUST NOT include credentials. The handshake exchanges keys over an
-  ECDH relay; the config tells the peer "this mesh lives on
-  `https://my-webdav/` at `/Foo`", not "and here is the password".
+  ECDH relay; the config identifies how to reach the same backend endpoint,
+  not its password or the mesh `remotePath`. The `remotePath` travels inside
+  the encrypted handshake credential envelope.
+
+### Optional: recovery wrapper storage
+
+Portable-key recovery can use the regular primitives under
+`/.interocitor/recovery/`. An adapter that needs a separate, mesh-independent
+endpoint can additionally implement `RecoveryStorageAdapter` with
+`readRecoveryWrapper(locator)` and `writeRecoveryWrapper(locator, data)`.
+Overwrite behavior belongs to the adapter. See the
+[Recovery API reference](recovery-reference.md#storage-adapter-behavior).
 
 ## Consistency assumptions
 
@@ -262,16 +281,17 @@ delete the old folder first.
 ## Implementing a custom adapter
 
 Minimum viable implementation: copy `MemoryAdapter` and replace the
-`Map<string, …>` with calls to your backend. Then run the contract
-tests:
+`Map<string, …>` with calls to your backend. The repository currently has a
+WebDAV-specific Playwright contract test:
 
 ```bash
-yarn workspace @interocitor/core test \
-  packages/core/tests/e2e/webdav.adapter.contract.spec.ts
+yarn workspace @interocitor/core test:e2e \
+  webdav.adapter.contract.spec.ts
 ```
 
-The same suite runs for every official adapter. If your adapter passes
-it, the engine will work.
+Use that test as a behavior example, then add equivalent coverage for the new
+adapter. Passing the WebDAV test is not proof that another backend satisfies
+authentication, consistency, timeout, metadata, or recovery semantics.
 
 ## Things adapters routinely get wrong
 

@@ -26,24 +26,31 @@ credentials, and image helpers live in `@interocitor/web`; React hooks live in
   they do not merge or compact.
 - A CRDT over per‑column HLC values. Every device converges to the same
   row state without a central merge authority.
-- An end‑to‑end encryption layer. The remote sees ciphertext blobs and
-  enough metadata to route them; nothing else.
+- An end‑to‑end encryption layer. The remote sees ciphertext blobs plus
+  routing and operational metadata such as object paths, mesh and device
+  identifiers, sizes, and timing.
 - A pluggable transport. Backends provide object storage operations for
   sync objects and, optionally, first-class durable file operations. See
   `docs/adapter-contract.md`.
 
 ## Why
 
-- **Offline‑first by construction.** Every read and write hits a local
-  store. Network is needed only to share state with other devices.
+- **Offline‑first rows by construction.** Row reads and writes hit a local
+  store. Network is needed only to share row state with other devices.
+  Durable file methods call the configured adapter directly.
 - **No required backend shape.** The remote is dumb storage. Core adapters can
   run anywhere the required standard APIs are available.
-- **End‑to‑end encryption by default.** The default config encrypts
-  every change file and snapshot before it leaves the device.
+- **Client-side encryption for protected meshes.** A non-null `keySource`
+  encrypts every change file, snapshot, and durable file body before upload.
 - **Small, embeddable runtime.** No workers, no background services
   required.
 
 ## Quick start
+
+TypeScript blocks in this README are partial or illustrative API fragments
+unless a section explicitly marks a runnable test command. They use exported
+names but assume application schema, credentials, runtime objects, and error
+handling.
 
 ```ts
 import {
@@ -86,19 +93,24 @@ Documented entrypoints in this package:
 | API | Use when |
 | --- | --- |
 | `Interocitor` | You want the runtime-neutral engine for local-first rows and durable files |
-| `db.configureMesh(...)` | Mesh identity or credentials become known after construction but before first connect |
+| `db.configureMesh(...)` | A remote path, passphrase, encryption mode, or device ID becomes known after construction but before `init()` |
 | `db.init()` | The app wants local-first readiness before any remote session starts |
 | `db.connect()` | The app wants to create/resume the remote mesh session |
 | `db.table(name)` | The app wants typed row CRUD, queries, and row handles |
 | `db.putFile`, `db.getFile`, `db.openFile`, `db.deleteFile`, `db.getFileMetadata` | The app stores durable encrypted attachments or sealed files in the same mesh |
 | `PortablePassphraseKeySource`, `BoundSharedKeySource` | The app chooses how mesh key material is restored or derived |
+| `createRecoveryWrapper`, `publishRecoveryWrapper`, `recoverMeshCredentials` | The app offers a client-provided recovery phrase for a portable-key mesh |
 | `MemoryAdapter`, `WebDAVAdapter`, `GoogleDriveAdapter`, `CloudflareAdapter` | The app chooses a mailbox backend |
 | `generateShareQR`, `generateJoinQR`, `handleScannedQR` | The app wants the high-level QR pairing flow |
 | `createGeneratorSession`, `runScannerHandshake` | The app wants low-level control of the pairing handshake |
 
-The public API is documented in two places:
-- In code, via JSDoc on the exported entrypoints.
-- Outside code, in this README and deeper package docs under `docs/`.
+For lifecycle methods, table/file/cache handles, consequential `SyncConfig`
+options, the `LocalStore` contract, key sources, events, and typed errors, use
+the [Core API reference](docs/api-reference.md).
+
+This README is the package landing page. The API reference and focused pages
+under `docs/` own the behavioral contracts; exported TypeScript declarations
+and their JSDoc provide the exact signatures.
 
 > The constructor accepts either `(adapter, config)` or `(config)` alone.
 > Use the `(config)` form for local‑only mode (no remote). Every runtime must
@@ -112,7 +124,7 @@ flowchart LR
   B --> C[Runtime-provided local store]
   B --> D[Encrypt locally]
   D --> E[Adapter]
-  E --> F[Remote mailbox<br/>ciphertext only]
+  E --> F[Remote mailbox<br/>ciphertext + routing metadata]
   F --> E
   E --> G[Decrypt locally]
   G --> B
@@ -142,12 +154,14 @@ What it protects:
 
 - Row contents (field names, field values, table names) inside change
   files and snapshots.
+- Durable file bodies.
 - Integrity of each entry (AES‑GCM authentication tag).
 
 What it does **not** protect:
 
-- File names (they encode the HLC and a device id).
-- Manifest contents (mesh id, schema version, epoch, encrypted flag,
+- Remote object names and paths. Change filenames encode an HLC and device id;
+  durable file paths are chosen by the application.
+- Manifest contents (mesh id, schema marker, epoch, encrypted flag,
   serverId).
 - Sizes, write timing, device count.
 - The local store on the device (IndexedDB / SQLite stores plaintext).
@@ -165,24 +179,27 @@ For the threat model, the metadata table, and full mitigations see
 | Operation | Network? |
 | --- | --- |
 | `new Interocitor()` | No |
-| `init()` | No |
+| `init()` | Core performs local initialization; application-provided key sources and `resolveInitialState` may prompt or perform external work |
 | `table.add()` / `patch()` / `replace()` / `delete()` | No |
 | `table.row()` / `table.query()` / `table.where()` | No |
 | `connect()` | Yes (if adapter configured) |
 | `flush()` / `pull()` / `compact()` | Yes |
+| `putFile()` / `getFile()` / `openFile()` / `deleteFile()` | Yes |
 
-Writes are persisted locally and queued in an outbox. They survive
-reload, crash, and offline periods. On reconnect the engine drains the
-outbox to the remote.
+Row writes are persisted through the configured `LocalStore` and queued in an
+outbox. They survive reloads and crashes only when that store is durable.
+`MemoryLocalStore` lasts for the current process/session and clears on close.
+On reconnect the engine drains a surviving outbox to the remote.
 
 ### Never-stuck principle
 
-Interocitor treats persistence and transport as implementation details
-behind the local-first API. The application must not become unusable
-because IndexedDB is wedged, a database upgrade is blocked by another tab,
-or a cloud call hangs forever.
+Core separates local row readiness from the remote sync session: once a
+caller-provided `LocalStore` has opened, a failed remote connection does not
+disable local row operations. Core does not create or replace that local store;
+an `open()` or restore failure rejects `init()`.
 
-Failure-mode hierarchy:
+For browser apps, `@interocitor/web` provides the recommended local-store
+recovery hierarchy:
 
 1. **Use durable local storage** when IndexedDB opens and behaves normally.
 2. **Degrade to memory** when IndexedDB is unavailable, blocked, closing, or
@@ -191,21 +208,20 @@ Failure-mode hierarchy:
 3. **Rotate the local database name** for persistent IndexedDB disasters.
    The DB name is a cache namespace, not identity. Mesh identity lives in
    credentials and the remote manifest.
-4. **Stay offline-ready** when a cloud connect stage stalls. `connect()`
-   returns, `init()` remains complete, writes continue locally, and the app
-   can retry `connect()` later.
+4. **Stay offline-ready** when one of the full connect pipeline's deadline-
+   wrapped stages stalls. `connect()` returns, `init()` remains complete,
+   writes continue locally, and the app can retry `connect()` later.
 
-This principle is intentionally conservative: stale or broken local cache
-must never block the user from reading/writing the app's current in-memory
-state.
+Choose and configure that fallback in the runtime layer; it is not automatic
+behavior of `@interocitor/core`.
 
 ## Sync guarantees
 
 - **Eventual convergence.** Two devices that have seen the same set of
   change files (in any order) reach byte‑identical local state.
 - **Per‑column merge.** Conflicts are resolved field‑by‑field, not at
-  the row level. Default strategy is `'remote-wins'` — see
-  "Conflict resolution".
+  the row level. A configured schema defaults to `'remote-wins'`; the
+  schema-less fallback is `'lww'`. See "Conflict resolution".
 - **Idempotent merge.** Replaying an already‑applied change is a no‑op.
   Safe to re‑pull, safe to re‑process the same change file twice.
 - **Per‑device HLC monotonicity.** A single device's HLCs strictly
@@ -226,9 +242,10 @@ What we do **not** guarantee:
 
 ### Sync cadence
 
-The engine adapts how often it polls the remote so it does useful work
-when there is data to sync, and stays out of the way otherwise. This is
-all automatic — there is no configuration knob.
+The engine adapts how often it polls the remote so it does useful work when
+there is data to sync and stays out of the way otherwise. Applications choose
+the base and relay-healthy intervals with `pollInterval` and
+`relayHealthyPollInterval`; adaptive backoff operates within that lifecycle.
 
 - **Adaptive backoff.** Polling starts at `pollInterval` (30 s by
   default). After every poll that merges zero entries the interval
@@ -251,7 +268,7 @@ all automatic — there is no configuration knob.
 new Interocitor(adapter?, config)
         │
         ▼
-  configureMesh({...})       ← optional; pin meshId / keySource upfront
+  configureMesh({...})       ← optional; supply late remotePath/passphrase before init
         │
         ▼
        init()                ← opens local store, restores credentials
@@ -283,14 +300,54 @@ try {
 }
 ```
 
+### Joining an existing mesh with local state
+
+When `connect()` finds an existing remote mesh whose `meshId` differs from the
+identity recorded in the local store, local rows and queued writes need an
+explicit policy. `joinExistingMeshPolicy` controls that decision:
+
+```ts
+// `credentials` is the promise returned by generateJoinQR().
+const receivedCredentials = await credentials;
+
+const db = new Interocitor(adapter, {
+  dbName: 'my-app',
+  remotePath,
+  localStore,
+  keySource,
+  joinExistingMeshPolicy: 'reset-to-remote', // default
+});
+```
+
+- **`'reset-to-remote'` (default)** clears local rows, queued and pending
+  writes, cursors, and stale mesh metadata before pulling the existing remote
+  mesh. Unsynced local work is discarded.
+- **`'merge-with-remote'`** retains local rows and queued writes. They enter
+  normal CRDT merge and can be published to the joined mesh.
+
+Before applying either consequential path, the engine emits
+`join:existing-mesh` with the prior and next mesh IDs, selected policy, local
+row count, and queued-change count. A genuinely empty fresh local store simply
+records the remote mesh ID. The policy is not applied when `connect()`
+bootstraps a new remote mesh.
+
+Choose this before constructing the engine. If local work may matter, ask the
+user or make an application-level backup before connecting; the event reports
+what happened but is not a cancellable prompt.
+
 ## New device / restore
 
 Joining a new device to an existing mesh requires three things:
 
-1. The **`meshId`** of the existing mesh.
-2. The **portable key material** for the mesh.
-3. Access to the same **remote mailbox** (the same `remotePath` on a
-   storage backend the new device can reach).
+1. The mesh **`remotePath`**.
+2. The mesh's base58 **passphrase** for a protected portable-key mesh, or
+   `null` for an unencrypted mesh.
+3. Access to and authentication for the same **remote mailbox** on a
+   storage backend the new device can reach.
+
+The engine reads the authoritative `meshId` from the remote manifest during
+`connect()`. Pairing transports `remotePath` and `passphrase`; it does not put
+either value in the QR payload.
 
 A production app should keep CRUD, sync lifecycle, and pairing separate:
 
@@ -300,25 +357,33 @@ lib/interocitor-sync.ts    mesh id lifecycle, adapter, connect/disconnect, recov
 lib/interocitor-pairing.ts QR handshake only
 ```
 
-The pairing flow ships credentials over an ECDH relay handshake. The handshake relay base and sync adapter base are different concepts: a relay base is the temporary handshake-file path, such as `/Taska`; the Cloudflare adapter base URL is the concrete Worker route, such as `/sync/io/{meshId}`. The engine `remotePath` is still the mesh folder path used inside that adapter, such as `/Taska`.
+The pairing flow ships credentials over an ECDH relay handshake. The handshake
+relay base and sync adapter base are different concepts: a relay base is the
+temporary handshake-file path, such as `/Taska`; the Cloudflare adapter base
+URL is the concrete Worker route, such as `/sync/io/{address}`. That address
+may be a stable name or an application-provisioned identifier and is not
+necessarily `manifest.meshId`. The engine `remotePath` is the mesh folder path
+inside that adapter, such as `/Taska`.
 
 ### Pairing intents
 
 **Join QR** is for a device that does not have credentials yet:
 
-1. Joiner mints a fresh mesh id.
-2. Joiner creates a Cloudflare adapter with base URL `/sync/io/{meshId}`.
-3. Joiner calls `generateJoinQR()`.
-4. Existing paired device scans and pushes credentials.
-5. Joiner receives credentials from `credentials` on the result.
-6. Joiner applies the portable key material and connects to the minted mesh.
+1. Joiner configures access to the handshake relay and calls
+   `generateJoinQR()`.
+2. Existing paired device scans and pushes `{ remotePath, passphrase }`.
+3. Joiner awaits `credentials` on the result.
+4. Joiner constructs a key source from the received passphrase and connects to
+   the existing mesh.
 
 **Share QR** is for an existing mesh member inviting a new device:
 
 1. Existing device connects to the active mesh.
-2. Existing device calls `generateShareQR()` with `remotePath` and portable key material.
+2. Existing device calls `generateShareQR()` with `remotePath` and
+   `passphrase`.
 3. New device scans and receives credentials from `handleScannedQR()`.
-4. New device applies credentials and connects using the adapter config from the payload.
+4. New device constructs its key source and connects using the adapter selected
+   by the application or reconstructed from `adapterConfig`.
 
 `handleScannedQR()` returns `null` for join intent because the scanner pushed its own credentials. It returns credentials for share intent because the scanner received credentials. Always handle the return value:
 
@@ -327,24 +392,36 @@ import { decodeQRPayload, handleScannedQR, parseQRFromUrl } from '@interocitor/c
 // Raw QR payload decoder is also available from '@interocitor/core/handshake/qr'.
 
 const payload = parseQRFromUrl(location.hash) ?? decodeQRPayload(rawPastedPayload);
-const received = await handleScannedQR({ adapter, relayBase: '/Taska', payload });
+const received = await handleScannedQR({
+  adapter,
+  relayBase: '/Taska',
+  payload,
+  ...(payload.intent === 'join'
+    ? { ownCredentials: { remotePath, passphrase: keySource.getPortableKey() } }
+    : {}),
+});
 
 if (received) {
-  if (received.portableKey) keySource.setPortableKey(received.portableKey);
-  await connectFromPayload(received.remotePath);
+  const receivedKeySource = received.passphrase === null
+    ? null
+    : new PortablePassphraseKeySource({ portableKey: received.passphrase });
+  // Application helper: construct a new engine with this path/key source.
+  await connectFromPayload(received.remotePath, receivedKeySource);
 }
 ```
 
-After the handshake the new device:
+For a received protected-mesh credential, the new device can construct the
+engine directly:
 
 ```ts
 const db = new Interocitor(adapter, {
   dbName: 'my-app',
-  remotePath: '/Taska',
+  remotePath: receivedCredentials.remotePath,
   keySource: new PortablePassphraseKeySource({
-    portableKey: 'base58-from-handshake',
+    portableKey: receivedCredentials.passphrase!,
   }),
   localStore,
+  joinExistingMeshPolicy: 'reset-to-remote',
 });
 
 await db.init();
@@ -362,9 +439,9 @@ On `connect()` the engine:
 5. Starts polling.
 
 > **If portable key material is lost and no other device holds it, the mesh is
-> unreadable.** The engine has no recovery path — the data is end-to-end
-> encrypted and the portable key material is capability-bearing. Back it up out
-> of band (password manager, paper, or another device's credential store).
+> unreadable unless a recovery wrapper was created first.** Recovery phrases
+> encrypt a backup of the portable key on the remote without storing the words
+> there. See [Recovery phrases](docs/recovery.md).
 
 For credential store details (records, anchors, biometric paths), see
 [Credential store](docs/credential-store.md). For portable versus bound shared-key deployment modes, see
@@ -378,6 +455,8 @@ const db = new Interocitor(adapter, {
   remotePath: '/MyApp',
   schema,
   localStore,
+  keySource,
+  joinExistingMeshPolicy: 'reset-to-remote',
   connectStageTimeoutMs: 15_000,
   onConnectStalled: ({ stage, timeoutMs }) => {
     console.warn(`connect stage stalled: ${stage}`, { timeoutMs });
@@ -406,11 +485,6 @@ const pdf = await db.getFile('receipts/may.pdf');
 const fileMeta = await db.getFileMetadata('receipts/may.pdf');
 await db.deleteFile('receipts/may.pdf');
 
-// Credentials
-keySource.getPortableKey();
-keySource.setPortableKey(portableKey);
-await db.clearCredentials();
-
 // Batched writes — one ChangeEntry per batch
 await db.batch(async () => {
   await db.table('todos').add({ title: 'a' });
@@ -424,6 +498,10 @@ Interocitor supports durable files alongside row-based state. Files are
 not row fields and are not part of the CRDT table schema. They live in the
 adapter-backed durable storage namespace under the mesh `files/` prefix and
 are addressed by application-chosen string paths.
+
+File operations call the adapter directly. They are not cached in the local
+row store or queued in its outbox; callers need available transport and must
+decide how to retry failed transfers.
 
 Use rows for structured state that participates in schema typing, queries,
 merge behavior, snapshots, and compaction. Use files for binary or large
@@ -630,25 +708,22 @@ efficient `where`/`orderBy`.
 
 ### Conflict resolution
 
-Per‑column CRDT with HLC. Default merge strategy: **`'remote-wins'`**.
-
-> "Remote‑wins" is per‑column, not per‑row. When two devices write the
-> same column on the same row, the merge keeps the value with the higher
-> HLC. Because HLCs are timestamp‑first, this is "later wall‑clock
-> wins, ties broken by device id". Calling it "remote‑wins" is a
-> historical accident of where the merge runs (during pull); both sides
-> apply the same rule and reach the same answer. Override per database,
-> table, or field if you need `'lww'`, `'local-wins'`, or a custom
-> `MergeFunction`.
+Conflict resolution is per column. With a configured schema, the default
+strategy is **`'remote-wins'`**. Without a schema, the fallback is
+**`'lww'`**.
 
 Available strategies:
 
-- `'lww'` — last‑write‑wins by HLC. Functionally identical to
-  `'remote-wins'` for this CRDT but keeps semantics explicit.
-- `'remote-wins'` (default).
-- `'local-wins'` — keep local on tie; remote still wins on a strictly
-  greater HLC.
+- `'remote-wins'` — always accept the incoming remote column when a local
+  value exists, even if the remote HLC is older.
+- `'local-wins'` — retain the existing local column whenever it exists.
+- `'lww'` — accept the incoming remote column only when its HLC is greater
+  than the local HLC.
 - `MergeFunction` — `(local, remote, ctx) => result` for custom logic.
+
+When the local column does not exist, the incoming column is accepted under
+every strategy. Configure the database, table, or field explicitly when
+application correctness depends on one of these policies.
 
 ### Deletion semantics
 
@@ -686,8 +761,8 @@ Runtime packages own durable implementations:
 
 - `@interocitor/web` exports `IndexedDbLocalStore`, resilient wrappers,
   named-store rotation, and reset helpers.
-- A future `@interocitor/node` package is expected to expose explicit Node
-  stores such as `NodeSqliteLocalStore`.
+- Core does not ship a durable Node local store; Node runtimes supply an
+  implementation of `LocalStore`.
 
 Example:
 
@@ -695,6 +770,7 @@ Example:
 import { createNamedLocalStore } from '@interocitor/web';
 
 const db = new Interocitor(adapter, {
+  keySource,
   localStore: createNamedLocalStore({
     baseName: 'CaseVaultInterocitor',
     schema,
@@ -735,14 +811,17 @@ React apps usually consume communication state through
 
 ### Connect-stage degradation
 
-`connect()` has bounded-progress semantics. Cloud work is split into
-stages (`authenticate`, `ensureFolder`, `loadOrCreateManifest`,
-`upsertDeviceMetadata`, `pull`, `rehydrate`, `flush`). Each stage uses
-`connectStageTimeoutMs` (default
-15s). If a stage stalls, `connect()` returns without throwing, emits
-`connect:error`, calls `onConnectStalled`, and leaves the engine ready but
-not connected. Local reads/writes continue and writes stay queued for a
-future successful connect.
+The full connect pipeline splits cloud work into stages (`authenticate`,
+`ensureFolder`, `loadOrCreateManifest`, `upsertDeviceMetadata`, `pull`,
+`rehydrate`, `flush`). Those stage-wrapped operations use
+`connectStageTimeoutMs` (default 15s). If one stalls, `connect()` returns
+without throwing, emits `connect:error`, calls `onConnectStalled`, and leaves
+the engine ready but not connected. Local row operations continue and writes
+stay queued for a future successful connect.
+
+This is not a universal deadline around every adapter call. In particular, the
+reload fast-path head probe occurs before the full staged pipeline. Adapters
+must still impose their own request timeouts and reject stalled operations.
 
 Apps should treat `onConnectStalled` like `onLocalDegraded`: telemetry and
 user messaging only. Do not make app correctness depend on the callback.
@@ -754,7 +833,7 @@ user messaging only. Do not make app correctness depend on the callback.
 | `MemoryAdapter` | Tests and demos | No remote persistence |
 | `GoogleDriveAdapter` | You want zero infrastructure | Runtime supplies OAuth token; the user owns the data |
 | `WebDAVAdapter` | Self‑hosted (Nextcloud, OwnCloud, custom WebDAV) | Easy to inspect remotely |
-| `CloudflareAdapter` | You operate a worker; want push invalidations | Experimental |
+| `CloudflareAdapter` | You operate a worker; want push invalidations | Optional realtime relay |
 
 Implementing your own adapter: see [Adapter contract](docs/adapter-contract.md) for
 required semantics, consistency assumptions, and the contract test
@@ -862,16 +941,16 @@ Notes:
 
 ## Schema migration
 
-Interocitor now manages **local cache/index upgrades automatically**.
-Adding or removing `types.index(...)` fields no longer requires bumping a
-public schema version just to keep IndexedDB in sync. The local store
+Interocitor manages **local cache/index upgrades automatically**. Adding or
+removing `types.index(...)` fields does not require a public schema-version
+change just to keep IndexedDB in sync. The local store
 computes its own cache fingerprint, repairs missing indexes on open, and
 falls back to scans if a stale cache slips through.
 
-`schema.version` is now **optional** and only matters if you want an
-explicit logical compatibility gate in the remote manifest. If you set
-it, the engine writes it to `manifest.schema` and will reject manifests
-written under a different logical version.
+`schema.version` is **optional** and matters only when the application wants
+an explicit logical compatibility gate in the remote manifest. When set, the
+engine writes it to `manifest.schema` and rejects manifests written under a
+different logical version.
 
 Use `schema.version` only for app-level data meaning changes such as:
 
@@ -906,9 +985,10 @@ db.on(event => {
     case 'flush:start':               /* event.entryCount */ break;
     case 'flush:complete':            break;
     case 'flush:error':               /* event.error */ break;
-    case 'connect:error':             /* event.stage, event.error; may be bounded-progress offline-ready degrade */ break;
+    case 'connect:error':             /* event.stage, event.error; deadline-wrapped stage may degrade offline-ready */ break;
+    case 'join:existing-mesh':        /* event.policy, localRowCount, queuedChangeCount */ break;
     case 'remote:poisoned':           /* unrecoverable; see security-model.md */ break;
-    case 'credentials:meshMismatch':  /* stored meshId != live; offer clearCredentials() */ break;
+    case 'credentials:meshMismatch':  /* stored meshId != live; require explicit re-pair/recovery */ break;
     case 'compact:warning':           /* outbox is large */ break;
     // compact:auto:start / complete / skip / error / delayed:* — see docs/compaction.md
   }
@@ -931,27 +1011,30 @@ A short field guide. Detailed mitigations in the linked docs.
 
 | Symptom | Likely cause | Where to look |
 | --- | --- | --- |
-| `MeshCredentialMismatchError` on connect | Same `dbName`, new mesh; stale credential record | `engine.clearCredentials()` then reconnect; [Credential store](docs/credential-store.md) |
+| `MeshCredentialMismatchError` on connect | Same `dbName`, new mesh; stale credential record | Confirm the intended mesh, disconnect, clear credentials, then create a newly configured engine with the correct key source; [Credential store](docs/credential-store.md) |
 | `MeshEncryptionMismatchError` on connect | App flipped key mode between sessions | Pin one `keySource` mode per `dbName`, never change |
 | `remote:poisoned` event | Decode failure on a manifest, change file, or snapshot | [Security model](docs/security-model.md) — usually wrong key, schema drift, or remote tampering |
 | Writes never appear on peer | Peer never compacted, peer's poll interval is long, remote dropped writes, or `connect()` is offline-ready after a stalled cloud stage | Check `flush:complete`, `connect:error`, `onConnectStalled`; check remote folder by hand |
 | App is unusable after browser local-store error | Local cache is wedged, blocked by older tab, or connection is closing | In `@interocitor/web`, use `createResilientLocalStore` / `createNamedLocalStore`; log `onLocalDegraded`; offer `resetLocalDatabaseWithDeadline` repair |
-| Local store has rows that are "old" after re‑pair | Engine kept local data when you re‑paired with a fresh mesh | Either delete local DB on re‑pair, or accept the merge |
-| Lost portable key | No recovery | Portable key material is the capability. Back it up out of band |
+| Local rows disappeared while joining an existing mesh | Default `joinExistingMeshPolicy: 'reset-to-remote'` cleared local rows and queued work | Use `'merge-with-remote'` only when publishing that retained work is intentional; see “Joining an existing mesh with local state” |
+| Lost portable key | No other device or previously published recovery wrapper | Restore through another device or [recovery phrase](docs/recovery.md); otherwise the encrypted mesh is unreadable |
 | Long‑offline device "lost" recent edits | Rehydrate replaced local state with the snapshot | Local writes already in the outbox survive; in‑flight uncommitted UI state does not |
-| Compaction never runs | `autoCompact: false`, or no remote, or `compactAutoThreshold` never reached | [Compaction](docs/compaction.md) — subscribe to `compact:auto:skip` |
+| Compaction never runs | `autoCompact: false`, no connected remote, immediate threshold not reached, or delayed path never sees remote count above its threshold | [Compaction](docs/compaction.md) — subscribe to `compact:auto:skip` |
 | Two compactors race | No CAS in the adapter; small probability in small meshes | Use `serverManaged: true` for large meshes |
 
 ## Tests
 
+For product-level Jest and Playwright testing with either a local-only engine
+or the real local WebDAV mailbox, see [Test an Interocitor product](docs/testing.md).
+
 ```bash
-yarn workspace @interocitor/core test
+yarn workspace @interocitor/core test:unit
 ```
 
-Adapter contract tests (run for every adapter):
+Run the current WebDAV adapter contract test:
 
 ```bash
-yarn workspace @interocitor/core test webdav.adapter.contract
+yarn workspace @interocitor/core test:e2e webdav.adapter.contract.spec.ts
 ```
 
 ## Package context
@@ -960,6 +1043,9 @@ Part of the Interocitor monorepo. See:
 
 - [Root README](../../README.md) — monorepo overview
 - [Dictionary](../../docs/dictionary.md) — terminology, including portable keys
+- [Core API reference](docs/api-reference.md) — engine, configuration, local store, events, and errors
+- [Recovery phrases](docs/recovery.md) — create and restore remote key wrappers
+- [Recovery API reference](docs/recovery-reference.md) — functions, wrapper format, adapter modes, and failures
 - [Security model](docs/security-model.md) — threat model
 - [Shared key scenarios](docs/shared-key-scenarios.md) — portable and bound shared-key deployment modes
 - [Pairing protocol](docs/pairing.md) — QR handshake and device-join flow
@@ -968,6 +1054,7 @@ Part of the Interocitor monorepo. See:
 - [Credential store](docs/credential-store.md) — credential persistence
 - [Tainted files](docs/tainted-files.md) — per-group sealed files and access grants
 - [Signing](docs/signing.md) — ECDSA authorship/attestation and capability tokens
+- [Test an Interocitor product](docs/testing.md) — local-only, server-backed, and browser testing
 
 ## License
 

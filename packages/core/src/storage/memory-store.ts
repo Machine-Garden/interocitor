@@ -74,8 +74,8 @@ export class MemoryLocalStore implements LocalStore {
   private cursors = new Map<string, number>();
   private meta = new Map<string, unknown>();
 
-  // open()/close() are no-ops. Always succeeds, never hangs — that's the
-  // entire point of this implementation.
+  // Opening cannot block or fail. Closing clears every volatile record so a
+  // disconnected test/fallback engine cannot leak state into later reuse.
   async open(): Promise<void> { /* noop */ }
   close(): void {
     this.rows.clear();

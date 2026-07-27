@@ -96,10 +96,10 @@ final class IndexedSQLiteStoreBasicTests: XCTestCase {
 
     func test_getTableNames() async throws {
         try await store.putRow(Row(table: "alpha", rowId: "r1", columns: [:]))
-        try await store.putRow(Row(table: "beta",  rowId: "r2", columns: [:]))
+        try await store.putRow(Row(table: "bravo", rowId: "r2", columns: [:]))
         let names = try await store.getTableNames()
         XCTAssertTrue(names.contains("alpha"))
-        XCTAssertTrue(names.contains("beta"))
+        XCTAssertTrue(names.contains("bravo"))
     }
 
     func test_clearRows() async throws {
@@ -461,15 +461,15 @@ final class IndexedSQLiteStoreQueryWhereTests: XCTestCase {
     }
 }
 
-// MARK: - SyncEngine + SQLite (full stack)
+// MARK: - Interocitor + SQLite (full stack)
 
 final class SyncEngineWithSQLiteTests: XCTestCase {
 
-    private func makeSQLiteEngine(namespace: String, key: MeshKey? = nil) -> (SyncEngine, IndexedSQLiteStore) {
+    private func makeSQLiteEngine(namespace: String, key: MeshKey? = nil) -> (Interocitor, IndexedSQLiteStore) {
         let store = makeTempStore(name: namespace)
         let adapter = MemoryStorageAdapter()
         let cfg = SyncConfig(remotePath: "/\(namespace)", pollInterval: 9999, flushDebounce: 0)
-        let engine = SyncEngine(adapter: adapter, config: cfg, localStore: store)
+        let engine = Interocitor(adapter: adapter, config: cfg, localStore: store)
         return (engine, store)
     }
 
@@ -489,11 +489,11 @@ final class SyncEngineWithSQLiteTests: XCTestCase {
         let cfg = SyncConfig(remotePath: "/sqlite-enc", pollInterval: 9999, flushDebounce: 0)
 
         let storeA = makeTempStore(name: "sqlite-enc-a-\(Int(Date().timeIntervalSince1970*1000))")
-        let engineA = SyncEngine(adapter: shared, config: cfg, localStore: storeA)
+        let engineA = Interocitor(adapter: shared, config: cfg, localStore: storeA)
         await engineA.setEncryptionKey(key)
 
         let storeB = makeTempStore(name: "sqlite-enc-b-\(Int(Date().timeIntervalSince1970*1000))")
-        let engineB = SyncEngine(adapter: shared, config: cfg, localStore: storeB)
+        let engineB = Interocitor(adapter: shared, config: cfg, localStore: storeB)
         await engineB.setEncryptionKey(key)
 
         try await engineA.initialize()

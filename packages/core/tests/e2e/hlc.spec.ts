@@ -146,7 +146,7 @@ test.describe('hlcCompare', () => {
     const result = await page.evaluate(async () => {
       const { hlcCompare } = await import('/packages/core/dist/core/hlc.js');
       const a = { ts: 100, counter: 1, nodeId: 'alpha' };
-      const b = { ts: 100, counter: 1, nodeId: 'beta' };
+      const b = { ts: 100, counter: 1, nodeId: 'bravo' };
       return hlcCompare(a, b);
     });
 
@@ -178,4 +178,3 @@ test.describe('hlcCompareStr', () => {
     expect(result.objSign).toBe(result.strSign);
   });
 });
-

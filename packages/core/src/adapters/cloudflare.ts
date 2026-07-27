@@ -5,10 +5,10 @@
  * It does NOT parse XML and does NOT depend on WebDAV compatibility.
  *
  * Base URL shape:
- *   https://<worker>/io/<prefix>
+ *   https://<worker>/io/<address>
  *
  * The adapter derives:
- *   wss://<worker>/notify/<prefix>  (WebSocket invalidations via InterocitorRelay DO)
+ *   wss://<worker>/notify/<address>  (WebSocket invalidations via InterocitorRelay DO)
  */
 
 import type {
@@ -21,12 +21,16 @@ import type {
 } from '../core/types.ts';
 
 export interface CloudflareAdapterConfig {
-  /** Worker IO base URL that includes prefix, e.g. https://worker/io/team-a */
+  /** Worker IO base URL that includes a mesh address, e.g. https://worker/io/main */
   baseUrl: string;
-  /** Optional bearer for server/cost protection (INTEROCITOR_ACCESS_TOKEN). */
+  /** Optional bearer passed to the Worker with I/O and relay requests. */
   token?: string;
   /** Disable relay/WebSocket invalidations for this client. */
   relayEnabled?: boolean;
+  /** Recovery endpoint, e.g. https://worker.example/sync/recovery. Required for phrase recovery. */
+  recoveryBaseUrl?: string;
+  /** Bearer forwarded to the recovery endpoint. Defaults to `token`. */
+  recoveryToken?: string;
 }
 
 interface IoFileMeta {
@@ -61,7 +65,7 @@ interface IoFileMeta {
  */
 /** Config shape embedded in QR payloads for CloudflareAdapter. Credentials excluded. */
 export interface CloudflareHandshakeConfig {
-  /** Worker IO base URL including the /io/<prefix> path segment. */
+  /** Worker IO base URL including the `/io/<address>` path segment. */
   baseUrl: string;
 }
 
@@ -95,7 +99,7 @@ export class CloudflareAdapter implements StorageAdapter {
       : new URL(this.config.baseUrl, 'http://interocitor').toString();
     const u = new URL(base);
     if (!u.pathname.includes('/io/')) {
-      throw new Error('CloudflareAdapter baseUrl must include /io/<prefix>');
+      throw new Error('CloudflareAdapter baseUrl must include /io/<address>');
     }
     return u;
   }
@@ -136,6 +140,19 @@ export class CloudflareAdapter implements StorageAdapter {
     const u = new URL(this.ioUrl('/stored-file'));
     u.searchParams.set('path', path);
     return u.toString();
+  }
+
+  private recoveryUrl(locator: string): string {
+    if (!this.config.recoveryBaseUrl) {
+      throw new Error('Cloudflare recovery requires recoveryBaseUrl (for example https://worker.example/sync/recovery)');
+    }
+    if (!/^[A-Za-z0-9_-]{43}$/.test(locator)) throw new Error('Invalid recovery locator');
+    return `${this.config.recoveryBaseUrl.replace(/\/$/, '')}/${locator}`;
+  }
+
+  private recoveryHeaders(): Record<string, string> {
+    const token = this.config.recoveryToken ?? this.config.token;
+    return token ? { Authorization: `Bearer ${token}` } : {};
   }
 
   async authenticate(): Promise<void> {
@@ -380,6 +397,30 @@ export class CloudflareAdapter implements StorageAdapter {
       modifiedTime: f.modifiedTime,
       etag: f.etag,
     };
+  }
+
+  /**
+   * Read a recovery wrapper from `recoveryBaseUrl` without a mesh ID.
+   * Rejects an invalid locator, missing recovery URL, or non-2xx response.
+   */
+  async readRecoveryWrapper(locator: string): Promise<Uint8Array> {
+    const res = await fetch(this.recoveryUrl(locator), { method: 'GET', headers: this.recoveryHeaders() });
+    if (!res.ok) throw new Error(`Failed to read recovery wrapper: HTTP ${res.status}`);
+    return new Uint8Array(await res.arrayBuffer());
+  }
+
+  /**
+   * Publish a serialized recovery wrapper to `recoveryBaseUrl`.
+   * Rejects an invalid locator, missing recovery URL, or non-2xx response.
+   * The adapter sends bytes as supplied and does not inspect their contents.
+   */
+  async writeRecoveryWrapper(locator: string, data: Uint8Array): Promise<void> {
+    const res = await fetch(this.recoveryUrl(locator), {
+      method: 'PUT',
+      headers: this.recoveryHeaders(),
+      body: data as unknown as BodyInit,
+    });
+    if (!res.ok) throw new Error(`Failed to write recovery wrapper: HTTP ${res.status}`);
   }
 
   async putStoredFile(path: string, data: Uint8Array | string, options: StoredFileWriteOptions = {}): Promise<StoredFileMetadata> {

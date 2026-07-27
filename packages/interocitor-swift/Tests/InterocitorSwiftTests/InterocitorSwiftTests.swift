@@ -214,15 +214,15 @@ final class MemoryLocalStoreTests: XCTestCase {
     }
 }
 
-// MARK: - SyncEngine (memory) Tests
+// MARK: - Interocitor (memory) Tests
 
 final class SyncEngineMemoryTests: XCTestCase {
 
-    func makePair() -> (SyncEngine, SyncEngine, MemoryStorageAdapter) {
+    func makePair() -> (Interocitor, Interocitor, MemoryStorageAdapter) {
         let shared = MemoryStorageAdapter()
         let cfg = SyncConfig(remotePath: "/TestApp", pollInterval: 9999, flushDebounce: 0)
-        let engineA = SyncEngine(adapter: shared, config: cfg, localStore: MemoryLocalStore())
-        let engineB = SyncEngine(adapter: shared, config: cfg, localStore: MemoryLocalStore())
+        let engineA = Interocitor(adapter: shared, config: cfg, localStore: MemoryLocalStore())
+        let engineB = Interocitor(adapter: shared, config: cfg, localStore: MemoryLocalStore())
         return (engineA, engineB, shared)
     }
 
@@ -448,16 +448,16 @@ final class CryptoTests: XCTestCase {
     }
 }
 
-// MARK: - Encrypted SyncEngine Tests
+// MARK: - Encrypted Interocitor Tests
 
 final class EncryptedSyncEngineTests: XCTestCase {
 
-    func makeEncryptedPair(key: MeshKey? = nil) -> (SyncEngine, SyncEngine, MeshKey) {
+    func makeEncryptedPair(key: MeshKey? = nil) -> (Interocitor, Interocitor, MeshKey) {
         let shared = MemoryStorageAdapter()
         let meshKey = key ?? generateMeshKey()
         let cfg = SyncConfig(remotePath: "/EncryptedApp", pollInterval: 9999, flushDebounce: 0)
-        let engineA = SyncEngine(adapter: shared, config: cfg, localStore: MemoryLocalStore())
-        let engineB = SyncEngine(adapter: shared, config: cfg, localStore: MemoryLocalStore())
+        let engineA = Interocitor(adapter: shared, config: cfg, localStore: MemoryLocalStore())
+        let engineB = Interocitor(adapter: shared, config: cfg, localStore: MemoryLocalStore())
         return (engineA, engineB, meshKey)
     }
 
@@ -482,7 +482,7 @@ final class EncryptedSyncEngineTests: XCTestCase {
         let shared = MemoryStorageAdapter()
         let key = generateMeshKey()
         let cfg = SyncConfig(remotePath: "/EncryptedFingerprintChange", pollInterval: 9999, flushDebounce: 0)
-        let engine = SyncEngine(adapter: shared, config: cfg, localStore: MemoryLocalStore())
+        let engine = Interocitor(adapter: shared, config: cfg, localStore: MemoryLocalStore())
         await engine.setEncryptionKey(key)
 
         try await engine.initialize()
@@ -508,7 +508,7 @@ final class EncryptedSyncEngineTests: XCTestCase {
         let shared = MemoryStorageAdapter()
         let key = generateMeshKey()
         let cfg = SyncConfig(remotePath: "/EncryptedFingerprintSnapshot", pollInterval: 9999, flushDebounce: 0)
-        let engine = SyncEngine(adapter: shared, config: cfg, localStore: MemoryLocalStore())
+        let engine = Interocitor(adapter: shared, config: cfg, localStore: MemoryLocalStore())
         await engine.setEncryptionKey(key)
 
         try await engine.initialize()
@@ -539,7 +539,7 @@ final class EncryptedSyncEngineTests: XCTestCase {
         let key = generateMeshKey()
 
         let sourceCfg = SyncConfig(remotePath: "/EncryptedPoisonSource", pollInterval: 9999, flushDebounce: 0)
-        let source = SyncEngine(adapter: shared, config: sourceCfg, localStore: MemoryLocalStore())
+        let source = Interocitor(adapter: shared, config: sourceCfg, localStore: MemoryLocalStore())
         await source.setEncryptionKey(key)
         try await source.initialize()
         try await source.connect()
@@ -548,7 +548,7 @@ final class EncryptedSyncEngineTests: XCTestCase {
         try await source.disconnect()
 
         let targetSeedCfg = SyncConfig(remotePath: "/EncryptedPoisonTarget", pollInterval: 9999, flushDebounce: 0)
-        let targetSeed = SyncEngine(adapter: shared, config: targetSeedCfg, localStore: MemoryLocalStore())
+        let targetSeed = Interocitor(adapter: shared, config: targetSeedCfg, localStore: MemoryLocalStore())
         await targetSeed.setEncryptionKey(key)
         try await targetSeed.initialize()
         try await targetSeed.connect()
@@ -560,7 +560,7 @@ final class EncryptedSyncEngineTests: XCTestCase {
         let poisonedPath = sourceFile.path.replacingOccurrences(of: "/EncryptedPoisonSource/", with: "/EncryptedPoisonTarget/")
         try await shared.writeFile(path: poisonedPath, data: sourceData)
 
-        let target = SyncEngine(adapter: shared, config: targetSeedCfg, localStore: MemoryLocalStore())
+        let target = Interocitor(adapter: shared, config: targetSeedCfg, localStore: MemoryLocalStore())
         await target.setEncryptionKey(key)
         try await target.initialize()
 
@@ -585,8 +585,8 @@ final class EncryptedSyncEngineTests: XCTestCase {
 
         let shared = MemoryStorageAdapter()
         let cfg = SyncConfig(remotePath: "/EncryptedApp2", pollInterval: 9999, flushDebounce: 0)
-        let engineA = SyncEngine(adapter: shared, config: cfg, localStore: MemoryLocalStore())
-        let engineB = SyncEngine(adapter: shared, config: cfg, localStore: MemoryLocalStore())
+        let engineA = Interocitor(adapter: shared, config: cfg, localStore: MemoryLocalStore())
+        let engineB = Interocitor(adapter: shared, config: cfg, localStore: MemoryLocalStore())
 
         await engineA.setEncryptionKey(key)
         await engineB.setEncryptionKey(wrongKey)
@@ -626,7 +626,7 @@ final class EncryptedSyncEngineTests: XCTestCase {
 
     func testIsEncrypted_flagReflectsState() async {
         let cfg = SyncConfig(remotePath: "/x")
-        let engine = SyncEngine(config: cfg)
+        let engine = Interocitor(config: cfg)
         let notEncrypted = await engine.isEncrypted()
         XCTAssertFalse(notEncrypted)
 

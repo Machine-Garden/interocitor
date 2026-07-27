@@ -168,7 +168,7 @@ test.describe('LocalStore — row operations', () => {
 
       await store.putRows([
         { _meta: { table: 'tasks', rowId: 't1', deleted: false, schemaVersion: 1 }, payload: { title: { value: 'alpha', hlc: '0' } } },
-        { _meta: { table: 'tasks', rowId: 't2', deleted: false, schemaVersion: 1 }, payload: { title: { value: 'beta', hlc: '0' } } },
+        { _meta: { table: 'tasks', rowId: 't2', deleted: false, schemaVersion: 1 }, payload: { title: { value: 'bravo', hlc: '0' } } },
       ] as any);
 
       const startsWithA = await store.queryWhere('tasks', {
@@ -227,7 +227,7 @@ test.describe('LocalStore — row operations', () => {
       await initial.open();
       await initial.putRows([
         { _meta: { table: 'tasks', rowId: 't1', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'open', hlc: '0' }, title: { value: 'alpha', hlc: '0' } } },
-        { _meta: { table: 'tasks', rowId: 't2', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'done', hlc: '0' }, title: { value: 'beta', hlc: '0' } } },
+        { _meta: { table: 'tasks', rowId: 't2', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'done', hlc: '0' }, title: { value: 'bravo', hlc: '0' } } },
       ] as any);
       initial.close();
 
@@ -276,7 +276,7 @@ test.describe('LocalStore — row operations', () => {
       await initial.open();
       await initial.putRows([
         { _meta: { table: 'tasks', rowId: 't1', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'open', hlc: '0' }, priority: { value: 1, hlc: '0' }, title: { value: 'alpha', hlc: '0' } } },
-        { _meta: { table: 'tasks', rowId: 't2', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'done', hlc: '0' }, priority: { value: 3, hlc: '0' }, title: { value: 'beta', hlc: '0' } } },
+        { _meta: { table: 'tasks', rowId: 't2', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'done', hlc: '0' }, priority: { value: 3, hlc: '0' }, title: { value: 'bravo', hlc: '0' } } },
         { _meta: { table: 'tasks', rowId: 't3', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'open', hlc: '0' }, priority: { value: 2, hlc: '0' }, title: { value: 'gamma', hlc: '0' } } },
       ] as any);
       initial.close();
@@ -327,7 +327,7 @@ test.describe('LocalStore — row operations', () => {
       await initial.open();
       await initial.putRows([
         { _meta: { table: 'tasks', rowId: 't1', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'open', hlc: '0' }, title: { value: 'alpha', hlc: '0' } } },
-        { _meta: { table: 'tasks', rowId: 't2', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'done', hlc: '0' }, title: { value: 'beta', hlc: '0' } } },
+        { _meta: { table: 'tasks', rowId: 't2', deleted: false, schemaVersion: 1 }, payload: { status: { value: 'done', hlc: '0' }, title: { value: 'bravo', hlc: '0' } } },
       ] as any);
       initial.close();
 
@@ -587,4 +587,3 @@ test.describe('LocalStore — clearAll', () => {
     expect(result.thrownMessage).toContain('closing');
   });
 });
-

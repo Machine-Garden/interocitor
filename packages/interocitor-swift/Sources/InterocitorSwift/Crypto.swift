@@ -1,8 +1,8 @@
 /**
  * Crypto — AES-256-GCM encryption, key management, and transfer formats
  *
- * Encryption is a first principle in Interocitor Swift.
- * Every byte written to a remote backend passes through this layer.
+ * The sync actor uses this layer for change and snapshot payloads after an
+ * application calls `setEncryptionKey(_:)`. Encryption is opt-in.
  *
  * Key formats:
  *  - Raw 32-byte SymmetricKey
@@ -11,8 +11,6 @@
  *
  * Wire format (EncryptedEnvelope):
  *  { "v": 1, "iv": "<base64-12-bytes>", "ct": "<base64-ciphertext+tag>" }
- *
- * Mirrors packages/interocitor/src/crypto/encryption.ts exactly.
  */
 
 import Foundation
@@ -149,7 +147,7 @@ public func keyFromFragment(_ fragment: String) -> Data? {
     guard let match = fragment.range(of: "key=([A-Za-z0-9_-]+)", options: .regularExpression) else {
         return nil
     }
-    let b64url = String(fragment[match]).dropFirst(4) // drop "key="
+    let b64url = String(fragment[match]).dropFirst(4)
     var b64 = b64url
         .replacingOccurrences(of: "-", with: "+")
         .replacingOccurrences(of: "_", with: "/")
@@ -212,7 +210,7 @@ public func decryptEntry(_ key: MeshKey, envelopeStr: String) throws -> String {
     return plaintext
 }
 
-/// Try to decrypt; returns nil instead of throwing (used by SyncEngine for corrupt entries).
+/// Try to decrypt; returns nil instead of throwing.
 public func tryDecryptEntry(_ key: MeshKey, envelopeStr: String) -> String? {
     try? decryptEntry(key, envelopeStr: envelopeStr)
 }
@@ -236,7 +234,7 @@ public func storeKeyInKeychain(_ key: MeshKey) throws {
         kSecAttrAccount as String: KEYCHAIN_ACCOUNT,
         kSecValueData as String:   raw,
     ]
-    SecItemDelete(query as CFDictionary) // remove old
+    SecItemDelete(query as CFDictionary)
     let status = SecItemAdd(query as CFDictionary, nil)
     guard status == errSecSuccess else { throw CryptoError.keychainError(status) }
 }

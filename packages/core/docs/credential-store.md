@@ -4,7 +4,10 @@ The credential store is where a `MeshKeySource` may persist its portable
 key material, **device id**, and the **mesh id anchor** between sessions.
 Without it, every reload would force a re-pair or another key handoff.
 
-This is the deep document. The README has the day‑to‑day usage. For the difference between portable shared keys and bound shared keys, see [Shared key scenarios](shared-key-scenarios.md).
+For routine browser setup, start with the package README. This page covers the
+persistence contract and implementation choices. For the difference between
+portable shared keys and bound shared keys, see
+[Shared key scenarios](shared-key-scenarios.md).
 
 ## Why it exists
 
@@ -36,9 +39,9 @@ interface CredentialStore {
 
 ## Built-in implementations
 
-For browser apps, the primary public entry point is `createWebCredentialStore(...)`.
-The concrete classes below exist as building blocks, but docs and examples should
-prefer the factory unless a caller explicitly needs direct construction.
+Browser apps normally call `createWebCredentialStore(...)`. Construct one of
+the concrete classes directly only when the application needs to control that
+implementation rather than select a factory storage mode.
 
 | Class / factory option | Backing store | Auth gate | Reload scope |
 | --- | --- | --- | --- |
@@ -207,8 +210,31 @@ construct engine ──► keySource.load()
 | `credentials:restored` | After silent or biometric load succeeds | Optional UI: "signed in as …" |
 | `credentials:persisted` | After `persistCredentials()` writes | Useful in tests |
 | `credentials:conflict` | Stored `deviceId` differs from active | Almost always a test artifact |
-| `credentials:meshMismatch` | Stored `meshId` differs from live mesh | Show a "this key belongs to a different mesh" UI; offer `clearCredentials()` |
+| `credentials:meshMismatch` | Stored `meshId` differs from live mesh | Stop the connection and require an explicit re-pair/recovery choice; do not reconnect the same cleared engine |
 | `encryption:resolved` | Key material is now ready | Safe to call `connect()` |
+
+### Clearing credentials safely
+
+`engine.clearCredentials()` clears the configured key source, its persisted
+credential record, and the current engine's resolved encryption state. It does
+not delete local rows or outbox entries, select a replacement mesh, or install
+new key material.
+
+Use it only as one step in an explicit reset or re-pair flow:
+
+1. Disconnect the current engine.
+2. Confirm which remote mesh and key material the user intends to use.
+3. Call `clearCredentials()`.
+4. Discard that engine instance.
+5. Construct a new engine with the intended `remotePath`, `keySource`, local
+   store, and `joinExistingMeshPolicy`, then call `init()` and `connect()`.
+
+Calling `connect()` again on the same cleared instance can present an
+unencrypted engine to an encrypted mesh and fail with
+`MeshEncryptionMismatchError`. If the replacement mesh differs from locally
+cached state, remember that the default join policy clears local rows and
+queued writes; see
+[Joining an existing mesh with local state](../README.md#joining-an-existing-mesh-with-local-state).
 
 ## Disabling persistence
 
@@ -259,17 +285,20 @@ Contract:
 
 ## What can go wrong
 
-- **Lost portable key, no biometrics, no other device.** The mesh is
-  unreadable. There is no recovery path inside the library — the data
-  is encrypted end‑to‑end and the key is gone.
+- **Lost portable key, no usable credential store, no other device, and no
+  recovery wrapper.** The mesh is unreadable because no remaining source can
+  reproduce the key. A wrapper published before loss can restore the portable
+  key; see [Recovery phrases](recovery.md).
 - **Two `dbName`s, one mesh.** The credential store does not enforce
   uniqueness across dbNames. Two engines on the same origin can both
   hold the same mesh's key. Usually fine, but writes from both will be
   attributed to two different device ids.
 - **Stale `meshId` anchor after manual remote wipe.** If you deleted
   the remote folder out of band, the engine sees a fresh manifest
-  (different `meshId`) and throws `MeshCredentialMismatchError`. Call
-  `engine.clearCredentials()` and reconnect.
+  (different `meshId`) and throws `MeshCredentialMismatchError`. Confirm the
+  new mesh, then follow the disconnect, clear, and newly configured engine
+  procedure above. A bare `clearCredentials()` followed by reconnecting the
+  same engine is not sufficient.
 - **Origin change.** `localStorage` is origin‑scoped. Moving the app to
   a different domain loses the credential record; user must re‑pair.
 - **WebAuthn-only device, user denies biometric.** `load()` returns

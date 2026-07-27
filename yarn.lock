@@ -541,7 +541,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@interocitor/core@workspace:packages/core":
+"@interocitor/core@workspace:*, @interocitor/core@workspace:packages/core":
   version: 0.0.0-use.local
   resolution: "@interocitor/core@workspace:packages/core"
   dependencies:
@@ -554,25 +554,28 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@interocitor/react@workspace:packages/react"
   dependencies:
+    "@interocitor/core": "workspace:*"
+    "@interocitor/web": "workspace:*"
     "@types/react": "npm:^19.0.0"
     "@types/react-test-renderer": "npm:^19.0.0"
     react: "npm:^19.0.0"
     react-test-renderer: "npm:^19.0.0"
     typescript: "npm:^6.0.0"
   peerDependencies:
-    "@interocitor/core": 0.0.0-beta.12
-    "@interocitor/web": 0.0.0-beta.12
+    "@interocitor/core": 0.1.0
+    "@interocitor/web": 0.1.0
     react: ">=18"
   languageName: unknown
   linkType: soft
 
-"@interocitor/web@workspace:packages/web":
+"@interocitor/web@workspace:*, @interocitor/web@workspace:packages/web":
   version: 0.0.0-use.local
   resolution: "@interocitor/web@workspace:packages/web"
   dependencies:
+    "@interocitor/core": "workspace:*"
     typescript: "npm:^6.0.0"
   peerDependencies:
-    "@interocitor/core": 0.0.0-beta.12
+    "@interocitor/core": 0.1.0
   languageName: unknown
   linkType: soft
 

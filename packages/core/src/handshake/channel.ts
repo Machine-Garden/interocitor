@@ -1,16 +1,15 @@
 /**
- * interocitor/handshake/channel
+ * @interocitor/core low-level handshake channel
  *
  * Ephemeral ECDH-P256 key exchange over the shared cloud backend (relay).
  * No extra server required — the backend the mesh already uses is the relay.
  *
  * ## Roles (determined by QR intent, not by which device is "bigger")
  *
- *   Generator  — device that created the QR (has the ECDH private key).
- *                Receives credentials from the scanner via the relay.
+ *   Generator  — device that created the QR or pair URL and holds the
+ *                corresponding ephemeral ECDH private key.
  *
- *   Scanner    — device that scanned the QR (has generatorPub from the QR).
- *                Pushes credentials to the generator via the relay.
+ *   Scanner    — device that obtained the payload and has generatorPub.
  *
  * ## Protocol
  *
@@ -38,24 +37,26 @@
  *                                                                  sharedSecret = ECDH(Es, eg)
  *                                                                  wrappingKey  = HKDF(sharedSecret)
  *
- *   ── if intent == "join": Generator has credentials, Scanner receives ──
- *                                                                  encrypt {remotePath, meshKey}
+ *   ── if intent == "share": Generator has credentials, Scanner receives ──
+ *                                                                  encrypt {remotePath, passphrase}
  *                                  ← write credentials.json
  *   read credentials.json
- *   decrypt → remotePath, meshKey
+ *   decrypt → remotePath, passphrase
  *
- *   ── if intent == "share": Scanner has credentials, Generator receives ──
- *   encrypt {remotePath, meshKey}
+ *   ── if intent == "join": Scanner has credentials, Generator receives ──
+ *   encrypt {remotePath, passphrase}
  *                                  write credentials.json →
  *                                                                  read credentials.json
- *                                                                  decrypt → remotePath, meshKey
+ *                                                                  decrypt → remotePath, passphrase
  *
  *   [whoever received credentials deletes relay files — best-effort]
  *
  * ## Relay files (scoped by handshakeId)
  *
- *   {relayBase}/scanner-pub.json   — scanner's ephemeral ECDH public key
- *   {relayBase}/credentials.json   — encrypted {remotePath, meshKey?}
+ *   {relayBase}/handshake/{handshakeId}/scanner-pub.json
+ *     — scanner's ephemeral ECDH public key
+ *   {relayBase}/handshake/{handshakeId}/credentials.json
+ *     — encrypted {remotePath, passphrase?}
  *
  * ## Security
  *
@@ -63,10 +64,11 @@
  *              = ECDH(scannerPub, generatorPriv)   (commutativity)
  *
  *   Anyone with cloud access sees scanner-pub.json and credentials.json.
- *   Without generatorPriv (which never leaves the generating device) they
- *   cannot derive wrappingKey and cannot decrypt credentials.json.
- *   generatorPriv is only accessible to someone who physically held the
- *   device that generated the QR.
+ *   Without generatorPub from the invitation payload and one participant's
+ *   private key, cloud access alone cannot derive wrappingKey. Anyone who
+ *   obtains the complete invitation payload and can access the relay can act
+ *   as the scanner, so applications must treat QR images and pair URLs as
+ *   short-lived capabilities.
  */
 
 import type { StorageAdapter } from '../core/types.ts';
@@ -327,7 +329,6 @@ export async function runScannerHandshake(
   const { pollIntervalMs = 2000, timeoutMs = 120_000 } = options;
   const paths = relayPaths(handshakeId, relayBase);
 
-  // Generate our ephemeral keypair.
   const keypair = await generateECDHKeypair();
   const scannerPub = await exportECDHPublicKey(keypair.publicKey);
 

@@ -296,7 +296,7 @@ test.describe('generateJoinQR + handleScannedQR (join flow)', () => {
         adapter,
         relayBase: '/',
         payload: join.qrPayload,
-        ownCredentials: { remotePath: '/team-beta', passphrase },
+        ownCredentials: { remotePath: '/team-bravo', passphrase },
         pollIntervalMs: 50,
         timeoutMs: 10_000,
       });
@@ -311,7 +311,7 @@ test.describe('generateJoinQR + handleScannedQR (join flow)', () => {
       };
     });
 
-    expect(result.remotePath).toBe('/team-beta');
+    expect(result.remotePath).toBe('/team-bravo');
     expect(result.passphraseMatch).toBe(true);
     expect(result.intent).toBe('join');
   });

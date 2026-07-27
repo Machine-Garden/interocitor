@@ -2,7 +2,8 @@
  * Structured ID generation and validation.
  *
  * Device IDs: UUIDv7 — timestamp + random, client-generated.
- * Mesh IDs:   UUIDv7 + HMAC tag — timestamp + random + MAC, worker-issued.
+ * Checksummed IDs: UUIDv7 + HMAC tag — optional authority-issued values that
+ *                  a Worker can accept as mesh addresses.
  * Row IDs:    UUID v4/v7 with optional prefix — client-generated.
  */
 
@@ -64,15 +65,17 @@ export function isValidDeviceId(id: unknown): id is string {
 // ─── Mesh / Team IDs ─────────────────────────────────────────────────
 
 /**
- * Issue a mesh/team ID with embedded HMAC tag.
+ * Issue a checksummed mesh ID with an embedded HMAC tag.
  *
  * Layout (opaque string):
  *   <uuidv7>.<tag>
  *
  * Where tag = base64url(HMAC-SHA256(secret, uuidv7))[0..10]
  *
- * Only workers with the secret can mint valid mesh IDs.
- * Clients and workers validate with `isValidMeshId(id, secret)`.
+ * Only callers with the secret can mint a value accepted by
+ * `isValidMeshId(id, secret)`. This proves issuance by that authority; it
+ * does not authenticate a requester. A Worker's route address may instead be
+ * a stable name admitted by its own integrity gate.
  *
  * @param secret — HMAC key (CryptoKey or raw bytes). Workers hold this.
  */

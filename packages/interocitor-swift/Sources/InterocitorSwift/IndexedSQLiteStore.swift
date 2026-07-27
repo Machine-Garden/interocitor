@@ -7,9 +7,8 @@
  *  - cursors table    → per-device byte offset
  *  - meta table       → key/value string store
  *
- * Requires the swift-nio-sqlite (or any SQLite wrapper) package.
- * This implementation uses the SQLite3 C library directly via Foundation
- * so it has zero external dependencies beyond what Apple ships.
+ * Uses the SQLite3 C library shipped with macOS and iOS. The Swift package
+ * links `sqlite3` directly and does not require a third-party SQLite wrapper.
  */
 
 import Foundation
@@ -152,7 +151,7 @@ public actor IndexedSQLiteStore: LocalStoreAdapter {
     }
 
     public func queryWhere(table: String, clause: WhereClause) async throws -> [Row] {
-        // Full table scan filtered in-memory (indexes can be added in future iterations)
+        // Predicate evaluation uses an in-memory full-table scan.
         let all = try await getTable(table)
         return all.filter { row in
             matchesWhereClause(value: row.columns[clause.field]?.value, clause: clause)

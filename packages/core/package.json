@@ -1,7 +1,19 @@
 {
   "name": "@interocitor/core",
-  "version": "0.0.0-beta.12",
-  "description": "Encrypted local-first CRDT database that syncs over cloud storage without a purpose-built backend.",
+  "version": "0.1.0",
+  "description": "Local-first CRDT rows and durable remote files with optional client-side encryption.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TheUiTeam/interocitor.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/TheUiTeam/interocitor/tree/main/packages/core#readme",
+  "bugs": {
+    "url": "https://github.com/TheUiTeam/interocitor/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -37,6 +49,10 @@
     "./crypto/keys": {
       "types": "./dist/crypto/keys.d.ts",
       "import": "./dist/crypto/keys.js"
+    },
+    "./crypto/recovery": {
+      "types": "./dist/crypto/recovery.d.ts",
+      "import": "./dist/crypto/recovery.js"
     },
     "./crypto/signing": {
       "types": "./dist/crypto/signing.d.ts",

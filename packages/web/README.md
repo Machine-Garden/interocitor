@@ -7,14 +7,22 @@ underneath; `@interocitor/web` provides the browser pieces you normally wire int
 that engine: IndexedDB local storage, browser credential storage, image helpers,
 and local reset helpers.
 
-## Install
+## Build the public release
 
 ```bash
-yarn add @interocitor/core @interocitor/web
+yarn install
+yarn workspace @interocitor/core build
+yarn workspace @interocitor/web build
 ```
 
-Add `@interocitor/react` if you want React hooks such as `useLiveQuery`,
-`useRow`, or `useImage`.
+The `0.1.0` release uses matching monorepo workspaces. Build it
+from the public repository with the commands above. Add the React workspace
+build if you want hooks such as `useLiveQuery`, `useRow`, or `useImage`.
+
+The shell commands above are runnable from the repository root. TypeScript
+blocks below are partial browser integration fragments; they assume
+application-owned schema, credentials, DOM values, and lifecycle/error
+handling.
 
 ## What this package owns
 
@@ -47,10 +55,15 @@ Documented entrypoints in this package:
 | `WebAuthnCredentialStore` | The whole credential record should live behind WebAuthn `largeBlob` |
 | `WebAuthnEnvelopeKeyProvider` | The credential record may live elsewhere, but envelope unwrap should require WebAuthn confirmation |
 | `putImage`, `getImage`, `getImageBlobUrl` | The app stores encrypted image files and needs browser upload/display helpers |
+| `LocalStorageCredentialStore`, `SessionStorageCredentialStore`, `MemoryCredentialStore` | The app wants a concrete mesh-credential store instead of the factory |
+| `BrowserCredentialEnvelopeStore`, `MemoryCredentialEnvelopeStore`, `EnvelopedCredentialStore`, `StaticEnvelopeKeyProvider` | The app composes encrypted credential-envelope custody directly |
+| `BrowserStorageSecretStore`, `WebAuthnPlatformSecretStore`, `WebAuthnCrossPlatformSecretStore` | The app wants a concrete arbitrary-secret store instead of `createWebSecretStore` |
+| `DEFAULT_LOCAL_OPEN_TIMEOUT_MS` | The app needs the resilient-store default (`300` ms without an IndexedDB progress signal) |
 
-The public API is documented in two places:
-- In code, via JSDoc on the exported entrypoints.
-- Outside code, in this README and the linked security/contract docs.
+The package root also exports the option, result, hook, and store-contract
+types associated with these values. Import from `@interocitor/web`; the
+documented subpath exports exist for storage and credential-store modules but
+are not required for the recommended path.
 
 ## Runtime boundary
 
@@ -61,6 +74,8 @@ browser image helpers, and reset helpers. React hooks live in
 `@interocitor/react`.
 
 ## Basic browser setup
+
+This partial fragment shows the browser-first composition point:
 
 ```ts
 import { Interocitor, PortablePassphraseKeySource, WebDAVAdapter } from '@interocitor/core';
@@ -121,8 +136,13 @@ const localStore = createResilientLocalStore({
 });
 ```
 
-Use this when the app must keep opening even if IndexedDB is blocked, wedged, or
-slow. It can fall back to memory and report degradation to the UI.
+Use this when the app must keep opening even if IndexedDB is unavailable,
+blocked, wedged, or its handle becomes unusable. The default open deadline is
+300 ms **without a progress signal**; an IndexedDB upgrade/progress callback
+disarms the timer, so a legitimately slow upgrade is allowed to finish. On
+degradation, all later operations use memory and local durability is lost for
+that process. `onDegraded` runs synchronously; exceptions from the hook are
+swallowed so the engine can keep opening.
 
 ### Named stores for reset/recovery flows
 
@@ -136,8 +156,11 @@ const localStore = createNamedLocalStore({
 console.log(getActiveLocalDatabaseName('case-vault'));
 ```
 
-Named stores let an app rotate the actual IndexedDB database name after a local
-reset or blocked delete while keeping a stable logical app name.
+Named stores persist the active physical database name in `localStorage` when
+available. When their own resilient store degrades because opening stalled or
+the handle became unusable, they advance the pointer to `baseName-v2`,
+`baseName-v3`, and so on for the next open. Calling a reset helper by itself
+does not rotate that pointer.
 
 ### Local reset
 
@@ -146,17 +169,22 @@ import { resetLocalDatabaseWithDeadline } from '@interocitor/web';
 
 const outcome = await resetLocalDatabaseWithDeadline('case-vault', 1500);
 if (outcome !== 'deleted') {
-  // another tab may be holding the database open; rotate via createNamedLocalStore
+  // Show recovery UX; another tab may still hold the database open.
 }
 ```
 
-Call reset only after disconnecting the engine and clearing credentials.
+Call reset only after disconnecting the engine and clearing credentials. The
+deadline helper returns `'deleted'`, `'blocked'`, `'timed-out'`, or `'errored'`
+and never throws; its default deadline is 1500 ms. If the app uses a named
+store, recovery should create/open that store and let its degradation path
+manage pointer rotation rather than assuming the reset call rotated it.
 
 ## Credential storage choices
 
 Browser apps choose where sync credentials live by building a `keySource` for
 the engine. In the browser, `createWebCredentialStore(...)` is usually one input
-to that key source.
+to that key source. With no options, the factory uses `localStorage`; examples
+select a mode explicitly so their credential-custody boundary is unambiguous.
 
 ### Tab-session credentials
 
@@ -200,7 +228,10 @@ const keySource = new PortablePassphraseKeySource({
 });
 ```
 
-Persists the credential record in `localStorage`.
+Persists the credential record as plaintext JSON in `localStorage`. The
+portable key and device identifiers are readable by same-origin JavaScript,
+browser extensions with access, and successful XSS. Use this only when that
+origin-level custody boundary is acceptable.
 
 ### Passkey / biometric-only credentials
 
@@ -219,7 +250,10 @@ credential-id hint, but not the credential payload itself.
 
 This is custody for the Interocitor mesh credential record. It is not a general
 application signing-key API and it does not expose the passkey private key to
-your application code.
+your application code. The stored credential bytes do enter JavaScript after a
+successful ceremony, so malicious same-origin code can read them at that time.
+WebAuthn user verification may be a biometric, device PIN, or another
+platform/browser-approved method.
 
 ### Additional WebAuthn-protected keys
 
@@ -261,6 +295,11 @@ claims". The package API is phrased in browser custody primitives: local
 browser storage, platform WebAuthn, and cross-platform WebAuthn with optional
 hybrid transport hints.
 
+`BrowserStorageSecretStore` stores application bytes as base64 in
+`localStorage`; base64 is encoding, not encryption. WebAuthn stores persist the
+exported application bytes in `largeBlob`. The authenticator's private
+credential key does not become the application's encryption or signing key.
+
 ### Enveloped credentials from backend, memory, or browser storage
 
 ```ts
@@ -297,8 +336,10 @@ For the full contract and security notes, see the
 
 ## Images
 
-Images are stored through the core file API and encrypted like other remote
-content. The web package adds browser input/output helpers.
+Images are stored through the core file API. They are encrypted before remote
+storage only when the `Interocitor` engine has an encrypted key source; an
+unencrypted engine sends the image bytes as-is. The web package adds browser
+input/output helpers.
 
 ```ts
 import { getImageBlobUrl, putImage } from '@interocitor/web';
@@ -313,7 +354,10 @@ image.revoke();
 ```
 
 `putImage` accepts `Blob`, `File`, `ArrayBuffer`, `Uint8Array`, data URLs, and
-SVG strings. Use core `db.putFile` / `db.getFile` for non-image attachments.
+SVG strings. A plain string is treated as SVG, an unknown extension defaults
+to `image/png`, and an explicit non-`image/*` content type throws. Revoke every
+URL returned by `getImageBlobUrl` when it is no longer displayed. Use core
+`db.putFile` / `db.getFile` for non-image attachments.
 
 ## React image hook
 
@@ -331,13 +375,14 @@ function Avatar({ db, path }) {
 `useImage` creates and revokes browser `blob:` URLs for display. It lives in
 `@interocitor/react` with the other React hooks.
 
-## Example apps
+## Runnable example apps
 
-- `examples/todo-webdav` — browser tabs syncing through a local WebDAV mailbox.
-- `examples/todo-cloudflare-do` — browser tabs syncing through the Cloudflare
+- [WebDAV TODO](../../examples/todo-webdav/README.md) — browser tabs syncing
+  through a local WebDAV mailbox.
+- [Cloudflare TODO](../../examples/todo-cloudflare-do/README.md) — browser tabs syncing through the Cloudflare
   Workers/Durable Object backend.
-- `examples/biometric-keys` — stored, protected, and enforced app-key custody,
-  including the explicit add-phone flow.
+- [Biometric keys](../../examples/biometric-keys/README.md) — stored, protected,
+  and enforced app-key custody, including the explicit add-phone flow.
 
 The todo examples wire `credentialStore` explicitly and support query-param modes:
 
@@ -349,7 +394,9 @@ The todo examples wire `credentialStore` explicitly and support query-param mode
 ?credentials=memory-envelope
 ```
 
-## Tests
+## Validate the package
+
+These commands are runnable from the repository root after `yarn install`:
 
 ```bash
 yarn workspace @interocitor/web check

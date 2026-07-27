@@ -34,7 +34,7 @@ test('MemoryLocalStore contract: rows, tombstones, and queries', async () => {
   await withStore(async (store) => {
     await store.putRows([
       row('tasks', 'a', { title: 'Alpha', status: 'open', priority: 1 }),
-      row('tasks', 'b', { title: 'Beta', status: 'done', priority: 2 }),
+      row('tasks', 'b', { title: 'Bravo', status: 'done', priority: 2 }),
       row('tasks', 'deleted', { title: 'Removed', status: 'open', priority: 3 }, true),
     ]);
 
@@ -82,4 +82,3 @@ test('MemoryLocalStore contract: cursors, meta, and clearAll', async () => {
     assert.equal(await store.getMeta('meshId'), undefined);
   });
 });
-

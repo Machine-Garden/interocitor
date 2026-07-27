@@ -2,10 +2,10 @@ import { Buffer } from 'node:buffer';
 import { expect, test } from '@playwright/test';
 
 import {
-  CF_SYSTEM_SECRET,
+  CF_SYSTEM_BEARER_TOKEN,
   CF_TESTS_ENABLED,
   CF_WORKER_BASE_URL,
-  accessTokenForNamespace,
+  meshBearerForNamespace,
   makeNamespace,
 } from './playwright.helpers';
 
@@ -15,7 +15,7 @@ test.describe.configure({ mode: 'serial' });
 
 function authHeaders(namespace: string): Record<string, string> {
   return {
-    Authorization: `Bearer ${accessTokenForNamespace(namespace)}`,
+    Authorization: `Bearer ${meshBearerForNamespace(namespace)}`,
   };
 }
 
@@ -45,7 +45,7 @@ async function execute(namespace: string, payload: Record<string, unknown>): Pro
   const response = await fetch(`${CF_WORKER_BASE_URL}/__interocitor/system/${encodeURIComponent(namespace)}`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${CF_SYSTEM_SECRET}`,
+      Authorization: `Bearer ${CF_SYSTEM_BEARER_TOKEN}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
@@ -56,7 +56,7 @@ async function execute(namespace: string, payload: Record<string, unknown>): Pro
 }
 
 test('Cloudflare worker tracks mesh-path activity and TTL maintenance deletes inactive paths', async () => {
-  const namespace = makeNamespace('team-maintenance');
+  const namespace = makeNamespace();
   const remotePath = '/todo-app';
   const filePath = `${remotePath}/demo.txt`;
   const body = new TextEncoder().encode('hello maintenance');
@@ -98,7 +98,7 @@ test('Cloudflare worker tracks mesh-path activity and TTL maintenance deletes in
 });
 
 test('Cloudflare worker rejects writes over the configured per-path size limit', async () => {
-  const namespace = makeNamespace('team-size-limit');
+  const namespace = makeNamespace();
   const filePath = '/todo-app/changes/2026-04-07T00:00:00.000Z:000001:dev_x-chg_large.json';
   const oversized = Buffer.alloc(1_048_577, 0x61);
 

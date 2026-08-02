@@ -1,428 +1,662 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Interocitor — local-first rows + durable remote files</title>
-  <meta name="description" content="Typed local-first CRDT rows and durable remote files for browser apps, with client-side encryption when the app supplies a key source." />
-  <meta name="theme-color" content="#08110f" />
-  <meta name="color-scheme" content="dark" />
-  <meta property="og:title" content="Interocitor — local-first rows + durable remote files" />
-  <meta property="og:description" content="Typed local-first rows and durable remote files, with client-side encryption when the app supplies a key source." />
-  <meta property="og:type" content="website" />
-  <meta property="og:site_name" content="Interocitor" />
-  <meta name="twitter:card" content="summary" />
-  <link rel="icon" href="assets/hero.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="index.css" />
-</head>
-<body>
-  <a class="skip-link" href="#main">Skip to content</a>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Interocitor — local-first app data without trusting the cloud</title>
+    <meta
+      name="description"
+      content="Interocitor gives applications local-first rows and encrypted durable files that can move through storage you choose without giving the storage provider plaintext access."
+    />
+    <meta name="theme-color" content="#07110f" />
+    <meta name="color-scheme" content="dark light" />
+    <meta
+      property="og:title"
+      content="Interocitor — local-first app data without trusting the cloud"
+    />
+    <meta
+      property="og:description"
+      content="Keep application data useful offline, convergent across trusted devices, and unreadable to the remote mailbox."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Interocitor" />
+    <meta name="twitter:card" content="summary" />
+    <link rel="icon" href="assets/quantum-c.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="index.css" />
+  </head>
+  <body class="home-page">
+    <a class="skip-link" href="#main">Skip to content</a>
 
-  <header class="site-header">
-    <div class="shell nav">
-      <a class="brand" href="#top" aria-label="Interocitor home">
-        <span class="brand-mark" aria-hidden="true"><i></i></span>
-        <span>Interocitor</span>
-      </a>
-      <nav class="nav-links" aria-label="Primary navigation">
-        <a href="#why">Why Interocitor</a>
-        <a href="#use-cases">Use cases</a>
-        <a href="#surfaces">Product</a>
-        <a href="#remotes">Deployment</a>
-        <a href="#security">Security</a>
-        <a href="#docs">Docs</a>
-      </nav>
-      <a class="nav-cta" href="/web">Start building <span aria-hidden="true">→</span></a>
-    </div>
-  </header>
+    <header class="site-header">
+      <div class="shell nav">
+        <a class="brand" href="#top" aria-label="Interocitor home">
+          <span class="brand-word" aria-hidden="true">Interocitor</span>
+        </a>
+        <nav class="nav-links" aria-label="Primary navigation">
+          <a href="#why">Why Interocitor</a>
+          <a href="#use-cases">Where it fits</a>
+          <a href="#surfaces">Data</a>
+          <a href="#security">Trust boundary</a>
+        </nav>
+        <a class="nav-cta" href="how-it-works.html"
+          >How it works <span aria-hidden="true">↗</span></a
+        >
+      </div>
+    </header>
 
-  <main id="main">
-    <section id="top" class="hero" aria-labelledby="hero-title">
-      <div class="shell hero-layout">
-        <div class="hero-copy">
-          <p class="eyebrow"><span></span> Data infrastructure for browser apps</p>
-          <h1 id="hero-title">Let trusted devices share app data without handing plaintext to the remote.</h1>
-          <p class="hero-lede">
-            Interocitor combines typed, local-first CRDT rows with durable remote files. Apps work against local row state, sync changes across trusted devices, and store exact documents or media through Google Drive, WebDAV, Cloudflare Workers, or an adapter you own. Supply a client-held key source and both surfaces are encrypted before upload.
+    <main id="main">
+      <section id="top" class="site-hero" aria-labelledby="hero-title">
+        <div class="shell site-hero-grid">
+          <div class="site-hero-copy">
+            <p class="site-kicker">Local-first data, encrypted before storage</p>
+            <h1 id="hero-title">
+              Trusted devices share the data.
+              <span class="heading-highlight">The remote doesn’t need to read it.</span>
+            </h1>
+            <p class="site-hero-lede">
+              Interocitor is an application data layer for products that need structured state to
+              work offline and converge across trusted devices. It also carries documents and media
+              as durable encrypted files. The remote mailbox moves both without needing plaintext or
+              responsibility for merging.
+            </p>
+            <p class="site-hero-support">
+              That separation is useful when a storage provider should
+              <strong class="key-point"
+                >make data available without becoming a plaintext processor</strong
+              >.
+            </p>
+            <div class="actions">
+              <a class="button primary" href="#why"
+                >Decide if it fits <span aria-hidden="true">↓</span></a
+              >
+              <a class="button secondary" href="how-it-works.html">See the technical model</a>
+            </div>
+          </div>
+
+          <aside class="fit-card" aria-labelledby="fit-card-title">
+            <p class="fit-card-label">A good fit when</p>
+            <h2 id="fit-card-title">The trusted devices should own the working state.</h2>
+            <ul>
+              <li>The app must remain useful through unreliable or absent connectivity.</li>
+              <li>Several devices may change the same structured data independently.</li>
+              <li>The remote should carry protected payloads without receiving plaintext.</li>
+              <li>The product benefits from choosing its own storage backend.</li>
+            </ul>
+            <p>
+              If server-side search, analytics, business logic, or administrator access to plaintext
+              is central, use a conventional server database instead.
+            </p>
+          </aside>
+        </div>
+      </section>
+
+      <section id="why" class="site-section why-section" aria-labelledby="why-title">
+        <div class="shell section-intro">
+          <div>
+            <p class="site-kicker">Why Interocitor</p>
+            <h2 id="why-title">A data layer should reflect where your product places trust.</h2>
+          </div>
+          <div class="intro-copy">
+            <p>
+              Many applications keep their primary state on a server because synchronization and
+              storage are treated as one problem. That choice makes the server operationally
+              convenient, but it also makes every network interruption a product interruption and
+              every database operator part of the plaintext trust boundary.
+            </p>
+          </div>
+        </div>
+
+        <div class="shell responsibility-map">
+          <p>Responsibility split with a non-null key source</p>
+          <dl>
+            <div>
+              <dt>Trusted devices</dt>
+              <dd>Keep working state and resolve changes.</dd>
+            </div>
+            <div>
+              <dt>Remote mailbox</dt>
+              <dd>Stores and moves encrypted artifacts.</dd>
+            </div>
+            <div>
+              <dt>Storage operator</dt>
+              <dd>Operates storage without payload plaintext.</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div class="shell reason-grid">
+          <article>
+            <h3>Continuity should not depend on a round trip</h3>
+            <p>
+              A local-first interface can respond from local state when a device is in the field,
+              moving between networks, or temporarily offline. Connectivity becomes the way work
+              travels, not a prerequisite for doing the work.
+            </p>
+          </article>
+          <article>
+            <h3>Storage trust should not imply data trust</h3>
+            <p>
+              A provider can retain and serve encrypted artifacts without needing the final
+              decryption key. This narrows the confidentiality boundary and makes a storage dump
+              materially less revealing than a plaintext application database.
+            </p>
+          </article>
+          <article>
+            <h3>Infrastructure choices should remain choices</h3>
+            <p>
+              The same application model can use a Cloudflare mailbox, a user’s Google Drive, a
+              WebDAV server or home NAS, or a custom adapter. The storage decision can follow the
+              product’s deployment, ownership, and operational needs.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="use-cases" class="site-section use-section" aria-labelledby="use-title">
+        <div class="shell">
+          <div class="section-intro compact-intro">
+            <div>
+              <p class="site-kicker">Where it earns its place</p>
+              <h2 id="use-title">
+                Useful for local work, remote privacy, or less plaintext processing.
+              </h2>
+            </div>
+            <ul class="fit-signals" aria-label="Strong fit signals">
+              <li>
+                <strong>Local autonomy</strong
+                ><span>Work must continue without a live server.</span>
+              </li>
+              <li>
+                <strong>Independent endpoints</strong
+                ><span>More than one trusted device may write.</span>
+              </li>
+              <li>
+                <strong>Blind storage</strong
+                ><span>The remote should store without interpreting.</span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="example-heading">
+            <p class="site-kicker">See the task</p>
+            <h3>Start with the product people already understand.</h3>
+            <p>
+              Rows cover changing application state. Durable files carry exact bytes. A trusted
+              endpoint can be a person’s app or an agent—the remote still only needs to move the
+              protected artifacts between them.
+            </p>
+          </div>
+
+          <div class="task-examples">
+            <article class="task-example todo-example">
+              <div class="task-example-copy">
+                <p class="example-label"><span>01</span> Local-first application</p>
+                <h3>TodoMVC can start without a backend.</h3>
+                <p>
+                  With the schema and browser store initialized, ask for the table, then use
+                  ordinary row operations. Reads and writes stay local, so the list works before a
+                  mailbox exists and while the network is away.
+                </p>
+                <div class="example-outcome">
+                  <strong>Share when the product is ready.</strong>
+                  <span
+                    >Add a mailbox adapter, a non-null key source, and pairing. The mailbox moves
+                    encrypted changes; it does not become the Todo API.</span
+                  >
+                  <a href="/examples/todo-webdav/"
+                    >Open the backend-free TodoMVC <span aria-hidden="true">→</span></a
+                  >
+                </div>
+              </div>
+
+              <div class="code-window" aria-label="Partial TodoMVC application code">
+                <div class="code-window-bar">
+                  <span aria-hidden="true"><i></i><i></i><i></i></span>
+                  <b>after db.init()</b>
+                </div>
+                <pre><code><span class="code-keyword">const</span> todos = db.table(<span class="code-string">'todos'</span>);
+
+<span class="code-keyword">await</span> todos.add({
+  title: <span class="code-string">'Ship it'</span>, done: <span class="code-value">false</span>
+});
+
+<span class="code-keyword">const</span> open = <span class="code-keyword">await</span> todos
+  .where(<span class="code-string">'done'</span>).equals(<span class="code-value">false</span>);
+
+<span class="code-comment">// Optional, on a db configured with a mailbox:</span>
+<span class="code-keyword">await</span> db.connect();</code></pre>
+              </div>
+            </article>
+
+            <article class="task-example file-example">
+              <div class="task-example-copy">
+                <p class="example-label"><span>02</span> Private file share</p>
+                <h3>A private Dropbox over storage you choose.</h3>
+                <p>
+                  Let storage do what it is good at—retain and deliver files—without giving it the
+                  document contents. Interocitor encrypts bytes before the adapter receives them,
+                  then another paired endpoint decrypts the same object.
+                </p>
+              </div>
+
+              <div
+                class="file-route"
+                role="img"
+                aria-label="A file is encrypted on one trusted device, stored as ciphertext in the user's cloud, and decrypted on another paired device."
+              >
+                <div class="file-endpoint">
+                  <span>Trusted device</span>
+                  <strong>plan.pdf</strong>
+                  <small>readable</small>
+                </div>
+                <div class="file-transfer">
+                  <span>encrypt</span>
+                  <b aria-hidden="true">→</b>
+                </div>
+                <div class="file-mailbox">
+                  <span>User’s cloud</span>
+                  <strong>7f a2 91 c8…</strong>
+                  <small>ciphertext + metadata</small>
+                </div>
+                <div class="file-transfer reverse">
+                  <span>decrypt</span>
+                  <b aria-hidden="true">→</b>
+                </div>
+                <div class="file-endpoint">
+                  <span>Paired device</span>
+                  <strong>plan.pdf</strong>
+                  <small>readable</small>
+                </div>
+              </div>
+
+              <pre
+                class="file-code"
+                aria-label="Partial durable-file application code"
+              ><code><span class="code-keyword">await</span> db.putFile(path, bytes, file.type);
+<span class="code-keyword">const</span> copy = <span class="code-keyword">await</span> db.getFile(path);</code></pre>
+              <p class="example-limit">
+                File calls use the remote directly, so transfers need connectivity. Object paths,
+                sizes, timing, and request identity can still be visible to the storage operator.
+              </p>
+            </article>
+
+            <article class="task-example agent-example">
+              <div class="task-example-copy">
+                <p class="example-label"><span>03</span> Agent workflow</p>
+                <h3>Give an agent a queue, not your storage plaintext.</h3>
+                <p>
+                  A product writes a job row. An authorized agent endpoint pulls it, does the work,
+                  and writes result rows or files back into the same mesh. Both endpoints can keep
+                  their own working state; the mailbox only exchanges encrypted artifacts.
+                </p>
+              </div>
+
+              <figure class="agent-workflow">
+                <div class="workflow-node trusted-node">
+                  <span>Trusted endpoint</span>
+                  <strong>Product</strong>
+                  <small>Writes job rows</small>
+                </div>
+                <div class="workflow-transfer">
+                  <span>encrypted changes</span>
+                  <b aria-hidden="true">⇄</b>
+                </div>
+                <div class="workflow-node blind-node">
+                  <span>Remote mailbox</span>
+                  <strong>Cannot read the job</strong>
+                  <small>Stores artifacts</small>
+                </div>
+                <div class="workflow-transfer">
+                  <span>encrypted results</span>
+                  <b aria-hidden="true">⇄</b>
+                </div>
+                <div class="workflow-node trusted-node agent-node">
+                  <span>Trusted endpoint</span>
+                  <strong>Agent</strong>
+                  <small>Reads, acts, writes</small>
+                </div>
+                <figcaption>
+                  The agent holds a mesh key and sees plaintext, so isolate workflows into separate
+                  databases and keys when they need smaller trust boundaries.
+                </figcaption>
+              </figure>
+            </article>
+          </div>
+
+          <div class="more-use-heading">
+            <p class="site-kicker">More places it fits</p>
+          </div>
+
+          <div class="use-grid">
+            <article>
+              <h3>Offline and field applications</h3>
+              <p>
+                Inspections, notes, checklists, and case work can continue against local records
+                through poor connectivity. Changes can travel later, so the workflow does not need
+                to treat the network as a gate.
+              </p>
+            </article>
+            <article>
+              <h3>Private portals and shared workspaces</h3>
+              <p>
+                A client and a trusted team can exchange records and documents while keeping their
+                content unreadable in the storage account that carries them.
+              </p>
+            </article>
+            <article>
+              <h3>Personal and household archives</h3>
+              <p>
+                Inventories, collections, scans, and photos can live across a person’s devices and
+                storage choices without requiring a hosted service to understand the collection.
+              </p>
+            </article>
+            <article>
+              <h3>Products with deployable trust boundaries</h3>
+              <p>
+                Teams can run their own mailbox, let users bring storage, or integrate another
+                adapter. The application can choose who operates availability separately from who
+                may read protected payloads.
+              </p>
+            </article>
+            <article class="compliance-use">
+              <h3>Infrastructure that stays out of user content</h3>
+              <div class="compliance-summary">
+                <p>
+                  If your services do not need to inspect user content, protected payloads can
+                  remain encrypted throughout the remote mailbox.
+                </p>
+                <ul class="compliance-points">
+                  <li>
+                    <strong>Less plaintext exposure.</strong> Fewer systems and people need access,
+                    narrowing the security, incident-response, and compliance surface.
+                  </li>
+                  <li>
+                    <strong>Possible scope reduction.</strong> If the mailbox has neither keys nor
+                    reasonably available identifying context, its encrypted payloads may fall
+                    outside GDPR scope for that operator.
+                  </li>
+                  <li>
+                    <strong>Metadata still matters.</strong> Account and request identity, object
+                    paths, mesh IDs, and device IDs may still identify or single out someone. The
+                    result remains deployment-specific.
+                  </li>
+                </ul>
+              </div>
+            </article>
+          </div>
+
+          <aside class="not-fit">
+            <h3>Choose a server-owned database when the server must understand the data.</h3>
+            <p>
+              Central reporting, broad server-side search, authoritative business rules, per-record
+              server authorization, and routine administrator access to plaintext all point toward a
+              conventional backend. Interocitor deliberately keeps those responsibilities at trusted
+              endpoints.
+            </p>
+          </aside>
+        </div>
+      </section>
+
+      <section id="plain-language" class="site-section story-section" aria-labelledby="story-title">
+        <div class="shell story-layout">
+          <div class="story-heading">
+            <p class="site-kicker">What that means in practice</p>
+            <h2 id="story-title">
+              The useful copy stays close. The remote carries sealed parcels.
+            </h2>
+            <p class="story-note">A plain-language view of the promises—and the trade-offs.</p>
+          </div>
+          <div class="story-prose">
+            <p class="story-lede">
+              Picture two people changing the same shared workspace from different devices. One is
+              offline on a train; the other is connected at home. Each can keep changing local rows.
+              When their devices can reach the mailbox again, they exchange encrypted changes and
+              arrive at the same result without asking the mailbox to choose a winner.
+            </p>
+            <p>
+              The mailbox is important, but deliberately unhelpful: it stores and returns protected
+              artifacts without receiving the final key or interpreting the row data inside them. It
+              can still see operational metadata—names, sizes, timing, request identity, and device
+              identifiers—and it can still lose, withhold, or roll back what it stores.
+            </p>
+            <p>
+              That is why local-first and encrypted do not mean consequence-free. Row work survives
+              offline only when the app uses durable local storage; durable-file calls still need a
+              connection. A lost key needs recovery prepared in advance, a copied key requires a new
+              database and key for full revocation, and important data still needs tested backups.
+            </p>
+            <a class="text-link" href="QA.md"
+              >Read the simple questions and honest answers <span aria-hidden="true">→</span></a
+            >
+          </div>
+        </div>
+      </section>
+
+      <section id="model" class="site-section model-summary" aria-labelledby="model-title">
+        <div class="shell narrow-layout">
+          <div>
+            <p class="site-kicker">Why local convergence matters</p>
+            <h2 id="model-title">Independent work does not need a central editor.</h2>
+          </div>
+          <div>
+            <p>
+              Trusted devices can change local rows without first acquiring a server lock or waiting
+              for a leader. Interocitor’s structured data model lets those devices converge after
+              they exchange encrypted changes.
+            </p>
+            <aside class="section-takeaway">
+              <span>Design consequence</span>
+              <strong>The remote can remain a mailbox, not the central editor.</strong>
+              <p>Application policy and trusted processing stay at the endpoints.</p>
+            </aside>
+            <a class="text-link" href="how-it-works.html"
+              >Follow a change through the complete sync loop <span aria-hidden="true">→</span></a
+            >
+          </div>
+        </div>
+      </section>
+
+      <section id="surfaces" class="site-section surfaces-summary" aria-labelledby="surfaces-title">
+        <div class="shell">
+          <div class="section-intro compact-intro">
+            <div>
+              <p class="site-kicker">Two data surfaces</p>
+              <h2 id="surfaces-title">
+                <span class="heading-highlight">Rows should converge.</span>
+                <span class="heading-highlight alternate">Files should stay exact.</span>
+              </h2>
+            </div>
+            <p>
+              Application state and file content need different promises. Treating them honestly
+              avoids forcing large binary objects into a merge model or pretending remote files have
+              the same offline behavior as local records.
+            </p>
+          </div>
+
+          <div class="surface-cards">
+            <article>
+              <p class="card-type">Structured rows</p>
+              <h3>Local working state that can converge</h3>
+              <p>
+                Use rows for the facts an application reads, changes, and reconciles across
+                devices—titles, statuses, notes, relationships, and other structured state. Reads
+                and writes use the application’s local store, so the product can remain responsive
+                without a live remote.
+              </p>
+            </article>
+            <article>
+              <p class="card-type">Durable files</p>
+              <h3>Exact remote objects for documents and media</h3>
+              <p>
+                Use files when the bytes themselves must remain intact. They are encrypted before
+                storage, but they are not merged as records. File calls need the remote, which makes
+                their availability boundary explicit instead of hiding it.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="remotes" class="site-section remotes-summary" aria-labelledby="remotes-title">
+        <div class="shell narrow-layout">
+          <div>
+            <p class="site-kicker">Bring your own cloud</p>
+            <h2 id="remotes-title">Put the mailbox where ownership makes sense.</h2>
+          </div>
+          <div>
+            <p>
+              Storage is part of a product’s trust, cost, portability, and recovery story. Some
+              teams want an operated Cloudflare deployment. Some want data in a user-controlled
+              Google Drive account. Others prefer WebDAV on infrastructure they already own.
+            </p>
+            <p>
+              Interocitor keeps those choices behind the same storage role. Changing the operator
+              does not require moving plaintext merge logic into that operator’s environment.
+            </p>
+            <ul class="remote-list" aria-label="Supported storage approaches">
+              <li><strong>Cloudflare</strong><span>Operate a mailbox with D1 and R2.</span></li>
+              <li>
+                <strong>Google Drive</strong><span>Let a user connect their own storage.</span>
+              </li>
+              <li><strong>WebDAV</strong><span>Use a compatible server or home NAS.</span></li>
+              <li>
+                <strong>Custom adapter</strong><span>Fit an existing storage environment.</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="security" class="site-section security-summary" aria-labelledby="security-title">
+        <div class="shell">
+          <div class="section-intro">
+            <div>
+              <p class="site-kicker">The actual trust boundary</p>
+              <h2 id="security-title">
+                Encryption narrows trust.
+                <span class="heading-highlight caution">It does not remove it.</span>
+              </h2>
+            </div>
+            <div class="intro-copy">
+              <p>
+                With a non-null key source, row payloads, snapshots, durable-file bodies, and
+                recovery-wrapper contents are encrypted before the remote adapter receives them.
+                <strong class="key-point"
+                  >The final decryption keys and usable plaintext remain at trusted
+                  endpoints.</strong
+                >
+              </p>
+              <p>
+                The remote still observes operational metadata such as object names, sizes, timing,
+                request identity, mesh identifiers, and device identifiers. It can also withhold,
+                delete, or roll back stored data. Interocitor protects payload confidentiality and
+                entry integrity; reliable storage and backups still protect availability.
+              </p>
+            </div>
+          </div>
+
+          <div class="boundary-grid">
+            <article class="boundary-card protected">
+              <h3>Protected from the remote</h3>
+              <ul>
+                <li>Row field names and values</li>
+                <li>Snapshot payloads</li>
+                <li>Durable-file contents</li>
+                <li>Recovery-wrapper contents</li>
+              </ul>
+            </article>
+            <article class="boundary-card visible">
+              <h3>Still visible to the remote</h3>
+              <ul>
+                <li>Object names, paths, sizes, and timing</li>
+                <li>Mesh and device identifiers</li>
+                <li>Request and storage-account identity</li>
+                <li>Deletion, withholding, and rollback opportunities</li>
+              </ul>
+            </article>
+          </div>
+
+          <p class="security-route">
+            See the <a href="how-it-works.html#boundary">illustrated trust boundary</a> for the path
+            from trusted endpoints through remote storage.
           </p>
-          <div class="actions">
-            <a class="button primary" href="#why">See what Interocitor enables</a>
-            <a class="button secondary" href="#model">How it works <span aria-hidden="true">↓</span></a>
-          </div>
-          <ul class="fact-row" aria-label="Project capabilities">
-            <li>Browser-first</li>
-            <li>Rows keep working offline</li>
-            <li>Files stay exact</li>
-            <li>Client-held encryption keys</li>
-          </ul>
         </div>
+      </section>
 
-        <figure class="mailbox-figure" aria-labelledby="mailbox-title">
-          <div class="figure-topline">
-            <span id="mailbox-title">One mesh, two trusted devices</span>
-            <span class="live-dot">row sync</span>
+      <section id="docs" class="site-section decision-section" aria-labelledby="decision-title">
+        <div class="shell">
+          <div class="decision-heading">
+            <p class="site-kicker">Before choosing the architecture</p>
+            <h2 id="decision-title">Decide who holds trust, not only where bytes live.</h2>
+            <p>
+              A local-first encrypted mesh changes several product responsibilities. These are the
+              questions worth answering before implementation details.
+            </p>
           </div>
-          <div class="mailbox-flow">
-            <div class="flow-node trusted">
-              <span class="node-index">01</span>
-              <strong>Device A</strong>
-              <small>plaintext · keys · local state</small>
-              <div class="mini-record"><i></i><span>case notes</span><b>local</b></div>
+
+          <div class="question-grid">
+            <article>
+              <h3>Which endpoints may read everything?</h3>
+              <p>
+                A client, worker, or AI agent with the mesh key is a trusted endpoint. It can
+                process the row database, so use separate databases and keys when work needs a
+                smaller trust boundary.
+              </p>
+            </article>
+            <article>
+              <h3>How will users recover a lost key?</h3>
+              <p>
+                Recovery must be prepared before loss. Another trusted device or a previously
+                published recovery wrapper can restore access; without either, encrypted data is
+                unreadable.
+              </p>
+            </article>
+            <article>
+              <h3>What happens when a device is no longer trusted?</h3>
+              <p>
+                Removing remote access does not erase a key that was already copied. Full revocation
+                requires a new mesh and key, which should be part of the product’s incident plan.
+              </p>
+            </article>
+            <article>
+              <h3>Who protects availability?</h3>
+              <p>
+                Encryption cannot recreate deleted objects. Important deployments still need
+                provider version history or an independent copy, plus a restore path that has been
+                tested.
+              </p>
+            </article>
+          </div>
+
+          <div class="next-step">
+            <div>
+              <h2>Ready for the mechanics?</h2>
+              <p>
+                See how independent writes converge, what the remote stores, and how clients keep
+                history bounded.
+              </p>
             </div>
-            <div class="flow-arrow" aria-hidden="true">
-              <span>encrypt</span>
-              <i>→</i>
-            </div>
-            <div class="flow-node remote">
-              <span class="node-index">02</span>
-              <strong>Mailbox</strong>
-              <small>ciphertext · routing metadata</small>
-              <div class="cipher-block">8f 3a c1 7e<br />04 d9 a2 6b</div>
-            </div>
-            <div class="flow-arrow reverse" aria-hidden="true">
-              <span>pull</span>
-              <i>→</i>
-            </div>
-            <div class="flow-node trusted">
-              <span class="node-index">03</span>
-              <strong>Device B</strong>
-              <small>decrypt · merge · query</small>
-              <div class="mini-record"><i></i><span>case notes</span><b>merged</b></div>
-            </div>
+            <a class="button primary" href="how-it-works.html"
+              >Open how it works <span aria-hidden="true">↗</span></a
+            >
           </div>
-          <figcaption>Plaintext and final decryption keys stay on trusted devices. The remote stores encrypted artifacts and can still observe operational metadata.</figcaption>
-        </figure>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="shell footer-inner">
+        <a class="brand" href="#top" aria-label="Interocitor home">
+          <span class="brand-word" aria-hidden="true">Interocitor</span>
+        </a>
+        <p>Local-first application data without remote plaintext.</p>
+        <nav aria-label="Footer navigation">
+          <a href="#why">Why</a>
+          <a href="#use-cases">Fit</a>
+          <a href="#security">Security</a>
+          <a href="how-it-works.html">How it works</a>
+        </nav>
       </div>
-    </section>
-
-    <section id="why" class="section value-section" aria-labelledby="why-title">
-      <div class="shell">
-        <div class="section-heading">
-          <div>
-            <p class="kicker">Why Interocitor</p>
-            <h2 id="why-title">Local-first behavior and remote durability belong in the same app.</h2>
-          </div>
-          <p>Interocitor is for teams building browser apps whose users need responsive local work, continuity across trusted devices, and durable files—without making server-side plaintext access a product requirement.</p>
-        </div>
-
-        <div class="value-grid">
-          <article class="value-card">
-            <p class="card-label">Responsive by default</p>
-            <h3>Keep row work moving locally</h3>
-            <p>Reads and writes use local state. Changes enter an outbox and sync when transport returns, so record work does not wait on the network.</p>
-          </article>
-          <article class="value-card">
-            <p class="card-label">Shared structured state</p>
-            <h3>Converge across trusted devices</h3>
-            <p>Typed tables and per-column conflict rules merge independent row changes into the same local view.</p>
-          </article>
-          <article class="value-card">
-            <p class="card-label">Durable bytes</p>
-            <h3>Preserve files as files</h3>
-            <p>Documents, images, and other bytes remain path-addressed remote objects. File reads return the stored object; files never enter CRDT merge.</p>
-          </article>
-          <article class="value-card">
-            <p class="card-label">Infrastructure choice</p>
-            <h3>Choose the remote boundary</h3>
-            <p>Use Google Drive, WebDAV, Cloudflare Workers, or your own adapter. With a key source, row artifacts and file bodies are encrypted before that boundary.</p>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <section id="use-cases" class="section use-cases" aria-labelledby="use-cases-title">
-      <div class="shell">
-        <div class="section-heading">
-          <div>
-            <p class="kicker">Where it fits</p>
-            <h2 id="use-cases-title">For app data that should stay useful locally—and unreadable to the remote.</h2>
-          </div>
-          <p>Use Interocitor when people need local-first row state and durable files across trusted devices, while a client-held key keeps protected payloads out of the storage operator’s view.</p>
-        </div>
-
-        <div class="case-grid">
-          <article class="case-card accent-mint">
-            <span>01</span>
-            <h3>Client portal</h3>
-            <p>Cases, documents, and notes remain readable to the client and their trusted team—not the sync bucket.</p>
-          </article>
-          <article class="case-card accent-blue">
-            <span>02</span>
-            <h3>Household records</h3>
-            <p>Recipes and inventories stay local-first as rows; scans and photos use durable remote files that trusted family devices can fetch.</p>
-          </article>
-          <article class="case-card accent-violet">
-            <span>03</span>
-            <h3>Team workspace</h3>
-            <p>A stable shared database can serve a project or small team while application policy controls requests to the hosted mailbox.</p>
-          </article>
-          <article class="case-card accent-amber">
-            <span>04</span>
-            <h3>Offline field app</h3>
-            <p>Row work continues against local state. Queued row changes sync when transport returns; file transfers require a live remote and caller retry.</p>
-          </article>
-        </div>
-
-        <aside class="fit-note">
-          <strong>Choose a conventional server database</strong>
-          <p>when server-side search, analytics, business logic, or administrator access to plaintext is central to the product. Interocitor deliberately gives those powers up.</p>
-        </aside>
-      </div>
-    </section>
-
-    <section id="surfaces" class="section data-section" aria-labelledby="surfaces-title">
-      <div class="shell">
-        <div class="section-heading">
-          <div>
-            <p class="kicker">The app data model</p>
-            <h2 id="surfaces-title">Records that converge. Files that stay exact.</h2>
-          </div>
-          <p>Both surfaces belong to the same mesh: the same devices, key source, adapters, and backend policy.</p>
-        </div>
-
-        <div class="surface-grid">
-          <article class="surface-card">
-            <div class="surface-icon rows-icon" aria-hidden="true"><i></i><i></i><i></i></div>
-            <p class="card-label">Structured state</p>
-            <h3>Typed CRDT rows</h3>
-            <p>Tables, schemas, local queries, per-column conflict resolution, snapshots, and deterministic convergence.</p>
-            <ul>
-              <li>Local writes land immediately</li>
-              <li>Changes merge across devices</li>
-              <li>Old change logs can compact</li>
-            </ul>
-          </article>
-          <article class="surface-card">
-            <div class="surface-icon file-icon" aria-hidden="true"><i></i></div>
-            <p class="card-label">Durable bytes</p>
-            <h3>Path-addressed files</h3>
-            <p>Encrypted blobs and images with put, get, overwrite, delete, metadata, and browser display helpers.</p>
-            <ul>
-              <li>Bytes remain exact until replaced</li>
-              <li>Files do not enter CRDT merge</li>
-              <li>File calls require remote transport</li>
-            </ul>
-          </article>
-          <article class="surface-card mesh-card">
-            <div class="mesh-orbit" aria-hidden="true"><i></i><i></i><i></i></div>
-            <p class="card-label">One isolation boundary</p>
-            <h3>The mesh</h3>
-            <p>A mesh is the shared application data world. Its address selects the remote namespace; its credentials let trusted devices decrypt its payloads.</p>
-            <ul>
-              <li>UUID or stable named address</li>
-              <li>Shared rows and files</li>
-              <li>Application-owned access policy</li>
-            </ul>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <section id="model" class="section model-section" aria-labelledby="model-title">
-      <div class="shell">
-        <div class="section-heading">
-          <div>
-            <p class="kicker">How it works</p>
-            <h2 id="model-title">The remote carries row artifacts and durable files—not plaintext app state.</h2>
-          </div>
-          <p>Rows live locally and converge through mailbox artifacts. File bodies live as direct remote objects. Decryption stays on trusted devices.</p>
-        </div>
-
-        <ol class="steps">
-          <li>
-            <span>01</span>
-            <div><h3>Write rows locally</h3><p>Row reads and writes use the local store. CRDT changes enter an outbox, so row work continues offline.</p></div>
-          </li>
-          <li>
-            <span>02</span>
-            <div><h3>Transfer files directly</h3><p>File put, get, and delete calls use the remote adapter immediately. They are not queued in the row outbox.</p></div>
-          </li>
-          <li>
-            <span>03</span>
-            <div><h3>Encrypt before upload</h3><p>With a non-null key source, row changes, snapshots, and file bodies are encrypted before they cross the adapter boundary.</p></div>
-          </li>
-          <li>
-            <span>04</span>
-            <div><h3>Converge rows, read exact files</h3><p>Trusted devices decrypt and merge row changes locally. File reads return the stored object without CRDT merge.</p></div>
-          </li>
-        </ol>
-
-        <div class="model-callout">
-          <p>For a protected mesh, a D1 export exposes encrypted row-sync artifacts and operational metadata; an R2 export exposes encrypted file bodies and object metadata. Neither includes readable payloads. Availability is separate: a malicious remote can still drop, withhold, or roll back data.</p>
-          <a href="#security">See the boundary summary <span aria-hidden="true">→</span></a>
-        </div>
-      </div>
-    </section>
-
-    <section id="remotes" class="section deploy-section" aria-labelledby="deploy-title">
-      <div class="shell">
-        <div class="section-heading">
-          <div>
-            <p class="kicker">Choose the remote</p>
-            <h2 id="deploy-title">Use a cloud the user owns—or operate the mailbox as a product.</h2>
-          </div>
-          <p>The client model stays the same. Choose the remote by the custody, policy, and operational control the application needs.</p>
-        </div>
-
-        <div class="deploy-grid">
-          <article class="deploy-card">
-            <div class="deploy-head">
-              <span class="deploy-number">A</span>
-              <span class="deploy-tag">Personal software</span>
-            </div>
-            <h3>Bring the user’s storage</h3>
-            <p>Use Google Drive or WebDAV when the user already has a suitable account and the application does not need a dedicated sync service.</p>
-            <div class="adapter-list">
-              <span>Google Drive</span><span>WebDAV</span><span>Custom adapter</span>
-            </div>
-            <a class="text-link" href="/core">Explore core adapters <span aria-hidden="true">→</span></a>
-          </article>
-
-          <article class="deploy-card featured">
-            <div class="deploy-head">
-              <span class="deploy-number">B</span>
-              <span class="deploy-tag">Product backend</span>
-            </div>
-            <h3>Mount it in a Cloudflare Worker</h3>
-            <p>D1 stores sync objects and metadata; R2 stores durable file bodies. Add size limits, per-mesh quotas, request policy, audit, maintenance, and optional realtime invalidation.</p>
-            <div class="adapter-list">
-              <span>D1 sync</span><span>R2 files</span><span>Durable Object relay</span>
-            </div>
-            <a class="text-link" href="/workers">Deploy the Worker package <span aria-hidden="true">→</span></a>
-          </article>
-        </div>
-
-      </div>
-    </section>
-
-    <section id="security" class="section security-section" aria-labelledby="security-title">
-      <div class="shell">
-        <div class="section-heading">
-          <div>
-            <p class="kicker">Security boundary</p>
-            <h2 id="security-title">Private means naming the boundary, including what remains visible.</h2>
-          </div>
-          <p>A non-null key source protects remote payload contents. It does not hide every signal, make endpoints trustworthy, or turn an unreliable remote into a reliable one.</p>
-        </div>
-
-        <div class="access-summary">
-          <article>
-            <p class="card-label">Request authorization</p>
-            <h3>The host controls which requests reach a mesh namespace.</h3>
-            <p>Address validation, authentication, authorization, audit, and administrative policy belong to the application hosting the remote.</p>
-          </article>
-          <article>
-            <p class="card-label">Decryption authority</p>
-            <h3>The portable key remains a separate capability.</h3>
-            <p>Anyone with both the portable key and a copy of the remote artifacts can decrypt protected payloads, even if the original host rejects their requests.</p>
-          </article>
-        </div>
-
-        <div class="boundary-grid">
-          <article class="boundary-card protected">
-            <span class="boundary-status">Protected remotely</span>
-            <h3>The payload</h3>
-            <ul>
-              <li>CRDT row changes</li>
-              <li>Compacted snapshots</li>
-              <li>Durable file bodies</li>
-              <li>Recovery credential wrapper contents</li>
-            </ul>
-          </article>
-          <article class="boundary-card visible">
-            <span class="boundary-status">Still observable</span>
-            <h3>Operational metadata</h3>
-            <ul>
-              <li>Mesh and device identifiers</li>
-              <li>Object names, sizes, and timing</li>
-              <li>Write rate and device count</li>
-              <li>Compaction and activity patterns</li>
-            </ul>
-          </article>
-          <article class="boundary-card endpoint">
-            <span class="boundary-status">Endpoint responsibility</span>
-            <h3>Readable local state</h3>
-            <ul>
-              <li>Browser local data is plaintext</li>
-              <li>Key custody is an application choice</li>
-              <li>Malicious client code can read data</li>
-              <li>Compromise requires a new mesh/key and data migration</li>
-            </ul>
-          </article>
-        </div>
-
-        <div class="security-cta">
-          <p><strong>For a threat model or audit, use the full security guide.</strong> It covers key custody, visible metadata, rollback and withholding, recovery, pairing, and shared-key scenarios.</p>
-          <a class="button secondary" href="/security">Read the security guide</a>
-        </div>
-      </div>
-    </section>
-
-    <section id="docs" class="section docs-section" aria-labelledby="docs-title">
-      <div class="shell">
-        <div class="section-heading">
-          <div>
-            <p class="kicker">Start building</p>
-            <h2 id="docs-title">Take the shortest path from product fit to implementation.</h2>
-          </div>
-          <p>Choose the application, backend, or trust path that matches the part of Interocitor you are adopting.</p>
-        </div>
-
-        <div class="docs-grid">
-          <a class="doc-card primary-doc" href="/web">
-            <span>Build the app</span>
-            <h3>Browser applications</h3>
-            <p>Wire local rows, credential custody, images, recovery, and browser lifecycle into the product experience.</p>
-            <b>Open the browser guide →</b>
-          </a>
-          <a class="doc-card" href="/workers">
-            <span>Operate the remote</span>
-            <h3>Cloudflare backend</h3>
-            <p>Mount D1 and R2 storage with application-owned access policy, quotas, audit, maintenance, and realtime invalidation.</p>
-            <b>Open the Worker guide →</b>
-          </a>
-          <a class="doc-card" href="/security">
-            <span>Evaluate trust</span>
-            <h3>Security and custody</h3>
-            <p>Review encryption boundaries, visible metadata, endpoint responsibility, key custody, pairing, and recovery.</p>
-            <b>Read the security model →</b>
-          </a>
-        </div>
-
-        <div class="docs-followup">
-          <p><strong>Want runnable proof?</strong> Explore the WebDAV and Cloudflare apps or the browser key-custody example.</p>
-          <a class="text-link" href="/examples">Browse examples <span aria-hidden="true">→</span></a>
-        </div>
-      </div>
-    </section>
-
-    <section class="final-cta" aria-labelledby="final-title">
-      <div class="shell">
-        <p class="kicker">A smaller trust boundary</p>
-        <h2 id="final-title">Let the remote carry the data.<br /> Do not give it the contents.</h2>
-        <p>Build local-first rows and durable remote files, choose the remote that fits, and keep application identity, policy, and key custody in the application.</p>
-        <div class="actions">
-          <a class="button primary" href="/web">Start building</a>
-          <a class="button secondary" href="/examples">Browse examples <span aria-hidden="true">→</span></a>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <footer class="footer">
-    <div class="shell footer-inner">
-      <a class="brand footer-brand" href="#top">
-        <span class="brand-mark" aria-hidden="true"><i></i></span>
-        <span>Interocitor</span>
-      </a>
-      <p>Local-first rows + durable remote files.</p>
-      <div>
-        <a href="#why">Why Interocitor</a>
-        <a href="#security">Security</a>
-        <a href="#docs">Docs</a>
-        <a href="https://github.com/TheUiTeam/interocitor">GitHub</a>
-      </div>
-    </div>
-  </footer>
-</body>
+    </footer>
+  </body>
 </html>

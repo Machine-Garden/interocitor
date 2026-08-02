@@ -14,7 +14,9 @@ public protocol StorageAdapter: Sendable {
 
     // Auth
     func authenticate() async throws
-    func isAuthenticated() -> Bool
+    /// Returns whether this adapter has completed its own authentication.
+    /// It is async so actor-backed adapters can safely read mutable auth state.
+    func isAuthenticated() async -> Bool
 
     // Folder
     func ensureFolder(path: String) async throws
@@ -43,7 +45,7 @@ public actor MemoryStorageAdapter: StorageAdapter {
 
     public init() {}
 
-    public nonisolated func isAuthenticated() -> Bool { true }
+    public func isAuthenticated() async -> Bool { true }
     public func authenticate() async throws {}
 
     public func ensureFolder(path: String) async throws {
@@ -147,10 +149,12 @@ public enum InterocitorError: Error, LocalizedError, Sendable {
     case adapterRequired(String)
     case manifestVersionUnsupported(Int)
     case schemaMismatch(local: Int, remote: Int)
+    case meshEncryptionMismatch(local: Bool, remote: Bool)
     case snapshotDecryptionFailed
     case compactionNotAllowed
     case unauthorized(String)
     case contentHashMismatch
+    case staleOutboxAtGcFloor(String)
     case remotePoisoned(String)
 
     public var errorDescription: String? {
@@ -160,10 +164,14 @@ public enum InterocitorError: Error, LocalizedError, Sendable {
         case .adapterRequired(let op):       return "No remote adapter configured for: \(op)"
         case .manifestVersionUnsupported(let v): return "Unsupported manifest version \(v)"
         case .schemaMismatch(let l, let r):  return "Schema mismatch: local=\(l) remote=\(r)"
+        case .meshEncryptionMismatch(let local, let remote):
+            return "Mesh encryption mismatch: local=\(local), remote=\(remote)"
         case .snapshotDecryptionFailed:      return "Failed to decrypt snapshot"
         case .compactionNotAllowed:          return "Compaction is allowed only for the authorized server writer"
         case .unauthorized(let w):           return "Unauthorized manifest writer: \(w)"
         case .contentHashMismatch:           return "Manifest content hash mismatch"
+        case .staleOutboxAtGcFloor(let floor):
+            return "Refusing to flush changes at or before gcFloorHlc \(floor); rehydrate required"
         case .remotePoisoned(let reason):    return "Remote poisoned: \(reason)"
         }
     }

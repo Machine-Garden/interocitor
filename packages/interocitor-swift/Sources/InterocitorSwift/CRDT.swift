@@ -1,11 +1,13 @@
 /**
- * CRDT Merge Engine — Last-Writer-Wins per column
+ * CRDT Merge Engine — Core-compatible per-column merge
  *
- * Each column in each row carries its own HLC.
- * The highest HLC wins for that column independently.
+ * Each column in each row carries its own HLC. LWW uses that ordering;
+ * configured policies may instead retain the local value or take the remote one.
  * Deletes are soft (tombstone with HLC).
  *
- * Implements the Swift runtime's column-level merge rules.
+ * Implements the same built-in merge-policy resolution and tombstone rules as
+ * `@interocitor/core`.  Schema-less databases use LWW; a configured schema
+ * defaults to remote-wins unless it overrides the table or field.
  */
 
 import Foundation
@@ -18,7 +20,8 @@ import Foundation
 public func applyOp(
     tables: inout [String: [String: Row]],
     op: Op,
-    schemaVersion: Int
+    schemaVersion: Int,
+    schema: DatabaseSchema? = nil
 ) -> Row? {
     if tables[op.table] == nil {
         tables[op.table] = [:]
@@ -28,7 +31,36 @@ public func applyOp(
     case .delete(let deleteOp):
         return applyDeleteOp(tables: &tables, op: deleteOp, schemaVersion: schemaVersion)
     case .upsert(let upsertOp):
-        return applyUpsertOp(tables: &tables, op: upsertOp, schemaVersion: schemaVersion)
+        return applyUpsertOp(tables: &tables, op: upsertOp, schemaVersion: schemaVersion, schema: schema)
+    }
+}
+
+private func resolveStrategy(
+    schema: DatabaseSchema?,
+    table: String,
+    field: String
+) -> MergeStrategy {
+    if let merge = schema?.tables[table]?.merge {
+        if let fieldStrategy = merge.fields[field] { return fieldStrategy }
+        if let tableStrategy = merge.strategy { return tableStrategy }
+    }
+    guard let schema else { return .lww }
+    return schema.mergeStrategy ?? .remoteWins
+}
+
+private func mergeColumn(
+    local: ColumnEntry?,
+    remote: ColumnEntry,
+    strategy: MergeStrategy
+) -> ColumnEntry? {
+    guard let local, !local.hlc.isEmpty else { return remote }
+    switch strategy {
+    case .remoteWins:
+        return remote
+    case .localWins:
+        return nil
+    case .lww:
+        return hlcCompareStr(remote.hlc, local.hlc) > 0 ? remote : nil
     }
 }
 
@@ -51,6 +83,10 @@ private func applyDeleteOp(
 
         existing._deleted = true
         existing._deletedHlc = op.hlc
+        // A tombstone must not retain user payload. Keeping old columns here
+        // can resurrect stale fields when a newer partial upsert revives the
+        // row on another peer.
+        existing.columns = [:]
         tables[op.table]![op.rowId] = existing
         return existing
     } else {
@@ -71,7 +107,8 @@ private func applyDeleteOp(
 private func applyUpsertOp(
     tables: inout [String: [String: Row]],
     op: UpsertOp,
-    schemaVersion: Int
+    schemaVersion: Int,
+    schema: DatabaseSchema?
 ) -> Row? {
     var row: Row
     var changed = false
@@ -89,25 +126,23 @@ private func applyUpsertOp(
         changed = true
     }
 
-    for (col, entry) in op.columns {
-        if let existing = row.columns[col] {
-            if hlcCompareStr(entry.hlc, existing.hlc) > 0 {
-                row.columns[col] = entry
-                changed = true
-            }
-        } else {
-            row.columns[col] = entry
-            changed = true
-        }
+    var columnsToApply = op.columns
+
+    // Re-insertion is a new incarnation. Ignore fields which predate the
+    // tombstone and remove all retained payload before accepting new fields.
+    if row._deleted, let deletedHlc = row._deletedHlc {
+        columnsToApply = columnsToApply.filter { hlcCompareStr($0.value.hlc, deletedHlc) > 0 }
+        guard !columnsToApply.isEmpty else { return nil }
+        row.columns = [:]
+        row._deleted = false
+        row._deletedHlc = nil
+        changed = true
     }
 
-    // An upsert newer than a delete revives the row
-    if row._deleted, let deletedHlc = row._deletedHlc {
-        let newestOpHlc = op.columns.values
-            .map(\.hlc)
-            .max { hlcCompareStr($0, $1) < 0 }
-        if let newestOpHlc, hlcCompareStr(newestOpHlc, deletedHlc) > 0 {
-            row._deleted = false
+    for (col, entry) in columnsToApply {
+        let strategy = resolveStrategy(schema: schema, table: op.table, field: col)
+        if let winner = mergeColumn(local: row.columns[col], remote: entry, strategy: strategy) {
+            row.columns[col] = winner
             changed = true
         }
     }
@@ -123,11 +158,12 @@ private func applyUpsertOp(
 public func applyChangeEntry(
     tables: inout [String: [String: Row]],
     entry: ChangeEntry,
-    schemaVersion: Int
+    schemaVersion: Int,
+    schema: DatabaseSchema? = nil
 ) -> [Row] {
     var affected: [Row] = []
     for op in entry.ops {
-        if let row = applyOp(tables: &tables, op: op, schemaVersion: schemaVersion) {
+        if let row = applyOp(tables: &tables, op: op, schemaVersion: schemaVersion, schema: schema) {
             affected.append(row)
         }
     }

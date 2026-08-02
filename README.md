@@ -10,6 +10,19 @@ Interocitor is an application data layer for software that needs structured
 state to work offline and converge across devices without giving the storage
 provider plaintext access.
 
+## Bring your own cloud
+
+Niki Tonsky’s [“Local, first, forever”](https://tonsky.me/blog/crdt-filesync/)
+independently explored the same broad idea: let CRDT data travel through
+commodity file-sync storage—“just bring your own cloud.” Interocitor was
+developed independently and turns that pattern into an application data layer
+with structured rows, durable files, pairing, recovery, and compaction.
+
+Run the mailbox backend on Cloudflare, let users connect Google Drive, or point
+WebDAV at a home NAS. Each backend carries the same artifacts; with a non-null
+key source, protected payloads are encrypted before the storage adapter receives
+them.
+
 > **Public release:** the packages in this checkout are one matched
 > `0.1.0` set. The supported distribution for this documentation is
 > the source-checkout workflow below, not independently selected registry tags.
@@ -41,9 +54,9 @@ storage modes and the durable-file pattern.
 Interocitor exposes two related surfaces with different availability
 guarantees:
 
-| Surface | Behavior | Remote storage |
-| --- | --- | --- |
-| CRDT rows | Reads and writes use a caller-supplied local store. An outbox carries encrypted changes when transport is available. | Encrypted changes and snapshots are merged and compacted by clients. |
+| Surface       | Behavior                                                                                                                           | Remote storage                                                         |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| CRDT rows     | Reads and writes use a caller-supplied local store. An outbox carries encrypted changes when transport is available.               | Encrypted changes and snapshots are merged and compacted by clients.   |
 | Durable files | `putFile`, `getFile`, `openFile`, and `deleteFile` call the remote adapter directly. There is no core file cache or offline queue. | Encrypted bytes remain at their app path until overwritten or deleted. |
 
 With a non-null key source, row payloads and file bytes are encrypted before
@@ -54,14 +67,15 @@ boundary.
 
 ## Package map
 
-| Package | Start here |
-| --- | --- |
-| `@interocitor/core` | [Engine, schemas, adapters, pairing, recovery, and file APIs](packages/core/README.md) |
-| `@interocitor/web` | [Browser local stores, credential custody, and image helpers](packages/web/README.md) |
-| `@interocitor/react` | [Context and reactive row/image hooks](packages/react/README.md) |
-| `@interocitor/workers` | [Cloudflare D1/R2 runtime, policy, operations, and optional relay](packages/workers/README.md) |
-| `@interocitor/webdav` | [Loopback development and test server](packages/webdav/README.md) |
-| InterocitorSwift | [Swift source package](packages/interocitor-swift/README.md) |
+| Package                | Start here                                                                                          |
+| ---------------------- | --------------------------------------------------------------------------------------------------- |
+| `@interocitor/core`    | [Engine, schemas, adapters, pairing, recovery, and file APIs](packages/core/README.md)              |
+| `@interocitor/web`     | [Browser local stores, credential custody, and image helpers](packages/web/README.md)               |
+| `@interocitor/react`   | [Context and reactive row/image hooks](packages/react/README.md)                                    |
+| `@interocitor/workers` | [Cloudflare D1/R2 runtime, policy, operations, and optional relay](packages/workers/README.md)      |
+| `@interocitor/webdav`  | [Loopback development and test server](packages/webdav/README.md)                                   |
+| InterocitorSwift       | [Swift source package](packages/interocitor-swift/README.md)                                        |
+| `interocitor`          | [Python core for headless workers and protocol integrations](packages/interocitor-python/README.md) |
 
 The browser package is the recommended entry point for browser applications;
 it supplies the local-store and credential-store implementations used with the
@@ -69,6 +83,7 @@ core engine.
 
 ## Guides and reference
 
+- [Plain-language questions and answers](docs/QA.md)
 - [Public-offering page source](docs/index.html)
 - [Terminology](docs/dictionary.md)
 - [Protocol flows](docs/flows.md)

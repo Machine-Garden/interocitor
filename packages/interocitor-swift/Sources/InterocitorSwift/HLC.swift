@@ -81,12 +81,13 @@ public func hlcCompare(_ a: HLC, _ b: HLC) -> Int {
     return 0
 }
 
-/// Compare two serialized HLC strings without fully parsing (lexicographic).
-/// Because ts is zero-padded to 15 digits and counter is zero-padded to 4 hex
-/// digits, the plain string comparison is equivalent to the structured compare.
+/// Compare two serialized HLC strings using their structured fields.
+///
+/// The counter starts with four hexadecimal digits, but can grow past that
+/// width during a long same-millisecond burst. Parsing avoids reversing the
+/// order at the `ffff` → `10000` boundary.
 public func hlcCompareStr(_ a: String, _ b: String) -> Int {
-    if a == b { return 0 }
-    return a < b ? -1 : 1
+    hlcCompare(hlcParse(a), hlcParse(b))
 }
 
 // MARK: - Serialization

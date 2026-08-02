@@ -52,6 +52,29 @@ function emitAffectedRows(
   }
 }
 
+function changeFileHlc(name: string): string | null {
+  const marker = name.lastIndexOf('-chg_');
+  return marker === -1 ? null : name.slice(0, marker);
+}
+
+function compareChangeFiles(left: { name: string }, right: { name: string }): number {
+  const leftHlc = changeFileHlc(left.name);
+  const rightHlc = changeFileHlc(right.name);
+  if (leftHlc && rightHlc) {
+    // Merge order is protocol data, not a display order. In particular,
+    // ``localeCompare`` can place same-tick device IDs differently across
+    // runtimes and make a remote-wins merge converge to different values.
+    // Keep malformed names on the normal per-file error path below.
+    const compared = hlcCompareStr(leftHlc, rightHlc);
+    if (Number.isFinite(compared) && compared !== 0) return compared;
+  }
+  // JavaScript relational string comparison is a stable UTF-16 code-unit
+  // tiebreaker, unlike localeCompare.
+  if (left.name < right.name) return -1;
+  if (left.name > right.name) return 1;
+  return 0;
+}
+
 /** Returns the updated HLC after pull. */
 export async function pull(ctx: PullContext): Promise<HLC> {
   const { adapter, local, remotePath, codecState, tables, knownTables, emit } = ctx;
@@ -99,7 +122,7 @@ export async function pull(ctx: PullContext): Promise<HLC> {
       emit({ type: 'sync:complete', entriesMerged: 0 });
       return hlc;
     }
-    files.sort((a, b) => a.name.localeCompare(b.name));
+    files.sort(compareChangeFiles);
 
     let totalMerged = 0;
     let latestMergedHlc = cursor;

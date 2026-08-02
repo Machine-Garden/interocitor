@@ -8,6 +8,12 @@
 
 ## Documentation goals and standards
 
+- Before creating or substantially reworking a reader-facing surface, use the
+  [content-persona cast](.context-docs/CONTENT-PERSONAS.md). Select by the
+  decision the entrant controls, keep the task as an episode, and keep the
+  reader goal separate from why Interocitor wants that surface to speak. If
+  evidence rejects the assumed reader, goal, subject, or surface, follow that
+  shift instead of forcing the planned document.
 - Follow the Diataxis framework for documentation architecture and writing style: [diataxis.fr](https://diataxis.fr/). Keep tutorials, how-to guides, reference, and explanation distinct instead of blending them into one page.
 - Document current behavior, not migration history. Remove bridge/legacy wording. If docs still explain how to move from old shape to new shape, cleanup is not finished.
 - Prefer one primary story per concept. Show the recommended path first. Document alternatives only when they serve different scenarios.

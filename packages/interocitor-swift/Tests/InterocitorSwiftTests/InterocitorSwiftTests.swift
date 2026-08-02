@@ -56,6 +56,13 @@ final class HLCTests: XCTestCase {
         XCTAssertEqual(hlcCompareStr(a, a), 0)
     }
 
+    func testHlcCompareStr_ordersCountersBeyondFourHexDigits() {
+        let lower = hlcSerialize(HLC(ts: 1_000, counter: 0xffff, nodeId: "dev_a"))
+        let higher = hlcSerialize(HLC(ts: 1_000, counter: 0x1_0000, nodeId: "dev_a"))
+        XCTAssertLessThan(hlcCompareStr(lower, higher), 0)
+        XCTAssertGreaterThan(hlcCompareStr(higher, lower), 0)
+    }
+
     func testHlcReceive_futureSkewClamped() {
         let local = hlcInit(nodeId: "dev_local")
         let farFuture = Int64(Date().timeIntervalSince1970 * 1000) + HLC_MAX_FUTURE_SKEW_MS + 60_000
@@ -145,6 +152,147 @@ final class CRDTTests: XCTestCase {
         let row = applyOp(tables: &tables, op: .upsert(UpsertOp(table: "t", rowId: "r1", columns: ["x": ColumnEntry(value: .int(2), hlc: hlc3)])), schemaVersion: 1)
         XCTAssertFalse(row?._deleted ?? true)
         XCTAssertEqual(row?.columns["x"]?.value, .int(2))
+    }
+
+    func testResurrectionDropsFieldsAtOrBeforeTombstone() {
+        var tables: [String: [String: Row]] = [:]
+        let beforeDelete = hlcSerialize(HLC(ts: 1_000, counter: 0, nodeId: "dev_a"))
+        let deleteHlc = hlcSerialize(HLC(ts: 2_000, counter: 0, nodeId: "dev_a"))
+        let afterDelete = hlcSerialize(HLC(ts: 3_000, counter: 0, nodeId: "dev_b"))
+
+        applyOp(
+            tables: &tables,
+            op: .upsert(UpsertOp(table: "tasks", rowId: "t1", columns: [
+                "stale": ColumnEntry(value: .string("old"), hlc: beforeDelete)
+            ])),
+            schemaVersion: 1
+        )
+        applyOp(
+            tables: &tables,
+            op: .delete(DeleteOp(table: "tasks", rowId: "t1", hlc: deleteHlc)),
+            schemaVersion: 1
+        )
+
+        let row = applyOp(
+            tables: &tables,
+            op: .upsert(UpsertOp(table: "tasks", rowId: "t1", columns: [
+                "stale": ColumnEntry(value: .string("must not return"), hlc: beforeDelete),
+                "fresh": ColumnEntry(value: .string("new"), hlc: afterDelete),
+            ])),
+            schemaVersion: 1
+        )
+
+        XCTAssertFalse(row?._deleted ?? true)
+        XCTAssertNil(row?.columns["stale"])
+        XCTAssertEqual(row?.columns["fresh"]?.value, .string("new"))
+    }
+
+    func testConfiguredSchemaDefaultsToRemoteWins() {
+        var tables: [String: [String: Row]] = [:]
+        let newer = hlcSerialize(HLC(ts: 2_000, counter: 0, nodeId: "dev_a"))
+        let older = hlcSerialize(HLC(ts: 1_000, counter: 0, nodeId: "dev_b"))
+        let schema = DatabaseSchema(version: 1, tables: ["tasks": TableSchema()])
+
+        applyOp(
+            tables: &tables,
+            op: .upsert(UpsertOp(table: "tasks", rowId: "t1", columns: [
+                "status": ColumnEntry(value: .string("local"), hlc: newer)
+            ])),
+            schemaVersion: 1,
+            schema: schema
+        )
+        let row = applyOp(
+            tables: &tables,
+            op: .upsert(UpsertOp(table: "tasks", rowId: "t1", columns: [
+                "status": ColumnEntry(value: .string("remote"), hlc: older)
+            ])),
+            schemaVersion: 1,
+            schema: schema
+        )
+
+        XCTAssertEqual(row?.columns["status"]?.value, .string("remote"))
+    }
+
+    func testFieldMergeStrategyOverridesTableStrategy() {
+        var tables: [String: [String: Row]] = [:]
+        let newer = hlcSerialize(HLC(ts: 2_000, counter: 0, nodeId: "dev_a"))
+        let older = hlcSerialize(HLC(ts: 1_000, counter: 0, nodeId: "dev_b"))
+        let schema = DatabaseSchema(
+            version: 1,
+            tables: [
+                "tasks": TableSchema(merge: TableMergeConfig(
+                    strategy: .localWins,
+                    fields: ["title": .lww]
+                ))
+            ],
+            mergeStrategy: .remoteWins
+        )
+
+        applyOp(
+            tables: &tables,
+            op: .upsert(UpsertOp(table: "tasks", rowId: "t1", columns: [
+                "title": ColumnEntry(value: .string("new title"), hlc: newer),
+                "status": ColumnEntry(value: .string("local"), hlc: newer),
+            ])),
+            schemaVersion: 1,
+            schema: schema
+        )
+        let row = applyOp(
+            tables: &tables,
+            op: .upsert(UpsertOp(table: "tasks", rowId: "t1", columns: [
+                "title": ColumnEntry(value: .string("old title"), hlc: older),
+                "status": ColumnEntry(value: .string("remote"), hlc: older),
+            ])),
+            schemaVersion: 1,
+            schema: schema
+        )
+
+        XCTAssertNil(row)
+        XCTAssertEqual(tables["tasks"]?["t1"]?.columns["title"]?.value, .string("new title"))
+        XCTAssertEqual(tables["tasks"]?["t1"]?.columns["status"]?.value, .string("local"))
+    }
+}
+
+// MARK: - Core wire compatibility
+
+final class CoreWireCompatibilityTests: XCTestCase {
+
+    func testAnyCodableRoundTripsNestedJSON() throws {
+        let value: AnyCodable = .object([
+            "labels": .array([.string("swift"), .string("core")]),
+            "metadata": .object(["retry": .int(2), "ready": .bool(true)]),
+        ])
+
+        let data = try JSONEncoder().encode(value)
+        XCTAssertEqual(try JSONDecoder().decode(AnyCodable.self, from: data), value)
+    }
+
+    func testRowEncodesAsCoreSnapshotShapeAndDecodesIt() throws {
+        let row = Row(
+            table: "tasks",
+            rowId: "t1",
+            deleted: false,
+            schemaVersion: 4,
+            owner: "device-a",
+            columns: [
+                "payload": ColumnEntry(
+                    value: .object(["nested": .array([.int(1), .int(2)])]),
+                    hlc: "001000000000000-0000-device-a"
+                )
+            ]
+        )
+
+        let data = try JSONEncoder().encode(row)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertNotNil(object["_meta"])
+        XCTAssertNotNil(object["payload"])
+        XCTAssertNil(object["_table"])
+        let decoded = try JSONDecoder().decode(Row.self, from: data)
+        XCTAssertEqual(decoded._table, row._table)
+        XCTAssertEqual(decoded._rowId, row._rowId)
+        XCTAssertEqual(decoded._schemaVersion, row._schemaVersion)
+        XCTAssertEqual(decoded._owner, row._owner)
+        XCTAssertEqual(decoded.columns, row.columns)
     }
 }
 
@@ -293,6 +441,128 @@ final class SyncEngineMemoryTests: XCTestCase {
         try await b.connect()
         let row = try await b.get(table: "tasks", rowId: "t1")
         XCTAssertEqual(row?.columns["title"]?.value, .string("Hello"))
+    }
+
+    func testConnectRejectsManifestFromDifferentPersistedMesh() async throws {
+        let adapter = MemoryStorageAdapter()
+        let remotePath = "/manifest-mesh-mismatch"
+
+        // Create a valid remote mesh first. The target has no rows or
+        // changes to read, so this specifically covers manifest loading.
+        let seed = Interocitor(
+            adapter: adapter,
+            config: SyncConfig(remotePath: remotePath, flushDebounce: 0),
+            localStore: MemoryLocalStore()
+        )
+        try await seed.initialize()
+        try await seed.connect()
+
+        let targetStore = MemoryLocalStore()
+        try await targetStore.open()
+        try await targetStore.setMeta(key: "meshId", value: AnyCodable.string("mesh_from_another_remote"))
+
+        let target = Interocitor(
+            adapter: adapter,
+            config: SyncConfig(remotePath: remotePath, flushDebounce: 0),
+            localStore: targetStore
+        )
+        try await target.initialize()
+
+        do {
+            try await target.connect()
+            XCTFail("Expected connect() to reject a manifest for another mesh")
+        } catch {
+            XCTAssertTrue(String(describing: error).contains("mesh mismatch"))
+        }
+
+        do {
+            try await target.pull()
+            XCTFail("Expected a manifest mismatch to poison later sync attempts")
+        } catch {
+            XCTAssertTrue(String(describing: error).contains("mesh mismatch"))
+        }
+    }
+
+    func testLocalPutOverridesConfiguredLocalWinsPolicy() async throws {
+        let schema = DatabaseSchema(
+            version: 1,
+            tables: ["tasks": TableSchema(merge: TableMergeConfig(strategy: .localWins))]
+        )
+        let db = Interocitor(
+            adapter: MemoryStorageAdapter(),
+            config: SyncConfig(remotePath: "/local-policy", flushDebounce: 0, schema: schema),
+            localStore: MemoryLocalStore()
+        )
+
+        try await db.initialize()
+        try await db.put(table: "tasks", rowId: "t1", columns: ["status": .string("first")])
+        try await db.put(table: "tasks", rowId: "t1", columns: ["status": .string("second")])
+
+        let row = try await db.get(table: "tasks", rowId: "t1")
+        XCTAssertEqual(row?.columns["status"]?.value, .string("second"))
+    }
+
+    func testLocalResurrectionDoesNotRepublishDeletedFields() async throws {
+        let db = Interocitor(
+            adapter: MemoryStorageAdapter(),
+            config: SyncConfig(remotePath: "/local-resurrection", flushDebounce: 0),
+            localStore: MemoryLocalStore()
+        )
+
+        try await db.initialize()
+        try await db.put(table: "tasks", rowId: "t1", columns: ["stale": .string("old")])
+        try await db.delete(table: "tasks", rowId: "t1")
+        try await db.put(table: "tasks", rowId: "t1", columns: ["fresh": .string("new")])
+
+        let row = try await db.get(table: "tasks", rowId: "t1")
+        XCTAssertNil(row?.columns["stale"])
+        XCTAssertEqual(row?.columns["fresh"]?.value, .string("new"))
+    }
+
+    func testCompactionIgnoresStaleCoreTimestampWithFractionalSeconds() async throws {
+        let adapter = MemoryStorageAdapter()
+        let remotePath = "/gc-fractional-core-timestamp"
+        let db = Interocitor(
+            adapter: adapter,
+            config: SyncConfig(remotePath: remotePath, flushDebounce: 0),
+            localStore: MemoryLocalStore()
+        )
+        try await db.initialize()
+        try await db.connect()
+
+        let deviceId = await db.getDeviceId()
+        let activeWatermark = hlcSerialize(HLC(ts: 2_000, counter: 0, nodeId: "swift"))
+        let staleWatermark = hlcSerialize(HLC(ts: 1_000, counter: 0, nodeId: "core"))
+        let now = ISO8601DateFormatter().string(from: Date())
+
+        let active = DeviceMetadata(
+            deviceId: deviceId,
+            registeredAt: now,
+            lastSeenAt: now,
+            observedWatermarkHlc: activeWatermark
+        )
+        // Node's Date#toISOString() uses millisecond fractional seconds.
+        // This record is outside the offline grace window and must not hold
+        // the floor back merely because it was written by Core.
+        let staleCore = DeviceMetadata(
+            deviceId: "core-device",
+            registeredAt: "2020-01-01T00:00:00.123Z",
+            lastSeenAt: "2020-01-01T00:00:00.123Z",
+            observedWatermarkHlc: staleWatermark
+        )
+        let encoder = JSONEncoder()
+        try await adapter.writeFile(
+            path: "\(remotePath)/devices/\(deviceId).json",
+            data: try encoder.encode(active)
+        )
+        try await adapter.writeFile(
+            path: "\(remotePath)/devices/core-device.json",
+            data: try encoder.encode(staleCore)
+        )
+
+        try await db.compact()
+        let manifest = await db.getManifest()
+        XCTAssertEqual(manifest?.gcFloorHlc, activeWatermark)
     }
 }
 

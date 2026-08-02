@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Interocitor TodoMVC — local-only, no backend</title>
+    <meta
+      name="description"
+      content="A complete TodoMVC-style Interocitor app that stores rows in this browser without a backend, account, or setup."
+    />
+    <meta name="theme-color" content="#07110f" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" href="../../assets/quantum-c.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#todo-app">Skip to the Todo app</a>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Interocitor home">Interocitor</a>
+      <span class="mode"><i aria-hidden="true"></i> Local-only example</span>
+      <a class="back-link" href="/">Back to the overview <span aria-hidden="true">↗</span></a>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <p class="kicker">TodoMVC · zero backend</p>
+        <h1 id="page-title">The app works.<br /><span>The network is optional.</span></h1>
+        <p class="lede">
+          Add tasks, complete them, edit them, and reload the page. Interocitor keeps the rows in
+          this browser’s IndexedDB. There is no account, server, key exchange, or setup step.
+        </p>
+        <ul class="proof" aria-label="Example guarantees">
+          <li><strong>Local writes</strong><span>Instant on this device</span></li>
+          <li><strong>Durable reloads</strong><span>Backed by IndexedDB</span></li>
+          <li><strong>Zero data requests</strong><span>No application backend</span></li>
+        </ul>
+      </section>
+
+      <section id="todo-app" class="todo-shell" aria-labelledby="todo-title">
+        <div class="todo-heading">
+          <div>
+            <p class="window-label">interocitor / todos</p>
+            <h2 id="todo-title">What needs doing?</h2>
+          </div>
+          <span id="storage-status" class="storage-status" role="status" aria-live="polite"
+            >Opening local database…</span
+          >
+        </div>
+
+        <form id="new-todo-form" class="new-todo-form">
+          <label for="new-todo">New task</label>
+          <div>
+            <input
+              id="new-todo"
+              name="title"
+              type="text"
+              autocomplete="off"
+              maxlength="240"
+              placeholder="What needs doing?"
+              required
+            />
+            <button type="submit">Add task</button>
+          </div>
+        </form>
+
+        <div class="list-toolbar">
+          <button id="toggle-all" class="quiet-button" type="button">Complete all</button>
+          <span id="item-count">0 tasks</span>
+        </div>
+
+        <ul id="todo-list" class="todo-list" aria-label="Todo list"></ul>
+        <p id="empty-state" class="empty-state">Your local list is ready.</p>
+
+        <footer class="todo-footer">
+          <div class="filters" aria-label="Filter tasks">
+            <button type="button" data-filter="all" aria-pressed="true">All</button>
+            <button type="button" data-filter="active" aria-pressed="false">Active</button>
+            <button type="button" data-filter="completed" aria-pressed="false">Completed</button>
+          </div>
+          <button id="clear-completed" class="quiet-button" type="button">Clear completed</button>
+        </footer>
+      </section>
+
+      <section class="boundary" aria-labelledby="boundary-title">
+        <div>
+          <p class="kicker">What this proves</p>
+          <h2 id="boundary-title">Local-first does not mean “waiting for sync.”</h2>
+        </div>
+        <div class="boundary-copy">
+          <p>
+            This page initializes Interocitor without a remote adapter. The same table API handles
+            every interaction above, and the browser store survives reloads.
+          </p>
+          <p>
+            Sharing is a separate product decision: add a mailbox adapter, a non-null key source,
+            and pairing when another trusted device should receive encrypted changes.
+          </p>
+          <a href="/how-it-works">See how sharing works <span aria-hidden="true">→</span></a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="page-footer">
+      <span>Everything above stays in this browser.</span>
+      <span>Double-click a task to edit it.</span>
+    </footer>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

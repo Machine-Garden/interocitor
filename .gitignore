@@ -149,3 +149,5 @@ test-results
 examples/todo-webdav/webdav-data/*
 !examples/todo-webdav/webdav-data/.gitkeep
 
+__pycache__/
+*.py[cod]

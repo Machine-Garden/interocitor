@@ -82,8 +82,7 @@ public actor WebDAVStorageAdapter: StorageAdapter {
         }
     }
 
-    public nonisolated func isAuthenticated() -> Bool { false } // actor state; checked lazily
-    public func isAuthenticatedActor() -> Bool { _authenticated }
+    public func isAuthenticated() async -> Bool { _authenticated }
 
     // MARK: - Folders
 

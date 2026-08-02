@@ -38,6 +38,60 @@ private struct CloudPaths {
     func changeFile(_ fileName: String) -> String { "\(root)/changes/\(fileName)" }
 }
 
+private func changeFileHlc(_ name: String) -> String? {
+    guard let range = name.range(of: "-chg_", options: .backwards) else { return nil }
+    return String(name[..<range.lowerBound])
+}
+
+/// Merge order is protocol data. Compare HLCs first, then use a stable
+/// code-point filename tie-breaker rather than a locale-sensitive ordering.
+private func compareChangeFiles(_ left: FileEntry, _ right: FileEntry) -> Bool {
+    if let leftHlc = changeFileHlc(left.name), let rightHlc = changeFileHlc(right.name) {
+        let compared = hlcCompareStr(leftHlc, rightHlc)
+        if compared != 0 { return compared < 0 }
+    }
+    return left.name < right.name
+}
+
+// MARK: - Manifest wire encoding
+
+// Core hashes `JSON.stringify(payload)`, so manifest property order is part of
+// the current wire contract. Swift emits Core's insertion order in compact
+// JSON and also accepts the former sorted Swift order when validating a stored
+// manifest. Required nullable fields are encoded as `null`, matching Core's
+// current manifest shape.
+private enum ManifestCodingKey: String, CodingKey, CaseIterable {
+    case generation
+    case parentGeneration
+    case writtenBy
+    case writtenAt
+    case contentHash
+    case version
+    case meshId
+    case schema
+    case encrypted
+    case server
+    case createdAt
+    case epoch
+    case watermarkHlc
+    case snapshotPath
+    case deltaPath
+    case gcFloorHlc
+    case gcEpoch
+    case gcCreatedAt
+    case offlineGraceMs
+}
+
+private let coreManifestKeyOrder: [ManifestCodingKey] = [
+    .generation, .parentGeneration, .writtenBy, .writtenAt, .version,
+    .meshId, .schema, .encrypted, .server, .createdAt, .epoch,
+    .watermarkHlc, .snapshotPath, .deltaPath, .gcFloorHlc, .gcEpoch,
+    .gcCreatedAt, .offlineGraceMs, .contentHash,
+]
+
+private let sortedManifestKeyOrder: [ManifestCodingKey] =
+    ManifestCodingKey.allCases.sorted { $0.rawValue < $1.rawValue }
+
 // MARK: - Replica
 
 public struct ReplicaConfig: Sendable {
@@ -62,6 +116,12 @@ public struct SyncConfig: Sendable {
     public var deviceName: String?
     public var deviceType: String?
     public var replicas: [ReplicaConfig]
+    /// Optional logical mesh schema. Its version is checked against the
+    /// manifest and its merge policies participate in CRDT resolution.
+    public var schema: DatabaseSchema?
+    /// Active-device grace used when a Swift client publishes compaction GC
+    /// metadata. Matches Core's seven-day default.
+    public var offlineGraceMs: Int
 
     public init(
         remotePath: String,
@@ -73,7 +133,9 @@ public struct SyncConfig: Sendable {
         dbName: String = "interocitor",
         deviceName: String? = nil,
         deviceType: String? = nil,
-        replicas: [ReplicaConfig] = []
+        replicas: [ReplicaConfig] = [],
+        schema: DatabaseSchema? = nil,
+        offlineGraceMs: Int = 7 * 24 * 60 * 60 * 1_000
     ) {
         self.remotePath = remotePath
         self.serverManaged = serverManaged
@@ -85,6 +147,8 @@ public struct SyncConfig: Sendable {
         self.deviceName = deviceName
         self.deviceType = deviceType
         self.replicas = replicas
+        self.schema = schema
+        self.offlineGraceMs = offlineGraceMs
     }
 }
 
@@ -167,7 +231,7 @@ public actor Interocitor {
         guard initialized else { throw InterocitorError.adapterRequired("init not called") }
         let adapter = try requireAdapter("connect()")
 
-        if !adapter.isAuthenticated() {
+        if !(await adapter.isAuthenticated()) {
             emit(.authRequired)
             try await adapter.authenticate()
             emit(.authComplete)
@@ -235,18 +299,31 @@ public actor Interocitor {
     /// Insert or update a row. Never requires network access.
     @discardableResult
     public func put(table: String, rowId: String, columns: [String: AnyCodable], userId: String? = nil) async throws -> Row {
+        let current = try await local.getRow(table: table, rowId: rowId)
+        let isResurrection = current?._deleted == true
+        var row = current ?? Row(
+            table: table,
+            rowId: rowId,
+            schemaVersion: config.schema?.version ?? 0
+        )
+        if isResurrection {
+            // A local write starts a new row incarnation. Do not carry fields
+            // from the tombstone into the full-row change we publish.
+            row.columns = [:]
+        }
+
         hlc = hlcNow(hlc)
         let hlcStr = hlcSerialize(hlc)
 
-        var columnEntries: [String: ColumnEntry] = [:]
         for (key, value) in columns {
-            columnEntries[key] = ColumnEntry(value: value, hlc: hlcStr)
+            row.columns[key] = ColumnEntry(value: value, hlc: hlcStr)
         }
-
-        let op = UpsertOp(table: table, rowId: rowId, columns: columnEntries)
-        try await ensureRowsCached(ops: [.upsert(op)])
-        var row = applyOp(tables: &tables, op: .upsert(op), schemaVersion: manifest?.schema ?? 1)!
+        row._deleted = false
+        row._deletedHlc = nil
         row._owner = deviceId
+
+        if tables[table] == nil { tables[table] = [:] }
+        tables[table]![rowId] = row
         knownTables.insert(table)
 
         try await local.putRow(row)
@@ -258,7 +335,10 @@ public actor Interocitor {
             device: deviceId,
             user: userId,
             hlc: hlcStr,
-            ops: [.upsert(op)]
+            // Core publishes the complete current payload for local writes.
+            // This is especially important after a resurrection, where only
+            // the new incarnation's fields may leave the device.
+            ops: [.upsert(UpsertOp(table: table, rowId: rowId, columns: row.columns))]
         )
         try await local.pushOutbox(entry)
         emit(.change(table: table, rowId: rowId, row: row))
@@ -268,14 +348,20 @@ public actor Interocitor {
 
     /// Soft-delete a row.
     public func delete(table: String, rowId: String, userId: String? = nil) async throws {
+        guard var row = try await local.getRow(table: table, rowId: rowId), !row._deleted else {
+            return
+        }
         hlc = hlcNow(hlc)
         let hlcStr = hlcSerialize(hlc)
 
-        let op = DeleteOp(table: table, rowId: rowId, hlc: hlcStr)
-        try await ensureRowsCached(ops: [.delete(op)])
-        applyOp(tables: &tables, op: .delete(op), schemaVersion: manifest?.schema ?? 1)
+        row._deleted = true
+        row._deletedHlc = hlcStr
+        row._owner = deviceId
+        row.columns = [:]
+        if tables[table] == nil { tables[table] = [:] }
+        tables[table]![rowId] = row
+        try await local.putRow(row)
 
-        if let row = tables[table]?[rowId] { try await local.putRow(row) }
         try await local.setMeta(key: "hlc", value: AnyCodable.string(hlcSerialize(hlc)))
 
         let entry = ChangeEntry(
@@ -284,7 +370,7 @@ public actor Interocitor {
             device: deviceId,
             user: userId,
             hlc: hlcStr,
-            ops: [.delete(op)]
+            ops: [.delete(DeleteOp(table: table, rowId: rowId, hlc: hlcStr))]
         )
         try await local.pushOutbox(entry)
         emit(.delete(table: table, rowId: rowId))
@@ -371,25 +457,55 @@ public actor Interocitor {
         guard !entries.isEmpty else { return }
 
         emit(.flushStart(entryCount: entries.count))
-        pendingCount = 0
         cancelFlushTimer()
+        var requeueEntries = true
 
         do {
             let adapter = try requireAdapter("flush()")
+            // A long-sleeping client must observe the current manifest before
+            // it republishes queued history. The GC floor is a point of no
+            // return: publishing at/below it could resurrect retired data.
+            try await loadOrCreateManifest()
+            if let floor = manifest?.gcFloorHlc, !floor.isEmpty,
+               entries.contains(where: { !$0.hlc.isEmpty && hlcCompareStr($0.hlc, floor) <= 0 }) {
+                if manifest?.snapshotPath != nil {
+                    try await rehydrate()
+                    requeueEntries = false
+                    pendingCount = 0
+                }
+                throw InterocitorError.staleOutboxAtGcFloor(floor)
+            }
+
+            pendingCount = 0
             try await flushToAdapter(adapter, remotePath: config.remotePath, entries: entries, isPrimary: true)
 
             for replica in config.replicas {
                 do {
-                    if !replica.adapter.isAuthenticated() { try await replica.adapter.authenticate() }
+                    if !(await replica.adapter.isAuthenticated()) { try await replica.adapter.authenticate() }
                     let path = replica.remotePath ?? config.remotePath
                     try await flushToAdapter(replica.adapter, remotePath: path, entries: entries, isPrimary: false)
                 } catch {
                     emit(.replicaError(adapter: replica.adapter.name, error: error))
                 }
             }
+            var highestFlushedHlc = ""
+            for entry in entries where !entry.hlc.isEmpty {
+                if highestFlushedHlc.isEmpty || hlcCompareStr(entry.hlc, highestFlushedHlc) > 0 {
+                    highestFlushedHlc = entry.hlc
+                }
+            }
+            if !highestFlushedHlc.isEmpty {
+                let cursor = ((try await local.getMeta(key: "cursor")) as? AnyCodable)?.stringValue ?? ""
+                if cursor.isEmpty || hlcCompareStr(highestFlushedHlc, cursor) > 0 {
+                    try await local.setMeta(key: "cursor", value: AnyCodable.string(highestFlushedHlc))
+                }
+            }
             emit(.flushComplete)
         } catch {
-            for entry in entries { try await local.pushOutbox(entry) }
+            if requeueEntries {
+                for entry in entries { try await local.pushOutbox(entry) }
+                pendingCount = entries.count
+            }
             emit(.flushError(error))
             throw error
         }
@@ -442,25 +558,26 @@ public actor Interocitor {
                let head = try? decoder.decode(ChangesHead.self, from: headData),
                !cursor.isEmpty,
                hlcCompareStr(head.latestHlc, cursor) <= 0 {
+                try await acknowledgeManifest()
                 emit(.syncComplete(entriesMerged: 0))
                 return
             }
 
             guard let files = try? await adapter.listFiles(path: p.changesFolder) else {
+                try await acknowledgeManifest()
                 emit(.syncComplete(entriesMerged: 0))
                 return
             }
 
             let sorted = files.filter { $0.name != "head.json" }
-                              .sorted { $0.name < $1.name }
+                              .sorted(by: compareChangeFiles)
 
             var totalMerged = 0
             var latestMergedHlc = cursor
 
             for file in sorted {
                 do {
-                    guard let chgRange = file.name.range(of: "-chg_", options: .backwards) else { continue }
-                    let fileHlc = String(file.name[file.name.startIndex..<chgRange.lowerBound])
+                    guard let fileHlc = changeFileHlc(file.name) else { continue }
                     if !cursor.isEmpty && hlcCompareStr(fileHlc, cursor) <= 0 { continue }
 
                     let rawData = try await adapter.readFile(path: file.path)
@@ -471,7 +588,12 @@ public actor Interocitor {
                     hlc = hlcReceive(hlc, remoteHlc)
 
                     try await ensureRowsCached(ops: entry.ops)
-                    let affected = applyChangeEntry(tables: &tables, entry: entry, schemaVersion: manifest?.schema ?? 1)
+                    let affected = applyChangeEntry(
+                        tables: &tables,
+                        entry: entry,
+                        schemaVersion: manifest?.schema ?? config.schema?.version ?? 1,
+                        schema: config.schema
+                    )
 
                     if !affected.isEmpty {
                         try await local.putRows(affected)
@@ -497,6 +619,7 @@ public actor Interocitor {
                 try await local.setMeta(key: "cursor", value: AnyCodable.string(latestMergedHlc))
             }
             try await local.setMeta(key: "hlc", value: AnyCodable.string(hlcSerialize(hlc)))
+            try await acknowledgeManifest()
             emit(.syncComplete(entriesMerged: totalMerged))
         } catch {
             emit(.syncError(error))
@@ -567,7 +690,13 @@ public actor Interocitor {
         try await pull()
 
         let p = CloudPaths(root: config.remotePath)
-        let now = ISO8601DateFormatter().string(from: Date())
+        let nowDate = Date()
+        let now = ISO8601DateFormatter().string(from: nowDate)
+        let gcFloorHlc = try await computeGcFloor(
+            manifest: currentManifest,
+            adapter: adapter,
+            now: nowDate
+        )
         let nextEpoch = currentManifest.epoch + 1
         let nextGeneration = currentManifest.generation + 1
         let snapshotPath = "\(p.mainlineFolder)/snapshot-\(nextEpoch)-\(config.serverId).json"
@@ -575,6 +704,12 @@ public actor Interocitor {
         let allRows = try await local.getAllRows()
         var snapshotTables: [String: [String: Row]] = [:]
         for row in allRows {
+            if !gcFloorHlc.isEmpty,
+               row._deleted,
+               let deletedHlc = row._deletedHlc,
+               hlcCompareStr(deletedHlc, gcFloorHlc) <= 0 {
+                continue
+            }
             if snapshotTables[row._table] == nil { snapshotTables[row._table] = [:] }
             snapshotTables[row._table]![row._rowId] = row
         }
@@ -606,21 +741,29 @@ public actor Interocitor {
             epoch: nextEpoch,
             watermarkHlc: hlcSerialize(hlc),
             snapshotPath: snapshotPath,
-            deltaPath: nil
+            deltaPath: nil,
+            gcFloorHlc: gcFloorHlc,
+            gcEpoch: gcFloorHlc.isEmpty ? currentManifest.gcEpoch : nextEpoch,
+            gcCreatedAt: gcFloorHlc.isEmpty ? currentManifest.gcCreatedAt : now,
+            offlineGraceMs: config.offlineGraceMs
         )
 
-        let manifestData = try encoder.encode(nextManifest)
-        try await adapter.writeFile(path: p.manifestFile(nextGeneration), data: manifestData)
+        let writtenManifest = try await writeManifest(
+            nextManifest,
+            path: p.manifestFile(nextGeneration),
+            adapter: adapter
+        )
 
         let pointer = ManifestPointer(currentGeneration: nextGeneration, file: "manifest-\(nextGeneration).json")
         let pointerData = try encoder.encode(pointer)
         try await adapter.writeFile(path: p.manifestPointer, data: pointerData)
 
-        manifest = nextManifest
+        manifest = writtenManifest
         try await local.setMeta(key: "epoch", value: AnyCodable.int(nextEpoch))
+        try await acknowledgeManifest()
 
         // Prune change files captured in the snapshot
-        let watermarkHlc = nextManifest.watermarkHlc
+        let watermarkHlc = writtenManifest.watermarkHlc
         do {
             let files = try await adapter.listFiles(path: p.changesFolder)
             for file in files {
@@ -737,6 +880,122 @@ public actor Interocitor {
         return payload.snapshot
     }
 
+    // MARK: - Manifest integrity
+
+    private func jsonString(_ value: String) throws -> String {
+        let stringEncoder = JSONEncoder()
+        stringEncoder.outputFormatting = [.withoutEscapingSlashes]
+        let data = try stringEncoder.encode(value)
+        guard let encoded = String(data: data, encoding: .utf8) else {
+            throw InterocitorError.remotePoisoned("failed to encode manifest JSON string")
+        }
+        return encoded
+    }
+
+    private func jsonOptionalString(_ value: String?) throws -> String {
+        guard let value else { return "null" }
+        return try jsonString(value)
+    }
+
+    private func manifestValue(
+        _ manifest: Manifest,
+        key: ManifestCodingKey,
+        includeContentHash: Bool
+    ) throws -> String? {
+        switch key {
+        case .generation: return String(manifest.generation)
+        case .parentGeneration: return String(manifest.parentGeneration)
+        case .writtenBy: return try jsonString(manifest.writtenBy)
+        case .writtenAt: return try jsonString(manifest.writtenAt)
+        case .contentHash:
+            return includeContentHash ? try jsonString(manifest.contentHash) : nil
+        case .version: return String(manifest.version)
+        case .meshId: return try jsonString(manifest.meshId)
+        case .schema: return String(manifest.schema)
+        case .encrypted: return manifest.encrypted ? "true" : "false"
+        case .server:
+            let relayUrl = try jsonOptionalString(manifest.server.relayUrl)
+            let managed = manifest.server.managed ? "true" : "false"
+            let serverId = try jsonString(manifest.server.serverId)
+            return "{\"managed\":\(managed),\"relayUrl\":\(relayUrl),\"serverId\":\(serverId)}"
+        case .createdAt: return try jsonString(manifest.createdAt)
+        case .epoch: return String(manifest.epoch)
+        case .watermarkHlc: return try jsonString(manifest.watermarkHlc)
+        case .snapshotPath: return try jsonOptionalString(manifest.snapshotPath)
+        case .deltaPath: return try jsonOptionalString(manifest.deltaPath)
+        case .gcFloorHlc:
+            return try manifest.gcFloorHlc.map { try jsonString($0) }
+        case .gcEpoch:
+            return manifest.gcEpoch.map(String.init)
+        case .gcCreatedAt:
+            return try manifest.gcCreatedAt.map { try jsonString($0) }
+        case .offlineGraceMs:
+            return manifest.offlineGraceMs.map(String.init)
+        }
+    }
+
+    private func manifestJSON(
+        _ manifest: Manifest,
+        order: [ManifestCodingKey],
+        includeContentHash: Bool
+    ) throws -> String {
+        var fields: [String] = []
+        for key in order {
+            guard let value = try manifestValue(manifest, key: key, includeContentHash: includeContentHash) else {
+                continue
+            }
+            fields.append("\(try jsonString(key.rawValue)):\(value)")
+        }
+        return "{\(fields.joined(separator: ","))}"
+    }
+
+    private func manifestHash(_ manifest: Manifest, order: [ManifestCodingKey]) throws -> String {
+        let payload = try manifestJSON(manifest, order: order, includeContentHash: false)
+        let digest = SHA256.hash(data: Data(payload.utf8))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "sha256:\(hex)"
+    }
+
+    private func preparedManifest(_ manifest: Manifest) throws -> (manifest: Manifest, data: Data) {
+        var signed = manifest
+        signed.contentHash = try manifestHash(signed, order: coreManifestKeyOrder)
+        let wireJSON = try manifestJSON(signed, order: coreManifestKeyOrder, includeContentHash: true)
+        return (signed, Data(wireJSON.utf8))
+    }
+
+    private func writeManifest(
+        _ manifest: Manifest,
+        path: String,
+        adapter: any StorageAdapter
+    ) async throws -> Manifest {
+        let prepared = try preparedManifest(manifest)
+        try await adapter.writeFile(path: path, data: prepared.data)
+        return prepared.manifest
+    }
+
+    private func validateManifest(_ manifest: Manifest) throws {
+        let expectedHashes = try [
+            manifestHash(manifest, order: coreManifestKeyOrder),
+            manifestHash(manifest, order: sortedManifestKeyOrder),
+        ]
+        guard expectedHashes.contains(manifest.contentHash) else {
+            throw InterocitorError.contentHashMismatch
+        }
+        guard manifest.version == 3 else {
+            throw InterocitorError.manifestVersionUnsupported(manifest.version)
+        }
+        if let localSchema = config.schema?.version, manifest.schema != localSchema {
+            emit(.schemaMismatch(local: localSchema, remote: manifest.schema))
+            throw InterocitorError.schemaMismatch(local: localSchema, remote: manifest.schema)
+        }
+        guard manifest.encrypted == encrypted else {
+            throw InterocitorError.meshEncryptionMismatch(local: encrypted, remote: manifest.encrypted)
+        }
+        if manifest.server.managed, manifest.writtenBy != config.serverId {
+            throw InterocitorError.unauthorized(manifest.writtenBy)
+        }
+    }
+
     // MARK: - Private helpers
 
     private func requireAdapter(_ operation: String) throws -> any StorageAdapter {
@@ -816,6 +1075,56 @@ public actor Interocitor {
         return latest
     }
 
+    private func computeGcFloor(
+        manifest: Manifest,
+        adapter: any StorageAdapter,
+        now: Date
+    ) async throws -> String {
+        let existingFloor = manifest.gcFloorHlc ?? ""
+        let cutoff = now.addingTimeInterval(-TimeInterval(config.offlineGraceMs) / 1_000)
+        let paths = CloudPaths(root: config.remotePath)
+        let fractionalDateParser = ISO8601DateFormatter()
+        fractionalDateParser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let dateParser = ISO8601DateFormatter()
+        var floors: [String] = []
+
+        do {
+            let files = try await adapter.listFiles(path: paths.devicesFolder)
+            for file in files where file.name.hasSuffix(".json") {
+                let suffix = ".json"
+                let deviceId = String(file.name.dropLast(suffix.count))
+                guard let data = try? await adapter.readFile(path: paths.deviceFile(deviceId)),
+                      let metadata = try? decoder.decode(DeviceMetadata.self, from: data),
+                      metadata.retired != true else {
+                    continue
+                }
+                let lastSeen = fractionalDateParser.date(from: metadata.lastSeenAt)
+                    ?? dateParser.date(from: metadata.lastSeenAt)
+                if let lastSeen, lastSeen < cutoff {
+                    continue
+                }
+                guard let watermark = metadata.observedWatermarkHlc, !watermark.isEmpty else {
+                    // Any active peer that has not acknowledged the current
+                    // canonical watermark prevents advancing the floor.
+                    return existingFloor
+                }
+                floors.append(watermark)
+            }
+        } catch {
+            // Failing open here could erase tombstones; retain the existing
+            // floor until the device list is readable again.
+            return existingFloor
+        }
+
+        guard let candidate = floors.min(by: { hlcCompareStr($0, $1) < 0 }) else {
+            return existingFloor
+        }
+        if !existingFloor.isEmpty, hlcCompareStr(existingFloor, candidate) > 0 {
+            return existingFloor
+        }
+        return candidate
+    }
+
     private func loadOrCreateManifest() async throws {
         guard let adapter else { return }
         let p = CloudPaths(root: config.remotePath)
@@ -829,7 +1138,15 @@ public actor Interocitor {
         let manifestData = try await adapter.readFile(path: "\(config.remotePath)/\(pointer.file)")
         let loaded = try decoder.decode(Manifest.self, from: manifestData)
 
-        if loaded.version != 3 { throw InterocitorError.manifestVersionUnsupported(loaded.version) }
+        try validateManifest(loaded)
+        do {
+            // A valid manifest from another mesh is still unsafe. Bind it to
+            // the persisted local identity before any pull or flush can act
+            // on it, as Core does when it loads the manifest.
+            try await assertExpectedMeshId(loaded.meshId)
+        } catch {
+            throw poisonRemote(error, path: "\(config.remotePath)/\(pointer.file)")
+        }
         manifest = loaded
     }
 
@@ -846,8 +1163,8 @@ public actor Interocitor {
             contentHash: "",
             version: 3,
             meshId: "mesh_\(Interocitor.randomHex(8))",
-            schema: 1,
-            encrypted: false,
+            schema: config.schema?.version ?? 1,
+            encrypted: encrypted,
             server: ServerConfig(managed: config.serverManaged, relayUrl: nil, serverId: config.serverId),
             createdAt: now,
             epoch: 0,
@@ -856,15 +1173,30 @@ public actor Interocitor {
             deltaPath: nil
         )
 
-        let manifestData = try encoder.encode(bootstrapManifest)
-        try await adapter.writeFile(path: p.manifestFile(1), data: manifestData)
+        _ = try await writeManifest(
+            bootstrapManifest,
+            path: p.manifestFile(1),
+            adapter: adapter
+        )
 
         let pointer = ManifestPointer(currentGeneration: 1, file: "manifest-1.json")
         let pointerData = try encoder.encode(pointer)
         try await adapter.writeFile(path: p.manifestPointer, data: pointerData)
     }
 
-    private func upsertDeviceMetadata() async throws {
+    private func acknowledgeManifest() async throws {
+        guard let manifest else { return }
+        // Epoch zero has no canonical watermark/floor to acknowledge. Presence
+        // was already written during connect, so avoid needless device writes.
+        if manifest.epoch == 0, manifest.watermarkHlc.isEmpty, (manifest.gcFloorHlc ?? "").isEmpty {
+            return
+        }
+        try await upsertDeviceMetadata(acknowledgeManifest: true)
+        try await local.setMeta(key: "gcFloorHlc", value: AnyCodable.string(manifest.gcFloorHlc ?? ""))
+        try await local.setMeta(key: "gcEpoch", value: AnyCodable.int(manifest.gcEpoch ?? 0))
+    }
+
+    private func upsertDeviceMetadata(acknowledgeManifest: Bool = false) async throws {
         guard let adapter else { return }
         let p = CloudPaths(root: config.remotePath)
         let now = ISO8601DateFormatter().string(from: Date())
@@ -878,7 +1210,16 @@ public actor Interocitor {
             lastSeenAt: now,
             userId: existing?.userId,
             name: existing?.name,
-            retired: existing?.retired
+            displayName: config.deviceName ?? existing?.displayName,
+            deviceType: config.deviceType ?? existing?.deviceType,
+            retired: existing?.retired,
+            observedManifestGeneration: acknowledgeManifest ? manifest?.generation : existing?.observedManifestGeneration,
+            observedEpoch: acknowledgeManifest ? manifest?.epoch : existing?.observedEpoch,
+            observedWatermarkHlc: acknowledgeManifest ? manifest?.watermarkHlc : existing?.observedWatermarkHlc,
+            observedGcFloorHlc: acknowledgeManifest ? manifest?.gcFloorHlc : existing?.observedGcFloorHlc,
+            observedAt: acknowledgeManifest ? now : existing?.observedAt,
+            cutOffAt: existing?.cutOffAt,
+            cutOffReason: existing?.cutOffReason
         )
         let data = try encoder.encode(metadata)
         try await adapter.writeFile(path: p.deviceFile(deviceId), data: data)

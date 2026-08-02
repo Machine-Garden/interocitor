@@ -69,8 +69,7 @@ public actor CloudflareStorageAdapter: StorageAdapter {
         }
     }
 
-    public nonisolated func isAuthenticated() -> Bool { false }
-    public func isAuthenticatedActor() -> Bool { _authenticated }
+    public func isAuthenticated() async -> Bool { _authenticated }
 
     // MARK: - Folders
 

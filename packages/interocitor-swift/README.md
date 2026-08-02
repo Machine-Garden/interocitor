@@ -13,6 +13,17 @@ The package keeps reads, writes, CRDT merge, and decryption on the device. A
 configured WebDAV or Cloudflare adapter moves remote objects; it does not query
 or merge application rows.
 
+For row sync, InterocitorSwift exchanges the current Core manifest, encrypted
+change, snapshot, device-metadata, and compaction artifacts with
+[`@interocitor/core`](../core/README.md). That is row-protocol compatibility,
+not full feature parity: InterocitorSwift does not expose Core's durable-file
+API, pairing/enrollment workflow, or recovery feature set.
+
+Before any payload is read, the runtime verifies the manifest version and
+content hash, configured schema version, encryption mode, and managed-server
+writer. It rejects an invalid manifest instead of rewriting it during
+`connect()`.
+
 > **Public release:** clone the public repository and add
 > `packages/interocitor-swift` as a local Swift package.
 
@@ -133,8 +144,8 @@ A database or object-store dump therefore reveals:
 Key custody stays with the app. A copied mesh key plus the remote objects is
 sufficient to decrypt protected payloads, so use Keychain or an equivalent
 application-owned secret store and never send the key to the storage service.
-If the configured key cannot authenticate the encrypted manifest, `connect()`
-fails with an authentication error instead of presenting an empty database.
+If the key cannot decrypt protected payloads, or its encryption mode conflicts
+with the manifest, `connect()` fails instead of presenting an empty database.
 
 ## Query and mutate rows
 
@@ -157,7 +168,43 @@ try await db.delete(table: "todos", rowId: "todo-1")
 ```
 
 Column values use `AnyCodable`: `.string`, `.int`, `.double`, `.bool`, or
-`.null`.
+`.null`, plus recursive `.array` and `.object` values.
+
+## Core-compatible schemas and merge policies
+
+Use `SyncConfig(schema:)` when the mesh declares a logical schema version or a
+merge policy. The version must equal the remote manifest version. Built-in
+policy resolution matches Core: a field override wins over its table policy,
+then the database policy; a configured schema otherwise defaults to
+`remote-wins`, while a schema-less mesh uses `lww`.
+
+This is an illustrative configuration to apply consistently in every runtime;
+only the built-in policies are portable, and Swift does not implement Core
+custom merge functions.
+
+```swift
+let schema = DatabaseSchema(
+    version: 1,
+    tables: [
+        "tasks": TableSchema(
+            merge: TableMergeConfig(
+                strategy: .lww,
+                fields: ["status": .remoteWins]
+            )
+        )
+    ]
+)
+
+let db = Interocitor(
+    adapter: adapter,
+    config: SyncConfig(remotePath: "/Apps/Todos", schema: schema),
+    localStore: localStore
+)
+```
+
+Local `put` operations always apply their supplied values. Merge policy resolves
+conflicts while applying remote changes. A delete clears the row payload; a
+later `put` creates a new row incarnation and publishes only its new fields.
 
 ## Sync lifecycle
 
@@ -176,7 +223,10 @@ Column values use `AnyCodable`: `.string`, `.int`, `.double`, `.bool`, or
 `compact()` is an explicit maintenance operation. The runtime does not provide
 a distributed compaction lease, idle-time policy, or automatic “20 changes”
 threshold. If multiple peers may compact, the application must coordinate
-that operation.
+that operation. Compaction retains tombstones until active devices have
+acknowledged a watermark. A stale outbox entry at or before the published GC
+floor is not uploaded; the client rehydrates from the canonical snapshot
+instead.
 
 ## Adapters
 
@@ -184,7 +234,7 @@ that operation.
 | --- | --- | --- |
 | `WebDAVStorageAdapter` | Basic- or bearer-authenticated WebDAV storage | `baseURL` is the WebDAV service root; the engine appends `remotePath` |
 | `CloudflareStorageAdapter` | An `@interocitor/workers` IO route | `baseURL` includes `/io/<address>`; an optional bearer token is forwarded to host mesh middleware |
-| `StorageAdapter` | Custom byte-oriented transport | Implement authentication, folder, list, read, write, delete, and metadata operations |
+| `StorageAdapter` | Custom byte-oriented transport | Implement async authentication (`isAuthenticated() async -> Bool`), folder, list, read, write, delete, and metadata operations |
 
 `CloudflareStorageAdapter.subscribeToInvalidations` exposes WebSocket
 notifications, but `Interocitor` does not subscribe automatically. An app that
@@ -196,7 +246,7 @@ path.
 | API | Role |
 | --- | --- |
 | `Interocitor` | Main actor for local rows and sync lifecycle |
-| `SyncConfig`, `ReplicaConfig` | Remote path, polling/flush defaults, local identity namespace, and optional replicas |
+| `SyncConfig`, `ReplicaConfig`, `DatabaseSchema`, `TableSchema`, `TableMergeConfig`, `MergeStrategy` | Remote lifecycle settings, logical schema version, and built-in merge policy |
 | `IndexedSQLiteStore`, `IndexedSQLiteStoreConfiguration` | Persistent SQLite local store |
 | `MemoryLocalStore` | In-memory local store |
 | `WebDAVStorageAdapter`, `WebDAVConfig`, `WebDAVAuth` | WebDAV transport |
@@ -211,11 +261,10 @@ supported application surface listed above.
 
 `SyncConfig` defaults are `serverManaged: false`,
 `serverId: "server_relay_1"`, `pollInterval: 30`, `flushDebounce: 2`,
-`flushThreshold: 50`, `dbName: "interocitor"`, and no replicas. The current
-runtime accepts `deviceName` and `deviceType`, but does not propagate those
-values into peer-visible device metadata; do not rely on that behavior yet.
-The `_owner` field assigned to a local write is also not propagated as a
-last-writer identity across peers.
+`flushThreshold: 50`, `dbName: "interocitor"`, a seven-day
+`offlineGraceMs`, and no replicas. `deviceName` and `deviceType` are written
+to peer-visible device metadata. The `_owner` field assigned to a local write
+is snapshot metadata, not a last-writer identity across peers.
 
 ## Remote object layout
 
@@ -252,6 +301,17 @@ The companion script starts the repository's loopback-only WebDAV test server:
 ```bash
 bash Scripts/run-integration-tests.sh
 ```
+
+To validate real Core ↔ Swift row compatibility, run:
+
+```bash
+bash Scripts/run-core-swift-interop.sh
+```
+
+It builds the repository's Core package and verifies both directions over
+encrypted loopback WebDAV: Core bootstrap and snapshot rehydration in Swift,
+then Swift bootstrap (including nested JSON) and Swift compaction read by fresh
+Core processes.
 
 ## Source layout
 

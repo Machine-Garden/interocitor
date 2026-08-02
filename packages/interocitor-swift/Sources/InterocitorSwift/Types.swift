@@ -11,12 +11,17 @@ import Foundation
 public typealias ColumnValue = AnyCodable
 
 /// A JSON-compatible value that can be stored in a column.
-/// Wraps String, Int, Double, Bool, or nil (null).
+///
+/// The wire format intentionally accepts the same JSON surface as Core: scalar
+/// values, arrays, objects, and null.  `Int` is preserved for ergonomic Swift
+/// use, but both integer and floating-point cases encode as JSON numbers.
 public enum AnyCodable: Codable, Sendable, Equatable {
     case string(String)
     case int(Int)
     case double(Double)
     case bool(Bool)
+    case array([AnyCodable])
+    case object([String: AnyCodable])
     case null
 
     public init(from decoder: Decoder) throws {
@@ -26,6 +31,8 @@ public enum AnyCodable: Codable, Sendable, Equatable {
         if let v = try? c.decode(Int.self)    { self = .int(v); return }
         if let v = try? c.decode(Double.self) { self = .double(v); return }
         if let v = try? c.decode(String.self) { self = .string(v); return }
+        if let v = try? c.decode([AnyCodable].self) { self = .array(v); return }
+        if let v = try? c.decode([String: AnyCodable].self) { self = .object(v); return }
         throw DecodingError.typeMismatch(AnyCodable.self,
             .init(codingPath: decoder.codingPath,
                   debugDescription: "Unsupported column value type"))
@@ -38,6 +45,8 @@ public enum AnyCodable: Codable, Sendable, Equatable {
         case .int(let v):    try c.encode(v)
         case .double(let v): try c.encode(v)
         case .bool(let v):   try c.encode(v)
+        case .array(let v):  try c.encode(v)
+        case .object(let v): try c.encode(v)
         case .null:          try c.encodeNil()
         }
     }
@@ -167,7 +176,12 @@ public struct ChangeEntry: Codable, Sendable {
 // MARK: - Row
 
 /// Row as stored in the local CRDT cache.
-/// Column values are wrapped in ColumnEntry; meta fields are plain.
+///
+/// Swift keeps the historic convenience properties for source compatibility,
+/// but its Codable representation is the Core wire shape:
+/// `{ "_meta": { ... }, "payload": { field: { value, hlc } } }`.
+/// The custom decoder accepts the former flat Swift representation too, so an
+/// existing SQLite cache can be opened and rewritten safely.
 public struct Row: Codable, Sendable {
     public var _table: String
     public var _rowId: String
@@ -187,6 +201,67 @@ public struct Row: Codable, Sendable {
         self._schemaVersion = schemaVersion
         self._owner = owner
         self.columns = columns
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case meta = "_meta"
+        case payload
+        case table = "_table"
+        case rowId = "_rowId"
+        case deleted = "_deleted"
+        case deletedHlc = "_deletedHlc"
+        case schemaVersion = "_schemaVersion"
+        case owner = "_owner"
+        case columns
+    }
+
+    private struct WireMeta: Codable, Sendable {
+        var table: String
+        var rowId: String
+        var deleted: Bool
+        var deletedHlc: String?
+        var schemaVersion: Int
+        var owner: String?
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if container.contains(.meta) {
+            let meta = try container.decode(WireMeta.self, forKey: .meta)
+            _table = meta.table
+            _rowId = meta.rowId
+            _deleted = meta.deleted
+            _deletedHlc = meta.deletedHlc
+            _schemaVersion = meta.schemaVersion
+            _owner = meta.owner
+            columns = try container.decodeIfPresent([String: ColumnEntry].self, forKey: .payload) ?? [:]
+            return
+        }
+
+        // Legacy Swift local-cache representation.
+        _table = try container.decode(String.self, forKey: .table)
+        _rowId = try container.decode(String.self, forKey: .rowId)
+        _deleted = try container.decodeIfPresent(Bool.self, forKey: .deleted) ?? false
+        _deletedHlc = try container.decodeIfPresent(String.self, forKey: .deletedHlc)
+        _schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        _owner = try container.decodeIfPresent(String.self, forKey: .owner)
+        columns = try container.decodeIfPresent([String: ColumnEntry].self, forKey: .columns) ?? [:]
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(
+            WireMeta(
+                table: _table,
+                rowId: _rowId,
+                deleted: _deleted,
+                deletedHlc: _deletedHlc,
+                schemaVersion: _schemaVersion,
+                owner: _owner
+            ),
+            forKey: .meta
+        )
+        try container.encode(columns, forKey: .payload)
     }
 }
 
@@ -242,6 +317,64 @@ public struct Manifest: Codable, Sendable {
     public var watermarkHlc: String
     public var snapshotPath: String?
     public var deltaPath: String?
+    public var gcFloorHlc: String? = nil
+    public var gcEpoch: Int? = nil
+    public var gcCreatedAt: String? = nil
+    public var offlineGraceMs: Int? = nil
+}
+
+// MARK: - Schema / merge policy
+
+/// Built-in CRDT merge strategies shared with `@interocitor/core`.
+public enum MergeStrategy: String, Codable, Sendable {
+    case lww
+    case localWins = "local-wins"
+    case remoteWins = "remote-wins"
+}
+
+/// Per-table merge configuration. Field settings take precedence over the
+/// table setting, then the database setting.
+public struct TableMergeConfig: Sendable {
+    public var strategy: MergeStrategy?
+    public var fields: [String: MergeStrategy]
+
+    public init(strategy: MergeStrategy? = nil, fields: [String: MergeStrategy] = [:]) {
+        self.strategy = strategy
+        self.fields = fields
+    }
+}
+
+/// Protocol-relevant schema information for one Swift table.
+///
+/// Field descriptors and indexes are local implementation details in Core and
+/// are intentionally not sent over the mesh. Merge policy is part of the
+/// convergence contract and is represented here explicitly.
+public struct TableSchema: Sendable {
+    public var merge: TableMergeConfig?
+
+    public init(merge: TableMergeConfig? = nil) {
+        self.merge = merge
+    }
+}
+
+/// Logical mesh schema and merge configuration.
+///
+/// A non-nil schema defaults to Core's `remote-wins` behavior when no more
+/// specific strategy applies. Omit it to retain legacy schema-less LWW.
+public struct DatabaseSchema: Sendable {
+    public var version: Int?
+    public var tables: [String: TableSchema]
+    public var mergeStrategy: MergeStrategy?
+
+    public init(
+        version: Int? = nil,
+        tables: [String: TableSchema] = [:],
+        mergeStrategy: MergeStrategy? = nil
+    ) {
+        self.version = version
+        self.tables = tables
+        self.mergeStrategy = mergeStrategy
+    }
 }
 
 // MARK: - Where clause
@@ -318,6 +451,13 @@ public struct DeviceMetadata: Codable, Sendable {
     public var displayName: String?
     public var deviceType: String?
     public var retired: Bool?
+    public var observedManifestGeneration: Int?
+    public var observedEpoch: Int?
+    public var observedWatermarkHlc: String?
+    public var observedGcFloorHlc: String?
+    public var observedAt: String?
+    public var cutOffAt: String?
+    public var cutOffReason: String?
 }
 
 public struct ChangesHead: Codable, Sendable {

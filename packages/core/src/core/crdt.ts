@@ -41,7 +41,7 @@ function resolveStrategy(
   const tableDef = schema?.tables[table];
   if (tableDef?.merge) {
     const m = tableDef.merge;
-    if (typeof m === 'object' && 'fields' in m) {
+    if (typeof m === 'object' && ('fields' in m || 'strategy' in m)) {
       const config = m as TableMergeConfig;
       if (config.fields?.[field]) return config.fields[field];
       if (config.strategy) return config.strategy;

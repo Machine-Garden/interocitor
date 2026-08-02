@@ -1,5 +1,12 @@
 # Repository guidance
 
+These instructions guide maintainers and coding agents changing Interocitor's
+library and protocol—local-first CRDT rows, directly remote durable files,
+trusted endpoints, and mailbox deployments—so edits preserve the row/file
+availability distinction and security boundary. They route repository work;
+detailed behavior remains owned by the linked READMEs, `docs/`, and
+package-local material.
+
 - Start by reading `README.md` for the public overview and package map.
 - For core behavior, read `packages/core/README.md` before changing engine, sync, storage, CRDT, encryption, pairing, or file APIs.
 - Keep root documentation minimal. Protocol and design deep dives belong in `docs/`; package-specific docs belong under that package.

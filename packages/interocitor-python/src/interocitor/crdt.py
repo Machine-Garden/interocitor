@@ -13,6 +13,15 @@ from .types import ChangeEntry, ColumnEntry, DeleteOp, Op, Row, RowMeta, UpsertO
 Schema = Mapping[str, Any] | None
 
 
+def _require_convergent_strategy(strategy: object, table: str, field: str) -> MergeStrategy:
+    if strategy == "lww" or callable(strategy):
+        return strategy  # type: ignore[return-value]
+    raise ValueError(
+        f"Unsupported replicated merge strategy {strategy!r} for {table}.{field}; "
+        'use "lww" or a convergent custom merge'
+    )
+
+
 def _resolve_strategy(schema: Schema, table: str, field: str) -> MergeStrategy:
     """Implement core's field → table → database merge-strategy lookup."""
 
@@ -24,33 +33,25 @@ def _resolve_strategy(schema: Schema, table: str, field: str) -> MergeStrategy:
     merge = table_def.get("merge") if isinstance(table_def, Mapping) else None
     if isinstance(merge, Mapping):
         # Core only recognizes a mapping as a TableMergeConfig when it carries
-        # one of these keys. An arbitrary mapping is an unknown strategy and
-        # therefore takes the normal LWW fallback in _merge_column.
+        # one of these keys.
         if "fields" in merge or "strategy" in merge:
             fields = merge.get("fields")
             field_strategy = fields.get(field) if isinstance(fields, Mapping) else None
             if field_strategy:
-                return field_strategy
+                return _require_convergent_strategy(field_strategy, table, field)
             strategy = merge.get("strategy")
             if strategy:
-                return strategy
+                return _require_convergent_strategy(strategy, table, field)
         else:
-            return merge  # type: ignore[return-value]
+            return _require_convergent_strategy(merge, table, field)
     elif merge is not None:
-        return merge
+        return _require_convergent_strategy(merge, table, field)
     strategy = schema.get("mergeStrategy")
-    return "remote-wins" if strategy is None else strategy
+    return "lww" if strategy is None else _require_convergent_strategy(strategy, table, field)
 
 
-def _js_strict_equal(left: Any, right: Any) -> bool:
-    """Compare JSON-shaped values with JavaScript's ``===`` semantics.
-
-    A custom merge strategy is allowed to return a new column entry.  Core
-    checks its ``hlc`` and ``value`` with strict equality; Python's structural
-    equality would incorrectly treat, for example, ``True`` and ``1`` as the
-    same value and would compare object payloads by contents rather than
-    identity.
-    """
+def _wire_value_equal(left: Any, right: Any) -> bool:
+    """Compare decoded JSON values independently of object identity and key order."""
 
     if isinstance(left, bool) or isinstance(right, bool):
         return type(left) is type(right) and left is right
@@ -58,11 +59,21 @@ def _js_strict_equal(left: Any, right: Any) -> bool:
     right_is_number = isinstance(right, (int, float)) and not isinstance(right, bool)
     if left_is_number or right_is_number:
         return left_is_number and right_is_number and left == right
-    if isinstance(left, str) or isinstance(right, str):
-        return type(left) is type(right) and left == right
-    if left is None or right is None:
-        return left is None and right is None
-    return left is right
+    if isinstance(left, Mapping) or isinstance(right, Mapping):
+        return (
+            isinstance(left, Mapping)
+            and isinstance(right, Mapping)
+            and left.keys() == right.keys()
+            and all(_wire_value_equal(left[key], right[key]) for key in left)
+        )
+    if isinstance(left, list) or isinstance(right, list):
+        return (
+            isinstance(left, list)
+            and isinstance(right, list)
+            and len(left) == len(right)
+            and all(_wire_value_equal(a, b) for a, b in zip(left, right, strict=True))
+        )
+    return type(left) is type(right) and left == right
 
 
 def _merge_column(
@@ -78,13 +89,15 @@ def _merge_column(
         return remote
     if callable(strategy):
         result = strategy(local, remote, {"table": table, "rowId": row_id, "field": field})
-        return result if result.hlc != local.hlc or not _js_strict_equal(result.value, local.value) else None
-    if strategy == "remote-wins":
+        return result if result.hlc != local.hlc or not _wire_value_equal(result.value, local.value) else None
+    comparison = hlc_compare_str(remote.hlc, local.hlc)
+    if comparison > 0:
         return remote
-    if strategy == "local-wins":
+    if comparison < 0:
         return None
-    # The core falls through to LWW for unknown built-in strategy strings.
-    return remote if hlc_compare_str(remote.hlc, local.hlc) > 0 else None
+    if not _wire_value_equal(local.value, remote.value):
+        raise ValueError(f"Conflicting values share HLC {remote.hlc} at {table}/{row_id}.{field}")
+    return None
 
 
 def _blank_row(table: str, row_id: str, schema_version: int, *, deleted: bool = False, deleted_hlc: str | None = None) -> Row:

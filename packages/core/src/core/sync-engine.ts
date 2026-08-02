@@ -59,7 +59,12 @@ import {
   LocalStoreConnectedStoresApi,
   type ConnectedStoresApi,
 } from './connected-stores.ts';
-import { pull as doPull } from './pull.ts';
+import {
+  pull as doPull,
+  changeFileIsUnseen,
+  parseSeenChangeFiles,
+  parseWriterFrontiers,
+} from './pull.ts';
 import { compact as doCompact, rehydrate as doRehydrate } from './compaction.ts';
 import { createDeviceId } from './ids.ts';
 
@@ -1497,14 +1502,17 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
           dbName: this.dbName,
           remotePath: this.config.remotePath,
         });
-        // Reset the local cursor so the upcoming pull cannot use the
-        // skip-listing fast-path. Without this, doFlush()'s post-write
-        // cursor advance under the OLD key hides remote change files
-        // from the new (mismatched) key — the engine would never decode
-        // them and never surface the decode failure that proves the
-        // portable key is wrong. Conflict surfaces via decode:error +
-        // remote:poisoned on the next pull, instead of silently going.
-        try { await this.local.setMeta('cursor', ''); } catch { /* best-effort */ }
+        // Reset every observation marker so the upcoming pull must decode
+        // retained remote changes under the newly supplied key. Otherwise
+        // exact-file progress recorded under the OLD key would hide the
+        // mismatch and suppress the decode failure that proves the key is
+        // wrong. Conflict surfaces via decode:error + remote:poisoned on the
+        // next pull, instead of silently proceeding.
+        try {
+          await this.local.setMeta('cursor', '');
+          await this.local.setMeta('seenChangeFiles', []);
+          await this.local.setMeta('writerFrontiers', {});
+        } catch { /* best-effort */ }
       }
     }
 
@@ -1600,6 +1608,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     const cursorRaw = await this.local.getMeta('cursor');
     const cursor = typeof cursorRaw === 'string' ? cursorRaw : '';
     if (!cursor) return false;
+    const seenChangeFiles = parseSeenChangeFiles(await this.local.getMeta('seenChangeFiles'));
+    if (!seenChangeFiles) return false;
     if (await this.local.outboxSize() > 0) return false;
 
     const remotePath = this.requireRemotePath('connect() fast-path');
@@ -1615,6 +1625,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
         priorHlc: head.latestHlc ?? null,
       });
       if (head.latestHlc && hlcCompareStr(head.latestHlc, cursor) <= 0) {
+        // A global HLC head cannot reveal a late-flushed change that sorts
+        // behind the head. Verify authoritative filenames against exact-file
+        // progress before taking the reload fast path. This still avoids all
+        // change-file GETs.
+        const files = await adapter.listFiles(p.changesFolder);
+        if (files.some(file => changeFileIsUnseen(file.name, seenChangeFiles))) {
+          return false;
+        }
         this.emit({
           type: 'trace:head',
           op: 'skip-no-change',
@@ -1719,12 +1737,12 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       this.emit({ type: 'auth:complete' });
     }
 
-    // Reload steady-state fast path: local cache has a cursor, there is no
-    // pending outbox, and remote head has not advanced. In that case the
-    // client has nothing to publish or merge. After the minimal auth check,
-    // probe head and stop — no folder creation, manifest reads, device
-    // metadata writes, listFiles, or change-file reads. This covers clients
-    // that recreate the adapter on reload before calling setRemoteStorage().
+    // Reload steady-state fast path: local cache has exact change-file
+    // progress, there is no pending outbox, and every authoritative change
+    // filename has been observed. After the minimal auth check, probe head
+    // plus the changes folder and stop — no folder creation, manifest reads,
+    // device metadata writes, or change-file reads. This covers clients that
+    // recreate the adapter on reload before calling setRemoteStorage().
     if (await this.tryConnectFastPath(adapter)) return;
 
     const remotePath = this.requireRemotePath('connect()');
@@ -2487,14 +2505,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
         }
       }
 
-      // Advance the local cursor past our own just-flushed entries.
-      // The cursor is the "we have already merged everything <= X"
-      // marker that pull()'s fast-path uses to short-circuit listing
-      // and reading change files. Without this, a page reload after a
-      // local-only write storm re-lists the changes folder and re-GETs
-      // every file we authored ourselves — re-decoding our own writes
-      // through the CRDT path despite local cache already being canonical.
-      // Monotonic-forward only: never let cursor go backwards on disk.
+      // Record our just-flushed files as locally observed. The scalar cursor
+      // remains a backwards-compatible high-water hint; correctness and
+      // change-file GET suppression use exact immutable filenames because
+      // publication order is not guaranteed to match HLC order.
       let highestFlushedHlc = '';
       for (const entry of entries) {
         if (!entry.hlc) continue;
@@ -2508,6 +2522,20 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
         if (!cursor || hlcCompareStr(highestFlushedHlc, cursor) > 0) {
           await this.local.setMeta('cursor', highestFlushedHlc);
         }
+        const seenChangeFiles =
+          parseSeenChangeFiles(await this.local.getMeta('seenChangeFiles')) ?? new Set<string>();
+        const writerFrontiers = parseWriterFrontiers(await this.local.getMeta('writerFrontiers'));
+        for (const entry of entries) {
+          if (!entry.hlc) continue;
+          seenChangeFiles.add(`${entry.hlc}-${entry.id}.json`);
+          const writerId = hlcParse(entry.hlc).nodeId;
+          const writerFrontierHlc = writerFrontiers[writerId];
+          if (!writerFrontierHlc || hlcCompareStr(entry.hlc, writerFrontierHlc) > 0) {
+            writerFrontiers[writerId] = entry.hlc;
+          }
+        }
+        await this.local.setMeta('seenChangeFiles', [...seenChangeFiles].sort());
+        await this.local.setMeta('writerFrontiers', writerFrontiers);
       }
 
       this.log('debug', 'flush() — complete', { entryCount: entries.length });

@@ -1064,12 +1064,16 @@ class Interocitor:
         paths = self._paths("pull")
         cursor = await self._local.get_meta("cursor")
         cursor = cursor if isinstance(cursor, str) else ""
+        seen_raw = await self._local.get_meta("seenChangeFiles")
+        seen_change_files = (
+            set(seen_raw)
+            if isinstance(seen_raw, list) and all(isinstance(name, str) for name in seen_raw)
+            else set()
+        )
         head_wire = await self._read_json_if_exists(paths.changes_head, "changes head")
         if head_wire is not None:
             try:
-                head = ChangesHead.from_wire(head_wire)
-                if cursor and hlc_compare_str(head.latest_hlc, cursor) <= 0:
-                    return
+                ChangesHead.from_wire(head_wire)
             except (ValueError, TypeError):
                 # A malformed head is merely an optimization miss. Listing
                 # change files is still authoritative.
@@ -1090,15 +1094,16 @@ class Interocitor:
                     continue
                 file_hlc = file.name[:marker]
                 hlc_parse(file_hlc)
-                if cursor and hlc_compare_str(file_hlc, cursor) <= 0:
+                gc_floor_hlc = self._manifest.gc_floor_hlc if self._manifest is not None else None
+                if gc_floor_hlc and hlc_compare_str(file_hlc, gc_floor_hlc) <= 0:
+                    continue
+                if file.name in seen_change_files:
                     continue
                 entry = self._decode_change_payload(await self._require_adapter("pull").read_file(file.path), file.path)
                 if entry.hlc != file_hlc:
                     raise InterocitorError(
                         f"Remote change filename does not match payload HLC: {file.path}"
                     )
-                if cursor and hlc_compare_str(entry.hlc, cursor) <= 0:
-                    continue
                 self._hlc = hlc_receive(self._hlc, hlc_parse(entry.hlc))
                 affected = apply_change_entry(
                     self._tables,
@@ -1111,10 +1116,19 @@ class Interocitor:
                     self._known_tables.update(row._meta.table for row in affected)
                 if not latest or hlc_compare_str(entry.hlc, latest) > 0:
                     latest = entry.hlc
+                seen_change_files.add(file.name)
             except Exception as error:
                 raise self._poison_remote(error) from error
         if latest and latest != cursor:
             await self._local.set_meta("cursor", latest)
+        gc_floor_hlc = self._manifest.gc_floor_hlc if self._manifest is not None else None
+        retained_seen = sorted(
+            name
+            for name in seen_change_files
+            if not gc_floor_hlc
+            or (name.rfind("-chg_") >= 0 and hlc_compare_str(name[: name.rfind("-chg_")], gc_floor_hlc) > 0)
+        )
+        await self._local.set_meta("seenChangeFiles", retained_seen)
         await self._local.set_meta("hlc", hlc_serialize(self._hlc))
 
     async def _flush(self) -> None:
@@ -1163,6 +1177,14 @@ class Interocitor:
                 cursor = await self._local.get_meta("cursor")
                 if not isinstance(cursor, str) or not cursor or hlc_compare_str(highest, cursor) > 0:
                     await self._local.set_meta("cursor", highest)
+                seen_raw = await self._local.get_meta("seenChangeFiles")
+                seen_change_files = (
+                    set(seen_raw)
+                    if isinstance(seen_raw, list) and all(isinstance(name, str) for name in seen_raw)
+                    else set()
+                )
+                seen_change_files.update(f"{entry.hlc}-{entry.id}.json" for entry in entries if entry.hlc)
+                await self._local.set_meta("seenChangeFiles", sorted(seen_change_files))
             await self._upsert_device_metadata()
             requeue = False
         finally:

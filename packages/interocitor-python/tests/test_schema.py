@@ -46,7 +46,7 @@ class SchemaDeclarationTests(unittest.TestCase):
                     indexes=(TableIndex("by-state", "state"),),
                     merge=TableMergeConfig(
                         strategy="lww",
-                        fields={"state": "remote-wins"},
+                        fields={"state": "lww"},
                     ),
                 ),
             },
@@ -70,7 +70,7 @@ class SchemaDeclarationTests(unittest.TestCase):
                         "indexes": [{"name": "by-state", "field": "state"}],
                         "merge": {
                             "strategy": "lww",
-                            "fields": {"state": "remote-wins"},
+                            "fields": {"state": "lww"},
                         },
                     },
                 },
@@ -158,11 +158,11 @@ class SchemaDeclarationTests(unittest.TestCase):
 class SchemaMergeTests(unittest.TestCase):
     def test_field_table_database_and_default_merge_order_matches_core(self) -> None:
         schema = Schema(
-            merge_strategy="remote-wins",
+            merge_strategy="lww",
             tables={
                 "tasks": TableSchema(
                     merge=TableMergeConfig(
-                        strategy="local-wins",
+                        strategy="lww",
                         fields={"state": "lww"},
                     ),
                 ),
@@ -211,9 +211,9 @@ class SchemaMergeTests(unittest.TestCase):
 
         self.assertEqual(tables["tasks"]["task-1"].payload["state"].value, "local-state")
         self.assertEqual(tables["tasks"]["task-1"].payload["title"].value, "local-title")
-        self.assertEqual(tables["audit"]["event-1"].payload["detail"].value, "remote")
+        self.assertEqual(tables["audit"]["event-1"].payload["detail"].value, "local")
 
-    def test_no_schema_is_lww_but_a_schema_defaults_to_remote_wins(self) -> None:
+    def test_schema_and_schema_less_defaults_are_both_lww(self) -> None:
         def resolve(schema):
             tables = {}
             apply_op(
@@ -231,7 +231,7 @@ class SchemaMergeTests(unittest.TestCase):
             return tables["tasks"]["task-1"].payload["state"].value
 
         self.assertEqual(resolve(None), "local")
-        self.assertEqual(resolve(Schema(tables={"tasks": TableSchema()}).to_dict()), "remote")
+        self.assertEqual(resolve(Schema(tables={"tasks": TableSchema()}).to_dict()), "local")
 
 
 class SchemaVersionTests(unittest.TestCase):

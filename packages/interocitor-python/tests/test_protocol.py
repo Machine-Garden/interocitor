@@ -80,26 +80,9 @@ class CrdtProtocolTests(unittest.TestCase):
         self.assertIsNotNone(changed)
         self.assertIs(type(tables["tasks"]["task-1"].payload["done"].value), int)
 
-    def test_strategy_only_table_config_matches_core(self) -> None:
+    def test_strategy_only_table_config_matches_convergent_core_default(self) -> None:
         tables = {}
-        schema = {"tables": {"tasks": {"merge": {"strategy": "remote-wins"}}}}
-        apply_op(
-            tables,
-            UpsertOp("tasks", "task-1", {"state": ColumnEntry("local-newer", "000000000000002-0000-local")}),
-            schema_version=1,
-            schema=schema,
-        )
-        apply_op(
-            tables,
-            UpsertOp("tasks", "task-1", {"state": ColumnEntry("remote-older", "000000000000001-0000-remote")}),
-            schema_version=1,
-            schema=schema,
-        )
-        self.assertEqual(tables["tasks"]["task-1"].payload["state"].value, "remote-older")
-
-    def test_unrecognised_table_merge_mapping_falls_back_to_lww_like_core(self) -> None:
-        tables = {}
-        schema = {"tables": {"tasks": {"merge": {}}}}
+        schema = {"tables": {"tasks": {"merge": {"strategy": "lww"}}}}
         apply_op(
             tables,
             UpsertOp("tasks", "task-1", {"state": ColumnEntry("local-newer", "000000000000002-0000-local")}),
@@ -113,6 +96,48 @@ class CrdtProtocolTests(unittest.TestCase):
             schema=schema,
         )
         self.assertEqual(tables["tasks"]["task-1"].payload["state"].value, "local-newer")
+
+    def test_perspective_dependent_legacy_strategy_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported replicated merge strategy"):
+            apply_op(
+                {},
+                UpsertOp(
+                    "tasks",
+                    "task-1",
+                    {"state": ColumnEntry("value", "000000000000001-0000-writer")},
+                ),
+                schema_version=1,
+                schema={"tables": {"tasks": {"merge": "remote-wins"}}},
+            )
+
+    def test_equal_hlc_requires_equal_value(self) -> None:
+        stamp = "000000000000001-0000-writer"
+        tables = {}
+        apply_op(
+            tables,
+            UpsertOp("tasks", "task-1", {"state": ColumnEntry({"a": [1]}, stamp)}),
+            schema_version=1,
+        )
+        self.assertIsNone(apply_op(
+            tables,
+            UpsertOp("tasks", "task-1", {"state": ColumnEntry({"a": [1]}, stamp)}),
+            schema_version=1,
+        ))
+        with self.assertRaisesRegex(ValueError, "Conflicting values share HLC"):
+            apply_op(
+                tables,
+                UpsertOp("tasks", "task-1", {"state": ColumnEntry({"a": [2]}, stamp)}),
+                schema_version=1,
+            )
+
+    def test_unrecognised_table_merge_mapping_is_rejected_like_core(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported replicated merge strategy"):
+            apply_op(
+                {},
+                UpsertOp("tasks", "task-1", {"state": ColumnEntry("value", "000000000000001-0000-writer")}),
+                schema_version=1,
+                schema={"tables": {"tasks": {"merge": {}}}},
+            )
 
 
 class ChangeFileOrderingTests(unittest.TestCase):

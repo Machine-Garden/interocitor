@@ -218,12 +218,15 @@ behavior of `@interocitor/core`.
 ## Sync guarantees
 
 - **Eventual convergence.** Two devices that have seen the same set of
-  change files (in any order) reach byte‑identical local state.
+  change files (in any order) reach byte‑identical local state under LWW or a
+  custom merge that satisfies the convergence laws below.
 - **Per‑column merge.** Conflicts are resolved field‑by‑field, not at
-  the row level. A configured schema defaults to `'remote-wins'`; the
-  schema-less fallback is `'lww'`. See "Conflict resolution".
-- **Idempotent merge.** Replaying an already‑applied change is a no‑op.
-  Safe to re‑pull, safe to re‑process the same change file twice.
+  the row level. Configured and schema-less databases both default to
+  `'lww'`. See "Conflict resolution".
+- **Exact change observation.** A client records immutable change filenames;
+  neither a global HLC nor one incomplete listing proves that an older file was
+  observed. LWW replay is idempotent, and exact receipts prevent an observed
+  custom change from being applied twice.
 - **Per‑device HLC monotonicity.** A single device's HLCs strictly
   increase. Cross‑device order is total but only as wall‑clocks allow.
 - **Restore via snapshot.** A device that joins late (or rehydrates after
@@ -239,6 +242,12 @@ What we do **not** guarantee:
 - Recovery if the remote silently lies (drops writes, rolls back the
   manifest). See [Security model](docs/security-model.md).
 - Recovery if portable key material is lost — see "New device / restore".
+
+For the completeness proof, comparison with established sync systems, checksum
+boundary, and cryptographic integrity requirements, see
+[Sync completeness, convergence, and integrity](docs/sync-completeness.md).
+The protocol decision is recorded in
+[Sync completeness and deterministic merge](docs/decisions/sync-completeness.md).
 
 ### Sync cadence
 
@@ -708,22 +717,21 @@ efficient `where`/`orderBy`.
 
 ### Conflict resolution
 
-Conflict resolution is per column. With a configured schema, the default
-strategy is **`'remote-wins'`**. Without a schema, the fallback is
-**`'lww'`**.
+Conflict resolution is per column. Every database defaults to **`'lww'`**:
+the mutation with the greater HLC wins, regardless of which peer discovers it
+first. An equal HLC with a different value is rejected as protocol corruption.
 
 Available strategies:
 
-- `'remote-wins'` — always accept the incoming remote column when a local
-  value exists, even if the remote HLC is older.
-- `'local-wins'` — retain the existing local column whenever it exists.
 - `'lww'` — accept the incoming remote column only when its HLC is greater
   than the local HLC.
-- `MergeFunction` — `(local, remote, ctx) => result` for custom logic.
+- `MergeFunction` — `(existing, incoming, ctx) => result` for custom logic.
 
-When the local column does not exist, the incoming column is accepted under
-every strategy. Configure the database, table, or field explicitly when
-application correctness depends on one of these policies.
+An incoming column is accepted when no existing column exists. A custom merge
+must be deterministic, commutative, associative, and idempotent; otherwise two
+peers can derive different state from the same files. Perspective-dependent
+policies such as “local wins” or “remote wins” are not valid in a peer mesh
+because each peer assigns those labels differently.
 
 ### Deletion semantics
 

@@ -17,14 +17,14 @@ if TYPE_CHECKING:
     from .types import ColumnEntry
 
 
-BuiltinMergeStrategy: TypeAlias = Literal["lww", "local-wins", "remote-wins"]
+BuiltinMergeStrategy: TypeAlias = Literal["lww"]
 MergeFunction: TypeAlias = Callable[["ColumnEntry", "ColumnEntry", Mapping[str, str]], "ColumnEntry"]
 MergeStrategy: TypeAlias = BuiltinMergeStrategy | MergeFunction
 SchemaFieldKind: TypeAlias = Literal["string", "number", "boolean", "date", "json", "enum"]
 
 _FIELD_KINDS = frozenset({"string", "number", "boolean", "date", "json", "enum"})
 _INDEXABLE_FIELD_KINDS = _FIELD_KINDS - {"json"}
-_BUILTIN_MERGE_STRATEGIES = frozenset({"lww", "local-wins", "remote-wins"})
+_BUILTIN_MERGE_STRATEGIES = frozenset({"lww"})
 
 
 class SchemaError(ValueError):
@@ -52,9 +52,7 @@ def _require_merge_strategy(value: object, description: str) -> MergeStrategy:
         return value
     if isinstance(value, str) and value in _BUILTIN_MERGE_STRATEGIES:
         return value
-    raise SchemaError(
-        f"{description} must be one of 'lww', 'local-wins', 'remote-wins', or a callable"
-    )
+    raise SchemaError(f"{description} must be 'lww' or a convergent callable")
 
 
 @dataclass(frozen=True, slots=True, init=False)

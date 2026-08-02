@@ -163,25 +163,25 @@ version number alone does not prove that they are identical.
 
 ### Choose a merge policy deliberately
 
+Catch-up records exact immutable change filenames. The global HLC cursor and
+`head.json` are ordering/invalidation hints, not proof that every older file
+was observed; a queued change published late is still listed and merged.
+
 Interocitor resolves a conflicting column in this order:
 
 1. TableMergeConfig(fields={...}) for that field.
 2. The table's merge or TableMergeConfig(strategy=...).
 3. Schema(merge_strategy=...).
-4. The default: **"lww" when no schema is configured**, or
-   **"remote-wins" when a schema is configured but supplies no policy**.
+4. The default: **"lww"**.
 
-The built-in policies match core:
+The built-in policy matches core:
 
 - "lww" accepts the column with the higher hybrid logical clock (HLC).
-- "remote-wins" accepts an incoming conflicting column even when its HLC is
-  older.
-- "local-wins" keeps an existing local column.
-
 A missing local column always accepts the incoming value. Deletions use their
 own HLC tombstone rules rather than a field merge policy. Python also accepts a
-custom callable merge strategy, but its code is not transmitted: every client
-must implement equivalent behavior or replicas can diverge.
+custom callable merge strategy, but it must be deterministic, commutative,
+associative, and idempotent. Its code is not transmitted, so every client must
+implement equivalent behavior or replicas can diverge.
 
 ### Treat version as a compatibility gate
 

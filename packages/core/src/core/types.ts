@@ -112,25 +112,26 @@ export interface TableIndexDefinition {
 // ─── Merge Strategies ─────────────────────────────────────────────────
 
 /**
- * Built-in column merge strategies (git-style):
+ * Built-in replicated-column merge strategy.
  *
- * - `'remote-wins'` — Like git `--theirs`. Remote always overwrites local. Default.
- * - `'lww'`         — Last-Writer-Wins. Highest HLC wins.
- * - `'local-wins'`  — Like git `--ours`. Keep local value on conflict.
+ * LWW compares the immutable HLCs carried by the conflicting mutations. It
+ * therefore produces the same winner on every peer regardless of discovery
+ * or publication order. Perspective-dependent "local" and "remote" policies
+ * are intentionally not representable in a peer mesh.
  */
-export type BuiltinMergeStrategy = 'lww' | 'local-wins' | 'remote-wins';
+export type BuiltinMergeStrategy = 'lww';
 
 /**
- * Custom merge function. Receives the local and incoming column entries
+ * Custom merge function. Receives the existing and incoming column entries
  * plus context, returns the winning entry.
  *
- * Called only when both local and remote have a value for the column.
- * Return `local` to keep, `remote` to accept, or a new ColumnEntry to
- * produce a merged result.
+ * Called only when both entries have a value for the column. To preserve mesh
+ * convergence this function must be deterministic, commutative, associative,
+ * and idempotent. Return `existing`, `incoming`, or a new ColumnEntry.
  */
 export type MergeFunction = (
-  local: ColumnEntry,
-  remote: ColumnEntry,
+  existing: ColumnEntry,
+  incoming: ColumnEntry,
   context: MergeContext,
 ) => ColumnEntry;
 
@@ -150,7 +151,7 @@ export type MergeStrategy = BuiltinMergeStrategy | MergeFunction;
  * - Set `fields` to override per column (like `.gitattributes` per file).
  *
  * Unspecified = inherits from {@link DatabaseSchemaDefinition.mergeStrategy},
- * which itself defaults to `'remote-wins'`.
+ * which itself defaults to `'lww'`.
  */
 export interface TableMergeConfig {
   /** Default strategy for all fields in this table. */
@@ -223,7 +224,7 @@ export interface DatabaseSchemaDefinition<
   /** Optional logical schema version for app-level compatibility checks. */
   version?: number;
   tables: { [K in keyof S]: TableSchemaDefinition<S[K]> } & Record<string, TableSchemaDefinition>;
-  /** Default merge strategy for all tables. Default: `'remote-wins'`. */
+  /** Default merge strategy for all tables. Default: `'lww'`. */
   mergeStrategy?: MergeStrategy;
 }
 
@@ -867,6 +868,15 @@ export type SyncEvent =
   | { type: 'sync:start' }
   | { type: 'sync:complete'; entriesMerged: number }
   | { type: 'sync:error'; error: Error }
+  | {
+      type: 'sync:late-change';
+      writerId: string;
+      changeHlc: string;
+      fileName: string;
+      relation: 'behind-global-high-water' | 'behind-writer-frontier';
+      writerFrontierHlc?: string;
+      legacyGlobalHighWaterHlc?: string;
+    }
   | { type: 'credentials:restored'; source: 'silent-store'; deviceIdChanged: boolean; hadPassphrase: boolean }
   | { type: 'remote:poisoned'; error: Error; path?: string; context?: Record<string, unknown> }
   | { type: 'decode:error'; error: Error; path?: string; context?: Record<string, unknown> }

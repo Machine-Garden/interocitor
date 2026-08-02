@@ -325,11 +325,9 @@ public struct Manifest: Codable, Sendable {
 
 // MARK: - Schema / merge policy
 
-/// Built-in CRDT merge strategies shared with `@interocitor/core`.
+/// Built-in convergent merge strategy shared with `@interocitor/core`.
 public enum MergeStrategy: String, Codable, Sendable {
     case lww
-    case localWins = "local-wins"
-    case remoteWins = "remote-wins"
 }
 
 /// Per-table merge configuration. Field settings take precedence over the
@@ -359,8 +357,7 @@ public struct TableSchema: Sendable {
 
 /// Logical mesh schema and merge configuration.
 ///
-/// A non-nil schema defaults to Core's `remote-wins` behavior when no more
-/// specific strategy applies. Omit it to retain legacy schema-less LWW.
+/// Every schema defaults to LWW when no more specific strategy applies.
 public struct DatabaseSchema: Sendable {
     public var version: Int?
     public var tables: [String: TableSchema]

@@ -1,13 +1,12 @@
 /**
  * CRDT Merge Engine — Core-compatible per-column merge
  *
- * Each column in each row carries its own HLC. LWW uses that ordering;
- * configured policies may instead retain the local value or take the remote one.
+ * Each column in each row carries its own HLC. LWW uses that immutable ordering
+ * so every peer selects the same value regardless of discovery order.
  * Deletes are soft (tombstone with HLC).
  *
  * Implements the same built-in merge-policy resolution and tombstone rules as
- * `@interocitor/core`.  Schema-less databases use LWW; a configured schema
- * defaults to remote-wins unless it overrides the table or field.
+ * `@interocitor/core`. Every database defaults to LWW.
  */
 
 import Foundation
@@ -22,7 +21,7 @@ public func applyOp(
     op: Op,
     schemaVersion: Int,
     schema: DatabaseSchema? = nil
-) -> Row? {
+) throws -> Row? {
     if tables[op.table] == nil {
         tables[op.table] = [:]
     }
@@ -31,7 +30,7 @@ public func applyOp(
     case .delete(let deleteOp):
         return applyDeleteOp(tables: &tables, op: deleteOp, schemaVersion: schemaVersion)
     case .upsert(let upsertOp):
-        return applyUpsertOp(tables: &tables, op: upsertOp, schemaVersion: schemaVersion, schema: schema)
+        return try applyUpsertOp(tables: &tables, op: upsertOp, schemaVersion: schemaVersion, schema: schema)
     }
 }
 
@@ -44,23 +43,26 @@ private func resolveStrategy(
         if let fieldStrategy = merge.fields[field] { return fieldStrategy }
         if let tableStrategy = merge.strategy { return tableStrategy }
     }
-    guard let schema else { return .lww }
-    return schema.mergeStrategy ?? .remoteWins
+    return schema?.mergeStrategy ?? .lww
 }
 
 private func mergeColumn(
     local: ColumnEntry?,
     remote: ColumnEntry,
     strategy: MergeStrategy
-) -> ColumnEntry? {
+) throws -> ColumnEntry? {
     guard let local, !local.hlc.isEmpty else { return remote }
     switch strategy {
-    case .remoteWins:
-        return remote
-    case .localWins:
-        return nil
     case .lww:
-        return hlcCompareStr(remote.hlc, local.hlc) > 0 ? remote : nil
+        let comparison = hlcCompareStr(remote.hlc, local.hlc)
+        if comparison > 0 { return remote }
+        if comparison < 0 { return nil }
+        if remote.value != local.value {
+            throw InterocitorError.protocolCorruption(
+                "conflicting values share HLC \(remote.hlc)"
+            )
+        }
+        return nil
     }
 }
 
@@ -109,7 +111,7 @@ private func applyUpsertOp(
     op: UpsertOp,
     schemaVersion: Int,
     schema: DatabaseSchema?
-) -> Row? {
+) throws -> Row? {
     var row: Row
     var changed = false
 
@@ -141,7 +143,7 @@ private func applyUpsertOp(
 
     for (col, entry) in columnsToApply {
         let strategy = resolveStrategy(schema: schema, table: op.table, field: col)
-        if let winner = mergeColumn(local: row.columns[col], remote: entry, strategy: strategy) {
+        if let winner = try mergeColumn(local: row.columns[col], remote: entry, strategy: strategy) {
             row.columns[col] = winner
             changed = true
         }
@@ -160,10 +162,10 @@ public func applyChangeEntry(
     entry: ChangeEntry,
     schemaVersion: Int,
     schema: DatabaseSchema? = nil
-) -> [Row] {
+) throws -> [Row] {
     var affected: [Row] = []
     for op in entry.ops {
-        if let row = applyOp(tables: &tables, op: op, schemaVersion: schemaVersion, schema: schema) {
+        if let row = try applyOp(tables: &tables, op: op, schemaVersion: schemaVersion, schema: schema) {
             affected.append(row)
         }
     }

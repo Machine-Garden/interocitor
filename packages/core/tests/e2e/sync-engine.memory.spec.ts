@@ -704,6 +704,83 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result).toBe('from a');
   });
 
+  test('pull discovers an older queued change flushed behind the current head', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, MemoryLocalStore, readColumn } =
+        await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      const shared = new MemoryAdapter();
+      const config = {
+        batchWindowMs: 0,
+        remotePath: '/MeshLateFlush',
+        pollInterval: 600_000,
+        flushDebounce: 600_000,
+        flushThreshold: 999,
+        keySource: null,
+      };
+      const left = new Interocitor(shared, {
+        ...config,
+        dbName: 'late-flush-left',
+        deviceId: 'dev_left',
+        localStore: new MemoryLocalStore(),
+      });
+      const right = new Interocitor(shared, {
+        ...config,
+        dbName: 'late-flush-right',
+        deviceId: 'dev_right',
+        localStore: new MemoryLocalStore(),
+      });
+
+      await left.connect();
+      await right.connect();
+
+      await left.put('tasks', 'second', { done: false });
+      await left.put('tasks', 'third', { done: false });
+      await left.flush();
+      await right.pull();
+
+      await right.put('tasks', 'second', { done: true });
+      await new Promise(resolve => setTimeout(resolve, 2));
+      await left.put('tasks', 'third', { done: true });
+      await left.flush();
+
+      await right.pull();
+      await right.flush();
+      const lateChanges: any[] = [];
+      left.on((event: any) => {
+        if (event.type === 'sync:late-change') lateChanges.push(event);
+      });
+      await left.pull();
+
+      const leftSecond = await left.loadRow({ table: 'tasks', rowId: 'second' });
+      const leftThird = await left.loadRow({ table: 'tasks', rowId: 'third' });
+      const rightSecond = await right.loadRow({ table: 'tasks', rowId: 'second' });
+      const rightThird = await right.loadRow({ table: 'tasks', rowId: 'third' });
+
+      return {
+        left: {
+          second: leftSecond ? readColumn(leftSecond, 'done') : null,
+          third: leftThird ? readColumn(leftThird, 'done') : null,
+        },
+        right: {
+          second: rightSecond ? readColumn(rightSecond, 'done') : null,
+          third: rightThird ? readColumn(rightThird, 'done') : null,
+        },
+        lateChanges,
+      };
+    });
+
+    expect(result.left).toEqual({ second: true, third: true });
+    expect(result.right).toEqual(result.left);
+    expect(result.lateChanges).toEqual([
+      expect.objectContaining({
+        writerId: 'dev_right',
+        relation: 'behind-global-high-water',
+      }),
+    ]);
+  });
+
   test('supports schema indexes + table.where queries', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { Interocitor, types } = await import('/packages/core/dist/index.js');
@@ -2371,4 +2448,3 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result.gappedAdded).toBe(2); // 2 gapped writes → 2 files
   });
 });
-

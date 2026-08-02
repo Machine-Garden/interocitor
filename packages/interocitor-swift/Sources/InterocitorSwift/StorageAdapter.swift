@@ -154,6 +154,7 @@ public enum InterocitorError: Error, LocalizedError, Sendable {
     case compactionNotAllowed
     case unauthorized(String)
     case contentHashMismatch
+    case protocolCorruption(String)
     case staleOutboxAtGcFloor(String)
     case remotePoisoned(String)
 
@@ -170,6 +171,7 @@ public enum InterocitorError: Error, LocalizedError, Sendable {
         case .compactionNotAllowed:          return "Compaction is allowed only for the authorized server writer"
         case .unauthorized(let w):           return "Unauthorized manifest writer: \(w)"
         case .contentHashMismatch:           return "Manifest content hash mismatch"
+        case .protocolCorruption(let reason): return "Protocol corruption: \(reason)"
         case .staleOutboxAtGcFloor(let floor):
             return "Refusing to flush changes at or before gcFloorHlc \(floor); rehydrate required"
         case .remotePoisoned(let reason):    return "Remote poisoned: \(reason)"

@@ -4,10 +4,9 @@
  * Each column in each row carries its own HLC.
  * The merge strategy determines which value wins on conflict:
  *
- *  - `'remote-wins'` — Remote always overwrites local. (Default)
- *  - `'lww'`         — Last-Writer-Wins. Highest HLC wins.
- *  - `'local-wins'`  — Keep local value when both exist.
- *  - custom function  — `(local, remote, ctx) => ColumnEntry`
+ *  - `'lww'`         — Last-Writer-Wins. Highest HLC wins. (Default)
+ *  - custom function  — `(existing, incoming, ctx) => ColumnEntry`; callers
+ *    must supply a deterministic, commutative, associative, idempotent merge.
  *
  * Deletes are soft (tombstone with HLC) and always use LWW.
  *
@@ -38,50 +37,78 @@ function resolveStrategy(
   table: string,
   field: string,
 ): MergeStrategy {
+  const requireConvergentStrategy = (strategy: unknown): MergeStrategy => {
+    if (strategy === 'lww' || typeof strategy === 'function') return strategy as MergeStrategy;
+    throw new Error(
+      `Unsupported replicated merge strategy ${JSON.stringify(strategy)} for ${table}.${field}; use "lww" or a convergent custom merge`,
+    );
+  };
   const tableDef = schema?.tables[table];
   if (tableDef?.merge) {
     const m = tableDef.merge;
     if (typeof m === 'object' && ('fields' in m || 'strategy' in m)) {
       const config = m as TableMergeConfig;
-      if (config.fields?.[field]) return config.fields[field];
-      if (config.strategy) return config.strategy;
+      if (config.fields?.[field]) return requireConvergentStrategy(config.fields[field]);
+      if (config.strategy) return requireConvergentStrategy(config.strategy);
     } else {
-      return m as MergeStrategy;
+      return requireConvergentStrategy(m);
     }
   }
-  if (!schema) return 'lww';
-  return schema.mergeStrategy ?? 'remote-wins';
+  return schema?.mergeStrategy ? requireConvergentStrategy(schema.mergeStrategy) : 'lww';
+}
+
+function columnValuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (left instanceof Date || right instanceof Date) {
+    return left instanceof Date && right instanceof Date && left.getTime() === right.getTime();
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => columnValuesEqual(value, right[index]));
+  }
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const leftKeys = Object.keys(leftRecord).sort();
+  const rightKeys = Object.keys(rightRecord).sort();
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key, index) => (
+      key === rightKeys[index] && columnValuesEqual(leftRecord[key], rightRecord[key])
+    ));
 }
 
 /**
  * Decide which column entry wins given a strategy.
  *
- * `local` may be undefined (new column). In that case, remote always wins
+ * `existing` may be undefined (new column). In that case, incoming always wins
  * regardless of strategy — there's no conflict.
  */
 function mergeColumn(
-  local: ColumnEntry | undefined,
-  remote: ColumnEntry,
+  existing: ColumnEntry | undefined,
+  incoming: ColumnEntry,
   strategy: MergeStrategy,
   table: string,
   rowId: string,
   field: string,
 ): ColumnEntry | null {
-  if (!local || !local.hlc) return remote;
+  if (!existing || !existing.hlc) return incoming;
 
   if (typeof strategy === 'function') {
-    const result = strategy(local, remote, { table, rowId, field });
-    return result.hlc !== local.hlc || result.value !== local.value ? result : null;
+    const result = strategy(existing, incoming, { table, rowId, field });
+    return result.hlc !== existing.hlc || !columnValuesEqual(result.value, existing.value)
+      ? result
+      : null;
   }
 
-  switch (strategy) {
-    case 'remote-wins':
-      return remote;
-    case 'local-wins':
-      return null;
-    default:
-      return hlcCompareStr(remote.hlc, local.hlc) > 0 ? remote : null;
+  const comparison = hlcCompareStr(incoming.hlc, existing.hlc);
+  if (comparison > 0) return incoming;
+  if (comparison < 0) return null;
+  if (!columnValuesEqual(existing.value, incoming.value)) {
+    throw new Error(`Conflicting values share HLC ${incoming.hlc} at ${table}/${rowId}.${field}`);
   }
+  return null;
 }
 
 /** Build a fresh row stub. */

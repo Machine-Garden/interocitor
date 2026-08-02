@@ -175,8 +175,7 @@ Column values use `AnyCodable`: `.string`, `.int`, `.double`, `.bool`, or
 Use `SyncConfig(schema:)` when the mesh declares a logical schema version or a
 merge policy. The version must equal the remote manifest version. Built-in
 policy resolution matches Core: a field override wins over its table policy,
-then the database policy; a configured schema otherwise defaults to
-`remote-wins`, while a schema-less mesh uses `lww`.
+then the database policy; every schema defaults to `lww`.
 
 This is an illustrative configuration to apply consistently in every runtime;
 only the built-in policies are portable, and Swift does not implement Core
@@ -189,7 +188,7 @@ let schema = DatabaseSchema(
         "tasks": TableSchema(
             merge: TableMergeConfig(
                 strategy: .lww,
-                fields: ["status": .remoteWins]
+                fields: ["status": .lww]
             )
         )
     ]
@@ -214,7 +213,7 @@ later `put` creates a new row incarnation and publishes only its new fields.
 | `put`, `delete`, `get`, `query`, `queryWhere` | Local-only |
 | `connect()` | Authenticates the adapter, creates or loads the remote manifest, catches up, flushes, and starts polling |
 | `flush()` | Writes queued local changes to the primary adapter and configured replicas |
-| `pull()` | Downloads and merges changes newer than the local cursor |
+| `pull()` | Lists retained changes and merges filenames not recorded in the local exact-file receipt set |
 | `rehydrate()` | Rebuilds local state from the current snapshot, then pulls newer changes |
 | `compact()` | Pulls, publishes a new snapshot and manifest generation, and prunes changes through the watermark |
 | `disconnect()` | Stops polling, flushes when the remote is healthy, and closes the local store |

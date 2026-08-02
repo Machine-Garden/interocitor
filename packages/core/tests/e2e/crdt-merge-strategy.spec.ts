@@ -1,469 +1,364 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from "@playwright/test";
 
 /* eslint-disable unicorn/consistent-function-scoping -- Browser-context helpers must be defined inside page.evaluate. */
 
-
 test.beforeEach(async ({ page }) => {
-  await page.goto('/packages/core/tests/e2e/fixtures/harness.html');
+  await page.goto("/packages/core/tests/e2e/fixtures/harness.html");
 });
 
-// ─── lww (default) ───────────────────────────────────────────────────
-
-test.describe('merge strategy — lww (default)', () => {
-  test('newer HLC wins', async ({ page }) => {
+test.describe("merge strategy — convergent LWW", () => {
+  test("newer HLC wins and an older late mutation loses", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { applyOp, readColumn } = await import('/packages/core/dist/core/crdt.js');
+      const { applyOp, readColumn } = await import("/packages/core/dist/core/crdt.js");
       const tables: Record<string, Record<string, any>> = {};
+      const schema = { version: 1, tables: { t: {} } };
 
-      applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: { name: { value: 'old', hlc: '000001000000000000-0000-dev_a' } },
-      }, 1);
+      applyOp(
+        tables,
+        {
+          type: "upsert",
+          table: "t",
+          rowId: "r1",
+          columns: { name: { value: "newer", hlc: "000002000000000000-0000-dev_b" } },
+        },
+        1,
+        schema,
+      );
+      const changed = applyOp(
+        tables,
+        {
+          type: "upsert",
+          table: "t",
+          rowId: "r1",
+          columns: { name: { value: "older", hlc: "000001000000000000-0000-dev_a" } },
+        },
+        1,
+        schema,
+      );
 
-      applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: { name: { value: 'new', hlc: '000002000000000000-0000-dev_b' } },
-      }, 1);
-
-      return readColumn(tables.t.r1, 'name');
+      return { value: readColumn(tables.t.r1, "name"), changed: changed !== null };
     });
-    expect(result).toBe('new');
+
+    expect(result).toEqual({ value: "newer", changed: false });
   });
 
-  test('older HLC loses', async ({ page }) => {
+  test("configured and schema-less databases have the same LWW default", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { applyOp, readColumn } = await import('/packages/core/dist/core/crdt.js');
-      const tables: Record<string, Record<string, any>> = {};
+      const { applyOp, readColumn } = await import("/packages/core/dist/core/crdt.js");
 
-      applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: { name: { value: 'winner', hlc: '000002000000000000-0000-dev_a' } },
-      }, 1);
-
-      applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: { name: { value: 'loser', hlc: '000001000000000000-0000-dev_b' } },
-      }, 1);
-
-      return readColumn(tables.t.r1, 'name');
-    });
-    expect(result).toBe('winner');
-  });
-});
-
-// ─── local-wins ──────────────────────────────────────────────────────
-
-test.describe('merge strategy — local-wins', () => {
-  test('keeps local value when both exist', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const { applyOp, readColumn } = await import('/packages/core/dist/core/crdt.js');
-      const tables: Record<string, Record<string, any>> = {};
-      const schema = {
-        version: 1,
-        tables: { t: { merge: 'local-wins' } },
+      const resolve = (schema?: any) => {
+        const tables: Record<string, Record<string, any>> = {};
+        applyOp(
+          tables,
+          {
+            type: "upsert",
+            table: "t",
+            rowId: "r1",
+            columns: { value: { value: "newer", hlc: "000002000000000000-0000-dev_b" } },
+          },
+          1,
+          schema,
+        );
+        applyOp(
+          tables,
+          {
+            type: "upsert",
+            table: "t",
+            rowId: "r1",
+            columns: { value: { value: "older", hlc: "000001000000000000-0000-dev_a" } },
+          },
+          1,
+          schema,
+        );
+        return readColumn(tables.t.r1, "value");
       };
-
-      // Local write
-      applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: { name: { value: 'local', hlc: '000001000000000000-0000-dev_a' } },
-      }, 1, schema);
-
-      // Remote write with newer HLC — should still lose
-      const changed = applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: { name: { value: 'remote', hlc: '000002000000000000-0000-dev_b' } },
-      }, 1, schema);
-
-      return { value: readColumn(tables.t.r1, 'name'), changed: changed !== null };
-    });
-    expect(result.value).toBe('local');
-    expect(result.changed).toBe(false);
-  });
-
-  test('accepts remote when no local value exists', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const { applyOp, readColumn } = await import('/packages/core/dist/core/crdt.js');
-      const tables: Record<string, Record<string, any>> = {};
-      const schema = {
-        version: 1,
-        tables: { t: { merge: 'local-wins' } },
-      };
-
-      // Remote write to a column that doesn't exist locally
-      applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: { name: { value: 'remote', hlc: '000001000000000000-0000-dev_b' } },
-      }, 1, schema);
-
-      return readColumn(tables.t.r1, 'name');
-    });
-    expect(result).toBe('remote');
-  });
-
-  test('independent columns still merge', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const { applyOp, readColumn } = await import('/packages/core/dist/core/crdt.js');
-      const tables: Record<string, Record<string, any>> = {};
-      const schema = {
-        version: 1,
-        tables: { t: { merge: 'local-wins' } },
-      };
-
-      applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: { title: { value: 'from A', hlc: '000001000000000000-0000-dev_a' } },
-      }, 1, schema);
-
-      applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: { status: { value: 'done', hlc: '000002000000000000-0000-dev_b' } },
-      }, 1, schema);
 
       return {
-        title: readColumn(tables.t.r1, 'title'),
-        status: readColumn(tables.t.r1, 'status'),
+        configured: resolve({ version: 1, tables: { t: {} } }),
+        schemaLess: resolve(),
       };
     });
-    expect(result.title).toBe('from A');
-    expect(result.status).toBe('done');
+
+    expect(result).toEqual({ configured: "newer", schemaLess: "newer" });
   });
-});
 
-// ─── remote-wins ─────────────────────────────────────────────────────
-
-test.describe('merge strategy — remote-wins', () => {
-  test('remote always overwrites even with older HLC', async ({ page }) => {
+  test("table and field configuration can state LWW explicitly", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { applyOp, readColumn } = await import('/packages/core/dist/core/crdt.js');
+      const { applyOp, readColumn } = await import("/packages/core/dist/core/crdt.js");
       const tables: Record<string, Record<string, any>> = {};
       const schema = {
         version: 1,
-        tables: { t: { merge: 'remote-wins' } },
-      };
-
-      applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: { name: { value: 'local', hlc: '000002000000000000-0000-dev_a' } },
-      }, 1, schema);
-
-      applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: { name: { value: 'remote', hlc: '000001000000000000-0000-dev_b' } },
-      }, 1, schema);
-
-      return readColumn(tables.t.r1, 'name');
-    });
-    expect(result).toBe('remote');
-  });
-});
-
-// ─── per-field merge ─────────────────────────────────────────────────
-
-test.describe('merge strategy — per-field', () => {
-  test('different strategies per field within a table', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const { applyOp, readColumn } = await import('/packages/core/dist/core/crdt.js');
-      const tables: Record<string, Record<string, any>> = {};
-      const schema = {
-        version: 1,
+        mergeStrategy: "lww" as const,
         tables: {
           t: {
             merge: {
-              strategy: 'lww',
-              fields: {
-                title: 'local-wins',
-                status: 'remote-wins',
-              },
+              strategy: "lww" as const,
+              fields: { status: "lww" as const },
             },
           },
         },
       };
 
-      // Set initial values
-      applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: {
-          title: { value: 'local title', hlc: '000001000000000000-0000-dev_a' },
-          status: { value: 'local status', hlc: '000002000000000000-0000-dev_a' },
-          priority: { value: 1, hlc: '000001000000000000-0000-dev_a' },
-        },
-      }, 1, schema);
-
-      // Incoming remote with conflicting values
-      applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: {
-          title: { value: 'remote title', hlc: '000003000000000000-0000-dev_b' },
-          status: { value: 'remote status', hlc: '000001000000000000-0000-dev_b' },
-          priority: { value: 99, hlc: '000003000000000000-0000-dev_b' },
-        },
-      }, 1, schema);
-
-      return {
-        title: readColumn(tables.t.r1, 'title'),     // local-wins → keep local
-        status: readColumn(tables.t.r1, 'status'),   // remote-wins → accept remote
-        priority: readColumn(tables.t.r1, 'priority'), // lww → newer HLC wins
-      };
-    });
-    expect(result.title).toBe('local title');
-    expect(result.status).toBe('remote status');
-    expect(result.priority).toBe(99);
-  });
-});
-
-// ─── custom merge function ───────────────────────────────────────────
-
-test.describe('merge strategy — custom function', () => {
-  test('custom function receives context and can produce merged value', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      function counterMerge(local: any, remote: any, _ctx: any) {
-        return {
-          value: (local.value as number) + (remote.value as number),
-          hlc: local.hlc > remote.hlc ? local.hlc : remote.hlc,
-        };
-      }
-      const { applyOp, readColumn } = await import('/packages/core/dist/core/crdt.js');
-      const tables: Record<string, Record<string, any>> = {};
-
-      // Counter merge: sum values, keep latest HLC
-
-      const schema = {
-        version: 1,
-        tables: {
-          counters: {
-            merge: {
-              fields: { count: counterMerge },
-            },
+      applyOp(
+        tables,
+        {
+          type: "upsert",
+          table: "t",
+          rowId: "r1",
+          columns: {
+            title: { value: "old", hlc: "000001000000000000-0000-dev_a" },
+            status: { value: "old", hlc: "000001000000000000-0000-dev_a" },
           },
         },
-      };
-
-      applyOp(tables, {
-        type: 'upsert', table: 'counters', rowId: 'c1',
-        columns: { count: { value: 5, hlc: '000001000000000000-0000-dev_a' } },
-      }, 1, schema);
-
-      applyOp(tables, {
-        type: 'upsert', table: 'counters', rowId: 'c1',
-        columns: { count: { value: 3, hlc: '000002000000000000-0000-dev_b' } },
-      }, 1, schema);
-
-      return readColumn(tables.counters.c1, 'count');
-    });
-    expect(result).toBe(8);
-  });
-
-  test('custom function receives correct context fields', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const { applyOp } = await import('/packages/core/dist/core/crdt.js');
-      const tables: Record<string, Record<string, any>> = {};
-      let capturedCtx: any = null;
-
-      const spy = (local: any, remote: any, ctx: any) => {
-        capturedCtx = ctx;
-        return remote;
-      };
-
-      const schema = {
-        version: 1,
-        tables: { tasks: { merge: spy } },
-      };
-
-      applyOp(tables, {
-        type: 'upsert', table: 'tasks', rowId: 'task_42',
-        columns: { title: { value: 'old', hlc: '000001000000000000-0000-dev_a' } },
-      }, 1, schema);
-
-      applyOp(tables, {
-        type: 'upsert', table: 'tasks', rowId: 'task_42',
-        columns: { title: { value: 'new', hlc: '000002000000000000-0000-dev_b' } },
-      }, 1, schema);
-
-      return capturedCtx;
-    });
-    expect(result.table).toBe('tasks');
-    expect(result.rowId).toBe('task_42');
-    expect(result.field).toBe('title');
-  });
-
-  test('custom function returning local means no change', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      function keepLocal(local: any, _remote: any) { return local; }
-      const { applyOp, readColumn } = await import('/packages/core/dist/core/crdt.js');
-      const tables: Record<string, Record<string, any>> = {};
-
-      const schema = {
-        version: 1,
-        tables: { t: { merge: keepLocal } },
-      };
-
-      applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: { name: { value: 'local', hlc: '000001000000000000-0000-dev_a' } },
-      }, 1, schema);
-
-      const changed = applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: { name: { value: 'remote', hlc: '000002000000000000-0000-dev_b' } },
-      }, 1, schema);
-
-      return { value: readColumn(tables.t.r1, 'name'), changed: changed !== null };
-    });
-    expect(result.value).toBe('local');
-    expect(result.changed).toBe(false);
-  });
-});
-
-// ─── database-level default ──────────────────────────────────────────
-
-test.describe('merge strategy — database-level default', () => {
-  test('database mergeStrategy defaults to remote-wins when schema present', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const { applyOp, readColumn } = await import('/packages/core/dist/core/crdt.js');
-      const tables: Record<string, Record<string, any>> = {};
-      const schema = {
-        version: 1,
-        // no mergeStrategy → defaults to 'remote-wins'
-        tables: { t: {}, t2: {} },
-      };
-
-      // table t
-      applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: { x: { value: 'local', hlc: '000002000000000000-0000-dev_a' } },
-      }, 1, schema);
-      applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: { x: { value: 'remote', hlc: '000001000000000000-0000-dev_b' } },
-      }, 1, schema);
-
-      // table t2
-      applyOp(tables, {
-        type: 'upsert', table: 't2', rowId: 'r1',
-        columns: { y: { value: 'local2', hlc: '000002000000000000-0000-dev_a' } },
-      }, 1, schema);
-      applyOp(tables, {
-        type: 'upsert', table: 't2', rowId: 'r1',
-        columns: { y: { value: 'remote2', hlc: '000001000000000000-0000-dev_b' } },
-      }, 1, schema);
-
-      return {
-        x: readColumn(tables.t.r1, 'x'),
-        y: readColumn(tables.t2.r1, 'y'),
-      };
-    });
-    expect(result.x).toBe('remote');
-    expect(result.y).toBe('remote2');
-  });
-
-  test('table-level overrides database-level', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const { applyOp, readColumn } = await import('/packages/core/dist/core/crdt.js');
-      const tables: Record<string, Record<string, any>> = {};
-      const schema = {
-        version: 1,
-        // default remote-wins
-        tables: {
-          protected: { merge: 'local-wins' },
-          normal: {},
+        1,
+        schema,
+      );
+      applyOp(
+        tables,
+        {
+          type: "upsert",
+          table: "t",
+          rowId: "r1",
+          columns: {
+            title: { value: "new", hlc: "000002000000000000-0000-dev_b" },
+            status: { value: "new", hlc: "000002000000000000-0000-dev_b" },
+          },
         },
-      };
-
-      // protected table: local-wins overrides database remote-wins
-      applyOp(tables, {
-        type: 'upsert', table: 'protected', rowId: 'r1',
-        columns: { x: { value: 'local', hlc: '000001000000000000-0000-dev_a' } },
-      }, 1, schema);
-      applyOp(tables, {
-        type: 'upsert', table: 'protected', rowId: 'r1',
-        columns: { x: { value: 'remote', hlc: '000002000000000000-0000-dev_b' } },
-      }, 1, schema);
-
-      // normal table: inherits database remote-wins
-      applyOp(tables, {
-        type: 'upsert', table: 'normal', rowId: 'r1',
-        columns: { x: { value: 'local', hlc: '000002000000000000-0000-dev_a' } },
-      }, 1, schema);
-      applyOp(tables, {
-        type: 'upsert', table: 'normal', rowId: 'r1',
-        columns: { x: { value: 'remote', hlc: '000001000000000000-0000-dev_b' } },
-      }, 1, schema);
+        1,
+        schema,
+      );
 
       return {
-        protected: readColumn(tables.protected.r1, 'x'),
-        normal: readColumn(tables.normal.r1, 'x'),
+        title: readColumn(tables.t.r1, "title"),
+        status: readColumn(tables.t.r1, "status"),
       };
     });
-    expect(result.protected).toBe('local');
-    expect(result.normal).toBe('remote');
+
+    expect(result).toEqual({ title: "new", status: "new" });
   });
-});
 
-// ─── deletes always use LWW ─────────────────────────────────────────
-
-test.describe('merge strategy — deletes', () => {
-  test('deletes use LWW regardless of table merge strategy', async ({ page }) => {
+  test("equal HLC and equal structured value is an idempotent replay", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { applyOp } = await import('/packages/core/dist/core/crdt.js');
+      const { applyOp } = await import("/packages/core/dist/core/crdt.js");
       const tables: Record<string, Record<string, any>> = {};
-      const schema = {
-        version: 1,
-        tables: { t: { merge: 'local-wins' } },
-      };
+      const hlc = "000001000000000000-0000-dev_a";
+      const op = (value: unknown) => ({
+        type: "upsert" as const,
+        table: "t",
+        rowId: "r1",
+        columns: { value: { value, hlc } },
+      });
 
-      applyOp(tables, {
-        type: 'upsert', table: 't', rowId: 'r1',
-        columns: { name: { value: 'hello', hlc: '000001000000000000-0000-dev_a' } },
-      }, 1, schema);
-
-      applyOp(tables, {
-        type: 'delete', table: 't', rowId: 'r1',
-        hlc: '000003000000000000-0000-dev_b',
-      }, 1, schema);
-
-      return tables.t.r1._meta.deleted;
+      applyOp(tables, op({ b: [2], a: 1 }), 1);
+      return applyOp(tables, op({ a: 1, b: [2] }), 1) === null;
     });
+
     expect(result).toBe(true);
   });
+
+  test("equal HLC with a different value is protocol corruption", async ({ page }) => {
+    const error = await page.evaluate(async () => {
+      const { applyOp } = await import("/packages/core/dist/core/crdt.js");
+      const tables: Record<string, Record<string, any>> = {};
+      const hlc = "000001000000000000-0000-dev_a";
+      applyOp(
+        tables,
+        {
+          type: "upsert",
+          table: "t",
+          rowId: "r1",
+          columns: { value: { value: "first", hlc } },
+        },
+        1,
+      );
+      try {
+        applyOp(
+          tables,
+          {
+            type: "upsert",
+            table: "t",
+            rowId: "r1",
+            columns: { value: { value: "different", hlc } },
+          },
+          1,
+        );
+        return null;
+      } catch (caught) {
+        return caught instanceof Error ? caught.message : String(caught);
+      }
+    });
+
+    expect(error).toContain("Conflicting values share HLC");
+  });
 });
 
-// ─── applyChangeEntry with schema ────────────────────────────────────
+test.describe("merge strategy — rejected perspective-dependent policies", () => {
+  for (const strategy of ["local-wins", "remote-wins"]) {
+    test(`${strategy} fails loudly`, async ({ page }) => {
+      const error = await page.evaluate(async (legacyStrategy) => {
+        const { applyOp } = await import("/packages/core/dist/core/crdt.js");
+        const tables: Record<string, Record<string, any>> = {};
+        try {
+          applyOp(
+            tables,
+            {
+              type: "upsert",
+              table: "t",
+              rowId: "r1",
+              columns: { value: { value: "value", hlc: "000001000000000000-0000-dev_a" } },
+            },
+            1,
+            { tables: { t: { merge: legacyStrategy } } } as any,
+          );
+          return null;
+        } catch (caught) {
+          return caught instanceof Error ? caught.message : String(caught);
+        }
+      }, strategy);
 
-test.describe('applyChangeEntry with merge strategy', () => {
-  test('passes schema through to applyOp', async ({ page }) => {
+      expect(error).toContain(`Unsupported replicated merge strategy "${strategy}"`);
+    });
+  }
+});
+
+test.describe("merge strategy — custom convergent function", () => {
+  test("receives context and can produce a merged value", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { applyChangeEntry, readColumn } = await import('/packages/core/dist/core/crdt.js');
+      const { applyOp, readColumn } = await import("/packages/core/dist/core/crdt.js");
       const tables: Record<string, Record<string, any>> = {};
-      const schema = {
-        version: 1,
-        tables: { t: { merge: 'local-wins' } },
+      let context: any = null;
+      const max = (existing: any, incoming: any, ctx: any) => {
+        context = ctx;
+        return existing.value >= incoming.value ? existing : incoming;
       };
+      const schema = { version: 1, tables: { counters: { merge: max } } };
 
-      // Seed local value
-      applyChangeEntry(tables, {
-        id: 'chg_1', ts: 1, device: 'dev_a', hlc: '000001000000000000-0000-dev_a',
-        ops: [{
-          type: 'upsert', table: 't', rowId: 'r1',
-          columns: { name: { value: 'local', hlc: '000001000000000000-0000-dev_a' } },
-        }],
-      }, 1, schema);
+      applyOp(
+        tables,
+        {
+          type: "upsert",
+          table: "counters",
+          rowId: "c1",
+          columns: { count: { value: 5, hlc: "000001000000000000-0000-dev_a" } },
+        },
+        1,
+        schema,
+      );
+      applyOp(
+        tables,
+        {
+          type: "upsert",
+          table: "counters",
+          rowId: "c1",
+          columns: { count: { value: 3, hlc: "000002000000000000-0000-dev_b" } },
+        },
+        1,
+        schema,
+      );
 
-      // Remote batch — should not overwrite
-      const affected = applyChangeEntry(tables, {
-        id: 'chg_2', ts: 2, device: 'dev_b', hlc: '000002000000000000-0000-dev_b',
-        ops: [{
-          type: 'upsert', table: 't', rowId: 'r1',
-          columns: { name: { value: 'remote', hlc: '000002000000000000-0000-dev_b' } },
-        }],
-      }, 1, schema);
+      return { value: readColumn(tables.counters.c1, "count"), context };
+    });
+
+    expect(result).toEqual({
+      value: 5,
+      context: { table: "counters", rowId: "c1", field: "count" },
+    });
+  });
+});
+
+test.describe("merge strategy — tombstones", () => {
+  test("delete and resurrection use HLC order", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { applyOp, readColumn } = await import("/packages/core/dist/core/crdt.js");
+      const tables: Record<string, Record<string, any>> = {};
+      applyOp(
+        tables,
+        {
+          type: "upsert",
+          table: "t",
+          rowId: "r1",
+          columns: { name: { value: "created", hlc: "000001000000000000-0000-dev_a" } },
+        },
+        1,
+      );
+      applyOp(
+        tables,
+        {
+          type: "delete",
+          table: "t",
+          rowId: "r1",
+          hlc: "000002000000000000-0000-dev_b",
+        },
+        1,
+      );
+      applyOp(
+        tables,
+        {
+          type: "upsert",
+          table: "t",
+          rowId: "r1",
+          columns: { name: { value: "resurrected", hlc: "000003000000000000-0000-dev_c" } },
+        },
+        1,
+      );
 
       return {
-        value: readColumn(tables.t.r1, 'name'),
-        affectedCount: affected.length,
+        deleted: tables.t.r1._meta.deleted,
+        value: readColumn(tables.t.r1, "name"),
       };
     });
-    expect(result.value).toBe('local');
-    expect(result.affectedCount).toBe(0);
+
+    expect(result).toEqual({ deleted: false, value: "resurrected" });
   });
+});
+
+test("applyChangeEntry preserves the LWW schema policy", async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { applyChangeEntry, readColumn } = await import("/packages/core/dist/core/crdt.js");
+    const tables: Record<string, Record<string, any>> = {};
+    const schema = { version: 1, tables: { t: { merge: "lww" as const } } };
+
+    applyChangeEntry(
+      tables,
+      {
+        id: "chg_new",
+        ts: 2,
+        device: "dev_b",
+        hlc: "000002000000000000-0000-dev_b",
+        ops: [
+          {
+            type: "upsert",
+            table: "t",
+            rowId: "r1",
+            columns: { name: { value: "newer", hlc: "000002000000000000-0000-dev_b" } },
+          },
+        ],
+      },
+      1,
+      schema,
+    );
+    const affected = applyChangeEntry(
+      tables,
+      {
+        id: "chg_old",
+        ts: 1,
+        device: "dev_a",
+        hlc: "000001000000000000-0000-dev_a",
+        ops: [
+          {
+            type: "upsert",
+            table: "t",
+            rowId: "r1",
+            columns: { name: { value: "older", hlc: "000001000000000000-0000-dev_a" } },
+          },
+        ],
+      },
+      1,
+      schema,
+    );
+
+    return { value: readColumn(tables.t.r1, "name"), affectedCount: affected.length };
+  });
+
+  expect(result).toEqual({ value: "newer", affectedCount: 0 });
 });

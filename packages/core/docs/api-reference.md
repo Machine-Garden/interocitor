@@ -79,9 +79,9 @@ The engine also exports lower-level `put`, `delete`, `query`, `queryWhere`, and
 `tableNames` methods. `batch(fn)` groups nested writes into one
 `ChangeEntry`; nested batches join the outer batch.
 
-Conflict resolution is per column. A schema defaults to `remote-wins`
-(incoming remote value always replaces an existing local value); schema-less
-operation defaults to HLC-based `lww`. See
+Conflict resolution is per column. Configured and schema-less databases both
+default to HLC-based `lww`. Custom merge functions must be deterministic,
+commutative, associative, and idempotent to preserve convergence. See
 [Conflict resolution](../README.md#conflict-resolution).
 
 ## Query and row caches

@@ -499,6 +499,16 @@ public actor Interocitor {
                 if cursor.isEmpty || hlcCompareStr(highestFlushedHlc, cursor) > 0 {
                     try await local.setMeta(key: "cursor", value: AnyCodable.string(highestFlushedHlc))
                 }
+                var seenChangeFiles = Set<String>()
+                if let seen = try await local.getMeta(key: "seenChangeFiles") as? AnyCodable,
+                   case .array(let values) = seen {
+                    seenChangeFiles.formUnion(values.compactMap(\.stringValue))
+                }
+                seenChangeFiles.formUnion(entries.filter { !$0.hlc.isEmpty }.map { "\($0.hlc)-\($0.id).json" })
+                try await local.setMeta(
+                    key: "seenChangeFiles",
+                    value: AnyCodable.array(seenChangeFiles.sorted().map(AnyCodable.string))
+                )
             }
             emit(.flushComplete)
         } catch {
@@ -552,15 +562,10 @@ public actor Interocitor {
 
             let cursorRaw = try await local.getMeta(key: "cursor")
             let cursor = (cursorRaw as? AnyCodable)?.stringValue ?? ""
-
-            // Fast path: head unchanged
-            if let headData = try? await adapter.readFile(path: p.changesHead),
-               let head = try? decoder.decode(ChangesHead.self, from: headData),
-               !cursor.isEmpty,
-               hlcCompareStr(head.latestHlc, cursor) <= 0 {
-                try await acknowledgeManifest()
-                emit(.syncComplete(entriesMerged: 0))
-                return
+            var seenChangeFiles = Set<String>()
+            if let seen = try await local.getMeta(key: "seenChangeFiles") as? AnyCodable,
+               case .array(let values) = seen {
+                seenChangeFiles.formUnion(values.compactMap(\.stringValue))
             }
 
             guard let files = try? await adapter.listFiles(path: p.changesFolder) else {
@@ -578,17 +583,23 @@ public actor Interocitor {
             for file in sorted {
                 do {
                     guard let fileHlc = changeFileHlc(file.name) else { continue }
-                    if !cursor.isEmpty && hlcCompareStr(fileHlc, cursor) <= 0 { continue }
+                    if let floor = manifest?.gcFloorHlc, !floor.isEmpty,
+                       hlcCompareStr(fileHlc, floor) <= 0 { continue }
+                    if seenChangeFiles.contains(file.name) { continue }
 
                     let rawData = try await adapter.readFile(path: file.path)
                     let entry = try await decodeChangePayload(rawData, path: file.path)
-                    if !cursor.isEmpty && hlcCompareStr(entry.hlc, cursor) <= 0 { continue }
+                    if entry.hlc != fileHlc {
+                        throw InterocitorError.protocolCorruption(
+                            "change filename does not match payload HLC: \(file.path)"
+                        )
+                    }
 
                     let remoteHlc = hlcParse(entry.hlc)
                     hlc = hlcReceive(hlc, remoteHlc)
 
                     try await ensureRowsCached(ops: entry.ops)
-                    let affected = applyChangeEntry(
+                    let affected = try applyChangeEntry(
                         tables: &tables,
                         entry: entry,
                         schemaVersion: manifest?.schema ?? config.schema?.version ?? 1,
@@ -610,6 +621,7 @@ public actor Interocitor {
                     if latestMergedHlc.isEmpty || hlcCompareStr(entry.hlc, latestMergedHlc) > 0 {
                         latestMergedHlc = entry.hlc
                     }
+                    seenChangeFiles.insert(file.name)
                 } catch {
                     throw poisonRemote(error, path: file.path)
                 }
@@ -618,6 +630,15 @@ public actor Interocitor {
             if !latestMergedHlc.isEmpty && latestMergedHlc != cursor {
                 try await local.setMeta(key: "cursor", value: AnyCodable.string(latestMergedHlc))
             }
+            let retainedSeen = seenChangeFiles.filter { name in
+                guard let floor = manifest?.gcFloorHlc, !floor.isEmpty,
+                      let fileHlc = changeFileHlc(name) else { return true }
+                return hlcCompareStr(fileHlc, floor) > 0
+            }
+            try await local.setMeta(
+                key: "seenChangeFiles",
+                value: AnyCodable.array(retainedSeen.sorted().map(AnyCodable.string))
+            )
             try await local.setMeta(key: "hlc", value: AnyCodable.string(hlcSerialize(hlc)))
             try await acknowledgeManifest()
             emit(.syncComplete(entriesMerged: totalMerged))

@@ -23,7 +23,7 @@ _SCHEMA = {
     "tables": {
         "tasks": {
             # State transitions use LWW in this test; otherwise a configured
-            # schema intentionally defaults to core's remote-wins policy.
+            # A configured schema uses the same convergent LWW default as Core.
             "merge": "lww",
         },
     },
@@ -64,6 +64,47 @@ class _PausingSnapshotAdapter(MemoryAdapter):
 
 
 class EngineTests(unittest.TestCase):
+    def test_late_published_change_behind_global_head_is_not_lost(self) -> None:
+        async def scenario() -> None:
+            adapter = MemoryAdapter()
+            left = Interocitor(
+                adapter,
+                remote_path="/late-publish-mesh",
+                local_store=MemoryLocalStore(),
+                schema=_SCHEMA,
+                db_name="late-left",
+                device_id="dev_left",
+            )
+            right = Interocitor(
+                adapter,
+                remote_path="/late-publish-mesh",
+                local_store=MemoryLocalStore(),
+                schema=_SCHEMA,
+                db_name="late-right",
+                device_id="dev_right",
+            )
+
+            await left.connect()
+            await right.connect()
+            await left.put("tasks", "second", {"done": False})
+            await left.put("tasks", "third", {"done": False})
+            await left.flush()
+            await right.pull()
+
+            await right.put("tasks", "second", {"done": True})
+            await asyncio.sleep(0.002)
+            await left.put("tasks", "third", {"done": True})
+            await left.flush()
+            await right.pull()
+            await right.flush()
+            await left.pull()
+
+            self.assertEqual((await left.get("tasks", "second"))["done"], True)
+            self.assertEqual((await left.get("tasks", "third"))["done"], True)
+            self.assertEqual(await right.get("tasks", "second"), await left.get("tasks", "second"))
+
+        asyncio.run(scenario())
+
     def test_encrypted_rows_files_and_stateless_restart(self) -> None:
         async def scenario() -> None:
             adapter = MemoryAdapter()

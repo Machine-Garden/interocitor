@@ -21,6 +21,26 @@ import { decodeChangePayload } from './codec.ts';
 import type { CodecState } from './codec.ts';
 import { readJsonIfExists } from './manifest.ts';
 
+const SEEN_CHANGE_FILES_META_KEY = 'seenChangeFiles';
+const WRITER_FRONTIERS_META_KEY = 'writerFrontiers';
+
+export type SeenChangeFiles = Set<string>;
+export type WriterFrontiers = Record<string, string>;
+
+export function parseSeenChangeFiles(value: unknown): SeenChangeFiles | null {
+  if (!Array.isArray(value) || value.some(name => typeof name !== 'string')) return null;
+  return new Set(value);
+}
+
+export function parseWriterFrontiers(value: unknown): WriterFrontiers {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const frontiers: WriterFrontiers = {};
+  for (const [writerId, hlc] of Object.entries(value)) {
+    if (typeof hlc === 'string' && hlc) frontiers[writerId] = hlc;
+  }
+  return frontiers;
+}
+
 export interface PullContext {
   adapter: StorageAdapter;
   local: LocalStore;
@@ -52,9 +72,13 @@ function emitAffectedRows(
   }
 }
 
-function changeFileHlc(name: string): string | null {
+export function changeFileHlc(name: string): string | null {
   const marker = name.lastIndexOf('-chg_');
   return marker === -1 ? null : name.slice(0, marker);
+}
+
+export function changeFileIsUnseen(name: string, seenChangeFiles: SeenChangeFiles): boolean {
+  return changeFileHlc(name) !== null && !seenChangeFiles.has(name);
 }
 
 function compareChangeFiles(left: { name: string }, right: { name: string }): number {
@@ -63,7 +87,7 @@ function compareChangeFiles(left: { name: string }, right: { name: string }): nu
   if (leftHlc && rightHlc) {
     // Merge order is protocol data, not a display order. In particular,
     // ``localeCompare`` can place same-tick device IDs differently across
-    // runtimes and make a remote-wins merge converge to different values.
+    // runtimes and make any order-sensitive custom merge produce different values.
     // Keep malformed names on the normal per-file error path below.
     const compared = hlcCompareStr(leftHlc, rightHlc);
     if (Number.isFinite(compared) && compared !== 0) return compared;
@@ -87,10 +111,15 @@ export async function pull(ctx: PullContext): Promise<HLC> {
     await ctx.loadOrCreateManifest();
     const p = paths(remotePath);
 
-    const cursorRaw = await local.getMeta('cursor');
-    const cursor = typeof cursorRaw === 'string' ? cursorRaw : '';
+    const legacyGlobalHighWaterRaw = await local.getMeta('cursor');
+    const legacyGlobalHighWaterHlc =
+      typeof legacyGlobalHighWaterRaw === 'string' ? legacyGlobalHighWaterRaw : '';
 
-    // Fast path: if global head hasn't advanced past cursor, skip listing.
+    // head.json remains a cheap invalidation hint for adapters with push
+    // support, but it is not an authoritative pull cursor. HLCs are globally
+    // ordered while publication is not: a device may flush an older queued
+    // HLC after another device has advanced the global head. The folder list
+    // is therefore required for correctness.
     const head = await readJsonIfExists<ChangesHead>(adapter, p.changesHead);
     emit({
       type: 'trace:head',
@@ -99,20 +128,6 @@ export async function pull(ctx: PullContext): Promise<HLC> {
       path: p.changesHead,
       priorHlc: head?.latestHlc ?? null,
     });
-    if (head?.latestHlc && cursor && hlcCompareStr(head.latestHlc, cursor) <= 0) {
-      log('debug', 'pull() — head unchanged, skipping');
-      emit({
-        type: 'trace:head',
-        op: 'skip-no-change',
-        reason: 'pull-fast-path',
-        path: p.changesHead,
-        priorHlc: head.latestHlc,
-        nextHlc: cursor,
-      });
-      emit({ type: 'sync:complete', entriesMerged: 0 });
-      return hlc;
-    }
-
     // List the flat changes folder once.
     let files;
     try {
@@ -125,7 +140,16 @@ export async function pull(ctx: PullContext): Promise<HLC> {
     files.sort(compareChangeFiles);
 
     let totalMerged = 0;
-    let latestMergedHlc = cursor;
+    let latestMergedHlc = legacyGlobalHighWaterHlc;
+    const storedSeenChangeFiles = parseSeenChangeFiles(
+      await local.getMeta(SEEN_CHANGE_FILES_META_KEY),
+    );
+    // A scalar cursor from an older release cannot prove which concrete files
+    // were observed. Start empty once after upgrade and safely replay retained
+    // change files; CRDT application is idempotent.
+    const seenChangeFiles: SeenChangeFiles = storedSeenChangeFiles ?? new Set();
+    const hasExactObservationHistory = storedSeenChangeFiles !== null;
+    const writerFrontiers = parseWriterFrontiers(await local.getMeta(WRITER_FRONTIERS_META_KEY));
 
     for (const file of files) {
       if (file.name === 'head.json') continue;
@@ -134,11 +158,14 @@ export async function pull(ctx: PullContext): Promise<HLC> {
         const chgIdx = file.name.lastIndexOf('-chg_');
         if (chgIdx === -1) continue;
         const fileHlc = file.name.slice(0, chgIdx);
-        if (cursor && hlcCompareStr(fileHlc, cursor) <= 0) continue;
+        const gcFloorHlc = codecState.manifest?.gcFloorHlc ?? '';
+        if (gcFloorHlc && hlcCompareStr(fileHlc, gcFloorHlc) <= 0) continue;
+        const writerId = hlcParse(fileHlc).nodeId;
+        const writerFrontierHlc = writerFrontiers[writerId];
+        if (seenChangeFiles.has(file.name)) continue;
 
         const raw = textDecoder.decode(await adapter.readFile(file.path));
         const entry = await decodeChangePayload(codecState, local, raw, file.path);
-        if (cursor && hlcCompareStr(entry.hlc, cursor) <= 0) continue;
 
         const remoteHlc = hlcParse(entry.hlc);
         hlc = hlcReceive(hlc, remoteHlc);
@@ -154,15 +181,49 @@ export async function pull(ctx: PullContext): Promise<HLC> {
         if (!latestMergedHlc || hlcCompareStr(entry.hlc, latestMergedHlc) > 0) {
           latestMergedHlc = entry.hlc;
         }
+        const behindWriterFrontier = writerFrontierHlc
+          ? hlcCompareStr(fileHlc, writerFrontierHlc) <= 0
+          : false;
+        const behindLegacyGlobalHighWater = legacyGlobalHighWaterHlc
+          ? hlcCompareStr(fileHlc, legacyGlobalHighWaterHlc) <= 0
+          : false;
+        if (hasExactObservationHistory && (behindWriterFrontier || behindLegacyGlobalHighWater)) {
+          emit({
+            type: 'sync:late-change',
+            writerId,
+            changeHlc: fileHlc,
+            fileName: file.name,
+            relation: behindWriterFrontier ? 'behind-writer-frontier' : 'behind-global-high-water',
+            writerFrontierHlc,
+            legacyGlobalHighWaterHlc: legacyGlobalHighWaterHlc || undefined,
+          });
+        }
+        if (!writerFrontierHlc || hlcCompareStr(fileHlc, writerFrontierHlc) > 0) {
+          writerFrontiers[writerId] = fileHlc;
+        }
+        seenChangeFiles.add(file.name);
       } catch (err) {
         emit({ type: 'decode:error', error: err instanceof Error ? err : new Error(String(err)), path: file.path, context: { stage: 'pull', name: file.name } });
         throw await ctx.poisonRemote(err, file.path);
       }
     }
 
-    if (latestMergedHlc && latestMergedHlc !== cursor) {
+    if (latestMergedHlc && latestMergedHlc !== legacyGlobalHighWaterHlc) {
       await local.setMeta('cursor', latestMergedHlc);
     }
+    // A listing is explicitly allowed to be non-monotonic, so absence from
+    // this response cannot retire proof that a file was already observed.
+    // Only the manifest GC floor is an authoritative retirement boundary.
+    const observationGcFloorHlc = codecState.manifest?.gcFloorHlc ?? '';
+    const retainedSeenChangeFiles = [...seenChangeFiles]
+      .filter(name => {
+        if (!observationGcFloorHlc) return true;
+        const fileHlc = changeFileHlc(name);
+        return fileHlc === null || hlcCompareStr(fileHlc, observationGcFloorHlc) > 0;
+      })
+      .sort();
+    await local.setMeta(SEEN_CHANGE_FILES_META_KEY, retainedSeenChangeFiles);
+    await local.setMeta(WRITER_FRONTIERS_META_KEY, writerFrontiers);
 
     await local.setMeta('hlc', hlcSerialize(hlc));
     log('debug', 'pull() — complete', { totalMerged });

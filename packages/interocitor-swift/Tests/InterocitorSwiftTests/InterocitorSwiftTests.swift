@@ -78,13 +78,13 @@ final class HLCTests: XCTestCase {
 
 final class CRDTTests: XCTestCase {
 
-    func testApplyUpsertOp_basic() {
+    func testApplyUpsertOp_basic() throws {
         var tables: [String: [String: Row]] = [:]
         let hlcStr = hlcSerialize(HLC(ts: 1000, counter: 0, nodeId: "dev_a"))
         let op = UpsertOp(table: "tasks", rowId: "t1", columns: [
             "title": ColumnEntry(value: .string("Hello"), hlc: hlcStr)
         ])
-        let row = applyOp(tables: &tables, op: .upsert(op), schemaVersion: 1)
+        let row = try applyOp(tables: &tables, op: .upsert(op), schemaVersion: 1)
         XCTAssertNotNil(row)
         XCTAssertEqual(row?._table, "tasks")
         XCTAssertEqual(row?._rowId, "t1")
@@ -92,7 +92,7 @@ final class CRDTTests: XCTestCase {
         XCTAssertEqual(row?.columns["title"]?.value, .string("Hello"))
     }
 
-    func testApplyUpsertOp_lwwWins() {
+    func testApplyUpsertOp_lwwWins() throws {
         var tables: [String: [String: Row]] = [:]
         let hlc1 = hlcSerialize(HLC(ts: 1000, counter: 0, nodeId: "dev_a"))
         let hlc2 = hlcSerialize(HLC(ts: 2000, counter: 0, nodeId: "dev_b"))
@@ -103,12 +103,12 @@ final class CRDTTests: XCTestCase {
         let op2 = UpsertOp(table: "tasks", rowId: "t1", columns: [
             "title": ColumnEntry(value: .string("New"), hlc: hlc2)
         ])
-        applyOp(tables: &tables, op: .upsert(op1), schemaVersion: 1)
-        let row = applyOp(tables: &tables, op: .upsert(op2), schemaVersion: 1)
+        try applyOp(tables: &tables, op: .upsert(op1), schemaVersion: 1)
+        let row = try applyOp(tables: &tables, op: .upsert(op2), schemaVersion: 1)
         XCTAssertEqual(row?.columns["title"]?.value, .string("New"))
     }
 
-    func testApplyUpsertOp_olderWriteIgnored() {
+    func testApplyUpsertOp_olderWriteIgnored() throws {
         var tables: [String: [String: Row]] = [:]
         let hlc2 = hlcSerialize(HLC(ts: 2000, counter: 0, nodeId: "dev_b"))
         let hlc1 = hlcSerialize(HLC(ts: 1000, counter: 0, nodeId: "dev_a"))
@@ -119,14 +119,34 @@ final class CRDTTests: XCTestCase {
         let op1 = UpsertOp(table: "tasks", rowId: "t1", columns: [
             "title": ColumnEntry(value: .string("Old"), hlc: hlc1)
         ])
-        applyOp(tables: &tables, op: .upsert(op2), schemaVersion: 1)
-        let result = applyOp(tables: &tables, op: .upsert(op1), schemaVersion: 1)
+        try applyOp(tables: &tables, op: .upsert(op2), schemaVersion: 1)
+        let result = try applyOp(tables: &tables, op: .upsert(op1), schemaVersion: 1)
         // No change — returns nil
         XCTAssertNil(result)
         XCTAssertEqual(tables["tasks"]?["t1"]?.columns["title"]?.value, .string("New"))
     }
 
-    func testApplyDeleteOp() {
+    func testEqualHLCWithDifferentValueIsProtocolCorruption() throws {
+        var tables: [String: [String: Row]] = [:]
+        let sharedHlc = hlcSerialize(HLC(ts: 1000, counter: 0, nodeId: "dev_a"))
+        let first = UpsertOp(table: "tasks", rowId: "t1", columns: [
+            "title": ColumnEntry(value: .string("first"), hlc: sharedHlc)
+        ])
+        let conflicting = UpsertOp(table: "tasks", rowId: "t1", columns: [
+            "title": ColumnEntry(value: .string("different"), hlc: sharedHlc)
+        ])
+
+        try applyOp(tables: &tables, op: .upsert(first), schemaVersion: 1)
+        XCTAssertThrowsError(
+            try applyOp(tables: &tables, op: .upsert(conflicting), schemaVersion: 1)
+        ) { error in
+            guard case InterocitorError.protocolCorruption = error else {
+                return XCTFail("Expected protocol corruption, got \(error)")
+            }
+        }
+    }
+
+    func testApplyDeleteOp() throws {
         var tables: [String: [String: Row]] = [:]
         let hlc1 = hlcSerialize(HLC(ts: 1000, counter: 0, nodeId: "dev_a"))
         let hlc2 = hlcSerialize(HLC(ts: 2000, counter: 0, nodeId: "dev_a"))
@@ -134,46 +154,46 @@ final class CRDTTests: XCTestCase {
         let upsert = UpsertOp(table: "tasks", rowId: "t1", columns: [
             "title": ColumnEntry(value: .string("Hello"), hlc: hlc1)
         ])
-        applyOp(tables: &tables, op: .upsert(upsert), schemaVersion: 1)
+        try applyOp(tables: &tables, op: .upsert(upsert), schemaVersion: 1)
 
         let del = DeleteOp(table: "tasks", rowId: "t1", hlc: hlc2)
-        let row = applyOp(tables: &tables, op: .delete(del), schemaVersion: 1)
+        let row = try applyOp(tables: &tables, op: .delete(del), schemaVersion: 1)
         XCTAssertTrue(row?._deleted ?? false)
     }
 
-    func testUpsertAfterDeleteRevivesRow() {
+    func testUpsertAfterDeleteRevivesRow() throws {
         var tables: [String: [String: Row]] = [:]
         let hlc1 = hlcSerialize(HLC(ts: 1000, counter: 0, nodeId: "dev_a"))
         let hlc2 = hlcSerialize(HLC(ts: 2000, counter: 0, nodeId: "dev_a"))
         let hlc3 = hlcSerialize(HLC(ts: 3000, counter: 0, nodeId: "dev_a"))
 
-        applyOp(tables: &tables, op: .upsert(UpsertOp(table: "t", rowId: "r1", columns: ["x": ColumnEntry(value: .int(1), hlc: hlc1)])), schemaVersion: 1)
-        applyOp(tables: &tables, op: .delete(DeleteOp(table: "t", rowId: "r1", hlc: hlc2)), schemaVersion: 1)
-        let row = applyOp(tables: &tables, op: .upsert(UpsertOp(table: "t", rowId: "r1", columns: ["x": ColumnEntry(value: .int(2), hlc: hlc3)])), schemaVersion: 1)
+        try applyOp(tables: &tables, op: .upsert(UpsertOp(table: "t", rowId: "r1", columns: ["x": ColumnEntry(value: .int(1), hlc: hlc1)])), schemaVersion: 1)
+        try applyOp(tables: &tables, op: .delete(DeleteOp(table: "t", rowId: "r1", hlc: hlc2)), schemaVersion: 1)
+        let row = try applyOp(tables: &tables, op: .upsert(UpsertOp(table: "t", rowId: "r1", columns: ["x": ColumnEntry(value: .int(2), hlc: hlc3)])), schemaVersion: 1)
         XCTAssertFalse(row?._deleted ?? true)
         XCTAssertEqual(row?.columns["x"]?.value, .int(2))
     }
 
-    func testResurrectionDropsFieldsAtOrBeforeTombstone() {
+    func testResurrectionDropsFieldsAtOrBeforeTombstone() throws {
         var tables: [String: [String: Row]] = [:]
         let beforeDelete = hlcSerialize(HLC(ts: 1_000, counter: 0, nodeId: "dev_a"))
         let deleteHlc = hlcSerialize(HLC(ts: 2_000, counter: 0, nodeId: "dev_a"))
         let afterDelete = hlcSerialize(HLC(ts: 3_000, counter: 0, nodeId: "dev_b"))
 
-        applyOp(
+        try applyOp(
             tables: &tables,
             op: .upsert(UpsertOp(table: "tasks", rowId: "t1", columns: [
                 "stale": ColumnEntry(value: .string("old"), hlc: beforeDelete)
             ])),
             schemaVersion: 1
         )
-        applyOp(
+        try applyOp(
             tables: &tables,
             op: .delete(DeleteOp(table: "tasks", rowId: "t1", hlc: deleteHlc)),
             schemaVersion: 1
         )
 
-        let row = applyOp(
+        let row = try applyOp(
             tables: &tables,
             op: .upsert(UpsertOp(table: "tasks", rowId: "t1", columns: [
                 "stale": ColumnEntry(value: .string("must not return"), hlc: beforeDelete),
@@ -187,13 +207,13 @@ final class CRDTTests: XCTestCase {
         XCTAssertEqual(row?.columns["fresh"]?.value, .string("new"))
     }
 
-    func testConfiguredSchemaDefaultsToRemoteWins() {
+    func testConfiguredSchemaDefaultsToLWW() throws {
         var tables: [String: [String: Row]] = [:]
         let newer = hlcSerialize(HLC(ts: 2_000, counter: 0, nodeId: "dev_a"))
         let older = hlcSerialize(HLC(ts: 1_000, counter: 0, nodeId: "dev_b"))
         let schema = DatabaseSchema(version: 1, tables: ["tasks": TableSchema()])
 
-        applyOp(
+        try applyOp(
             tables: &tables,
             op: .upsert(UpsertOp(table: "tasks", rowId: "t1", columns: [
                 "status": ColumnEntry(value: .string("local"), hlc: newer)
@@ -201,7 +221,7 @@ final class CRDTTests: XCTestCase {
             schemaVersion: 1,
             schema: schema
         )
-        let row = applyOp(
+        let row = try applyOp(
             tables: &tables,
             op: .upsert(UpsertOp(table: "tasks", rowId: "t1", columns: [
                 "status": ColumnEntry(value: .string("remote"), hlc: older)
@@ -210,10 +230,11 @@ final class CRDTTests: XCTestCase {
             schema: schema
         )
 
-        XCTAssertEqual(row?.columns["status"]?.value, .string("remote"))
+        XCTAssertNil(row)
+        XCTAssertEqual(tables["tasks"]?["t1"]?.columns["status"]?.value, .string("local"))
     }
 
-    func testFieldMergeStrategyOverridesTableStrategy() {
+    func testFieldMergeStrategyOverridesTableStrategy() throws {
         var tables: [String: [String: Row]] = [:]
         let newer = hlcSerialize(HLC(ts: 2_000, counter: 0, nodeId: "dev_a"))
         let older = hlcSerialize(HLC(ts: 1_000, counter: 0, nodeId: "dev_b"))
@@ -221,14 +242,14 @@ final class CRDTTests: XCTestCase {
             version: 1,
             tables: [
                 "tasks": TableSchema(merge: TableMergeConfig(
-                    strategy: .localWins,
+                    strategy: .lww,
                     fields: ["title": .lww]
                 ))
             ],
-            mergeStrategy: .remoteWins
+            mergeStrategy: .lww
         )
 
-        applyOp(
+        try applyOp(
             tables: &tables,
             op: .upsert(UpsertOp(table: "tasks", rowId: "t1", columns: [
                 "title": ColumnEntry(value: .string("new title"), hlc: newer),
@@ -237,7 +258,7 @@ final class CRDTTests: XCTestCase {
             schemaVersion: 1,
             schema: schema
         )
-        let row = applyOp(
+        let row = try applyOp(
             tables: &tables,
             op: .upsert(UpsertOp(table: "tasks", rowId: "t1", columns: [
                 "title": ColumnEntry(value: .string("old title"), hlc: older),
@@ -388,6 +409,54 @@ final class SyncEngineMemoryTests: XCTestCase {
         XCTAssertEqual(row?.columns["title"]?.value, .string("Hello"))
     }
 
+    func testLatePublishedChangeBehindGlobalHeadIsNotLost() async throws {
+        let shared = MemoryStorageAdapter()
+        let left = Interocitor(
+            adapter: shared,
+            config: SyncConfig(
+                remotePath: "/LatePublish",
+                pollInterval: 9_999,
+                flushDebounce: 9_999,
+                dbName: "late-publish-left"
+            ),
+            localStore: MemoryLocalStore()
+        )
+        let right = Interocitor(
+            adapter: shared,
+            config: SyncConfig(
+                remotePath: "/LatePublish",
+                pollInterval: 9_999,
+                flushDebounce: 9_999,
+                dbName: "late-publish-right"
+            ),
+            localStore: MemoryLocalStore()
+        )
+
+        try await left.initialize()
+        try await right.initialize()
+        try await left.connect()
+        try await right.connect()
+        try await left.put(table: "tasks", rowId: "second", columns: ["done": .bool(false)])
+        try await left.put(table: "tasks", rowId: "third", columns: ["done": .bool(false)])
+        try await left.flush()
+        try await right.pull()
+
+        try await right.put(table: "tasks", rowId: "second", columns: ["done": .bool(true)])
+        try await Task.sleep(nanoseconds: 2_000_000)
+        try await left.put(table: "tasks", rowId: "third", columns: ["done": .bool(true)])
+        try await left.flush()
+        try await right.pull()
+        try await right.flush()
+        try await left.pull()
+
+        let leftSecond = try await left.get(table: "tasks", rowId: "second")
+        let leftThird = try await left.get(table: "tasks", rowId: "third")
+        let rightSecond = try await right.get(table: "tasks", rowId: "second")
+        XCTAssertEqual(leftSecond?.columns["done"]?.value, .bool(true))
+        XCTAssertEqual(leftThird?.columns["done"]?.value, .bool(true))
+        XCTAssertEqual(rightSecond?.columns["done"]?.value, leftSecond?.columns["done"]?.value)
+    }
+
     func testLocalWriteBeforeConnect() async throws {
         let (a, _, _) = makePair()
         try await a.initialize()
@@ -483,10 +552,10 @@ final class SyncEngineMemoryTests: XCTestCase {
         }
     }
 
-    func testLocalPutOverridesConfiguredLocalWinsPolicy() async throws {
+    func testLocalPutAdvancesConfiguredLWWPolicy() async throws {
         let schema = DatabaseSchema(
             version: 1,
-            tables: ["tasks": TableSchema(merge: TableMergeConfig(strategy: .localWins))]
+            tables: ["tasks": TableSchema(merge: TableMergeConfig(strategy: .lww))]
         )
         let db = Interocitor(
             adapter: MemoryStorageAdapter(),

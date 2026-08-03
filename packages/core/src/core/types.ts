@@ -1046,6 +1046,16 @@ export type SyncEvent =
       deviceId: string;
     }
   | {
+      type: 'compact:snapshot-cleanup';
+      activeSnapshotPath: string;
+      attempted: number;
+      deleted: number;
+      failedPaths: string[];
+      error?: Error;
+      remotePath?: string;
+      deviceId: string;
+    }
+  | {
       type: 'offline:retention-expired';
       expiredAt: string;
       lastSuccessfulSyncAt: string;

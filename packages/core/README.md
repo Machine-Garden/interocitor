@@ -877,10 +877,13 @@ manifest and poison the remote.
 
 ## Maintenance / compaction
 
-Compaction publishes a snapshot, bumps the manifest, and removes the exact
-change files represented in that snapshot. Tombstones remain in the snapshot.
-Server-managed mode publishes canonical checkpoints and enables automatic
-compaction.
+Compaction publishes a snapshot, bumps the manifest, removes the exact change
+files represented in that snapshot, and removes superseded snapshots. In
+normal operation `mainline/` contains exactly the one snapshot named by the
+current manifest; failed storage deletion can temporarily leave redundant
+files, which later retention checks and compactions retry. Tombstones remain
+in the snapshot. Server-managed mode publishes canonical checkpoints and
+enables automatic compaction.
 
 In server-managed mode, two paths run automatically. Peer mode supports manual
 compaction but does not schedule it automatically:

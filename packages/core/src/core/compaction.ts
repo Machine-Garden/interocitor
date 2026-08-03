@@ -35,6 +35,67 @@ export interface CompactContext {
   pull: () => Promise<void>;
 }
 
+export interface SnapshotCleanupResult {
+  attempted: number;
+  deleted: number;
+  failedPaths: string[];
+  error?: Error;
+}
+
+/**
+ * Keep exactly the snapshot named by the authoritative manifest.
+ *
+ * This must run only after manifest-pointer publication and under the same
+ * externally serialized compaction ownership. Readers that raced the pointer
+ * refresh the manifest and retry when their superseded path disappears.
+ */
+export async function pruneSupersededSnapshots(
+  adapter: StorageAdapter,
+  remotePath: string,
+  activeSnapshotPath: string,
+  emit: (event: SyncEvent) => void,
+  deviceId: string,
+): Promise<SnapshotCleanupResult> {
+  const p = paths(remotePath);
+  const activeSnapshotName = activeSnapshotPath.slice(activeSnapshotPath.lastIndexOf('/') + 1);
+  let candidates: string[];
+  try {
+    const files = await adapter.listFiles(p.mainlineFolder);
+    candidates = files
+      .filter((file) => /^snapshot-\d+-.+\.json$/.test(file.name) && file.name !== activeSnapshotName)
+      .map((file) => file.path);
+  } catch (cause) {
+    const error = cause instanceof Error ? cause : new Error(String(cause));
+    const result: SnapshotCleanupResult = { attempted: 0, deleted: 0, failedPaths: [], error };
+    emit({
+      type: 'compact:snapshot-cleanup',
+      activeSnapshotPath,
+      ...result,
+      remotePath,
+      deviceId,
+    });
+    return result;
+  }
+
+  const settled = await Promise.allSettled(candidates.map((path) => adapter.deleteFile(path)));
+  const failedPaths = candidates.filter((_, index) => settled[index]?.status === 'rejected');
+  const result: SnapshotCleanupResult = {
+    attempted: candidates.length,
+    deleted: candidates.length - failedPaths.length,
+    failedPaths,
+  };
+  if (candidates.length > 0) {
+    emit({
+      type: 'compact:snapshot-cleanup',
+      activeSnapshotPath,
+      ...result,
+      remotePath,
+      deviceId,
+    });
+  }
+  return result;
+}
+
 export async function compact(ctx: CompactContext): Promise<Manifest> {
   const { adapter, local, remotePath, manifest, codecState, deviceId, serverId } = ctx;
 
@@ -111,6 +172,7 @@ export async function compact(ctx: CompactContext): Promise<Manifest> {
   // Delete only the exact files represented by this snapshot; a change that
   // appeared after capture remains available for the catch-up pull.
   await Promise.allSettled(coveredChangeFiles.map((fileName) => adapter.deleteFile(`${p.changesFolder}/${fileName}`)));
+  await pruneSupersededSnapshots(adapter, remotePath, snapshotPath, ctx.emit, deviceId);
   return nextManifest;
 }
 
@@ -126,6 +188,8 @@ export interface RehydrateContext {
   emit: (event: SyncEvent) => void;
   poisonRemote: (error: unknown, path?: string) => Promise<Error>;
   pull: () => Promise<void>;
+  /** Force-refresh the manifest after a stale snapshot path disappears. */
+  reloadManifest: () => Promise<Manifest | null>;
   /** Local-only records that snapshot replacement must not erase. */
   preservedMeta?: Readonly<Record<string, unknown>>;
 }
@@ -136,16 +200,16 @@ export async function rehydrate(ctx: RehydrateContext): Promise<HLC> {
 
   ctx.emit({ type: 'rehydrate:start' });
 
-  const snapshotPath = ctx.manifest?.snapshotPath;
+  let snapshotPath = ctx.manifest?.snapshotPath;
   if (!snapshotPath) {
     ctx.emit({ type: 'rehydrate:complete', rowCount: 0 });
     await ctx.pull();
     return hlc;
   }
 
-  try {
-    const data = await ctx.adapter.readFile(snapshotPath);
-    const snapshot = await decodeSnapshotPayload(ctx.codecState, ctx.local, textDecoder.decode(data), snapshotPath);
+  const restore = async (path: string): Promise<number> => {
+    const data = await ctx.adapter.readFile(path);
+    const snapshot = await decodeSnapshotPayload(ctx.codecState, ctx.local, textDecoder.decode(data), path);
 
     let rowCount = 0;
     await ChangeObservationLedger.restoreSnapshot(ctx.local, snapshot.hlc, snapshot.coveredChangeFiles ?? [], async () => {
@@ -172,6 +236,20 @@ export async function rehydrate(ctx: RehydrateContext): Promise<HLC> {
     }
 
     await ctx.local.setMeta('epoch', snapshot.epoch);
+    return rowCount;
+  };
+
+  try {
+    let rowCount: number;
+    try {
+      rowCount = await restore(snapshotPath);
+    } catch (firstError) {
+      const refreshed = await ctx.reloadManifest();
+      const refreshedPath = refreshed?.snapshotPath;
+      if (!refreshedPath || refreshedPath === snapshotPath) throw firstError;
+      snapshotPath = refreshedPath;
+      rowCount = await restore(snapshotPath);
+    }
     ctx.emit({ type: 'rehydrate:complete', rowCount });
   } catch (err) {
     ctx.emit({

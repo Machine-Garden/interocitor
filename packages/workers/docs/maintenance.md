@@ -15,9 +15,11 @@ run compaction; the safe default is seven days. The separate Worker path TTL
 removes an entire inactive mesh and must therefore be longer than the mesh's
 supported offline lifetime and backup policy.
 
-Change files deliberately bypass Cloudflare's per-colo Cache API. Snapshot
-files remain cacheable, but every change read consults D1 so an exact
-post-compaction deletion is authoritative in every colo.
+Change files, mainline snapshots, and the listings of their two folders
+deliberately bypass Cloudflare's per-colo Cache API. Every read of those
+deletable payloads and lifecycle listings consults D1, so post-compaction
+deletion is authoritative in every colo. Immutable manifest generation files
+remain cacheable.
 
 The snippets are partial deployment fragments. Supply the host Worker,
 bindings, application policy, and Wrangler database identifiers. Use the

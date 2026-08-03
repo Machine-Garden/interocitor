@@ -2182,6 +2182,105 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result.hasSnapshot).toBe(true);
   });
 
+  test('repeated compaction keeps one authoritative snapshot and stale readers retry it', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, MemoryLocalStore, readColumn } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      const adapter = new MemoryAdapter();
+      const remotePath = '/SnapshotLifecycleMesh';
+      const compactor = new Interocitor(adapter, {
+        remotePath,
+        localStore: new MemoryLocalStore(),
+        keySource: null,
+        deviceId: 'dev_snapshot_lifecycle_compactor',
+        batchWindowMs: 0,
+      });
+      const staleReader = new Interocitor(adapter, {
+        remotePath,
+        localStore: new MemoryLocalStore(),
+        keySource: null,
+        deviceId: 'dev_snapshot_lifecycle_reader',
+        batchWindowMs: 0,
+      });
+
+      await compactor.connect();
+      await compactor.put('notes', 'n1', { text: 'snapshot one' });
+      await compactor.flush();
+      await compactor.compact();
+      await staleReader.connect();
+      const staleSnapshotPath = staleReader.getManifest()?.snapshotPath;
+
+      await compactor.put('notes', 'n2', { text: 'snapshot two' });
+      await compactor.flush();
+      await compactor.compact();
+      const afterSecond = Object.keys(adapter.dump()).filter((path) => path.includes('/mainline/snapshot-'));
+      const stalePathWasDeleted = staleSnapshotPath ? !Object.hasOwn(adapter.dump(), staleSnapshotPath) : false;
+
+      await staleReader.rehydrate();
+      const restored = await staleReader.loadRow({ table: 'notes', rowId: 'n2' });
+
+      await compactor.compact();
+      const afterThird = Object.keys(adapter.dump()).filter((path) => path.includes('/mainline/snapshot-'));
+      const activeSnapshotPath = compactor.getManifest()?.snapshotPath;
+      await staleReader.disconnect();
+      await compactor.disconnect();
+
+      return {
+        afterSecond,
+        afterThird,
+        activeSnapshotPath,
+        stalePathWasDeleted,
+        restoredText: restored ? readColumn(restored, 'text') : null,
+      };
+    });
+
+    expect(result.afterSecond).toHaveLength(1);
+    expect(result.afterThird).toEqual([result.activeSnapshotPath]);
+    expect(result.stalePathWasDeleted).toBe(true);
+    expect(result.restoredText).toBe('snapshot two');
+  });
+
+  test('a later compaction retries transient superseded-snapshot deletion failure', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, MemoryLocalStore } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      class OnceFailingSnapshotDeleteAdapter extends MemoryAdapter {
+        failed = false;
+
+        override async deleteFile(path: string): Promise<void> {
+          if (!this.failed && path.includes('/mainline/snapshot-')) {
+            this.failed = true;
+            throw new Error('simulated transient snapshot delete failure');
+          }
+          return super.deleteFile(path);
+        }
+      }
+
+      const adapter = new OnceFailingSnapshotDeleteAdapter();
+      const engine = new Interocitor(adapter, {
+        remotePath: '/SnapshotCleanupRetryMesh',
+        localStore: new MemoryLocalStore(),
+        keySource: null,
+        deviceId: 'dev_snapshot_cleanup_retry',
+        batchWindowMs: 0,
+      });
+      await engine.connect();
+      await engine.compact();
+      await engine.compact();
+      const afterFailure = Object.keys(adapter.dump()).filter((path) => path.includes('/mainline/snapshot-')).length;
+      await engine.compact();
+      const remaining = Object.keys(adapter.dump()).filter((path) => path.includes('/mainline/snapshot-'));
+      const activeSnapshotPath = engine.getManifest()?.snapshotPath;
+      await engine.disconnect();
+      return { afterFailure, remaining, activeSnapshotPath };
+    });
+
+    expect(result.afterFailure).toBe(2);
+    expect(result.remaining).toEqual([result.activeSnapshotPath]);
+  });
+
   test('non-authorized client compaction is rejected in server-managed mode', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { Interocitor } = await import('/packages/core/dist/index.js');

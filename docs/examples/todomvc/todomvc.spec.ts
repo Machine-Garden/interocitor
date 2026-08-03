@@ -236,6 +236,30 @@ test("live todos survive after covered changes are merged into mainline and remo
     .toEqual(expectedTodos);
 });
 
+test("repeated compaction keeps only the current mainline snapshot", async ({ page }) => {
+  await page.goto("/docs/examples/todomvc/index.html");
+  await page.waitForFunction(() => window.__todoMvcDemo?.ready());
+  await addTodo(page, "bounded");
+
+  const compactButton = page.getByRole("button", { name: "Compact" });
+  for (const epoch of [1, 2, 3]) {
+    await compactButton.click();
+    await expect
+      .poll(async () => {
+        const paths = Object.keys(await page.evaluate(() => window.__todoMvcDemo.getFilesystem()));
+        return paths.filter((path) => path.includes("/mainline/snapshot-"));
+      })
+      .toEqual([`/TodoMVC/mainline/snapshot-${epoch}-server_relay_1.json`]);
+  }
+
+  await expect(page.getByRole("status")).toContainText(
+    "1 current snapshot · 0 uncovered change files remain",
+  );
+  await expect
+    .poll(async () => (await todos(page, "client-2")).map((todo) => todo.title))
+    .toEqual(["bounded"]);
+});
+
 declare global {
   interface Window {
     __todoMvcDemo: {

@@ -627,15 +627,15 @@ public actor Interocitor {
         let adapter = try requireAdapter("rehydrate()")
         emit(.rehydrateStart)
 
-        guard let snapshotPath = manifest?.snapshotPath else {
+        guard var snapshotPath = manifest?.snapshotPath else {
             emit(.rehydrateComplete(rowCount: 0))
             try await pull()
             return
         }
 
-        do {
-            let rawData = try await adapter.readFile(path: snapshotPath)
-            let snapshot = try await decodeSnapshotPayload(rawData, path: snapshotPath)
+        func restore(_ path: String) async throws -> Int {
+            let rawData = try await adapter.readFile(path: path)
+            let snapshot = try await decodeSnapshotPayload(rawData, path: path)
 
             try await local.clearRows()
             try await local.setMeta(key: "cursor", value: AnyCodable.string(""))
@@ -662,6 +662,21 @@ public actor Interocitor {
             }
 
             try await local.setMeta(key: "epoch", value: AnyCodable.int(snapshot.epoch))
+            return rowCount
+        }
+
+        do {
+            let rowCount: Int
+            do {
+                rowCount = try await restore(snapshotPath)
+            } catch let firstError {
+                try await loadOrCreateManifest()
+                guard let refreshedPath = manifest?.snapshotPath, refreshedPath != snapshotPath else {
+                    throw firstError
+                }
+                snapshotPath = refreshedPath
+                rowCount = try await restore(snapshotPath)
+            }
             emit(.rehydrateComplete(rowCount: rowCount))
         } catch {
             let poisoned = poisonRemote(error, path: snapshotPath)
@@ -674,7 +689,7 @@ public actor Interocitor {
 
     // MARK: - Compaction
 
-    /// Publish a snapshot and manifest generation, then remove exactly covered changes.
+    /// Publish a snapshot, then remove covered changes and superseded snapshots.
     /// The application must serialize compaction across engine instances.
     public func compact() async throws {
         let adapter = try requireAdapter("compact()")
@@ -753,6 +768,16 @@ public actor Interocitor {
         try await local.setMeta(key: "epoch", value: AnyCodable.int(nextEpoch))
         for fileName in coveredChangeFiles {
             try? await adapter.deleteFile(path: "\(p.changesFolder)/\(fileName)")
+        }
+        let activeSnapshotName = (snapshotPath as NSString).lastPathComponent
+        if let snapshots = try? await adapter.listFiles(path: p.mainlineFolder) {
+            for entry in snapshots where
+                entry.name != activeSnapshotName
+                && entry.name.hasPrefix("snapshot-")
+                && entry.name.hasSuffix(".json")
+            {
+                try? await adapter.deleteFile(path: entry.path)
+            }
         }
         try await acknowledgeManifest()
 

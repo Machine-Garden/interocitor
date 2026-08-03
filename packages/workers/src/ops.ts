@@ -79,10 +79,10 @@ function decodeJsonBuffer(value: ArrayBuffer | Uint8Array | string | null | unde
 }
 
 function isCacheableImmutablePathType(pathType: PathType): boolean {
-  // Change files are immutable but deletable after exact snapshot coverage.
-  // Cache API entries are per-colo, so they cannot be globally invalidated;
-  // always read changes from D1 to make compaction deletion authoritative.
-  return pathType === 'manifest-snapshot' || pathType === 'mainline-snapshot';
+  // Change files and mainline snapshots are immutable but deletable after
+  // compaction advances the authoritative manifest. Cache API entries are
+  // per-colo and cannot be globally invalidated, so both must always read D1.
+  return pathType === 'manifest-snapshot';
 }
 
 async function cacheGet(prefix: string, path: string): Promise<CacheEntry | null> {
@@ -130,6 +130,10 @@ async function cacheDelete(prefix: string, path: string): Promise<void> {
 // still absorbs poll bursts within a single colo (DDoS protection) without
 // stale reads becoming a problem.
 const LISTING_CACHE_TTL_SECONDS = 60;
+
+function isAuthoritativeCompactionListing(path: string): boolean {
+  return /\/(?:changes|mainline)$/.test(path);
+}
 
 async function listingCacheGet(prefix: string, path: string): Promise<ListChildrenResult | null> {
   const cache = getDefaultCache();
@@ -532,11 +536,16 @@ export interface ListChildrenResult {
 
 export async function opListChildren(db: D1Database, prefix: string, path: string): Promise<ListChildrenResult> {
   const normalized = normalizePath(path);
+  const cacheableListing = !isAuthoritativeCompactionListing(normalized);
 
   // Cache hit: skip D1 entirely. Cache is invalidated by every op that
   // mutates files/folders under this folder (see listingCacheDelete callers).
-  const cached = await listingCacheGet(prefix, normalized);
-  if (cached) return cached;
+  // Deletable compaction folders always consult D1 because per-colo listing
+  // invalidation cannot make their lifecycle authoritative globally.
+  if (cacheableListing) {
+    const cached = await listingCacheGet(prefix, normalized);
+    if (cached) return cached;
+  }
 
   const pattern = normalized === '/' ? '/%' : `${normalized}/%`;
   const slashCount = normalized === '/' ? 1 : normalized.split('/').filter(Boolean).length + 1;
@@ -580,7 +589,7 @@ export async function opListChildren(db: D1Database, prefix: string, path: strin
     .filter(Boolean);
 
   const result: ListChildrenResult = { files, folders };
-  await listingCachePut(prefix, normalized, result);
+  if (cacheableListing) await listingCachePut(prefix, normalized, result);
   return result;
 }
 
@@ -668,8 +677,8 @@ export async function opDeletePath(db: D1Database, prefix: string, path: string,
   await Promise.allSettled(deletedFiles.map((file) => cacheDelete(prefix, String(file.path))));
 
   // Invalidate the parent folder listing of the deleted path. Subtree listings
-  // (if any were cached) age out via TTL. Change-file reads always consult D1,
-  // so compaction deletion is authoritative across colos.
+  // (if any were cached) age out via TTL. Deletable compaction objects always
+  // consult D1, so change and snapshot deletion is authoritative across colos.
   await listingCacheDelete(prefix, parentDirOf(normalized));
 
   return true;

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { opDeletePath, opGetFile, opPutImmutable } from '../dist/ops.js';
+import { opDeletePath, opGetFile, opListChildren, opPutImmutable } from '../dist/ops.js';
+import { listingCacheKeyFor } from '../dist/paths.js';
 
 class Statement {
   constructor(db, sql) {
@@ -125,6 +126,50 @@ test('compacted changes bypass per-colo cache and deletion decrements byte metri
     const deletionMetrics = db.metricUpdates.at(-1);
     assert.deepEqual(deletionMetrics.slice(3, 6), [-1, -3, -3]);
     assert.equal(Math.abs(deletionMetrics[6]), 0);
+  } finally {
+    globalThis.caches = previousCaches;
+  }
+});
+
+test('superseded mainline snapshots bypass per-colo cache and delete authoritatively', async () => {
+  const previousCaches = globalThis.caches;
+  const cache = new MemoryCache();
+  globalThis.caches = { default: cache };
+
+  try {
+    const db = new MemoryD1();
+    const path = '/mesh/mainline/snapshot-1-server.json';
+    const bytes = new Uint8Array([4, 5, 6, 7]);
+    await opPutImmutable(db, 'mesh-address', path, bytes, 'mainline-snapshot', '/mesh');
+    assert.equal(cache.entries.size, 0);
+    assert.equal((await opGetFile(db, 'mesh-address', path, 'mainline-snapshot')).source, 'd1');
+    assert.equal(cache.entries.size, 0);
+
+    assert.equal(await opDeletePath(db, 'mesh-address', path, '/mesh'), true);
+    assert.equal((await opGetFile(db, 'mesh-address', path, 'mainline-snapshot')).found, false);
+    assert.equal(cache.entries.size, 0);
+
+    const deletionMetrics = db.metricUpdates.at(-1);
+    assert.deepEqual(deletionMetrics.slice(3, 5), [-1, -4]);
+    assert.equal(Math.abs(deletionMetrics[5]), 0);
+    assert.equal(deletionMetrics[6], -4);
+  } finally {
+    globalThis.caches = previousCaches;
+  }
+});
+
+test('compaction folder listings ignore stale per-colo cache entries', async () => {
+  const previousCaches = globalThis.caches;
+  const cache = new MemoryCache();
+  globalThis.caches = { default: cache };
+
+  try {
+    const db = new MemoryD1();
+    for (const path of ['/mesh/changes', '/mesh/mainline']) {
+      const cacheKey = listingCacheKeyFor('mesh-address', path);
+      await cache.put(cacheKey, new Response(JSON.stringify({ files: [{ name: 'stale.json' }], folders: [] })));
+      assert.deepEqual(await opListChildren(db, 'mesh-address', path), { files: [], folders: [] });
+    }
   } finally {
     globalThis.caches = previousCaches;
   }

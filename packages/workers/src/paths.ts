@@ -5,7 +5,7 @@
  * - `manifest-snapshot` — `manifest-<gen>.json` (immutable, cached forever)
  * - `head` — `changes/head.json` (mutable, HLC-ordered merge)
  * - `change-file` — `changes/<hlc>-chg_<id>.json` (immutable until compaction deletes and evicts it)
- * - `mainline-snapshot` — `mainline/<name>` (immutable, cached forever)
+ * - `mainline-snapshot` — `mainline/<name>` (immutable until a newer manifest supersedes it)
  * - `device-heartbeat` — `devices/<id>` (mutable, always overwrite)
  * - `other` — anything not matched above (generic overwrite semantics)
  */

@@ -634,6 +634,10 @@ class EngineTests(unittest.TestCase):
             self.assertNotIn("gcFloorHlc", wire)
             changes = await adapter.list_files("/gc-mesh/changes")
             self.assertEqual(len([entry for entry in changes if "-chg_" in entry.name]), 0)
+            snapshots = await adapter.list_files("/gc-mesh/mainline")
+            self.assertEqual([entry.path for entry in snapshots], [second.snapshot_path])
+            await reader._rehydrate()
+            self.assertIsNone(await reader.get("tasks", "deleted-task"))
             await reader.disconnect()
             await writer.disconnect()
 

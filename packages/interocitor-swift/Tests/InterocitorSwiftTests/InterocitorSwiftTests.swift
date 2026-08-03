@@ -596,11 +596,16 @@ final class SyncEngineMemoryTests: XCTestCase {
         try await a.put(table: "tasks", rowId: "t1", columns: ["title": .string("Hello")])
         try await a.flush()
         try await a.compact()
-        let changes = try await shared.listFiles(path: "/Interocitor/changes")
-        XCTAssertFalse(changes.contains { $0.name.contains("-chg_") })
-
-        // B joins after compaction — should rehydrate from snapshot
         try await b.connect()
+        try await a.compact()
+        let changes = try await shared.listFiles(path: "/TestApp/changes")
+        XCTAssertFalse(changes.contains { $0.name.contains("-chg_") })
+        let snapshots = try await shared.listFiles(path: "/TestApp/mainline")
+        XCTAssertEqual(snapshots.map(\.name), ["snapshot-2-server_relay_1.json"])
+
+        // B cached snapshot 1 before snapshot 2 superseded and deleted it.
+        // Explicit rehydrate must refresh the manifest and retry snapshot 2.
+        try await b.rehydrate()
         let row = try await b.get(table: "tasks", rowId: "t1")
         XCTAssertEqual(row?.columns["title"]?.value, .string("Hello"))
     }

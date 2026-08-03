@@ -111,7 +111,7 @@ framework integrations; most applications should use the result handles.
 | `flush()`                          | Move queued local changes to the primary adapter, then attempt configured write-only replicas.                |
 | `pull()`                           | Read and merge remote changes from the primary adapter.                                                       |
 | `rehydrate()`                      | Publish durable local work, replace local state with the manifest snapshot, then catch up.                    |
-| `compact()`                        | Publish a snapshot/manifest generation, then attempt best-effort removal of exactly the covered change files. |
+| `compact()`                        | Publish a snapshot/manifest generation, then best-effort remove exactly covered changes and every superseded mainline snapshot. |
 | `getQuarantinedOfflineChanges()`   | Return local operations withheld after the device exceeded `retention.maxOfflineDurationMs`, or `null`.       |
 | `clearQuarantinedOfflineChanges()` | Remove the local quarantine after the application has exported, discarded, or deliberately reapplied it.      |
 
@@ -246,6 +246,11 @@ encryption mode. See [Shared key scenarios](shared-key-scenarios.md) and
 Compaction events are listed in [Compaction](compaction.md#events). High-volume
 `trace:manifest` and `trace:head` events are diagnostics for tests/devtools,
 not a stable application contract.
+
+`compact:snapshot-cleanup` reports the active path plus attempted, deleted, and
+failed superseded-snapshot deletions. A healthy remote has one mainline
+snapshot; storage failures may temporarily leave more until a managed
+retention check or later compaction retries cleanup.
 
 ## Typed errors
 

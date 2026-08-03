@@ -529,7 +529,7 @@ class Interocitor:
             await self._flush()
 
     async def compact(self) -> Manifest:
-        """Publish a snapshot, rotate the manifest, and remove covered changes.
+        """Publish a snapshot and remove covered changes and superseded snapshots.
 
         The caller must serialize compaction across processes because storage
         adapters do not provide a distributed lease or compare-and-swap write.
@@ -608,6 +608,25 @@ class Interocitor:
                     )
                 except Exception:
                     pass
+
+            # The manifest names the only authoritative full-state snapshot.
+            # Once its pointer is published, every older snapshot is
+            # superseded and can be retried safely on the next compaction.
+            try:
+                active_snapshot_name = snapshot_path.rsplit("/", 1)[-1]
+                snapshots = await self._require_adapter("compact").list_files(paths.mainline_folder)
+                for entry in snapshots:
+                    if (
+                        entry.name != active_snapshot_name
+                        and entry.name.startswith("snapshot-")
+                        and entry.name.endswith(".json")
+                    ):
+                        try:
+                            await self._require_adapter("compact").delete_file(entry.path)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
 
             await self._acknowledge_manifest()
             return Manifest.from_wire(next_manifest.to_wire())
@@ -1088,9 +1107,9 @@ class Interocitor:
         if not snapshot_path:
             await self._pull(reload_manifest=False)
             return
-        try:
+        async def restore(path: str) -> None:
             snapshot = self._decode_snapshot_payload(
-                await self._require_adapter("rehydrate").read_file(snapshot_path), snapshot_path
+                await self._require_adapter("rehydrate").read_file(path), path
             )
             await self._local.clear_rows()
             await self._local.set_meta("cursor", "")
@@ -1108,17 +1127,31 @@ class Interocitor:
             await self._local.set_meta("meshId", self._manifest.mesh_id)
             await self._local.set_meta("epoch", snapshot.epoch)
             await self._local.set_meta("hlc", hlc_serialize(self._hlc))
-            await self._pull(reload_manifest=False)
-        except BaseException as error:
-            # ``CancelledError`` inherits from BaseException in supported
-            # Python versions. It is a lifecycle signal, not evidence that
-            # the remote mesh is corrupt; requeue first, then propagate it
-            # without poisoning this client.
-            if isinstance(error, asyncio.CancelledError):
-                raise
-            if isinstance(error, Exception):
+
+        for attempt in range(2):
+            try:
+                await restore(snapshot_path)
+                break
+            except BaseException as error:
+                # ``CancelledError`` inherits from BaseException in supported
+                # Python versions. It is a lifecycle signal, not evidence that
+                # the remote mesh is corrupt.
+                if isinstance(error, asyncio.CancelledError):
+                    raise
+                if not isinstance(error, Exception):
+                    raise
+                if attempt == 0:
+                    previous_path = snapshot_path
+                    try:
+                        await self._load_or_create_manifest()
+                    except Exception:
+                        raise self._poison_remote(error) from error
+                    refreshed_path = self._manifest.snapshot_path if self._manifest is not None else None
+                    if refreshed_path and refreshed_path != previous_path:
+                        snapshot_path = refreshed_path
+                        continue
                 raise self._poison_remote(error) from error
-            raise
+        await self._pull(reload_manifest=False)
 
     def _change_for_row(self, row: Row) -> ChangeEntry | None:
         if row._meta.deleted:

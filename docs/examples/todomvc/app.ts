@@ -122,7 +122,7 @@ function updateCompactAvailability(): void {
   const allConnected = clients.every((client) => client.connected);
   compactButton.disabled = compacting || !allConnected;
   compactButton.title = allConnected
-    ? "Publish a snapshot and remove the change files it covers"
+    ? "Publish a snapshot and remove covered changes and superseded snapshots"
     : "Reconnect every client before compacting";
 }
 
@@ -516,9 +516,12 @@ compactButton.addEventListener("click", () => {
       );
       const snapshotPath = [...changedPaths].find((path) => path.includes("/mainline/snapshot-"));
       const afterChangeCount = Object.keys(after).filter((path) => path.includes("-chg_")).length;
+      const snapshotCount = Object.keys(after).filter((path) =>
+        path.includes("/mainline/snapshot-"),
+      ).length;
 
       renderFilesystem(snapshotPath ?? "/TodoMVC/manifest.json", changedPaths);
-      meshStatus.textContent = `Snapshot published · ${afterChangeCount} uncovered change files remain`;
+      meshStatus.textContent = `Snapshot published · ${snapshotCount} current snapshot · ${afterChangeCount} uncovered change files remain`;
     })
     .catch((error) => {
       meshStatus.textContent = "The filesystem could not be compacted";

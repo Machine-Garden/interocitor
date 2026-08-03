@@ -1,7 +1,9 @@
 # Compaction
 
 Compaction publishes a full-state snapshot, bumps the manifest generation, and
-attempts to delete the exact change files merged into that snapshot. A finite
+attempts to delete the exact change files merged into that snapshot. It also
+deletes every superseded mainline snapshot, so a healthy remote has exactly
+one `mainline/snapshot-*.json`: the file named by the current manifest. A finite
 retention policy bounds normal-operation eligibility and schedules cleanup;
 storage failures can delay physical deletion. Tombstones remain in the
 snapshot. Because storage adapters provide no CAS or distributed lease,
@@ -42,6 +44,45 @@ apply every remaining filename absent from the receipt set. The snapshot
 8. Best-effort delete every filename in `coveredChangeFiles`. Files omitted
    from the captured set remain available for catch-up, even when their HLC is
    below the snapshot watermark.
+9. Best-effort list `mainline/` and delete every snapshot except the one named
+   by the new manifest. A connected managed writer retries interrupted cleanup
+   during its retention checks; another successful compaction retries too.
+
+Every successful call writes a new snapshot even when there are no new change
+files. The write-new, publish-pointer, delete-old order is the commit protocol:
+overwriting the current payload in place would expose partial data to readers.
+Callers that do not need a new explicit checkpoint should avoid redundant
+manual calls; automatic compaction does not run without eligible changes.
+
+## Snapshot lifecycle and storage bounds
+
+| State | Meaning | Retention rule |
+| --- | --- | --- |
+| Candidate | Snapshot payload was written, but the manifest pointer does not name it yet. | Keep during publication; a later retention check, compaction, or operator recovery removes an abandoned candidate. |
+| Current | `manifest.json` resolves to a generation whose `snapshotPath` names this file. | Keep exactly one. Never delete it during cleanup. |
+| Superseded | A newer manifest pointer was committed. | Delete best effort after publication; retry on later managed retention checks and compactions. |
+
+The normal-operation physical bounds for protocol data are:
+
+- `mainline/`: exactly one current snapshot;
+- `changes/`: only changes not yet covered by the current snapshot, subject to
+  the finite `retention.compactAfterMs` deadline;
+- `manifest-<generation>.json`: immutable publication lineage, retained by this
+  protocol and normally much smaller than snapshots or changes;
+- `files/`: application-owned durable files, never compacted.
+
+Delete or listing failures may temporarily exceed the one-snapshot bound. The
+`compact:snapshot-cleanup` event reports attempted, deleted, and failed paths.
+If strict storage accounting is required, alert on that event and on more than
+one mainline snapshot. Historical backups belong in storage-level backup or
+versioning, not in `mainline/`.
+
+A client can race cleanup after reading an old manifest but before reading its
+snapshot. On a missing or unreadable cached path, rehydration force-refreshes
+the manifest and retries once if `snapshotPath` changed. Failure of the current
+path still poisons the remote. Adapters and gateways must therefore make
+snapshot deletion authoritative; a cache must not continue serving a deleted
+superseded snapshot or a stale `mainline/` listing.
 
 ## Triggers
 
@@ -193,6 +234,8 @@ db.on((event) => {
       /* snapshot published and cleanup attempted */ break;
     case "compact:retention:error":
       /* deadline check or compact failed */ break;
+    case "compact:snapshot-cleanup":
+      /* superseded snapshot delete counts and failedPaths */ break;
     case "offline:retention-expired":
       /* stale outbox moved to local quarantine */ break;
   }
@@ -267,6 +310,11 @@ best effort: a failed delete leaves a redundant file that restored receipts
 will skip. A file published after receipt capture is not named and remains for
 the next pull or compaction.
 
+Superseded snapshot cleanup follows the same publication boundary but not the
+change-file coverage rule: after the pointer commits, every other recognized
+`mainline/snapshot-*.json` is redundant. This cleanup is safe only while the
+whole compaction sequence is externally serialized.
+
 Tombstones are not garbage-collected. A device acknowledgement contains a
 scalar watermark, and that scalar cannot prove that the device has no older
 durable batch left to publish. Using it as a cutoff recreates the late-file
@@ -285,6 +333,8 @@ The deletion invariant is:
   compaction outside the engine.
 - **Incomplete adapter listing.** An omitted file is not added to
   `coveredChangeFiles`, so cleanup leaves it available for a later pull.
+- **Persistent delete/list failure.** The current snapshot remains usable, but
+  redundant snapshots may exceed the physical bound until storage recovers.
 
 ## Rehydrate flow
 
@@ -313,8 +363,10 @@ Rehydrate emits:
 
 - `rehydrate:start`
 - `rehydrate:complete` with `rowCount`
+- a forced manifest refresh and one transparent retry when a superseded
+  snapshot disappeared during a read race
 - `decode:error` + `remote:poisoned` if the snapshot file fails to decode
-  (corrupt or wrong key)
+  (corrupt, wrong key, or still unavailable after the retry)
 
 ## Tuning checklist
 

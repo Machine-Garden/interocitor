@@ -60,7 +60,7 @@ import { flushPrimary } from './flush.ts';
 import { LocalStoreConnectedStoresApi, type ConnectedStoresApi } from './connected-stores.ts';
 import { pull as doPull } from './pull.ts';
 import { ChangeObservationLedger } from './change-observation.ts';
-import { compact as doCompact, rehydrate as doRehydrate } from './compaction.ts';
+import { compact as doCompact, pruneSupersededSnapshots, rehydrate as doRehydrate } from './compaction.ts';
 import { createDeviceId } from './ids.ts';
 import { resolveRetentionPolicy } from './retention.ts';
 
@@ -2581,7 +2581,39 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
 
   private async runRetentionCompactionCheck(): Promise<void> {
     if (!this.connected || !this.adapter || !this.config.remotePath || !this.manifest?.server.managed) return;
+    const adapter = this.adapter;
+    const remotePath = this.config.remotePath;
     if (this.remotePoisonError) {
+      this.scheduleRetentionCompactionCheck(RETENTION_RETRY_DELAY_MS);
+      return;
+    }
+
+    let snapshotCleanupNeedsRetry = false;
+    try {
+      await this.local.withLock(SYNC_STATE_LOCK, async () => {
+        // Keep cleanup on the same local serialization boundary as snapshot
+        // publication so it cannot mistake an in-progress candidate for a
+        // superseded snapshot.
+        await this.doLoadOrCreateManifest('snapshot-retention-check', true);
+        const activeSnapshotPath = this.manifest?.snapshotPath;
+        if (activeSnapshotPath) {
+          const cleanup = await pruneSupersededSnapshots(
+            adapter,
+            remotePath,
+            activeSnapshotPath,
+            (event) => this.emit(event),
+            this.deviceId,
+          );
+          snapshotCleanupNeedsRetry = cleanup.error !== undefined || cleanup.failedPaths.length > 0;
+        }
+      });
+    } catch (error) {
+      this.emit({
+        type: 'compact:retention:error',
+        error: error instanceof Error ? error : new Error(String(error)),
+        remotePath: this.config.remotePath,
+        deviceId: this.deviceId,
+      });
       this.scheduleRetentionCompactionCheck(RETENTION_RETRY_DELAY_MS);
       return;
     }
@@ -2610,13 +2642,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
 
     const compactAfterMs = this.activeRetentionPolicy().compactAfterMs;
     if (oldestChangeAt === undefined) {
-      this.scheduleRetentionCompactionCheck(compactAfterMs);
+      this.scheduleRetentionCompactionCheck(snapshotCleanupNeedsRetry ? RETENTION_RETRY_DELAY_MS : compactAfterMs);
       return;
     }
     const ageMs = Math.max(0, Date.now() - oldestChangeAt);
     if (ageMs < compactAfterMs) {
       const delayMs = compactAfterMs - ageMs;
-      this.scheduleRetentionCompactionCheck(delayMs);
+      this.scheduleRetentionCompactionCheck(snapshotCleanupNeedsRetry ? Math.min(delayMs, RETENTION_RETRY_DELAY_MS) : delayMs);
       return;
     }
     if (this.compactInFlight) {
@@ -2976,6 +3008,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       emit: (e) => this.emit(e),
       poisonRemote: (err, path) => this.poisonRemote(err, path),
       pull: () => this.pullNow(),
+      reloadManifest: async () => {
+        await this.doLoadOrCreateManifest('rehydrate-stale-snapshot', true);
+        return this.manifest;
+      },
       preservedMeta,
     });
     await this.acknowledgeManifest();
@@ -2983,9 +3019,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
 
   /**
    * Publish a full snapshot and manifest generation, then best-effort delete
-   * the exact change filenames covered by that snapshot. Callers must
-   * serialize compaction across engine instances because adapters provide no
-   * distributed lease or compare-and-swap publication primitive.
+   * the exact covered changes and every superseded mainline snapshot. Callers
+   * must serialize compaction across engine instances because adapters provide
+   * no distributed lease or compare-and-swap publication primitive.
    */
   async compact(): Promise<void> {
     await this.ensureReady();

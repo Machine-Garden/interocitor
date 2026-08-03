@@ -76,12 +76,13 @@ private enum ManifestCodingKey: String, CodingKey, CaseIterable {
     case watermarkHlc
     case snapshotPath
     case deltaPath
+    case retention
 }
 
 private let coreManifestKeyOrder: [ManifestCodingKey] = [
     .generation, .parentGeneration, .writtenBy, .writtenAt, .version,
     .meshId, .schema, .encrypted, .server, .createdAt, .epoch,
-    .watermarkHlc, .snapshotPath, .deltaPath, .contentHash,
+    .watermarkHlc, .snapshotPath, .deltaPath, .retention, .contentHash,
 ]
 
 private let sortedManifestKeyOrder: [ManifestCodingKey] =
@@ -638,7 +639,10 @@ public actor Interocitor {
 
             try await local.clearRows()
             try await local.setMeta(key: "cursor", value: AnyCodable.string(""))
-            try await local.setMeta(key: "seenChangeFiles", value: AnyCodable.array([]))
+            try await local.setMeta(
+                key: "seenChangeFiles",
+                value: AnyCodable.array((snapshot.coveredChangeFiles ?? []).map(AnyCodable.string))
+            )
             tables = [:]
             knownTables = []
 
@@ -670,7 +674,8 @@ public actor Interocitor {
 
     // MARK: - Compaction
 
-    /// Publish a new snapshot and manifest generation.
+    /// Publish a snapshot and manifest generation, then remove exactly covered changes.
+    /// The application must serialize compaction across engine instances.
     public func compact() async throws {
         let adapter = try requireAdapter("compact()")
 
@@ -696,6 +701,11 @@ public actor Interocitor {
             if snapshotTables[row._table] == nil { snapshotTables[row._table] = [:] }
             snapshotTables[row._table]![row._rowId] = row
         }
+        var coveredChangeFiles = Set<String>()
+        if let seen = try await local.getMeta(key: "seenChangeFiles") as? AnyCodable,
+           case .array(let values) = seen {
+            coveredChangeFiles.formUnion(values.compactMap(\.stringValue))
+        }
 
         let snapshot = Snapshot(
             snapshotId: "snap_\(Interocitor.randomHex(8))",
@@ -703,6 +713,7 @@ public actor Interocitor {
             hlc: hlcSerialize(hlc),
             epoch: nextEpoch,
             schemaVersion: currentManifest.schema,
+            coveredChangeFiles: coveredChangeFiles.sorted(),
             tables: snapshotTables
         )
 
@@ -724,7 +735,8 @@ public actor Interocitor {
             epoch: nextEpoch,
             watermarkHlc: hlcSerialize(hlc),
             snapshotPath: snapshotPath,
-            deltaPath: nil
+            deltaPath: nil,
+            retention: currentManifest.retention
         )
 
         let writtenManifest = try await writeManifest(
@@ -739,6 +751,9 @@ public actor Interocitor {
 
         manifest = writtenManifest
         try await local.setMeta(key: "epoch", value: AnyCodable.int(nextEpoch))
+        for fileName in coveredChangeFiles {
+            try? await adapter.deleteFile(path: "\(p.changesFolder)/\(fileName)")
+        }
         try await acknowledgeManifest()
 
     }
@@ -889,6 +904,9 @@ public actor Interocitor {
         case .watermarkHlc: return try jsonString(manifest.watermarkHlc)
         case .snapshotPath: return try jsonOptionalString(manifest.snapshotPath)
         case .deltaPath: return try jsonOptionalString(manifest.deltaPath)
+        case .retention:
+            guard let retention = manifest.retention else { return nil }
+            return "{\"compactAfterMs\":\(retention.compactAfterMs),\"maxOfflineDurationMs\":\(retention.maxOfflineDurationMs)}"
         }
     }
 
@@ -941,6 +959,10 @@ public actor Interocitor {
         }
         guard manifest.version == 3 else {
             throw InterocitorError.manifestVersionUnsupported(manifest.version)
+        }
+        if let retention = manifest.retention,
+           retention.compactAfterMs <= 0 || retention.maxOfflineDurationMs <= 0 {
+            throw InterocitorError.remotePoisoned("manifest retention durations must be positive")
         }
         if let localSchema = config.schema?.version, manifest.schema != localSchema {
             emit(.schemaMismatch(local: localSchema, remote: manifest.schema))

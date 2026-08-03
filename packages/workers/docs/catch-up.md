@@ -23,15 +23,18 @@ Compaction publishes a snapshot with `coveredChangeFiles`, the exact filenames
 whose effects are represented in that snapshot, and advances the manifest
 epoch. A client seeing a newer epoch first publishes its durable local outbox,
 then replaces local rows from the snapshot, restores those exact receipts, and
-pulls every other retained filename.
+pulls every other remaining filename.
 
-Immutable change files and tombstones are retained. The storage API provides no
-mesh-wide lease or compare-and-swap primitive that could prove deletion safe,
-so neither a watermark nor an authorized writer identity permits pruning.
+After snapshot and manifest publication, the engine attempts to delete the exact filenames
+in `coveredChangeFiles`; later or omitted files remain available for catch-up.
+Tombstones remain inside the snapshot. Because the storage API provides no
+mesh-wide lease or compare-and-swap primitive, deployments must ensure only one
+compactor runs at a time.
 
 ## Worker role
 
 The Worker stores and serves immutable changes, snapshots, manifests, and
-device metadata. It does not decide that a change is covered from scalar HLC
-state and exposes no compacted-change pruning operation. The engine owns exact
-receipt tracking, epoch comparison, rehydration, and deterministic CRDT merge.
+device metadata. It deletes covered change objects only when the engine names
+their exact paths through the normal storage operation; it never derives a
+deletion set from scalar HLC state. The engine owns coverage, epoch comparison,
+rehydration, and deterministic CRDT merge.

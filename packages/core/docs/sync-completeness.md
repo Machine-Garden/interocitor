@@ -19,7 +19,7 @@ Exact immutable change filenames are the authoritative observation record.
 `head.json`, a scalar cursor, and per-writer HLC frontiers are hints;
 none proves that every lower HLC was observed.
 
-On pull, a client lists retained change files and applies every filename absent
+On pull, a client lists remaining change files and applies every filename absent
 from its local receipt set. A successful local flush records its own filenames
 before publication, so a receipt-storage failure cannot leave an authoritative
 file locally unrecorded. The durable outbox is only acknowledged after primary
@@ -32,11 +32,11 @@ base.
 
 Compaction writes the exact observed filename set into the snapshot as
 `coveredChangeFiles`. Rehydrate restores that set as receipts before catch-up.
-Peer meshes retain all immutable files because concurrent pointer updates lack
-CAS. Server-managed mode retains them too: an authorized identity does not
-prove that only one process is running. A file that appears during compaction
-therefore survives regardless of whether its HLC is below the snapshot
-watermark.
+After publishing the snapshot and manifest pointer, compaction deletes exactly
+that set. A file that appears during compaction is absent from the captured set
+and therefore survives regardless of whether its HLC is below the snapshot
+watermark. Deployments must serialize compaction because concurrent pointer
+updates and deletion are not safe without CAS or a lease.
 
 Compaction holds the local sync-state lock, promotes and publishes completed
 batches, pulls remote changes, and then captures exact receipts and rows. A
@@ -45,11 +45,11 @@ write or explicit batch is therefore wholly before or wholly after that cut.
 This makes a new client and an existing client the same algorithm with different
 starting receipts:
 
-- a new client starts with an empty receipt set and applies every retained file;
+- a new client starts with snapshot receipts and applies every remaining file;
 - an existing client subtracts its exact receipts and applies every unseen
-  retained file.
+  remaining file.
 
-Provided the remote eventually lists every retained immutable file, clients that
+Provided the remote eventually lists every remaining immutable file, clients that
 observe the same file set converge under the built-in LWW policy. Core emits
 `sync:late-change` when a newly observed file falls behind the client's prior
 global or writer frontier, making the condition observable.
@@ -97,7 +97,7 @@ integrity. Any protocol integrity commitment should use a cryptographic hash
 such as SHA-256.
 
 The exact-receipt design guarantees catch-up against an honest,
-eventually consistent remote that eventually lists retained files. It does not
+eventually consistent remote that eventually lists remaining files. It does not
 cryptographically prove completeness against a remote that withholds both a
 change and every reference to it. The [security model](security-model.md)
 continues to treat remote withholding and rollback as threats.

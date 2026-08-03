@@ -215,14 +215,15 @@ later `put` creates a new row incarnation and publishes only its new fields.
 | `flush()` | Writes queued local changes to the primary adapter and configured replicas |
 | `pull()` | Lists retained changes and merges filenames not recorded in the local exact-file receipt set |
 | `rehydrate()` | Rebuilds local state from the current snapshot, then pulls newer changes |
-| `compact()` | Pulls and publishes a new snapshot/manifest generation while retaining immutable changes and tombstones |
+| `compact()` | Pulls, publishes a new snapshot/manifest generation, removes covered change files, and retains tombstones |
 | `disconnect()` | Stops polling, flushes when the remote is healthy, and closes the local store |
 | `setRemoteStorage(_:)` | Switches adapters or enters local-only mode |
 
 `compact()` is an explicit maintenance operation. The runtime does not provide
 a distributed compaction lease, idle-time policy, or automatic “20 changes”
 threshold. If multiple peers may compact, the application must coordinate
-that operation. Compaction retains every immutable change file and tombstone.
+that operation. Compaction removes exactly the change files represented by its
+published snapshot and retains tombstones.
 Before replacing local rows from a newer snapshot, a client publishes its
 durable outbox; scalar HLC state never suppresses a queued or unseen change.
 

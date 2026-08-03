@@ -165,7 +165,8 @@ sequenceDiagram
 
     E->>E: setMeta epoch ← nextEpoch
 
-    Note over E,C: every immutable change file and tombstone remains retained
+    E->>C: DELETE each filename in coveredChangeFiles
+    Note over E,C: uncovered change files and snapshot tombstones remain
 ```
 
 **Write ordering:** snapshot → manifest file → manifest pointer.
@@ -174,7 +175,7 @@ snapshot file exists before any reader is directed to it.
 
 Other devices detect epoch advancement on the next `connect()` or `pull()`.
 If `remoteEpoch > localEpoch`, an old client first publishes durable local
-work, then rehydrates from the snapshot and pulls every retained filename not
+work, then rehydrates from the snapshot and pulls every remaining filename not
 present in the snapshot's exact receipt set. A new client has no local work and
 can restore immediately.
 

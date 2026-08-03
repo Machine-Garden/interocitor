@@ -2,7 +2,6 @@ import { expect, test } from '@playwright/test';
 
 /* eslint-disable unicorn/consistent-function-scoping -- Browser-context helpers must be defined inside page.evaluate. */
 
-
 test.beforeEach(async ({ page }) => {
   await page.goto('/packages/core/tests/e2e/fixtures/harness.html');
   await page.evaluate(async () => {
@@ -23,7 +22,12 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
 
       const adapter = new MemoryAdapter();
-      const engine = new Interocitor(adapter, { batchWindowMs: 0, remotePath: '/MeshBoot', pollInterval: 600_000, deviceId: 'dev_bootstrap' });
+      const engine = new Interocitor(adapter, {
+        batchWindowMs: 0,
+        remotePath: '/MeshBoot',
+        pollInterval: 600_000,
+        deviceId: 'dev_bootstrap',
+      });
 
       await engine.init();
       await engine.connect();
@@ -117,7 +121,9 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         // Force ensureFolder to never resolve, simulating a remote/network
         // call that hangs without rejecting.
         override async ensureFolder(_path: string): Promise<void> {
-          await new Promise<void>(() => { /* never resolves */ });
+          await new Promise<void>(() => {
+            /* never resolves */
+          });
         }
       }
 
@@ -164,7 +170,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
 
     expect(result.connectError).toBeNull();
     expect(result.stalledStages).toContain('ensureFolder');
-    expect(result.stalledTimeouts.every(ms => ms === 50)).toBe(true);
+    expect(result.stalledTimeouts.every((ms) => ms === 50)).toBe(true);
     expect(result.events).toContain('connect:error');
     expect(result.elapsed).toBeLessThan(2_000);
     expect(result.initializedBefore).toBe(true);
@@ -183,29 +189,75 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         // failure that we observed in production Sentry data.
         private failedOnce = false;
         private meta = new Map<string, unknown>();
-        async withLock<T>(_name: string, operation: () => Promise<T>): Promise<T> { return operation(); }
-        async open(): Promise<void> { /* success */ }
-        close(): void { /* noop */ }
-        async getRow(_table: string, _rowId: string): Promise<any> { return undefined; }
-        async putRow(_row: any): Promise<void> { /* noop */ }
-        async putRows(_rows: any[]): Promise<void> { /* noop */ }
-        async getTable(_table: string): Promise<any[]> { return []; }
-        async queryWhere(_table: string, _clause: any): Promise<any[]> { return []; }
-        async getAllRows(): Promise<any[]> { return []; }
-        async clearRows(): Promise<void> { /* noop */ }
-        async getTableNames(): Promise<string[]> { return []; }
-        async commitLocalMutation(_row: any, _pendingBatch: any): Promise<void> { /* noop */ }
-        async promotePendingBatch(): Promise<any> { return null; }
-        async pushOutbox(_entry: any): Promise<void> { /* noop */ }
-        async pushOutboxEntries(_entries: any[]): Promise<void> { /* noop */ }
-        async peekOutbox(): Promise<any[]> { return []; }
-        async acknowledgeOutbox(_entryIds: readonly string[]): Promise<void> { /* noop */ }
-        async drainOutbox(): Promise<any[]> { return []; }
-        async outboxSize(): Promise<number> { return 0; }
-        async getCursor(_deviceId: string): Promise<number> { return 0; }
-        async setCursor(_deviceId: string, _offset: number): Promise<void> { /* noop */ }
-        async getAllCursors(): Promise<Record<string, number>> { return {}; }
-        async getMeta(key: string): Promise<unknown> { return this.meta.get(key); }
+        async withLock<T>(_name: string, operation: () => Promise<T>): Promise<T> {
+          return operation();
+        }
+        async open(): Promise<void> {
+          /* success */
+        }
+        close(): void {
+          /* noop */
+        }
+        async getRow(_table: string, _rowId: string): Promise<any> {
+          return undefined;
+        }
+        async putRow(_row: any): Promise<void> {
+          /* noop */
+        }
+        async putRows(_rows: any[]): Promise<void> {
+          /* noop */
+        }
+        async getTable(_table: string): Promise<any[]> {
+          return [];
+        }
+        async queryWhere(_table: string, _clause: any): Promise<any[]> {
+          return [];
+        }
+        async getAllRows(): Promise<any[]> {
+          return [];
+        }
+        async clearRows(): Promise<void> {
+          /* noop */
+        }
+        async getTableNames(): Promise<string[]> {
+          return [];
+        }
+        async commitLocalMutation(_row: any, _pendingBatch: any): Promise<void> {
+          /* noop */
+        }
+        async promotePendingBatch(): Promise<any> {
+          return null;
+        }
+        async pushOutbox(_entry: any): Promise<void> {
+          /* noop */
+        }
+        async pushOutboxEntries(_entries: any[]): Promise<void> {
+          /* noop */
+        }
+        async peekOutbox(): Promise<any[]> {
+          return [];
+        }
+        async acknowledgeOutbox(_entryIds: readonly string[]): Promise<void> {
+          /* noop */
+        }
+        async drainOutbox(): Promise<any[]> {
+          return [];
+        }
+        async outboxSize(): Promise<number> {
+          return 0;
+        }
+        async getCursor(_deviceId: string): Promise<number> {
+          return 0;
+        }
+        async setCursor(_deviceId: string, _offset: number): Promise<void> {
+          /* noop */
+        }
+        async getAllCursors(): Promise<Record<string, number>> {
+          return {};
+        }
+        async getMeta(key: string): Promise<unknown> {
+          return this.meta.get(key);
+        }
         async setMeta(key: string, value: unknown): Promise<void> {
           if (!this.failedOnce) {
             this.failedOnce = true;
@@ -213,7 +265,9 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
           }
           this.meta.set(key, value);
         }
-        async clearAll(): Promise<void> { this.meta.clear(); }
+        async clearAll(): Promise<void> {
+          this.meta.clear();
+        }
       }
 
       const { createResilientLocalStore } = await import('/packages/core/dist/storage/resilient-store.js');
@@ -221,17 +275,24 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       const events: string[] = [];
       const degradations: any[] = [];
       const origError = console.error;
-      console.error = () => { /* silence noise */ };
+      console.error = () => {
+        /* silence noise */
+      };
       try {
         const engine = new Interocitor(new MemoryAdapter(), {
-          remotePath: '/InitSurvivesClosing', pollInterval: 600_000, deviceId: 'init-survival',
+          remotePath: '/InitSurvivesClosing',
+          pollInterval: 600_000,
+          deviceId: 'init-survival',
           encrypted: false,
-          localStoreFactory: () => createResilientLocalStore({
-            dbName: 'init-survives-closing',
-            openTimeoutMs: 200,
-            primaryFactory: () => new OneShotClosingLocalStore() as any,
-            onDegraded: (info: any) => { degradations.push(info); },
-          }),
+          localStoreFactory: () =>
+            createResilientLocalStore({
+              dbName: 'init-survives-closing',
+              openTimeoutMs: 200,
+              primaryFactory: () => new OneShotClosingLocalStore() as any,
+              onDegraded: (info: any) => {
+                degradations.push(info);
+              },
+            }),
         });
         engine.on((event: { type: string }) => events.push(event.type));
 
@@ -270,7 +331,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
           initializedAfterInit,
           initialized: engine.isReady(),
           rowCount,
-          degradationReasons: degradations.map(d => d.reason),
+          degradationReasons: degradations.map((d) => d.reason),
           events,
         };
         await engine.disconnect().catch(() => {});
@@ -311,7 +372,10 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         readyCount = 0;
         unsubscribed = false;
         listener: ((payload: { type: string; path: string; ts: number }) => void) | null = null;
-        subscribeToInvalidations(onInvalidate: (payload: { type: string; path: string; ts: number }) => void, hooks?: { onReady?: () => void }): () => void {
+        subscribeToInvalidations(
+          onInvalidate: (payload: { type: string; path: string; ts: number }) => void,
+          hooks?: { onReady?: () => void },
+        ): () => void {
           this.listener = onInvalidate;
           this.readyCount++;
           hooks?.onReady?.();
@@ -326,7 +390,12 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       }
 
       const adapter = new PushAdapter();
-      const engine = new Interocitor(adapter, { batchWindowMs: 0, remotePath: '/MeshPush', pollInterval: 600_000, deviceId: 'dev_push' });
+      const engine = new Interocitor(adapter, {
+        batchWindowMs: 0,
+        remotePath: '/MeshPush',
+        pollInterval: 600_000,
+        deviceId: 'dev_push',
+      });
       const events: string[] = [];
       engine.on((event: { type: string }) => events.push(event.type));
 
@@ -334,8 +403,10 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await engine.connect();
       adapter.push('/MeshPush/changes/head.json');
       const deadline = Date.now() + 2_000;
-      while (events.filter(type => type === 'sync:complete').length < 2 && Date.now() < deadline) {
-        await new Promise(resolve => { setTimeout(resolve, 25); });
+      while (events.filter((type) => type === 'sync:complete').length < 2 && Date.now() < deadline) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 25);
+        });
       }
       await engine.disconnect();
 
@@ -345,7 +416,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         relaySubscribe: events.includes('relay:subscribe'),
         relayReady: events.includes('relay:ready'),
         relayMessage: events.includes('relay:message'),
-        syncCompleteCount: events.filter(type => type === 'sync:complete').length,
+        syncCompleteCount: events.filter((type) => type === 'sync:complete').length,
       };
     });
 
@@ -377,15 +448,42 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
           unsubscribeRemoteInvalidations: 0,
         };
         listener: ((payload: { type: string; path: string; ts: number }) => void) | null = null;
-        async authenticate() { this.counts.authenticate++; return await super.authenticate(); }
-        async ensureFolder(path: string) { this.counts.ensureFolder++; return await super.ensureFolder(path); }
-        async listFiles(path: string) { this.counts.listFiles++; return await super.listFiles(path); }
-        async listFolders(path: string) { this.counts.listFolders++; return await super.listFolders(path); }
-        async readFile(path: string) { this.counts.readFile++; return await super.readFile(path); }
-        async writeFile(path: string, data: Uint8Array | string) { this.counts.writeFile++; return await super.writeFile(path, data); }
-        async deleteFile(path: string) { this.counts.deleteFile++; return await super.deleteFile(path); }
-        async getFileMetadata(path: string) { this.counts.getFileMetadata++; return await super.getFileMetadata(path); }
-        subscribeToInvalidations(onInvalidate: (payload: { type: string; path: string; ts: number }) => void, hooks?: { onReady?: () => void }): () => void {
+        async authenticate() {
+          this.counts.authenticate++;
+          return await super.authenticate();
+        }
+        async ensureFolder(path: string) {
+          this.counts.ensureFolder++;
+          return await super.ensureFolder(path);
+        }
+        async listFiles(path: string) {
+          this.counts.listFiles++;
+          return await super.listFiles(path);
+        }
+        async listFolders(path: string) {
+          this.counts.listFolders++;
+          return await super.listFolders(path);
+        }
+        async readFile(path: string) {
+          this.counts.readFile++;
+          return await super.readFile(path);
+        }
+        async writeFile(path: string, data: Uint8Array | string) {
+          this.counts.writeFile++;
+          return await super.writeFile(path, data);
+        }
+        async deleteFile(path: string) {
+          this.counts.deleteFile++;
+          return await super.deleteFile(path);
+        }
+        async getFileMetadata(path: string) {
+          this.counts.getFileMetadata++;
+          return await super.getFileMetadata(path);
+        }
+        subscribeToInvalidations(
+          onInvalidate: (payload: { type: string; path: string; ts: number }) => void,
+          hooks?: { onReady?: () => void },
+        ): () => void {
           this.counts.subscribeToInvalidations++;
           this.listener = onInvalidate;
           hooks?.onReady?.();
@@ -394,17 +492,29 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
             this.listener = null;
           };
         }
-        snapshotCounts() { return { ...this.counts }; }
+        snapshotCounts() {
+          return { ...this.counts };
+        }
       }
 
       const adapter = new CountingPushAdapter();
-      const engine = new Interocitor(adapter, { batchWindowMs: 0, remotePath: '/MeshBudget', pollInterval: 600_000, deviceId: 'dev_budget' });
+      const engine = new Interocitor(adapter, {
+        batchWindowMs: 0,
+        remotePath: '/MeshBudget',
+        pollInterval: 600_000,
+        deviceId: 'dev_budget',
+      });
       await engine.init();
       await engine.connect();
       await engine.disconnect();
       const afterFirstSession = adapter.snapshotCounts();
 
-      const engine2 = new Interocitor(adapter, { batchWindowMs: 0, remotePath: '/MeshBudget', pollInterval: 600_000, deviceId: 'dev_budget' });
+      const engine2 = new Interocitor(adapter, {
+        batchWindowMs: 0,
+        remotePath: '/MeshBudget',
+        pollInterval: 600_000,
+        deviceId: 'dev_budget',
+      });
       await engine2.init();
       await engine2.connect();
       await engine2.disconnect();
@@ -422,7 +532,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
           deleteFile: afterSecondSession.deleteFile - afterFirstSession.deleteFile,
           getFileMetadata: afterSecondSession.getFileMetadata - afterFirstSession.getFileMetadata,
           subscribeToInvalidations: afterSecondSession.subscribeToInvalidations - afterFirstSession.subscribeToInvalidations,
-          unsubscribeRemoteInvalidations: afterSecondSession.unsubscribeRemoteInvalidations - afterFirstSession.unsubscribeRemoteInvalidations,
+          unsubscribeRemoteInvalidations:
+            afterSecondSession.unsubscribeRemoteInvalidations - afterFirstSession.unsubscribeRemoteInvalidations,
         },
       };
     });
@@ -467,15 +578,42 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
           unsubscribeRemoteInvalidations: 0,
         };
         listener: ((payload: { type: string; path: string; ts: number }) => void) | null = null;
-        async authenticate() { this.counts.authenticate++; return await super.authenticate(); }
-        async ensureFolder(path: string) { this.counts.ensureFolder++; return await super.ensureFolder(path); }
-        async listFiles(path: string) { this.counts.listFiles++; return await super.listFiles(path); }
-        async listFolders(path: string) { this.counts.listFolders++; return await super.listFolders(path); }
-        async readFile(path: string) { this.counts.readFile++; return await super.readFile(path); }
-        async writeFile(path: string, data: Uint8Array | string) { this.counts.writeFile++; return await super.writeFile(path, data); }
-        async deleteFile(path: string) { this.counts.deleteFile++; return await super.deleteFile(path); }
-        async getFileMetadata(path: string) { this.counts.getFileMetadata++; return await super.getFileMetadata(path); }
-        subscribeToInvalidations(onInvalidate: (payload: { type: string; path: string; ts: number }) => void, hooks?: { onReady?: () => void }): () => void {
+        async authenticate() {
+          this.counts.authenticate++;
+          return await super.authenticate();
+        }
+        async ensureFolder(path: string) {
+          this.counts.ensureFolder++;
+          return await super.ensureFolder(path);
+        }
+        async listFiles(path: string) {
+          this.counts.listFiles++;
+          return await super.listFiles(path);
+        }
+        async listFolders(path: string) {
+          this.counts.listFolders++;
+          return await super.listFolders(path);
+        }
+        async readFile(path: string) {
+          this.counts.readFile++;
+          return await super.readFile(path);
+        }
+        async writeFile(path: string, data: Uint8Array | string) {
+          this.counts.writeFile++;
+          return await super.writeFile(path, data);
+        }
+        async deleteFile(path: string) {
+          this.counts.deleteFile++;
+          return await super.deleteFile(path);
+        }
+        async getFileMetadata(path: string) {
+          this.counts.getFileMetadata++;
+          return await super.getFileMetadata(path);
+        }
+        subscribeToInvalidations(
+          onInvalidate: (payload: { type: string; path: string; ts: number }) => void,
+          hooks?: { onReady?: () => void },
+        ): () => void {
           this.counts.subscribeToInvalidations++;
           this.listener = onInvalidate;
           hooks?.onReady?.();
@@ -487,11 +625,18 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         push(path: string): void {
           this.listener?.({ type: 'invalidation', path, ts: Date.now() });
         }
-        snapshotCounts() { return { ...this.counts }; }
+        snapshotCounts() {
+          return { ...this.counts };
+        }
       }
 
       const adapter = new CountingPushAdapter();
-      const engine = new Interocitor(adapter, { batchWindowMs: 0, remotePath: '/MeshBurstBudget', pollInterval: 600_000, deviceId: 'dev_burst' });
+      const engine = new Interocitor(adapter, {
+        batchWindowMs: 0,
+        remotePath: '/MeshBurstBudget',
+        pollInterval: 600_000,
+        deviceId: 'dev_burst',
+      });
       await engine.init();
       await engine.connect();
       const baseline = adapter.snapshotCounts();
@@ -499,7 +644,9 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       adapter.push('/MeshBurstBudget/changes/head.json');
       adapter.push('/MeshBurstBudget/changes/head.json');
       adapter.push('/MeshBurstBudget/changes/head.json');
-      await new Promise(resolve => { setTimeout(resolve, 100); });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 100);
+      });
       const afterBurst = adapter.snapshotCounts();
       await engine.disconnect();
 
@@ -537,20 +684,60 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
 
       class CountingAdapter extends MemoryAdapter {
-        counts = { authenticate: 0, ensureFolder: 0, listFiles: 0, listFolders: 0, readFile: 0, writeFile: 0, deleteFile: 0, getFileMetadata: 0 };
-        async authenticate() { this.counts.authenticate++; return await super.authenticate(); }
-        async ensureFolder(path: string) { this.counts.ensureFolder++; return await super.ensureFolder(path); }
-        async listFiles(path: string) { this.counts.listFiles++; return await super.listFiles(path); }
-        async listFolders(path: string) { this.counts.listFolders++; return await super.listFolders(path); }
-        async readFile(path: string) { this.counts.readFile++; return await super.readFile(path); }
-        async writeFile(path: string, data: Uint8Array | string) { this.counts.writeFile++; return await super.writeFile(path, data); }
-        async deleteFile(path: string) { this.counts.deleteFile++; return await super.deleteFile(path); }
-        async getFileMetadata(path: string) { this.counts.getFileMetadata++; return await super.getFileMetadata(path); }
-        snapshotCounts() { return { ...this.counts }; }
+        counts = {
+          authenticate: 0,
+          ensureFolder: 0,
+          listFiles: 0,
+          listFolders: 0,
+          readFile: 0,
+          writeFile: 0,
+          deleteFile: 0,
+          getFileMetadata: 0,
+        };
+        async authenticate() {
+          this.counts.authenticate++;
+          return await super.authenticate();
+        }
+        async ensureFolder(path: string) {
+          this.counts.ensureFolder++;
+          return await super.ensureFolder(path);
+        }
+        async listFiles(path: string) {
+          this.counts.listFiles++;
+          return await super.listFiles(path);
+        }
+        async listFolders(path: string) {
+          this.counts.listFolders++;
+          return await super.listFolders(path);
+        }
+        async readFile(path: string) {
+          this.counts.readFile++;
+          return await super.readFile(path);
+        }
+        async writeFile(path: string, data: Uint8Array | string) {
+          this.counts.writeFile++;
+          return await super.writeFile(path, data);
+        }
+        async deleteFile(path: string) {
+          this.counts.deleteFile++;
+          return await super.deleteFile(path);
+        }
+        async getFileMetadata(path: string) {
+          this.counts.getFileMetadata++;
+          return await super.getFileMetadata(path);
+        }
+        snapshotCounts() {
+          return { ...this.counts };
+        }
       }
 
       const adapter = new CountingAdapter();
-      const engine = new Interocitor(adapter, { batchWindowMs: 0, remotePath: '/MeshSameAdapter', pollInterval: 600_000, deviceId: 'dev_same_adapter' });
+      const engine = new Interocitor(adapter, {
+        batchWindowMs: 0,
+        remotePath: '/MeshSameAdapter',
+        pollInterval: 600_000,
+        deviceId: 'dev_same_adapter',
+      });
       await engine.init();
       const before = adapter.snapshotCounts();
       await engine.setRemoteStorage(adapter);
@@ -587,7 +774,10 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       class PushAdapter extends MemoryAdapter {
         readonly name = 'push-memory';
         listener: ((payload: { type: string; path: string; ts: number }) => void) | null = null;
-        subscribeToInvalidations(onInvalidate: (payload: { type: string; path: string; ts: number }) => void, hooks?: { onReady?: () => void }): () => void {
+        subscribeToInvalidations(
+          onInvalidate: (payload: { type: string; path: string; ts: number }) => void,
+          hooks?: { onReady?: () => void },
+        ): () => void {
           this.listener = onInvalidate;
           hooks?.onReady?.();
           return () => {
@@ -600,7 +790,12 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       }
 
       const adapter = new PushAdapter();
-      const engine = new Interocitor(adapter, { batchWindowMs: 0, remotePath: '/MeshBurst', pollInterval: 600_000, deviceId: 'dev_burst' });
+      const engine = new Interocitor(adapter, {
+        batchWindowMs: 0,
+        remotePath: '/MeshBurst',
+        pollInterval: 600_000,
+        deviceId: 'dev_burst',
+      });
       let activeSyncs = 0;
       let maxConcurrentSyncs = 0;
       let invalidationMessages = 0;
@@ -627,7 +822,9 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       adapter.push('/MeshBurst/changes/head.json');
       adapter.push('/MeshBurst/changes/head.json');
       adapter.push('/MeshBurst/changes/head.json');
-      await new Promise(resolve => { setTimeout(resolve, 100); });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 100);
+      });
       await engine.disconnect();
 
       return {
@@ -649,7 +846,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
 
       const adapter = new MemoryAdapter();
       const engine = new Interocitor(adapter, {
-        batchWindowMs: 0, remotePath: '/MeshFlush',
+        batchWindowMs: 0,
+        remotePath: '/MeshFlush',
         pollInterval: 600_000,
         flushThreshold: 999,
         flushDebounce: 60_000,
@@ -667,8 +865,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       const files = Object.keys(dump);
       return {
         files,
-        headPath: files.find(path => path.endsWith('/changes/head.json')),
-        changeFileCount: files.filter(path => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(path)).length,
+        headPath: files.find((path) => path.endsWith('/changes/head.json')),
+        changeFileCount: files.filter((path) => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(path)).length,
       };
     });
 
@@ -683,7 +881,13 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
 
       const shared = new MemoryAdapter();
 
-      const engineA = new Interocitor(shared, { batchWindowMs: 0, remotePath: '/MeshSync', pollInterval: 600_000, flushThreshold: 1, deviceId: 'dev_a' });
+      const engineA = new Interocitor(shared, {
+        batchWindowMs: 0,
+        remotePath: '/MeshSync',
+        pollInterval: 600_000,
+        flushThreshold: 1,
+        deviceId: 'dev_a',
+      });
       await engineA.init();
       await engineA.connect();
       await engineA.put('tasks', 'r1', { title: 'from a' });
@@ -697,7 +901,12 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         req.onblocked = () => resolve();
       });
 
-      const engineB = new Interocitor(shared, { batchWindowMs: 0, remotePath: '/MeshSync', pollInterval: 600_000, deviceId: 'dev_b' });
+      const engineB = new Interocitor(shared, {
+        batchWindowMs: 0,
+        remotePath: '/MeshSync',
+        pollInterval: 600_000,
+        deviceId: 'dev_b',
+      });
       await engineB.init();
       await engineB.connect();
       const row = await engineB.loadRow({ table: 'tasks', rowId: 'r1' });
@@ -711,8 +920,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
 
   test('pull discovers an older queued change flushed behind the current head', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { Interocitor, MemoryLocalStore, readColumn } =
-        await import('/packages/core/dist/index.js');
+      const { Interocitor, MemoryLocalStore, readColumn } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
 
       const shared = new MemoryAdapter();
@@ -820,7 +1028,11 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await engine.put('tasks', 'durable', { title: 'never lost' });
 
       let error = '';
-      try { await engine.flush(); } catch (cause) { error = String(cause); }
+      try {
+        await engine.flush();
+      } catch (cause) {
+        error = String(cause);
+      }
       const afterFailure = (await local.peekOutbox()).map((entry) => entry.id);
       await engine.flush();
       const afterRetry = (await local.peekOutbox()).map((entry) => entry.id);
@@ -855,8 +1067,12 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
 
       let releaseBatch!: () => void;
       let firstWriteDone!: () => void;
-      const firstWrite = new Promise<void>((resolve) => { firstWriteDone = resolve; });
-      const batchGate = new Promise<void>((resolve) => { releaseBatch = resolve; });
+      const firstWrite = new Promise<void>((resolve) => {
+        firstWriteDone = resolve;
+      });
+      const batchGate = new Promise<void>((resolve) => {
+        releaseBatch = resolve;
+      });
       const batch = engine.batch(async () => {
         await engine.put('tasks', 'first', { title: 'first' });
         firstWriteDone();
@@ -866,7 +1082,9 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await firstWrite;
 
       let compactCompleted = false;
-      const compact = engine.compact().then(() => { compactCompleted = true; });
+      const compact = engine.compact().then(() => {
+        compactCompleted = true;
+      });
       await Promise.resolve();
       const completedBeforeBatch = compactCompleted;
       releaseBatch();
@@ -888,7 +1106,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result.completedBeforeBatch).toBe(false);
     expect(result.rowIds).toEqual(['first', 'second']);
     expect(result.coveredChangeFiles).toHaveLength(1);
-    expect(result.remoteChanges).toHaveLength(1);
+    expect(result.remoteChanges).toHaveLength(0);
   });
 
   test('compaction never deletes a late file that the snapshot did not observe', async ({ page }) => {
@@ -989,7 +1207,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result.coveredChangeFiles).not.toContain(result.lateFileName);
   });
 
-  test('rehydrate does not replay a snapshot-covered retained file', async ({ page }) => {
+  test('rehydrate does not replay a snapshot-covered file when cleanup fails', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { Interocitor, MemoryLocalStore, readColumn } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
@@ -1053,7 +1271,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result.title).toBe('snapshot value');
   });
 
-  test('peer compaction retains immutable history', async ({ page }) => {
+  test('manual peer compaction removes covered immutable history', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { Interocitor, MemoryLocalStore } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
@@ -1089,7 +1307,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       };
     });
 
-    expect(result.changeFileCount).toBe(1);
+    expect(result.changeFileCount).toBe(0);
     expect(result.snapshotPath).toContain('/mainline/snapshot-');
     expect(result.autoSkipReasons).toContain('peer-mode');
   });
@@ -1101,7 +1319,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
 
       const adapter = new MemoryAdapter();
       const engine = new Interocitor(adapter, {
-        batchWindowMs: 0, remotePath: '/MeshWhere',
+        batchWindowMs: 0,
+        remotePath: '/MeshWhere',
         pollInterval: 600_000,
         deviceId: 'dev_where',
         schema: {
@@ -1179,11 +1398,26 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         afterOnly: true,
       } as any);
 
-      const above = await engine.table('cookedMeals').where('date').above('2026-05-01' as any);
-      const aboveOrEqual = await engine.table('cookedMeals').where('date').aboveOrEqual('2026-05-02' as any);
-      const below = await engine.table('cookedMeals').where('date').below('2026-05-03' as any);
-      const belowOrEqual = await engine.table('cookedMeals').where('date').belowOrEqual('2026-05-02' as any);
-      const between = await engine.table('cookedMeals').where('date').between('2026-05-01' as any, '2026-05-03' as any);
+      const above = await engine
+        .table('cookedMeals')
+        .where('date')
+        .above('2026-05-01' as any);
+      const aboveOrEqual = await engine
+        .table('cookedMeals')
+        .where('date')
+        .aboveOrEqual('2026-05-02' as any);
+      const below = await engine
+        .table('cookedMeals')
+        .where('date')
+        .below('2026-05-03' as any);
+      const belowOrEqual = await engine
+        .table('cookedMeals')
+        .where('date')
+        .belowOrEqual('2026-05-02' as any);
+      const between = await engine
+        .table('cookedMeals')
+        .where('date')
+        .between('2026-05-01' as any, '2026-05-03' as any);
       const startsWith = await engine.table('cookedMeals').where('date').startsWith('2026-05');
 
       await engine.disconnect();
@@ -1276,8 +1510,14 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         slot: 'lunch',
       } as any);
 
-      const equals = await engine.table('cookedMeals').where('date').equals('2026-05-02' as any);
-      const anyOf = await engine.table('cookedMeals').where('date').anyOf(['2026-05-02', '2026-05-03'] as any);
+      const equals = await engine
+        .table('cookedMeals')
+        .where('date')
+        .equals('2026-05-02' as any);
+      const anyOf = await engine
+        .table('cookedMeals')
+        .where('date')
+        .anyOf(['2026-05-02', '2026-05-03'] as any);
 
       await engine.disconnect();
 
@@ -1305,7 +1545,9 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       async function hashOf(obj: unknown): Promise<string> {
         const json = JSON.stringify(obj);
         const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(json));
-        const hex = Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, '0')).join('');
+        const hex = Array.from(new Uint8Array(digest))
+          .map((byte) => byte.toString(16).padStart(2, '0'))
+          .join('');
         return `sha256:${hex}`;
       }
       const { Interocitor } = await import('/packages/core/dist/index.js');
@@ -1313,7 +1555,6 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
 
       const adapter = new MemoryAdapter();
       const now = new Date().toISOString();
-
 
       const globalPayload = {
         generation: 1,
@@ -1337,7 +1578,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await adapter.writeFile('/Bad/manifest.json', JSON.stringify({ currentGeneration: 1, file: 'manifest-1.json' }));
 
       const engine = new Interocitor(adapter, {
-        batchWindowMs: 0, remotePath: '/Bad',
+        batchWindowMs: 0,
+        remotePath: '/Bad',
         pollInterval: 600_000,
         serverId: 'server_relay_1',
         deviceId: 'dev_bad',
@@ -1366,7 +1608,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       const passphrase = await keyToPassphrase(key);
       const adapter = new MemoryAdapter();
       const engine = new Interocitor(adapter, {
-        batchWindowMs: 0, remotePath: '/MeshEnc',
+        batchWindowMs: 0,
+        remotePath: '/MeshEnc',
         pollInterval: 600_000,
         flushThreshold: 1,
         deviceId: 'dev_enc',
@@ -1416,7 +1659,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       const adapter = new MemoryAdapter();
 
       const engine = new Interocitor(adapter, {
-        batchWindowMs: 0, remotePath: '/MeshSnapshotFP',
+        batchWindowMs: 0,
+        remotePath: '/MeshSnapshotFP',
         dbName: 'mesh-snapshot-fp-db',
         pollInterval: 600_000,
         flushThreshold: 1,
@@ -1435,7 +1679,13 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       const dump = adapter.dump();
       const payload = Object.entries(dump).find(([path]) => path.includes('/mainline/snapshot-1-'));
       if (!payload) {
-        return { ciphertext: '', meshId: null, kind: null, snapshotMeshId: null, leakedPlaintext: true };
+        return {
+          ciphertext: '',
+          meshId: null,
+          kind: null,
+          snapshotMeshId: null,
+          leakedPlaintext: true,
+        };
       }
 
       const ciphertext = payload[1];
@@ -1466,7 +1716,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       const passphrase = await keyToPassphrase(key);
 
       const source = new Interocitor(adapter, {
-        batchWindowMs: 0, remotePath: '/MeshSnapshotSource',
+        batchWindowMs: 0,
+        remotePath: '/MeshSnapshotSource',
         dbName: 'mesh-snapshot-source-db',
         pollInterval: 600_000,
         flushThreshold: 1,
@@ -1481,7 +1732,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await source.disconnect();
 
       const targetSeed = new Interocitor(adapter, {
-        batchWindowMs: 0, remotePath: '/MeshSnapshotTarget',
+        batchWindowMs: 0,
+        remotePath: '/MeshSnapshotTarget',
         dbName: 'mesh-snapshot-target-seed-db',
         pollInterval: 600_000,
         flushThreshold: 1,
@@ -1509,7 +1761,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       });
 
       const target = new Interocitor(adapter, {
-        batchWindowMs: 0, remotePath: '/MeshSnapshotTarget',
+        batchWindowMs: 0,
+        remotePath: '/MeshSnapshotTarget',
         dbName: 'mesh-snapshot-target-reader-db',
         pollInterval: 600_000,
         deviceId: 'dev_snapshot_target_reader',
@@ -1565,7 +1818,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       const passphrase = await keyToPassphrase(key);
 
       const source = new Interocitor(adapter, {
-        batchWindowMs: 0, remotePath: '/MeshSource',
+        batchWindowMs: 0,
+        remotePath: '/MeshSource',
         dbName: 'mesh-source-db',
         pollInterval: 600_000,
         flushThreshold: 999,
@@ -1580,7 +1834,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await source.disconnect();
 
       const targetSeed = new Interocitor(adapter, {
-        batchWindowMs: 0, remotePath: '/MeshTarget',
+        batchWindowMs: 0,
+        remotePath: '/MeshTarget',
         dbName: 'mesh-target-seed-db',
         pollInterval: 600_000,
         deviceId: 'dev_target_seed',
@@ -1597,7 +1852,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await adapter.writeFile(poisonedPath, sourceChange[1]);
 
       const target = new Interocitor(adapter, {
-        batchWindowMs: 0, remotePath: '/MeshTarget',
+        batchWindowMs: 0,
+        remotePath: '/MeshTarget',
         dbName: 'mesh-target-reader-db',
         pollInterval: 600_000,
         deviceId: 'dev_target_reader',
@@ -1681,7 +1937,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       });
 
       const reader = new Interocitor(remote, {
-        batchWindowMs: 0, remotePath: '/MeshLateAttach',
+        batchWindowMs: 0,
+        remotePath: '/MeshLateAttach',
         pollInterval: 600_000,
         deviceId: 'dev_late_reader',
       });
@@ -1695,7 +1952,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         beforeSync: beforeSync ? readColumn(beforeSync, 'title') : null,
         connectError,
         synced: synced ? readColumn(synced, 'title') : null,
-        changeFileCount: Object.keys(dump).filter(path => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(path)).length,
+        changeFileCount: Object.keys(dump).filter((path) => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(path)).length,
       };
     });
 
@@ -1714,7 +1971,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       const remoteB = new MemoryAdapter();
 
       const engine = new Interocitor(remoteA, {
-        batchWindowMs: 0, remotePath: '/MeshSwap',
+        batchWindowMs: 0,
+        remotePath: '/MeshSwap',
         pollInterval: 600_000,
         flushDebounce: 5,
         flushThreshold: 1,
@@ -1726,7 +1984,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await engine.flush();
 
       const peer = new Interocitor(remoteA, {
-        batchWindowMs: 0, remotePath: '/MeshSwap',
+        batchWindowMs: 0,
+        remotePath: '/MeshSwap',
         pollInterval: 600_000,
         flushDebounce: 5,
         flushThreshold: 1,
@@ -1752,7 +2011,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       });
 
       const reader = new Interocitor(remoteB, {
-        batchWindowMs: 0, remotePath: '/MeshSwap',
+        batchWindowMs: 0,
+        remotePath: '/MeshSwap',
         pollInterval: 600_000,
         deviceId: 'dev_b_reader',
       });
@@ -1770,8 +2030,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         localTitle: localRow ? readColumn(localRow, 'title') : null,
         peerTitle: peerRow ? readColumn(peerRow, 'title') : null,
         switchedTitle: switchedRow ? readColumn(switchedRow, 'title') : null,
-        remoteAHasSwitchWrite: Object.values(dumpA).some(value => value.includes('after switch')),
-        remoteBChangeFileCount: Object.keys(dumpB).filter(path => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(path)).length,
+        remoteAHasSwitchWrite: Object.values(dumpA).some((value) => value.includes('after switch')),
+        remoteBChangeFileCount: Object.keys(dumpB).filter((path) => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(path)).length,
       };
     });
 
@@ -1814,7 +2074,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await clientOne.setRemoteStorage(null);
 
       const clientTwo = new Interocitor(adapterA, {
-        batchWindowMs: 0, remotePath: '/MeshRoundTrip',
+        batchWindowMs: 0,
+        remotePath: '/MeshRoundTrip',
         dbName: 'mesh-roundtrip-client-two',
         pollInterval: 600_000,
         flushDebounce: 5,
@@ -1843,20 +2104,23 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await clientTwo.disconnect();
       await clientOne.disconnect();
 
-      const titles = (rows: any[]) => rows
-        .map((row) => readColumn(row, 'title'))
-        .filter(Boolean)
-        .sort();
+      const titles = (rows: any[]) =>
+        rows
+          .map((row) => readColumn(row, 'title'))
+          .filter(Boolean)
+          .sort();
 
       return {
         offlineTitle: offlineRow ? readColumn(offlineRow, 'title') : null,
         clientOneTitles: titles(clientOneRows),
         clientTwoTitles: titles(clientTwoRows),
-        adapterBHasSeed: Object.values(dumpBAfterAttach).some(value => value.includes('seed offline')),
-        adapterAHasMergedState: Object.values(dumpA).some(value => value.includes('from old adapter'))
-          && Object.values(dumpA).some(value => value.includes('from first while detached')),
-        adapterBStayedDetached: !Object.values(dumpBFinal).some(value => value.includes('from old adapter'))
-          && !Object.values(dumpBFinal).some(value => value.includes('from first while detached')),
+        adapterBHasSeed: Object.values(dumpBAfterAttach).some((value) => value.includes('seed offline')),
+        adapterAHasMergedState:
+          Object.values(dumpA).some((value) => value.includes('from old adapter')) &&
+          Object.values(dumpA).some((value) => value.includes('from first while detached')),
+        adapterBStayedDetached:
+          !Object.values(dumpBFinal).some((value) => value.includes('from old adapter')) &&
+          !Object.values(dumpBFinal).some((value) => value.includes('from first while detached')),
       };
     });
 
@@ -1876,7 +2140,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       const shared = new MemoryAdapter();
 
       const serverEngine = new Interocitor(shared, {
-        batchWindowMs: 0, remotePath: '/MeshCompact',
+        batchWindowMs: 0,
+        remotePath: '/MeshCompact',
         pollInterval: 600_000,
         flushThreshold: 1,
         deviceId: 'dev_compactor',
@@ -1896,7 +2161,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       });
 
       const clientEngine = new Interocitor(shared, {
-        batchWindowMs: 0, remotePath: '/MeshCompact',
+        batchWindowMs: 0,
+        remotePath: '/MeshCompact',
         pollInterval: 600_000,
         deviceId: 'dev_client',
       });
@@ -1908,7 +2174,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
 
       return {
         text: row ? readColumn(row, 'text') : null,
-        hasSnapshot: Object.keys(dump).some(path => path.includes('/mainline/snapshot-1-')),
+        hasSnapshot: Object.keys(dump).some((path) => path.includes('/mainline/snapshot-1-')),
       };
     });
 
@@ -1951,7 +2217,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
 
       const adapter = new MemoryAdapter();
       const engine = new Interocitor(adapter, {
-        batchWindowMs: 0, dbName: 'lazy-config-db',
+        batchWindowMs: 0,
+        dbName: 'lazy-config-db',
         appName: 'Test App',
         encrypted: false,
         logLevel: 'debug',
@@ -1988,7 +2255,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       const adapter = new MemoryAdapter();
       let calls = 0;
       const engine = new Interocitor(adapter, {
-        batchWindowMs: 0, dbName: 'resolve-initial-db',
+        batchWindowMs: 0,
+        dbName: 'resolve-initial-db',
         appName: 'Test App',
         logLevel: 'debug',
         resolveInitialState: async () => {
@@ -2108,19 +2376,21 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       });
 
       const events: string[] = [];
-      engine.on(e => { events.push(e.type); });
+      engine.on((e) => {
+        events.push(e.type);
+      });
 
       await engine.init();
       // No remote connect — warning fires on write, not connect
 
       await engine.put('tasks', 't1', { title: 'one' });
       await engine.put('tasks', 't2', { title: 'two' });
-      const beforeThird = events.filter(e => e === 'compact:warning').length;
+      const beforeThird = events.filter((e) => e === 'compact:warning').length;
       await engine.put('tasks', 't3', { title: 'three' });
-      const afterThird = events.filter(e => e === 'compact:warning').length;
+      const afterThird = events.filter((e) => e === 'compact:warning').length;
       // Warning fires exactly once even with more writes
       await engine.put('tasks', 't4', { title: 'four' });
-      const afterFourth = events.filter(e => e === 'compact:warning').length;
+      const afterFourth = events.filter((e) => e === 'compact:warning').length;
 
       await engine.disconnect();
       return { beforeThird, afterThird, afterFourth };
@@ -2152,7 +2422,9 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       });
 
       const skipEvents: any[] = [];
-      engine.on(e => { if (e.type === 'compact:auto:skip') skipEvents.push(e); });
+      engine.on((e) => {
+        if (e.type === 'compact:auto:skip') skipEvents.push(e);
+      });
 
       await engine.init();
       // Do NOT connect — auto-compact should skip with not-connected
@@ -2160,10 +2432,12 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await engine.put('tasks', 't1', { title: 'one' });
       await engine.put('tasks', 't2', { title: 'two' });
       // flush:threshold triggers doFlush which triggers maybeAutoCompact
-      await new Promise(resolve => { setTimeout(resolve, 100); });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 100);
+      });
 
       await engine.disconnect();
-      return { skipReasons: skipEvents.map(e => e.reason) };
+      return { skipReasons: skipEvents.map((e) => e.reason) };
     });
 
     expect(result.skipReasons).toContain('not-connected');
@@ -2176,7 +2450,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
 
       const adapter = new MemoryAdapter();
       const engine = new Interocitor(adapter, {
-        batchWindowMs: 0, remotePath: '/DisabledMesh',
+        batchWindowMs: 0,
+        remotePath: '/DisabledMesh',
         dbName: 'disabled-mesh-db',
         encrypted: false,
         pollInterval: 600_000,
@@ -2190,7 +2465,9 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       });
 
       const skipEvents: any[] = [];
-      engine.on(e => { if (e.type === 'compact:auto:skip') skipEvents.push(e); });
+      engine.on((e) => {
+        if (e.type === 'compact:auto:skip') skipEvents.push(e);
+      });
 
       await engine.init();
       await engine.connect();
@@ -2199,7 +2476,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await engine.flush();
 
       await engine.disconnect();
-      return { skipReasons: skipEvents.map(e => e.reason) };
+      return { skipReasons: skipEvents.map((e) => e.reason) };
     });
 
     expect(result.skipReasons).toContain('disabled');
@@ -2212,7 +2489,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
 
       const adapter = new MemoryAdapter();
       const engine = new Interocitor(adapter, {
-        batchWindowMs: 0, remotePath: '/ResetWarnMesh',
+        batchWindowMs: 0,
+        remotePath: '/ResetWarnMesh',
         dbName: 'reset-warn-db',
         encrypted: false,
         pollInterval: 600_000,
@@ -2224,7 +2502,9 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       });
 
       const warnings: number[] = [];
-      engine.on(e => { if (e.type === 'compact:warning') warnings.push(Date.now()); });
+      engine.on((e) => {
+        if (e.type === 'compact:warning') warnings.push(Date.now());
+      });
 
       await engine.init();
       await engine.connect();
@@ -2254,8 +2534,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     // Phase 1: clientA writes 10 todos, flushes → 10 change files on remote
     // Phase 2: clientB pulls, sees 10 rows
     // Phase 3: clientA writes 20 more todos, flushes → 30 change files on remote
-    // Phase 4: clientA checkpoints → 1 snapshot; peer mode retains immutable files
-    // Phase 5: fresh clientC restores exact snapshot receipts, sees all 30 rows, and does not replay files
+    // Phase 4: clientA checkpoints → 1 snapshot and removes its covered change files
+    // Phase 5: fresh clientC restores the snapshot and sees all 30 rows
     const result = await page.evaluate(async () => {
       const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
@@ -2265,25 +2545,32 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
 
       // helper: count change files (not head, not snapshot, not manifest)
       const countChangeFiles = (dump: Record<string, string>) =>
-        Object.keys(dump).filter(p => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p)).length;
+        Object.keys(dump).filter((p) => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p)).length;
 
       // helper: count snapshot files
       const countSnapshotFiles = (dump: Record<string, string>) =>
-        Object.keys(dump).filter(p => p.includes('/mainline/snapshot-')).length;
+        Object.keys(dump).filter((p) => p.includes('/mainline/snapshot-')).length;
 
       // helper: clear IDB between device simulations
-      const clearIDB = (name: string) => new Promise<void>(resolve => {
-        const req = indexedDB.deleteDatabase(name);
-        req.onsuccess = () => resolve();
-        req.onerror = () => resolve();
-        req.onblocked = () => resolve();
-      });
+      const clearIDB = (name: string) =>
+        new Promise<void>((resolve) => {
+          const req = indexedDB.deleteDatabase(name);
+          req.onsuccess = () => resolve();
+          req.onerror = () => resolve();
+          req.onblocked = () => resolve();
+        });
 
       // ── Phase 1: clientA writes 10 todos ──────────────────────────────
       const engineA = new Interocitor(shared, {
-        batchWindowMs: 0, remotePath: REMOTE, dbName: 'phase-a', encrypted: false,
-        pollInterval: 600_000, flushThreshold: 9999, flushDebounce: 60_000,
-        autoCompact: false, deviceId: 'dev_a',
+        batchWindowMs: 0,
+        remotePath: REMOTE,
+        dbName: 'phase-a',
+        encrypted: false,
+        pollInterval: 600_000,
+        flushThreshold: 9999,
+        flushDebounce: 60_000,
+        autoCompact: false,
+        deviceId: 'dev_a',
       });
       await engineA.init();
       await engineA.connect();
@@ -2297,8 +2584,13 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       // ── Phase 2: clientB pulls, sees 10 rows ─────────────────────────
       await clearIDB('phase-b');
       const engineB = new Interocitor(shared, {
-        batchWindowMs: 0, remotePath: REMOTE, dbName: 'phase-b', encrypted: false,
-        pollInterval: 600_000, autoCompact: false, deviceId: 'dev_b',
+        batchWindowMs: 0,
+        remotePath: REMOTE,
+        dbName: 'phase-b',
+        encrypted: false,
+        pollInterval: 600_000,
+        autoCompact: false,
+        deviceId: 'dev_b',
       });
       await engineB.init();
       await engineB.connect();
@@ -2307,9 +2599,15 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
 
       // ── Phase 3: clientA writes 20 more todos ────────────────────────
       const engineA2 = new Interocitor(shared, {
-        batchWindowMs: 0, remotePath: REMOTE, dbName: 'phase-a', encrypted: false,
-        pollInterval: 600_000, flushThreshold: 9999, flushDebounce: 60_000,
-        autoCompact: false, deviceId: 'dev_a',
+        batchWindowMs: 0,
+        remotePath: REMOTE,
+        dbName: 'phase-a',
+        encrypted: false,
+        pollInterval: 600_000,
+        flushThreshold: 9999,
+        flushDebounce: 60_000,
+        autoCompact: false,
+        deviceId: 'dev_a',
       });
       await engineA2.init();
       await engineA2.connect();
@@ -2329,8 +2627,13 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       // ── Phase 5: fresh clientC reads snapshot, sees all 30 rows ──────
       await clearIDB('phase-c');
       const engineC = new Interocitor(shared, {
-        batchWindowMs: 0, remotePath: REMOTE, dbName: 'phase-c', encrypted: false,
-        pollInterval: 600_000, autoCompact: false, deviceId: 'dev_c',
+        batchWindowMs: 0,
+        remotePath: REMOTE,
+        dbName: 'phase-c',
+        encrypted: false,
+        pollInterval: 600_000,
+        autoCompact: false,
+        deviceId: 'dev_c',
       });
       await engineC.init();
       await engineC.connect();
@@ -2344,7 +2647,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         rowsAfterPhase2, // expect 10
         changeFilesAfterPhase3, // expect 30
         snapshotsBeforeCompact, // expect 0
-        changeFilesAfterCompact, // peer mode retains all 30 immutable files
+        changeFilesAfterCompact, // covered files were folded into mainline
         snapshotsAfterCompact, // expect 1
         rowsAfterPhase5, // expect 30
         firstRowTitle: firstRow ? readColumn(firstRow, 'title') : null,
@@ -2356,7 +2659,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result.rowsAfterPhase2).toBe(10);
     expect(result.changeFilesAfterPhase3).toBe(30);
     expect(result.snapshotsBeforeCompact).toBe(0);
-    expect(result.changeFilesAfterCompact).toBe(30);
+    expect(result.changeFilesAfterCompact).toBe(0);
     expect(result.snapshotsAfterCompact).toBe(1);
     expect(result.rowsAfterPhase5).toBe(30);
     expect(result.firstRowTitle).toBe('todo 0');
@@ -2391,7 +2694,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       });
 
       const events: any[] = [];
-      engine.on(e => {
+      engine.on((e) => {
         if (e.type === 'compact:delayed:scheduled' || e.type === 'compact:delayed:check' || e.type === 'compact:auto:skip') {
           events.push(e);
         }
@@ -2401,13 +2704,15 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await engine.connect();
       await engine.put('tasks', 't1', { title: 'one' });
       await engine.flush();
-      await new Promise(resolve => { setTimeout(resolve, 200); });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 200);
+      });
       await engine.disconnect();
 
       return {
-        scheduledCheck: events.some(e => e.type === 'compact:delayed:scheduled' && e.phase === 'check'),
-        check: events.find(e => e.type === 'compact:delayed:check'),
-        skipBelowThreshold: events.find(e => e.type === 'compact:auto:skip' && e.reason === 'below-remote-threshold'),
+        scheduledCheck: events.some((e) => e.type === 'compact:delayed:scheduled' && e.phase === 'check'),
+        check: events.find((e) => e.type === 'compact:delayed:check'),
+        skipBelowThreshold: events.find((e) => e.type === 'compact:auto:skip' && e.reason === 'below-remote-threshold'),
       };
     });
 
@@ -2444,9 +2749,13 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       });
 
       const events: any[] = [];
-      engine.on(e => {
-        if (e.type === 'compact:delayed:scheduled' || e.type === 'compact:delayed:check'
-            || e.type === 'compact:auto:start' || e.type === 'compact:auto:complete') {
+      engine.on((e) => {
+        if (
+          e.type === 'compact:delayed:scheduled' ||
+          e.type === 'compact:delayed:check' ||
+          e.type === 'compact:auto:start' ||
+          e.type === 'compact:auto:complete'
+        ) {
           events.push(e);
         }
       });
@@ -2459,14 +2768,16 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await engine.put('tasks', 't3', { title: 'three' });
       await engine.flush();
       // Wait for full delayed pipeline: check + run
-      await new Promise(resolve => { setTimeout(resolve, 250); });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 250);
+      });
       await engine.disconnect();
 
       return {
-        check: events.find(e => e.type === 'compact:delayed:check'),
-        scheduledCompact: events.find(e => e.type === 'compact:delayed:scheduled' && e.phase === 'compact'),
-        start: events.find(e => e.type === 'compact:auto:start' && e.trigger === 'delayed'),
-        complete: events.find(e => e.type === 'compact:auto:complete' && e.trigger === 'delayed'),
+        check: events.find((e) => e.type === 'compact:delayed:check'),
+        scheduledCompact: events.find((e) => e.type === 'compact:delayed:scheduled' && e.phase === 'compact'),
+        start: events.find((e) => e.type === 'compact:auto:start' && e.trigger === 'delayed'),
+        complete: events.find((e) => e.type === 'compact:auto:complete' && e.trigger === 'delayed'),
       };
     });
 
@@ -2596,8 +2907,9 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       const offline = await restartedOldClient.loadRow({ table: 'tasks', rowId: 'offline' });
       const canonical = await restartedOldClient.loadRow({ table: 'tasks', rowId: 'canonical' });
       const outboxSize = await oldLocal.outboxSize();
-      const retainedChangeFileCount = Object.keys(adapter.dump()).filter((path) =>
-        path.includes('/changes/') && path.includes('-chg_')).length;
+      const retainedChangeFileCount = Object.keys(adapter.dump()).filter(
+        (path) => path.includes('/changes/') && path.includes('-chg_'),
+      ).length;
 
       return {
         offline: offline ? readColumn(offline, 'title') : null,
@@ -2618,7 +2930,363 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result.offline).toBe('durable offline write');
     expect(result.canonical).toBe('snapshot state');
     expect(result.outboxSize).toBe(0);
-    expect(result.retainedChangeFileCount).toBe(2);
+    expect(result.retainedChangeFileCount).toBe(1);
+  });
+
+  test('expired offline client quarantines its outbox before restoring the snapshot', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, MemoryLocalStore, readColumn } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      const adapter = new MemoryAdapter();
+      const remotePath = '/ExpiredOfflineClientMesh';
+      const oldLocal = new MemoryLocalStore();
+      const common = {
+        remotePath,
+        keySource: null,
+        pollInterval: 600_000,
+        flushThreshold: 9999,
+        flushDebounce: 600_000,
+        autoCompact: false,
+        batchWindowMs: 0,
+        serverId: 'dev_retention_compactor',
+        serverManaged: true,
+        retention: {
+          compactAfterMs: 7 * 24 * 60 * 60 * 1_000,
+          maxOfflineDurationMs: 30 * 24 * 60 * 60 * 1_000,
+        },
+      } as const;
+
+      const oldClient = new Interocitor(adapter, {
+        ...common,
+        dbName: 'expired-offline-client-db',
+        deviceId: 'dev_expired_offline',
+        localStore: oldLocal,
+      });
+      await oldClient.connect();
+      await oldClient.setRemoteStorage(null);
+      await oldClient.put('tasks', 'expired-local', { title: 'must stay local' });
+      await oldLocal.setMeta('lastSuccessfulSyncAt', new Date(Date.now() - 31 * 24 * 60 * 60 * 1_000).toISOString());
+
+      const compactor = new Interocitor(adapter, {
+        ...common,
+        dbName: 'expired-offline-compactor-db',
+        deviceId: 'dev_retention_compactor',
+        localStore: new MemoryLocalStore(),
+      });
+      await compactor.connect();
+      await compactor.put('tasks', 'canonical', { title: 'snapshot state' });
+      await compactor.flush();
+      await compactor.compact();
+
+      const events: string[] = [];
+      const restarted = new Interocitor(adapter, {
+        ...common,
+        dbName: 'expired-offline-client-db',
+        deviceId: 'dev_expired_offline',
+        localStore: oldLocal,
+      });
+      restarted.on((event) => events.push(event.type));
+      await restarted.connect();
+
+      const expiredLocal = await restarted.loadRow({ table: 'tasks', rowId: 'expired-local' });
+      const canonical = await restarted.loadRow({ table: 'tasks', rowId: 'canonical' });
+      const quarantine = await restarted.getQuarantinedOfflineChanges();
+      const remoteChangeFiles = Object.keys(adapter.dump()).filter((path) => path.includes('/changes/') && path.includes('-chg_'));
+      return {
+        expiredLocal: expiredLocal ? readColumn(expiredLocal, 'title') : null,
+        canonical: canonical ? readColumn(canonical, 'title') : null,
+        quarantineCount: quarantine?.entries.length ?? 0,
+        quarantinedTitle: quarantine?.entries[0]?.ops[0]?.type === 'upsert' ? quarantine.entries[0].ops[0].columns.title?.value : null,
+        outboxSize: await oldLocal.outboxSize(),
+        remoteChangeFileCount: remoteChangeFiles.length,
+        emittedExpiry: events.includes('offline:retention-expired'),
+      };
+    });
+
+    expect(result.expiredLocal).toBeNull();
+    expect(result.canonical).toBe('snapshot state');
+    expect(result.quarantineCount).toBe(1);
+    expect(result.quarantinedTitle).toBe('must stay local');
+    expect(result.outboxSize).toBe(0);
+    expect(result.remoteChangeFileCount).toBe(0);
+    expect(result.emittedExpiry).toBe(true);
+  });
+
+  test('direct flush obeys a retention policy tightened while the client was offline', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, MemoryLocalStore } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      const adapter = new MemoryAdapter();
+      const remotePath = '/TightenedRetentionMesh';
+      const serverId = 'retention_policy_server';
+      const oldLocal = new MemoryLocalStore();
+      const oldClient = new Interocitor(adapter, {
+        remotePath,
+        dbName: 'tightened-retention-old-client',
+        localStore: oldLocal,
+        keySource: null,
+        deviceId: 'dev_tightened_retention_old',
+        serverId,
+        serverManaged: true,
+        batchWindowMs: 0,
+        flushDebounce: 60_000,
+        retention: {
+          compactAfterMs: 7 * 24 * 60 * 60_000,
+          maxOfflineDurationMs: 30 * 24 * 60 * 60_000,
+        },
+      });
+      await oldClient.connect();
+      await oldClient.disconnect();
+      await oldLocal.setMeta('lastSuccessfulSyncAt', new Date(Date.now() - 2 * 24 * 60 * 60_000).toISOString());
+      await oldClient.put('tasks', 'stale-direct-flush', { title: 'must not upload' });
+
+      const policyWriter = new Interocitor(adapter, {
+        remotePath,
+        dbName: 'tightened-retention-policy-writer',
+        localStore: new MemoryLocalStore(),
+        keySource: null,
+        deviceId: serverId,
+        serverId,
+        serverManaged: true,
+        batchWindowMs: 0,
+        retention: {
+          compactAfterMs: 7 * 24 * 60 * 60_000,
+          maxOfflineDurationMs: 24 * 60 * 60_000,
+        },
+      });
+      await policyWriter.connect();
+      await policyWriter.compact();
+      await policyWriter.disconnect();
+
+      await oldClient.flush();
+      const quarantine = await oldClient.getQuarantinedOfflineChanges();
+      const remoteChangeFileCount = Object.keys(adapter.dump()).filter(
+        (path) => path.includes('/changes/') && path.includes('-chg_'),
+      ).length;
+      return {
+        manifestPolicy: oldClient.getManifest()?.retention,
+        quarantinedIds: quarantine?.entries.map((entry) => entry.id) ?? [],
+        outboxSize: await oldLocal.outboxSize(),
+        remoteChangeFileCount,
+      };
+    });
+
+    expect(result.manifestPolicy?.maxOfflineDurationMs).toBe(24 * 60 * 60_000);
+    expect(result.quarantinedIds).toHaveLength(1);
+    expect(result.outboxSize).toBe(0);
+    expect(result.remoteChangeFileCount).toBe(0);
+  });
+
+  test('direct compact cannot snapshot a write expired by a tightened policy', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, MemoryLocalStore, readColumn } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      const adapter = new MemoryAdapter();
+      const remotePath = '/TightenedCompactRetentionMesh';
+      const oldLocal = new MemoryLocalStore();
+      const oldClient = new Interocitor(adapter, {
+        remotePath,
+        dbName: 'tightened-compact-old-client',
+        localStore: oldLocal,
+        keySource: null,
+        deviceId: 'dev_tightened_compact_old',
+        batchWindowMs: 0,
+        flushDebounce: 60_000,
+        retention: {
+          compactAfterMs: 7 * 24 * 60 * 60_000,
+          maxOfflineDurationMs: 30 * 24 * 60 * 60_000,
+        },
+      });
+      await oldClient.connect();
+      await oldClient.disconnect();
+      await oldLocal.setMeta('lastSuccessfulSyncAt', new Date(Date.now() - 2 * 24 * 60 * 60_000).toISOString());
+      await oldClient.put('tasks', 'expired-snapshot-row', { title: 'must not enter snapshot' });
+
+      const policyWriter = new Interocitor(adapter, {
+        remotePath,
+        dbName: 'tightened-compact-policy-writer',
+        localStore: new MemoryLocalStore(),
+        keySource: null,
+        deviceId: 'dev_tightened_compact_policy',
+        batchWindowMs: 0,
+        retention: {
+          compactAfterMs: 7 * 24 * 60 * 60_000,
+          maxOfflineDurationMs: 24 * 60 * 60_000,
+        },
+      });
+      await policyWriter.connect();
+      await policyWriter.compact();
+      await policyWriter.disconnect();
+
+      await oldClient.compact();
+      const staleLocalRow = await oldClient.loadRow({
+        table: 'tasks',
+        rowId: 'expired-snapshot-row',
+      });
+      const quarantine = await oldClient.getQuarantinedOfflineChanges();
+      const manifest = oldClient.getManifest();
+      const snapshotWire = JSON.parse(adapter.dump()[manifest?.snapshotPath ?? ''] ?? '{}');
+      const snapshotRow = snapshotWire.snapshot?.tables?.tasks?.['expired-snapshot-row'];
+      return {
+        epoch: manifest?.epoch,
+        staleLocalTitle: staleLocalRow ? readColumn(staleLocalRow, 'title') : null,
+        snapshotContainsExpiredRow: snapshotRow !== undefined,
+        quarantineCount: quarantine?.entries.length ?? 0,
+      };
+    });
+
+    expect(result.epoch).toBe(1);
+    expect(result.staleLocalTitle).toBeNull();
+    expect(result.snapshotContainsExpiredRow).toBe(false);
+    expect(result.quarantineCount).toBe(1);
+  });
+
+  test('empty flush and disconnect do not bootstrap remote state', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, MemoryLocalStore } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      const adapter = new MemoryAdapter();
+      const engine = new Interocitor(adapter, {
+        remotePath: '/EmptyFlushMesh',
+        dbName: 'empty-flush-db',
+        localStore: new MemoryLocalStore(),
+        keySource: null,
+        deviceId: 'dev_empty_flush',
+      });
+      await engine.init();
+      await engine.flush();
+      await engine.disconnect();
+      return Object.keys(adapter.dump());
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  test('finite retention compacts an old uploaded change even when churn auto-compaction is disabled', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, MemoryLocalStore } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      class OldChangeAdapter extends MemoryAdapter {
+        override async listFiles(path: string) {
+          const files = await super.listFiles(path);
+          return files.map((file) =>
+            file.name.includes('-chg_') ? { ...file, modifiedTime: new Date(Date.now() - 10_000).toISOString() } : file,
+          );
+        }
+      }
+
+      const adapter = new OldChangeAdapter();
+      const engine = new Interocitor(adapter, {
+        remotePath: '/RetentionDeadlineMesh',
+        dbName: 'retention-deadline-db',
+        localStore: new MemoryLocalStore(),
+        keySource: null,
+        deviceId: 'dev_retention_deadline',
+        serverId: 'dev_retention_deadline',
+        serverManaged: true,
+        autoCompact: false,
+        batchWindowMs: 0,
+        retention: { compactAfterMs: 1_000, maxOfflineDurationMs: 30_000 },
+      });
+
+      let resolveCompacted!: () => void;
+      const compacted = new Promise<void>((resolve) => {
+        resolveCompacted = resolve;
+      });
+      engine.on((event) => {
+        if (event.type === 'compact:retention:complete') resolveCompacted();
+      });
+      await engine.connect();
+      await engine.put('tasks', 'old-change', { title: 'fold me' });
+      await engine.flush();
+      await Promise.race([
+        compacted,
+        new Promise<void>((_, reject) => {
+          setTimeout(() => reject(new Error('retention compaction timed out')), 5_000);
+        }),
+      ]);
+
+      const changeFileCount = Object.keys(adapter.dump()).filter((path) => path.includes('/changes/') && path.includes('-chg_')).length;
+      return {
+        changeFileCount,
+        epoch: engine.getManifest()?.epoch,
+        retention: engine.getManifest()?.retention,
+      };
+    });
+
+    expect(result.changeFileCount).toBe(0);
+    expect(result.epoch).toBe(1);
+    expect(result.retention).toEqual({ compactAfterMs: 1_000, maxOfflineDurationMs: 30_000 });
+  });
+
+  test('retention cleanup failure backs off instead of publishing snapshots in a tight loop', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, MemoryLocalStore } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      class DeleteFailingAdapter extends MemoryAdapter {
+        override async listFiles(path: string) {
+          const files = await super.listFiles(path);
+          return files.map((file) =>
+            file.name.includes('-chg_') ? { ...file, modifiedTime: new Date(Date.now() - 10_000).toISOString() } : file,
+          );
+        }
+
+        override async deleteFile(path: string) {
+          if (path.includes('/changes/') && path.includes('-chg_')) {
+            throw new Error('simulated delete outage');
+          }
+          return super.deleteFile(path);
+        }
+      }
+
+      const adapter = new DeleteFailingAdapter();
+      const engine = new Interocitor(adapter, {
+        remotePath: '/RetentionDeleteFailureMesh',
+        dbName: 'retention-delete-failure-db',
+        localStore: new MemoryLocalStore(),
+        keySource: null,
+        deviceId: 'dev_retention_delete_failure',
+        serverId: 'dev_retention_delete_failure',
+        serverManaged: true,
+        autoCompact: false,
+        batchWindowMs: 0,
+        retention: { compactAfterMs: 20, maxOfflineDurationMs: 30_000 },
+      });
+
+      let resolveCompacted!: () => void;
+      const compacted = new Promise<void>((resolve) => {
+        resolveCompacted = resolve;
+      });
+      engine.on((event) => {
+        if (event.type === 'compact:retention:complete') resolveCompacted();
+      });
+      await engine.connect();
+      await engine.put('tasks', 'undeletable-change', { title: 'retry later' });
+      await engine.flush();
+      await Promise.race([
+        compacted,
+        new Promise<void>((_, reject) => {
+          setTimeout(() => reject(new Error('retention compaction timed out')), 5_000);
+        }),
+      ]);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 150);
+      });
+
+      const snapshotCount = Object.keys(adapter.dump()).filter((path) => path.includes('/mainline/snapshot-')).length;
+      const epoch = engine.getManifest()?.epoch;
+      await engine.disconnect();
+      return { snapshotCount, epoch };
+    });
+
+    expect(result.snapshotCount).toBe(1);
+    expect(result.epoch).toBe(1);
   });
 
   test('explicit rehydrate publishes a completed local mutation before replacing state', async ({ page }) => {
@@ -2649,8 +3317,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
 
       const snapshot = await engine.loadRow({ table: 'tasks', rowId: 'snapshot' });
       const pending = await engine.loadRow({ table: 'tasks', rowId: 'pending' });
-      const changeFileCount = Object.keys(adapter.dump()).filter((path) =>
-        path.includes('/changes/') && path.includes('-chg_')).length;
+      const changeFileCount = Object.keys(adapter.dump()).filter((path) => path.includes('/changes/') && path.includes('-chg_')).length;
       return {
         snapshot: snapshot ? readColumn(snapshot, 'title') : null,
         pending: pending ? readColumn(pending, 'title') : null,
@@ -2662,7 +3329,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result.snapshot).toBe('snapshot row');
     expect(result.pending).toBe('must publish first');
     expect(result.outboxSize).toBe(0);
-    expect(result.changeFileCount).toBe(2);
+    expect(result.changeFileCount).toBe(1);
   });
 
   test('put after delete starts a fresh local row incarnation', async ({ page }) => {
@@ -2709,10 +3376,12 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result.tombstoneDeletedHlc).toBeTruthy();
     expect(result.tombstonePayload).toEqual({});
     expect(result.afterDelete).toBeUndefined();
-    expect(result.afterReinsert).toEqual(expect.objectContaining({
-      _meta: expect.objectContaining({ deleted: false }),
-      payload: { title: expect.objectContaining({ value: 'new' }) },
-    }));
+    expect(result.afterReinsert).toEqual(
+      expect.objectContaining({
+        _meta: expect.objectContaining({ deleted: false }),
+        payload: { title: expect.objectContaining({ value: 'new' }) },
+      }),
+    );
     expect(result.query).toHaveLength(1);
     expect(result.query[0]).toEqual(expect.objectContaining({ title: 'new' }));
     expect(result.query[0]).not.toHaveProperty('stale');
@@ -2738,7 +3407,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await engine.init();
       await engine.connect();
 
-      const before = Object.keys(adapter.dump()).filter(p => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p)).length;
+      const before = Object.keys(adapter.dump()).filter((p) => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p)).length;
 
       await engine.batch(async () => {
         await engine.put('tasks', 'b1', { title: 'one' });
@@ -2748,7 +3417,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       });
       await engine.flush();
 
-      const after = Object.keys(adapter.dump()).filter(p => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p)).length;
+      const after = Object.keys(adapter.dump()).filter((p) => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p)).length;
       await engine.disconnect();
       return { added: after - before };
     });
@@ -2775,22 +3444,24 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
 
       await engine.init();
       await engine.connect();
-      const before = Object.keys(adapter.dump()).filter(p => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p)).length;
+      const before = Object.keys(adapter.dump()).filter((p) => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p)).length;
 
       // Three rapid writes without any awaited gap should join one batch
       await engine.put('tasks', 'i1', { title: 'one' });
       await engine.put('tasks', 'i2', { title: 'two' });
       await engine.put('tasks', 'i3', { title: 'three' });
       await engine.flush(); // forces pending batch + outbox to remote
-      const afterRapid = Object.keys(adapter.dump()).filter(p => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p)).length;
+      const afterRapid = Object.keys(adapter.dump()).filter((p) => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p)).length;
 
       // Now do two writes with a long gap between them — they should be 2 entries
       await engine.put('tasks', 'g1', { title: 'g-one' });
       await engine.flush();
-      await new Promise(resolve => { setTimeout(resolve, 100); });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 100);
+      });
       await engine.put('tasks', 'g2', { title: 'g-two' });
       await engine.flush();
-      const afterGapped = Object.keys(adapter.dump()).filter(p => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p)).length;
+      const afterGapped = Object.keys(adapter.dump()).filter((p) => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p)).length;
 
       await engine.disconnect();
       return {

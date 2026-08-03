@@ -105,7 +105,11 @@ export interface R2ObjectBody {
 
 export interface R2Bucket {
   get(key: string): Promise<R2ObjectBody | null>;
-  put(key: string, value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob, options?: { httpMetadata?: Record<string, string>; customMetadata?: Record<string, string> }): Promise<unknown>;
+  put(
+    key: string,
+    value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob,
+    options?: { httpMetadata?: Record<string, string>; customMetadata?: Record<string, string> },
+  ): Promise<unknown>;
   delete(key: string): Promise<void>;
 }
 
@@ -144,9 +148,7 @@ export interface FileUploadAuthorizationRequest {
  * Durable-file upload decision. `false` rejects with `403`; an object can
  * supply a rejection status and response reason.
  */
-export type FileUploadAuthorizationResult =
-  | boolean
-  | { allowed: boolean; reason?: string; status?: number };
+export type FileUploadAuthorizationResult = boolean | { allowed: boolean; reason?: string; status?: number };
 
 /** Information available while deciding whether a mesh address exists. */
 export interface MeshIntegrityContext {
@@ -165,10 +167,7 @@ export interface MeshIntegrityContext {
  * unchanged. If every gate returns `false`, the request receives `404`; a
  * thrown or rejected gate produces `503`.
  */
-export type MeshIntegrityGate<Env = unknown> = (
-  context: MeshIntegrityContext,
-  env: Env,
-) => boolean | Promise<boolean>;
+export type MeshIntegrityGate<Env = unknown> = (context: MeshIntegrityContext, env: Env) => boolean | Promise<boolean>;
 
 /** The access requested from a mesh route. */
 export type MeshAccess = 'read' | 'write';
@@ -211,10 +210,7 @@ export type MeshAuthorization = 'none' | 'readonly' | 'full' | 'deny';
  * Return application access for one accepted mesh request.
  * A thrown/rejected authorizer or an invalid result produces `503`.
  */
-export type MeshAuthorizer<Env = unknown> = (
-  request: MeshRequestContext,
-  env: Env,
-) => MeshAuthorization | Promise<MeshAuthorization>;
+export type MeshAuthorizer<Env = unknown> = (request: MeshRequestContext, env: Env) => MeshAuthorization | Promise<MeshAuthorization>;
 
 /** Outcome recorded after a storage operation completes. */
 export type WorkerAuditOutcome = 'ok' | 'rejected' | 'not-found';
@@ -226,7 +222,18 @@ export interface WorkerAuditEvent {
   /** ISO timestamp recorded after the storage operation. */
   at: string;
   /** Storage operation observed by the Worker. */
-  op: 'read' | 'write' | 'delete' | 'list' | 'metadata' | 'recovery-read' | 'recovery-write' | 'stored-file-read' | 'stored-file-write' | 'stored-file-delete' | 'stored-file-metadata';
+  op:
+    | 'read'
+    | 'write'
+    | 'delete'
+    | 'list'
+    | 'metadata'
+    | 'recovery-read'
+    | 'recovery-write'
+    | 'stored-file-read'
+    | 'stored-file-write'
+    | 'stored-file-delete'
+    | 'stored-file-metadata';
   /** Accepted mesh address, when the operation is mesh-scoped. */
   address?: string;
   /** Normalized object path, when applicable. */
@@ -313,7 +320,10 @@ export interface InterocitorRuntimeOptions<Env = unknown> {
    * Return `true` to allow, `false` to reject with default status, or an
    * explicit `{ allowed, status, reason }` object to control the response.
    */
-  authorizeFileUpload?: (request: FileUploadAuthorizationRequest, env: Env) => FileUploadAuthorizationResult | Promise<FileUploadAuthorizationResult>;
+  authorizeFileUpload?: (
+    request: FileUploadAuthorizationRequest,
+    env: Env,
+  ) => FileUploadAuthorizationResult | Promise<FileUploadAuthorizationResult>;
   /**
    * Awaited instrumentation for completed storage operations. Callback errors
    * are isolated from the request; callback latency is request latency.
@@ -390,13 +400,10 @@ export interface InterocitorSystemHandlerOptions<Env = unknown> {
   /** Resolve the D1 database used by system operations. */
   db: (env: Env) => D1Database;
   /** Integrity, TTL, checksum, and diagnostic settings used by system operations. */
-  runtime?: Pick<
-    InterocitorRuntimeOptions<Env>,
-    'meshIntegrityGates' | 'pathTtlHours' | 'meshSecret' | 'verbose'
-  >;
+  runtime?: Pick<InterocitorRuntimeOptions<Env>, 'meshIntegrityGates' | 'pathTtlHours' | 'meshSecret' | 'verbose'>;
 }
 
-/** Separately routed mesh-ID, compaction, metrics, and maintenance handler. */
+/** Separately routed mesh-ID, metrics, and maintenance handler. */
 export interface InterocitorSystemHandler<Env = unknown> {
   /** Base path of the system operation route. */
   systemBase: string;

@@ -233,7 +233,7 @@ behavior of `@interocitor/core`.
   increase. Cross‑device order is total but only as wall‑clocks allow.
 - **Restore via snapshot.** A device that joins late (or rehydrates after
   a long offline) loads the latest snapshot and its exact change-file receipts,
-  then applies every retained file not covered by the snapshot.
+  then applies every remaining file not covered by the snapshot.
 - **One compaction cut.** Local writes, explicit batches, pulls, flushes, and
   snapshot capture share the local-store sync lock. Compaction first publishes
   completed local work, then pulls, captures receipts and rows, and only then
@@ -448,11 +448,13 @@ On `connect()` the engine:
 1. Reads `manifest.json` from the remote.
 2. Compares stored `meshId` (from the credential store) against the live
    one. Mismatch → `MeshCredentialMismatchError`.
-3. If local epoch < remote epoch, calls `rehydrate()` to load the
-   latest snapshot.
-4. Pulls every retained change file not covered by the snapshot's exact
+3. Checks offline eligibility before uploading queued work. An expired client
+   quarantines its queue and restores remote state.
+4. If an eligible client's local epoch < remote epoch, calls `rehydrate()` to
+   load the latest snapshot after publishing its durable outbox.
+5. Pulls every remaining change file not covered by the snapshot's exact
    receipts.
-5. Starts polling.
+6. Starts polling.
 
 > **If portable key material is lost and no other device holds it, the mesh is
 > unreadable unless a recovery wrapper was created first.** Recovery phrases
@@ -875,15 +877,13 @@ manifest and poison the remote.
 
 ## Maintenance / compaction
 
-Compaction publishes a snapshot and bumps the manifest. Peer meshes retain the
-immutable change log because their adapters provide no CAS for safe destructive
-coordination. Server-managed mode publishes canonical checkpoints and enables
-automatic compaction. Immutable change files and tombstones remain retained:
-an authorized identity does not prove that only one process is running.
+Compaction publishes a snapshot, bumps the manifest, and removes the exact
+change files represented in that snapshot. Tombstones remain in the snapshot.
+Server-managed mode publishes canonical checkpoints and enables automatic
+compaction.
 
 In server-managed mode, two paths run automatically. Peer mode supports manual
-checkpoints but does not schedule automatic compaction because it retains the
-immutable history:
+compaction but does not schedule it automatically:
 
 - **Immediate sampled** — after a flush of ≥ `compactAutoThreshold`
   (default 50) ops, with probability ≈
@@ -891,6 +891,9 @@ immutable history:
 - **Delayed two‑phase** — per‑write timer (10 ± 5 min) → check that
   remote change files exceed `compactRemoteChangeThreshold` (default 2)
   → second timer (15 ± 5 min) → run.
+- **Finite retention deadline** — compact when the oldest uploaded change
+  reaches `retention.compactAfterMs` (default 7 days), even when
+  `autoCompact` disables the two churn paths.
 
 Both paths are deduped by a single in‑flight guard. You can also call
 `db.compact()` manually.
@@ -901,13 +904,19 @@ Both paths are deduped by a single in‑flight guard. You can also call
 > any button. See [Compaction](docs/compaction.md).
 
 > **Compaction is not race‑safe across devices.** The adapter contract
-> has no CAS/ETag write, so two simultaneous compactors can both
-> overwrite the manifest pointer. Mitigations: rely on probabilistic
-> avoidance for small meshes, or run with `serverManaged: true` and a
-> single authorized writer.
+> has no CAS/ETag write, so two simultaneous compactors can race the manifest
+> pointer and covered-file deletion. Run with `serverManaged: true` and one
+> active authorized writer, or otherwise serialize manual compaction.
 
-Full protocol, events, lock story, retention invariants, and tuning checklist:
+Full protocol, events, lock story, deletion invariants, and tuning checklist:
 [Compaction](docs/compaction.md).
+
+Offline publication eligibility is finite too. After
+`retention.maxOfflineDurationMs` (default 30 days), reconnect quarantines the
+device's queued operations before restoring the current snapshot. Applications
+can inspect them with `getQuarantinedOfflineChanges()` and choose whether to
+export, discard, or reapply them. Both retention durations are configurable,
+positive, and finite.
 
 ## Connected stores
 
@@ -1004,7 +1013,7 @@ db.on(event => {
     case 'remote:poisoned':           /* unrecoverable; see security-model.md */ break;
     case 'credentials:meshMismatch':  /* stored meshId != live; require explicit re-pair/recovery */ break;
     case 'compact:warning':           /* outbox is large */ break;
-    // compact:auto:start / complete / skip / error / delayed:* — see docs/compaction.md
+    // compact:auto:* / compact:retention:* / offline:retention-expired — see docs/compaction.md
   }
 });
 ```
@@ -1032,8 +1041,8 @@ A short field guide. Detailed mitigations in the linked docs.
 | App is unusable after browser local-store error | Local cache is wedged, blocked by older tab, or connection is closing | In `@interocitor/web`, use `createResilientLocalStore` / `createNamedLocalStore`; log `onLocalDegraded`; offer `resetLocalDatabaseWithDeadline` repair |
 | Local rows disappeared while joining an existing mesh | Default `joinExistingMeshPolicy: 'reset-to-remote'` cleared local rows and queued work | Use `'merge-with-remote'` only when publishing that retained work is intentional; see “Joining an existing mesh with local state” |
 | Lost portable key | No other device or previously published recovery wrapper | Restore through another device or [recovery phrase](docs/recovery.md); otherwise the encrypted mesh is unreadable |
-| Long‑offline device "lost" recent edits | Rehydrate replaced local state with the snapshot | Local writes already in the outbox survive; in‑flight uncommitted UI state does not |
-| Compaction never runs | `autoCompact: false`, no connected remote, immediate threshold not reached, or delayed path never sees remote count above its threshold | [Compaction](docs/compaction.md) — subscribe to `compact:auto:skip` |
+| Long‑offline device does not publish recent edits | Its last successful sync exceeded `retention.maxOfflineDurationMs` | Inspect `getQuarantinedOfflineChanges()`; export, discard, or reapply reviewed edits as fresh operations |
+| Compaction never runs | No continuously connected authorized managed writer, peer compaction is not externally scheduled, or the remote is poisoned | [Compaction](docs/compaction.md) — subscribe to `compact:retention:error` and `compact:auto:skip` |
 | Two compactors race | No CAS in the adapter; small probability in small meshes | Use `serverManaged: true` for large meshes |
 
 ## Tests

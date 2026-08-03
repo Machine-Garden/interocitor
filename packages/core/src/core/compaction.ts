@@ -11,15 +11,7 @@
  * Extracted from Interocitor. Not part of the public API.
  */
 
-import type {
-  StorageAdapter,
-  LocalStore,
-  Manifest,
-  ManifestPointer,
-  Snapshot,
-  Row,
-  SyncEvent,
-} from './types.ts';
+import type { StorageAdapter, LocalStore, Manifest, ManifestPointer, Snapshot, Row, SyncEvent, RetentionPolicy } from './types.ts';
 import type { HLC } from './types.ts';
 import { hlcSerialize } from './hlc.ts';
 import { paths, textEncoder, textDecoder, generateId, computeContentHash } from './internals.ts';
@@ -38,6 +30,7 @@ export interface CompactContext {
   hlc: HLC;
   deviceId: string;
   serverId: string;
+  retention: RetentionPolicy;
   emit: (event: SyncEvent) => void;
   pull: () => Promise<void>;
 }
@@ -97,6 +90,7 @@ export async function compact(ctx: CompactContext): Promise<Manifest> {
     watermarkHlc: hlcSerialize(ctx.hlc),
     snapshotPath,
     deltaPath: null,
+    retention: ctx.retention,
   };
 
   const nextManifest: Manifest = {
@@ -113,10 +107,10 @@ export async function compact(ctx: CompactContext): Promise<Manifest> {
 
   await local.setMeta('epoch', nextEpoch);
 
-  // Immutable change files are deliberately retained. Even one authorized
-  // server identity can run concurrently in multiple processes; without a
-  // remote lease or CAS, two compactors could delete different covered sets
-  // and leave the winning snapshot unable to recover the union.
+  // Snapshot publication is authoritative even if cleanup is interrupted.
+  // Delete only the exact files represented by this snapshot; a change that
+  // appeared after capture remains available for the catch-up pull.
+  await Promise.allSettled(coveredChangeFiles.map((fileName) => adapter.deleteFile(`${p.changesFolder}/${fileName}`)));
   return nextManifest;
 }
 
@@ -132,6 +126,8 @@ export interface RehydrateContext {
   emit: (event: SyncEvent) => void;
   poisonRemote: (error: unknown, path?: string) => Promise<Error>;
   pull: () => Promise<void>;
+  /** Local-only records that snapshot replacement must not erase. */
+  preservedMeta?: Readonly<Record<string, unknown>>;
 }
 
 /** Returns the updated HLC after rehydration. */
@@ -154,6 +150,9 @@ export async function rehydrate(ctx: RehydrateContext): Promise<HLC> {
     let rowCount = 0;
     await ChangeObservationLedger.restoreSnapshot(ctx.local, snapshot.hlc, snapshot.coveredChangeFiles ?? [], async () => {
       await ctx.local.clearAll();
+      for (const [key, value] of Object.entries(ctx.preservedMeta ?? {})) {
+        if (value !== undefined) await ctx.local.setMeta(key, value);
+      }
       ctx.tables = {};
       ctx.knownTables.clear();
 
@@ -175,7 +174,12 @@ export async function rehydrate(ctx: RehydrateContext): Promise<HLC> {
     await ctx.local.setMeta('epoch', snapshot.epoch);
     ctx.emit({ type: 'rehydrate:complete', rowCount });
   } catch (err) {
-    ctx.emit({ type: 'decode:error', error: err instanceof Error ? err : new Error(String(err)), path: snapshotPath, context: { stage: 'rehydrate' } });
+    ctx.emit({
+      type: 'decode:error',
+      error: err instanceof Error ? err : new Error(String(err)),
+      path: snapshotPath,
+      context: { stage: 'rehydrate' },
+    });
     const poisoned = await ctx.poisonRemote(err, snapshotPath);
     ctx.emit({ type: 'sync:error', error: poisoned });
     throw poisoned;

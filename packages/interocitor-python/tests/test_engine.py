@@ -599,7 +599,7 @@ class EngineTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
-    def test_compaction_retains_changes_and_has_no_scalar_gc_floor(self) -> None:
+    def test_compaction_removes_exactly_covered_changes_and_has_no_scalar_gc_floor(self) -> None:
         async def scenario() -> None:
             adapter = MemoryAdapter()
             portable_key = generate_portable_key()
@@ -633,7 +633,7 @@ class EngineTests(unittest.TestCase):
             wire = json.loads((await adapter.read_file(f"/gc-mesh/manifest-{second.generation}.json")).decode("utf-8"))
             self.assertNotIn("gcFloorHlc", wire)
             changes = await adapter.list_files("/gc-mesh/changes")
-            self.assertEqual(len([entry for entry in changes if "-chg_" in entry.name]), 2)
+            self.assertEqual(len([entry for entry in changes if "-chg_" in entry.name]), 0)
             await reader.disconnect()
             await writer.disconnect()
 

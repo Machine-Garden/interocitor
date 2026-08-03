@@ -11,11 +11,13 @@ import type {
   DeviceMetadata,
   DatabaseSchemaDefinition,
   SyncEvent,
+  RetentionPolicy,
 } from './types.ts';
 import { paths, textEncoder, textDecoder, generateId, computeContentHash } from './internals.ts';
 import { assertExpectedMeshId } from './codec.ts';
 import type { CodecState } from './codec.ts';
 import { MeshEncryptionMismatchError } from './errors.ts';
+import { resolveRetentionPolicy } from './retention.ts';
 
 export interface ManifestContext {
   adapter: StorageAdapter;
@@ -25,6 +27,7 @@ export interface ManifestContext {
   deviceId: string;
   encrypted: boolean;
   schema?: DatabaseSchemaDefinition;
+  retention: RetentionPolicy;
   emit: (event: SyncEvent) => void;
 }
 
@@ -47,9 +50,7 @@ function assertServerAuth(manifest: { writtenBy: string }, serverId: string): vo
   }
 }
 
-async function validateManifestHash(
-  manifest: { contentHash: string; [key: string]: unknown },
-): Promise<void> {
+async function validateManifestHash(manifest: { contentHash: string; [key: string]: unknown }): Promise<void> {
   const { contentHash, ...payload } = manifest;
   const expected = await computeContentHash(payload);
   if (contentHash !== expected) {
@@ -58,14 +59,22 @@ async function validateManifestHash(
 }
 
 export async function writeJson(adapter: StorageAdapter, path: string, value: unknown): Promise<void> {
-  console.log('[interocitor:write] manifest.writeJson', { path, kind: path.endsWith('/manifest.json') ? 'pointer' : path.includes('/manifest-') ? 'manifest' : path.includes('/devices/') ? 'device' : path.includes('/changes/') ? 'changes' : 'other' });
+  console.log('[interocitor:write] manifest.writeJson', {
+    path,
+    kind: path.endsWith('/manifest.json')
+      ? 'pointer'
+      : path.includes('/manifest-')
+        ? 'manifest'
+        : path.includes('/devices/')
+          ? 'device'
+          : path.includes('/changes/')
+            ? 'changes'
+            : 'other',
+  });
   await adapter.writeFile(path, textEncoder.encode(JSON.stringify(value, null, 2)));
 }
 
-async function createBootstrapManifest(
-  ctx: ManifestContext,
-  meshId?: string,
-): Promise<{ pointer: ManifestPointer; manifest: Manifest }> {
+async function createBootstrapManifest(ctx: ManifestContext, meshId?: string): Promise<{ pointer: ManifestPointer; manifest: Manifest }> {
   const p = paths(ctx.remotePath);
   const now = new Date().toISOString();
 
@@ -88,6 +97,7 @@ async function createBootstrapManifest(
     watermarkHlc: '',
     snapshotPath: null,
     deltaPath: null,
+    retention: ctx.retention,
   };
 
   const manifest: Manifest = {
@@ -140,7 +150,13 @@ export async function loadOrCreateManifest(
   if (globalPointer) {
     pointer = globalPointer;
     const manifestPath = `${ctx.remotePath}/${pointer.file}`;
-    ctx.emit({ type: 'trace:manifest', op: 'read', reason, path: manifestPath, generation: pointer.currentGeneration });
+    ctx.emit({
+      type: 'trace:manifest',
+      op: 'read',
+      reason,
+      path: manifestPath,
+      generation: pointer.currentGeneration,
+    });
     manifest = await readJson<Manifest>(ctx.adapter, manifestPath);
   } else {
     bootstrapped = true;
@@ -154,6 +170,10 @@ export async function loadOrCreateManifest(
   }
   const manifestPath = `${ctx.remotePath}/${pointer.file}`;
   await validateManifestHash(manifest as unknown as { contentHash: string; [key: string]: unknown });
+  // Retention was added without invalidating existing version-3 manifests.
+  // Resolve it only after validating the persisted hash; the next compaction
+  // writes the defaults into the new generation.
+  manifest = { ...manifest, retention: resolveRetentionPolicy(manifest.retention) };
   if (options.assertLocalMeshId !== false) {
     try {
       await assertExpectedMeshId(local, codecState.manifest, manifest.meshId);
@@ -223,12 +243,9 @@ export async function upsertDeviceMetadata(
   // user set on a different device — which would itself indicate the
   // bootstrap flag was misused. Sync engine only sets bootstrap=true
   // when it just minted the manifest in this same connect cycle.
-  const existing = opts?.bootstrap
-    ? null
-    : await readJsonIfExists<DeviceMetadata>(adapter, p.deviceFile(deviceId));
-  const touchedObserved = opts?.observedManifestGeneration !== undefined
-    || opts?.observedEpoch !== undefined
-    || opts?.observedWatermarkHlc !== undefined;
+  const existing = opts?.bootstrap ? null : await readJsonIfExists<DeviceMetadata>(adapter, p.deviceFile(deviceId));
+  const touchedObserved =
+    opts?.observedManifestGeneration !== undefined || opts?.observedEpoch !== undefined || opts?.observedWatermarkHlc !== undefined;
   const next: DeviceMetadata = {
     deviceId,
     registeredAt: existing?.registeredAt ?? now,
@@ -241,24 +258,23 @@ export async function upsertDeviceMetadata(
     observedManifestGeneration: opts?.observedManifestGeneration ?? existing?.observedManifestGeneration,
     observedEpoch: opts?.observedEpoch ?? existing?.observedEpoch,
     observedWatermarkHlc: opts?.observedWatermarkHlc ?? existing?.observedWatermarkHlc,
-    observedAt: touchedObserved
-      ? (opts?.skipTouchIfUnchanged ? (existing?.observedAt ?? now) : now)
-      : existing?.observedAt,
+    observedAt: touchedObserved ? (opts?.skipTouchIfUnchanged ? (existing?.observedAt ?? now) : now) : existing?.observedAt,
     cutOffAt: existing?.cutOffAt,
     cutOffReason: existing?.cutOffReason,
   };
   if (opts?.skipTouchIfUnchanged && existing && JSON.stringify(existing) === JSON.stringify(next)) return;
   if (opts?.skipTouchIfUnchanged && touchedObserved && existing) {
-    const observedChanged = existing.observedManifestGeneration !== next.observedManifestGeneration
-      || existing.observedEpoch !== next.observedEpoch
-      || existing.observedWatermarkHlc !== next.observedWatermarkHlc
-      || existing.displayName !== next.displayName
-      || existing.deviceType !== next.deviceType
-      || existing.retired !== next.retired
-      || existing.cutOffAt !== next.cutOffAt
-      || existing.cutOffReason !== next.cutOffReason
-      || existing.userId !== next.userId
-      || existing.name !== next.name;
+    const observedChanged =
+      existing.observedManifestGeneration !== next.observedManifestGeneration ||
+      existing.observedEpoch !== next.observedEpoch ||
+      existing.observedWatermarkHlc !== next.observedWatermarkHlc ||
+      existing.displayName !== next.displayName ||
+      existing.deviceType !== next.deviceType ||
+      existing.retired !== next.retired ||
+      existing.cutOffAt !== next.cutOffAt ||
+      existing.cutOffReason !== next.cutOffReason ||
+      existing.userId !== next.userId ||
+      existing.name !== next.name;
     if (!observedChanged) return;
     next.lastSeenAt = existing.lastSeenAt;
     next.observedAt = existing.observedAt;

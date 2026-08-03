@@ -276,7 +276,7 @@ cannot acknowledge a completed task on the application's behalf.
 | await mesh.pull() | Merges available remote row changes after a connection has been established. |
 | await mesh.flush() | Uploads queued local row changes. Call it before an external success acknowledgement. |
 | await mesh.put_file/get_file/delete_file/get_file_metadata | Reads or writes durable bytes directly through the adapter; a key source encrypts their contents. |
-| await mesh.compact() | Manually publishes a snapshot while retaining immutable changes and tombstones. Designate one checkpoint writer per managed mesh. |
+| await mesh.compact() | Publishes a snapshot, removes its exactly covered change files, and retains tombstones. Designate one checkpoint writer per managed mesh. |
 | await mesh.disconnect() | Ends the session and clears the default volatile local store. |
 
 Rows may be created or patched after init() and before connect(). Snapshot

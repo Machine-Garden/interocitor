@@ -66,31 +66,15 @@ export type {
 
 // ─── Engine ───────────────────────────────────────────────────────────
 
-export {
-  Interocitor,
-  type InterocitorInitContext,
-} from './core/sync-engine.ts';
+export { Interocitor, type InterocitorInitContext } from './core/sync-engine.ts';
 export type { LocalStore } from './storage/local-store.ts';
 export { MemoryLocalStore } from './storage/memory-store.ts';
 export { MemoryAdapter } from './adapters/memory.ts';
-export {
-  GoogleDriveAdapter,
-  type GoogleDriveConfig,
-} from './adapters/google-drive.ts';
-export {
-  WebDAVAdapter,
-  type WebDAVConfig,
-} from './adapters/webdav.ts';
-export {
-  CloudflareAdapter,
-  type CloudflareAdapterConfig,
-  type CloudflareHandshakeConfig,
-} from './adapters/cloudflare.ts';
-export {
-  ConnectStageTimeoutError,
-  DEFAULT_CONNECT_STAGE_TIMEOUT_MS,
-  withDeadline,
-} from './core/with-deadline.ts';
+export { GoogleDriveAdapter, type GoogleDriveConfig } from './adapters/google-drive.ts';
+export { WebDAVAdapter, type WebDAVConfig } from './adapters/webdav.ts';
+export { CloudflareAdapter, type CloudflareAdapterConfig, type CloudflareHandshakeConfig } from './adapters/cloudflare.ts';
+export { ConnectStageTimeoutError, DEFAULT_CONNECT_STAGE_TIMEOUT_MS, withDeadline } from './core/with-deadline.ts';
+export { DAY_MS, DEFAULT_COMPACT_AFTER_MS, DEFAULT_MAX_OFFLINE_DURATION_MS } from './core/retention.ts';
 export {
   BoundSharedKeySource,
   PortablePassphraseKeySource,
@@ -124,10 +108,7 @@ export {
   type RecoveryStorageAdapter,
   type RecoveryWrapper,
 } from './crypto/recovery.ts';
-export {
-  type CredentialStore,
-  type StoredCredentials,
-} from './storage/credential-store.ts';
+export { type CredentialStore, type StoredCredentials } from './storage/credential-store.ts';
 export { Table, QueryResult, RowResult } from './core/table.ts';
 export { types } from './core/schema-types.ts';
 export {
@@ -139,24 +120,13 @@ export {
 
 // ─── Typed errors ─────────────────────────────────────────────────────
 
-export {
-  MeshEncryptionMismatchError,
-  MeshCredentialMismatchError,
-} from './core/errors.ts';
+export { MeshEncryptionMismatchError, MeshCredentialMismatchError } from './core/errors.ts';
 
 // ─── Row utilities ────────────────────────────────────────────────────
 
 export { readColumn, rowToPlain } from './core/crdt.ts';
 export { createRowId } from './core/row-id.ts';
-export {
-  uuidv7,
-  createDeviceId,
-  isValidDeviceId,
-  issueMeshId,
-  isValidMeshId,
-  parseMeshId,
-  createMeshSecret,
-} from './core/ids.ts';
+export { uuidv7, createDeviceId, isValidDeviceId, issueMeshId, isValidMeshId, parseMeshId, createMeshSecret } from './core/ids.ts';
 export type { CreateRowIdOptions } from './core/row-id.ts';
 
 // ─── Types ────────────────────────────────────────────────────────────
@@ -233,4 +203,7 @@ export type {
   DeviceHead,
   ChangesHead,
   ReplicaConfig,
+  RetentionPolicy,
+  RetentionPolicyInput,
+  QuarantinedOfflineChanges,
 } from './core/types.ts';

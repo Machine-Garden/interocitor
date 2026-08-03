@@ -3,51 +3,17 @@
 </p>
 
 <p align="center">
-  <strong>Local-first rows and durable remote files, encrypted on the client.</strong>
+  <strong>A protocol for trusted clients over storage that does not need to understand their data.</strong>
 </p>
 
-Interocitor is an application data layer for software that needs structured
-state to work offline and converge across devices without giving the storage
-provider plaintext access.
+Interocitor is a protocol and client library for trusted endpoints, not a
+database server. Each endpoint owns its local row state, applies application
+policy, and merges row changes. The remote mailbox behaves like a hard drive:
+it stores and returns row artifacts and durable files, but it does not query
+records, resolve conflicts, or run application logic.
 
-## Bring your own cloud
-
-Niki Tonsky’s [“Local, first, forever”](https://tonsky.me/blog/crdt-filesync/)
-independently explored the same broad idea: let CRDT data travel through
-commodity file-sync storage—“just bring your own cloud.” Interocitor was
-developed independently and turns that pattern into an application data layer
-with structured rows, durable files, pairing, recovery, and compaction.
-
-Run the mailbox backend on Cloudflare, let users connect Google Drive, or point
-WebDAV at a home NAS. Each backend carries the same artifacts; with a non-null
-key source, protected payloads are encrypted before the storage adapter receives
-them.
-
-> **Public release:** the packages in this checkout are one matched
-> `0.1.0` set. The supported distribution for this documentation is
-> the source-checkout workflow below, not independently selected registry tags.
-
-## Try the two-tab demo
-
-From a clean checkout:
-
-```bash
-git clone https://github.com/TheUiTeam/interocitor.git
-cd interocitor
-corepack enable
-yarn install
-yarn demo:todo
-```
-
-Open
-`http://127.0.0.1:4173/examples/todo-webdav/index.html` in two tabs. In tab A,
-choose **New session**, then **Copy token**. Paste the token into tab B, choose
-**Apply token**, and connect both tabs. A task added in either tab should appear
-in both. The encrypted mailbox artifacts are available for inspection under
-`examples/todo-webdav/webdav-data/`.
-
-The [complete demo guide](examples/todo-webdav/README.md) explains credential
-storage modes and the durable-file pattern.
+With a non-null key source, clients encrypt payloads before the remote receives
+them. The storage provider can make data available without receiving plaintext.
 
 ## Data surfaces
 
@@ -105,16 +71,18 @@ core engine.
 - [`examples/todo-cloudflare-do`](examples/todo-cloudflare-do/README.md) —
   Cloudflare Worker, D1, R2, and optional realtime invalidation.
 
-## Validate this checkout
+## Bring your own cloud
 
-```bash
-yarn check:types
-yarn workspace @interocitor/core test:unit
-yarn test:e2e:todo
-```
+Niki Tonsky’s [“Local, first, forever”](https://tonsky.me/blog/crdt-filesync/)
+independently explored the same broad idea: let CRDT data travel through
+commodity file-sync storage—“just bring your own cloud.” Interocitor was
+developed independently and turns that pattern into an application data layer
+with structured rows, durable files, pairing, recovery, and compaction.
 
-Package-specific commands and environmental prerequisites live with each
-package or example.
+Run the mailbox backend on Cloudflare, let users connect Google Drive, or point
+WebDAV at a home NAS. Each backend carries the same artifacts; with a non-null
+key source, protected payloads are encrypted before the storage adapter receives
+them.
 
 ## License
 

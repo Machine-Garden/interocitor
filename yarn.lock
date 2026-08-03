@@ -1663,6 +1663,7 @@ __metadata:
   resolution: "interocitor-monorepo@workspace:."
   dependencies:
     "@playwright/test": "npm:^1.54.2"
+    esbuild: "npm:0.27.3"
     knip: "npm:6.24.0"
     oxfmt: "npm:^0.45.0"
     oxlint: "npm:^1.60.0"

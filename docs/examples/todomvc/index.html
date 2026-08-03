@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Interocitor TodoMVC — up to three clients, one local memory mesh</title>
+    <meta
+      name="description"
+      content="Up to three TodoMVC clients converge through Interocitor entirely inside this browser tab. No backend, account, WebDAV server, or cloud storage."
+    />
+    <meta name="theme-color" content="#f5f5f5" />
+    <meta name="color-scheme" content="light" />
+    <link rel="icon" href="../../assets/quantum-c.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#demo">Skip to the demo</a>
+
+    <header class="site-header">
+      <a href="/" class="brand" aria-label="Interocitor home">Interocitor</a>
+      <p><strong>Live local demo</strong> · nothing leaves this tab</p>
+      <a href="/" class="back-link">Overview <span aria-hidden="true">↗</span></a>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">TodoMVC × Interocitor</p>
+        <h1 id="page-title">Up to three clients. One memory mesh.</h1>
+        <p>
+          Add, edit, complete, or delete a task on either side. The middle pane exposes the exact
+          manifest, device, head, and change files written as the clients converge—without a
+          backend. Add a third client, then disconnect any client to watch local work wait for
+          reconnection.
+        </p>
+      </section>
+
+      <section id="add-client-control" class="mesh-control" aria-labelledby="mesh-control-title">
+        <div>
+          <p class="eyebrow">Mesh size</p>
+          <h2 id="mesh-control-title">QA a three-client mesh</h2>
+          <p>Spawn another independent client, then disconnect and reconnect any panel.</p>
+        </div>
+        <button id="add-client-demo" type="button">
+          <span aria-hidden="true">＋</span>
+          Add client 3
+        </button>
+      </section>
+
+      <section id="demo" class="demo-stage" aria-label="Synchronized TodoMVC clients">
+        <section class="client-pane" data-client="client-1" aria-labelledby="client-1-label">
+          <div class="client-label">
+            <span>01</span>
+            <strong id="client-1-label">TodoMVC client 1</strong>
+            <div class="client-connection">
+              <small data-client-status>Starting…</small>
+              <button id="compact-demo" type="button" disabled>Compact</button>
+              <button data-connection-toggle type="button" aria-pressed="false" disabled>
+                Disconnect
+              </button>
+            </div>
+          </div>
+
+          <section class="todoapp">
+            <header class="todo-header">
+              <form data-new-todo-form>
+                <input
+                  class="new-todo"
+                  data-new-todo
+                  placeholder="What needs to be done?"
+                  aria-label="New task for client 1"
+                  maxlength="240"
+                  autocomplete="off"
+                  autofocus
+                />
+              </form>
+            </header>
+            <main class="todo-main" data-todo-main hidden>
+              <button
+                class="toggle-all"
+                data-toggle-all
+                type="button"
+                aria-label="Toggle all tasks"
+              >
+                ⌄
+              </button>
+              <ul class="todo-list" data-todo-list aria-label="Client 1 tasks"></ul>
+            </main>
+            <footer class="todo-footer" data-todo-footer hidden>
+              <span class="todo-count" data-todo-count></span>
+              <div class="filters" aria-label="Filter client 1 tasks">
+                <button type="button" data-filter="all" aria-pressed="true">All</button>
+                <button type="button" data-filter="active" aria-pressed="false">Active</button>
+                <button type="button" data-filter="completed" aria-pressed="false">
+                  Completed
+                </button>
+              </div>
+              <button class="clear-completed" data-clear-completed type="button">
+                Clear completed
+              </button>
+            </footer>
+          </section>
+          <p class="edit-hint">Double-click a task to edit it.</p>
+        </section>
+
+        <aside class="memory-pane" aria-labelledby="memory-title">
+          <div class="memory-heading">
+            <p>Live filesystem</p>
+            <h2 id="memory-title">/TodoMVC</h2>
+            <span id="mesh-status" role="status" aria-live="polite">Opening filesystem…</span>
+          </div>
+
+          <div class="filesystem-browser">
+            <div class="filesystem-heading">
+              <strong>Files written by Interocitor</strong>
+              <div class="filesystem-actions">
+                <button id="reset-demo" type="button">Reset demo</button>
+              </div>
+            </div>
+            <div class="filesystem-tree" id="filesystem-tree" aria-label="Live filesystem tree">
+              <span class="filesystem-empty">Reading files…</span>
+            </div>
+            <div class="file-inspector">
+              <div class="file-inspector-heading">
+                <span>Selected file</span>
+                <strong id="selected-file-path">/TodoMVC/manifest.json</strong>
+              </div>
+              <pre id="file-preview" tabindex="0">Waiting for filesystem…</pre>
+            </div>
+          </div>
+
+          <p class="memory-boundary">
+            <strong>These are the current files and contents.</strong> They live in this tab’s
+            JavaScript memory, so reloading resets the filesystem. Compact publishes a snapshot with
+            exact coverage and removes the change files merged into it. Tombstones remain in the
+            snapshot. Nothing is uploaded or persisted.
+          </p>
+        </aside>
+
+        <section class="client-pane" data-client="client-2" aria-labelledby="client-2-label">
+          <div class="client-label">
+            <span>02</span>
+            <strong id="client-2-label">TodoMVC client 2</strong>
+            <div class="client-connection">
+              <small data-client-status>Starting…</small>
+              <button data-connection-toggle type="button" aria-pressed="false" disabled>
+                Disconnect
+              </button>
+            </div>
+          </div>
+
+          <section class="todoapp">
+            <header class="todo-header">
+              <form data-new-todo-form>
+                <input
+                  class="new-todo"
+                  data-new-todo
+                  placeholder="What needs to be done?"
+                  aria-label="New task for client 2"
+                  maxlength="240"
+                  autocomplete="off"
+                />
+              </form>
+            </header>
+            <main class="todo-main" data-todo-main hidden>
+              <button
+                class="toggle-all"
+                data-toggle-all
+                type="button"
+                aria-label="Toggle all tasks"
+              >
+                ⌄
+              </button>
+              <ul class="todo-list" data-todo-list aria-label="Client 2 tasks"></ul>
+            </main>
+            <footer class="todo-footer" data-todo-footer hidden>
+              <span class="todo-count" data-todo-count></span>
+              <div class="filters" aria-label="Filter client 2 tasks">
+                <button type="button" data-filter="all" aria-pressed="true">All</button>
+                <button type="button" data-filter="active" aria-pressed="false">Active</button>
+                <button type="button" data-filter="completed" aria-pressed="false">
+                  Completed
+                </button>
+              </div>
+              <button class="clear-completed" data-clear-completed type="button">
+                Clear completed
+              </button>
+            </footer>
+          </section>
+          <p class="edit-hint">Try changing the same task from this side.</p>
+        </section>
+
+        <section class="client-pane" data-client="client-3" aria-labelledby="client-3-label" hidden>
+          <div class="client-label">
+            <span>03</span>
+            <strong id="client-3-label">TodoMVC client 3</strong>
+            <div class="client-connection">
+              <small data-client-status>Starting…</small>
+              <button data-connection-toggle type="button" aria-pressed="false" disabled>
+                Disconnect
+              </button>
+            </div>
+          </div>
+
+          <section class="todoapp">
+            <header class="todo-header">
+              <form data-new-todo-form>
+                <input
+                  class="new-todo"
+                  data-new-todo
+                  placeholder="What needs to be done?"
+                  aria-label="New task for client 3"
+                  maxlength="240"
+                  autocomplete="off"
+                />
+              </form>
+            </header>
+            <main class="todo-main" data-todo-main hidden>
+              <button
+                class="toggle-all"
+                data-toggle-all
+                type="button"
+                aria-label="Toggle all tasks"
+              >
+                ⌄
+              </button>
+              <ul class="todo-list" data-todo-list aria-label="Client 3 tasks"></ul>
+            </main>
+            <footer class="todo-footer" data-todo-footer hidden>
+              <span class="todo-count" data-todo-count></span>
+              <div class="filters" aria-label="Filter client 3 tasks">
+                <button type="button" data-filter="all" aria-pressed="true">All</button>
+                <button type="button" data-filter="active" aria-pressed="false">Active</button>
+                <button type="button" data-filter="completed" aria-pressed="false">
+                  Completed
+                </button>
+              </div>
+              <button class="clear-completed" data-clear-completed type="button">
+                Clear completed
+              </button>
+            </footer>
+          </section>
+          <p class="edit-hint">Keep this client offline while the other two exchange changes.</p>
+        </section>
+      </section>
+
+      <section class="explanation" aria-labelledby="explanation-title">
+        <p class="eyebrow">Local data boundary</p>
+        <h2 id="explanation-title">Interocitor is the data layer, not a hosted service.</h2>
+        <p>
+          Each TodoMVC client owns an independent <code>MemoryLocalStore</code>. A shared in-page
+          filesystem carries their artifacts so you can inspect the exact files while the clients
+          converge. A real application chooses persistence, encryption, and remote transport only
+          when its product needs them.
+        </p>
+      </section>
+    </main>
+
+    <footer class="page-footer">
+      <a href="/">Interocitor overview</a>
+      <span>No account · no WebDAV · no cloud</span>
+    </footer>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

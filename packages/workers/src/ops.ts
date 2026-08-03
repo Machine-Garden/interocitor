@@ -1,4 +1,4 @@
-import { meshRootForPath, cacheKeyFor, listingCacheKeyFor } from './paths.ts';
+import { classifyPath, meshRootForPath, cacheKeyFor, listingCacheKeyFor } from './paths.ts';
 import type { PathType } from './paths.ts';
 import type { D1Database, D1PreparedStatement, QueryRow } from './types.ts';
 
@@ -31,6 +31,11 @@ interface FolderListRow extends QueryRow {
   path: string;
 }
 
+interface FileSizeRow extends QueryRow {
+  path: string;
+  size: number | null;
+}
+
 interface MetricsRow extends QueryRow {
   file_count: number | null;
   total_bytes: number | null;
@@ -59,6 +64,7 @@ declare const caches: GlobalCaches | undefined;
 
 function getDefaultCache(): CacheNamespace | undefined {
   // biome-ignore lint/suspicious/noExplicitAny: Cloudflare Workers cache API not in DOM lib
+  // oxlint-disable-next-line unicorn/no-typeof-undefined -- `caches` may be undeclared outside the Workers runtime.
   const gc = (typeof caches === 'undefined' ? (globalThis as any).caches : caches) as GlobalCaches | undefined;
   return gc?.default;
 }
@@ -72,12 +78,11 @@ function decodeJsonBuffer(value: ArrayBuffer | Uint8Array | string | null | unde
   return new TextDecoder().decode(new Uint8Array(v?.buffer ?? v ?? []));
 }
 
-function isImmutablePathType(pathType: PathType): boolean {
-  return (
-    pathType === 'change-file' ||
-    pathType === 'manifest-snapshot' ||
-    pathType === 'mainline-snapshot'
-  );
+function isCacheableImmutablePathType(pathType: PathType): boolean {
+  // Change files are immutable but deletable after exact snapshot coverage.
+  // Cache API entries are per-colo, so they cannot be globally invalidated;
+  // always read changes from D1 to make compaction deletion authoritative.
+  return pathType === 'manifest-snapshot' || pathType === 'mainline-snapshot';
 }
 
 async function cacheGet(prefix: string, path: string): Promise<CacheEntry | null> {
@@ -91,13 +96,7 @@ async function cacheGet(prefix: string, path: string): Promise<CacheEntry | null
   return { bytes, etag, modifiedTime, size: bytes.byteLength };
 }
 
-async function cachePut(
-  prefix: string,
-  path: string,
-  bytes: Uint8Array,
-  etag: string,
-  modifiedTime: string,
-): Promise<void> {
+async function cachePut(prefix: string, path: string, bytes: Uint8Array, etag: string, modifiedTime: string): Promise<void> {
   const cache = getDefaultCache();
   if (!cache) return;
   await cache.put(
@@ -111,6 +110,12 @@ async function cachePut(
       },
     }),
   );
+}
+
+async function cacheDelete(prefix: string, path: string): Promise<void> {
+  const cache = getDefaultCache();
+  if (!cache) return;
+  await cache.delete(cacheKeyFor(prefix, path));
 }
 
 // ─── Listing cache helpers ───────────────────────────────────────────────────
@@ -190,11 +195,7 @@ function clampNonNeg(v: unknown): number {
 
 // ─── Folder tree (batched) ───────────────────────────────────────────────────
 
-function folderTreeStatements(
-  db: D1Database,
-  prefix: string,
-  target: string,
-): D1PreparedStatement[] {
+function folderTreeStatements(db: D1Database, prefix: string, target: string): D1PreparedStatement[] {
   const n = normalizePath(target);
   if (!n || n === '/') return [];
   const stmts: D1PreparedStatement[] = [];
@@ -202,10 +203,7 @@ function folderTreeStatements(
   let cur = '';
   for (const seg of n.split('/').filter(Boolean)) {
     cur += `/${seg}`;
-    stmts.push(
-      db.prepare('INSERT OR IGNORE INTO folders (prefix,path,created_at) VALUES (?1,?2,?3)')
-        .bind(prefix, cur, now),
-    );
+    stmts.push(db.prepare('INSERT OR IGNORE INTO folders (prefix,path,created_at) VALUES (?1,?2,?3)').bind(prefix, cur, now));
   }
   return stmts;
 }
@@ -219,11 +217,7 @@ interface MetricsDelta {
   mainlineBytesDelta: number;
 }
 
-function metricsDelta(
-  pathType: PathType,
-  prevSize: number | null | undefined,
-  nextSize: number | null | undefined,
-): MetricsDelta {
+function metricsDelta(pathType: PathType, prevSize: number | null | undefined, nextSize: number | null | undefined): MetricsDelta {
   const prevMissing = prevSize === null || prevSize === undefined;
   const nextMissing = nextSize === null || nextSize === undefined;
   const prev = prevMissing ? 0 : clampNonNeg(prevSize);
@@ -258,16 +252,19 @@ function meshDeltaStatements(
   const touchWrite = options.touchWrite ? now : null;
   const touchOperation = options.touchOperation === false ? null : now;
   return [
-    db.prepare(
-      `INSERT OR IGNORE INTO mesh_paths (
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO mesh_paths (
          prefix, remote_root, created_at, updated_at, last_operation_at,
          last_read_at, last_write_at, last_ttl_delete_at, deleted_at,
          ops_day, ops_count_day, writes_count_day,
          current_file_count, current_total_bytes, current_change_bytes, current_mainline_bytes
        ) VALUES (?1, ?2, ?3, ?3, NULL, NULL, NULL, NULL, NULL, ?4, 0, 0, 0, 0, 0, 0)`,
-    ).bind(prefix, remoteRoot, now, today),
-    db.prepare(
-      `UPDATE mesh_paths SET
+      )
+      .bind(prefix, remoteRoot, now, today),
+    db
+      .prepare(
+        `UPDATE mesh_paths SET
          updated_at = ?3,
          deleted_at = NULL,
          last_operation_at = COALESCE(?8, last_operation_at),
@@ -281,19 +278,22 @@ function meshDeltaStatements(
          current_change_bytes    = MAX(0, current_change_bytes    + ?6),
          current_mainline_bytes  = MAX(0, current_mainline_bytes  + ?7)
        WHERE prefix = ?1 AND remote_root = ?2`,
-    ).bind(
-      prefix, remoteRoot, now,
-      delta.fileCountDelta,
-      delta.totalBytesDelta,
-      delta.changeBytesDelta,
-      delta.mainlineBytesDelta,
-      touchOperation,
-      touchRead,
-      touchWrite,
-      today,
-      touchOperation ? 1 : 0,
-      touchWrite ? 1 : 0,
-    ),
+      )
+      .bind(
+        prefix,
+        remoteRoot,
+        now,
+        delta.fileCountDelta,
+        delta.totalBytesDelta,
+        delta.changeBytesDelta,
+        delta.mainlineBytesDelta,
+        touchOperation,
+        touchRead,
+        touchWrite,
+        today,
+        touchOperation ? 1 : 0,
+        touchWrite ? 1 : 0,
+      ),
   ];
 }
 
@@ -308,16 +308,11 @@ export interface GetFileResult {
   source?: 'cache' | 'd1';
 }
 
-export async function opGetFile(
-  db: D1Database,
-  prefix: string,
-  path: string,
-  pathType: PathType,
-): Promise<GetFileResult> {
+export async function opGetFile(db: D1Database, prefix: string, path: string, pathType: PathType): Promise<GetFileResult> {
   const normalized = normalizePath(path);
   const remoteRoot = meshRootForPath(normalized, pathType);
 
-  if (isImmutablePathType(pathType)) {
+  if (isCacheableImmutablePathType(pathType)) {
     const cached = await cacheGet(prefix, normalized);
     if (cached) {
       return {
@@ -331,34 +326,45 @@ export async function opGetFile(
     }
   }
 
-  const row = await db.prepare(
-    'SELECT content, size, modified_time, etag FROM files WHERE prefix=?1 AND path=?2 LIMIT 1',
-  ).bind(prefix, normalized).first<FileRow>();
+  const row = await db
+    .prepare('SELECT content, size, modified_time, etag FROM files WHERE prefix=?1 AND path=?2 LIMIT 1')
+    .bind(prefix, normalized)
+    .first<FileRow>();
 
   if (!row) return { found: false };
 
   const raw = row.content;
-  const bytes = raw instanceof ArrayBuffer
-    ? new Uint8Array(raw)
-    : raw instanceof Uint8Array
-      ? raw
-      // biome-ignore lint/suspicious/noExplicitAny: runtime-typed D1 binary blob
-      : new Uint8Array((raw as any)?.buffer ?? raw ?? []);
+  const bytes =
+    raw instanceof ArrayBuffer
+      ? new Uint8Array(raw)
+      : raw instanceof Uint8Array
+        ? raw
+        : // biome-ignore lint/suspicious/noExplicitAny: runtime-typed D1 binary blob
+          new Uint8Array((raw as any)?.buffer ?? raw ?? []);
   const etag = String(row.etag ?? '');
   const modifiedTime = String(row.modified_time ?? '');
 
-  if (isImmutablePathType(pathType)) {
+  if (isCacheableImmutablePathType(pathType)) {
     await cachePut(prefix, normalized, bytes, etag, modifiedTime);
   }
 
   if (remoteRoot) {
     const now = nowIso();
-    await db.batch(meshDeltaStatements(db, prefix, remoteRoot, {
-      fileCountDelta: 0,
-      totalBytesDelta: 0,
-      changeBytesDelta: 0,
-      mainlineBytesDelta: 0,
-    }, now, { touchRead: true, touchWrite: false }));
+    await db.batch(
+      meshDeltaStatements(
+        db,
+        prefix,
+        remoteRoot,
+        {
+          fileCountDelta: 0,
+          totalBytesDelta: 0,
+          changeBytesDelta: 0,
+          mainlineBytesDelta: 0,
+        },
+        now,
+        { touchRead: true, touchWrite: false },
+      ),
+    );
   }
 
   return {
@@ -394,9 +400,9 @@ export async function opPutImmutable(
   const delta = metricsDelta(pathType, null, bytes.byteLength);
   const results = await db.batch([
     ...folderTreeStatements(db, prefix, parentDir),
-    db.prepare(
-      'INSERT OR IGNORE INTO files (prefix,path,content,size,modified_time,etag) VALUES (?1,?2,?3,?4,?5,?6)',
-    ).bind(prefix, normalized, bytes, bytes.byteLength, now, etag),
+    db
+      .prepare('INSERT OR IGNORE INTO files (prefix,path,content,size,modified_time,etag) VALUES (?1,?2,?3,?4,?5,?6)')
+      .bind(prefix, normalized, bytes, bytes.byteLength, now, etag),
     ...meshDeltaStatements(db, prefix, remoteRoot, delta, now, { touchWrite: true }),
   ]);
 
@@ -405,7 +411,9 @@ export async function opPutImmutable(
   const wrote = (insertResult?.meta?.changes ?? 0) > 0;
 
   if (wrote) {
-    await cachePut(prefix, normalized, bytes, etag, now);
+    if (isCacheableImmutablePathType(pathType)) {
+      await cachePut(prefix, normalized, bytes, etag, now);
+    }
     // Invalidate parent folder listing — new file appeared.
     await listingCacheDelete(prefix, parentDir);
   }
@@ -428,9 +436,10 @@ export async function opPutSemantic(
   const etag = newEtag();
   const parentDir = normalized.slice(0, normalized.lastIndexOf('/')) || '/';
 
-  const existing = await db.prepare(
-    'SELECT content, size FROM files WHERE prefix=?1 AND path=?2 LIMIT 1',
-  ).bind(prefix, normalized).first<FileRow>();
+  const existing = await db
+    .prepare('SELECT content, size FROM files WHERE prefix=?1 AND path=?2 LIMIT 1')
+    .bind(prefix, normalized)
+    .first<FileRow>();
 
   if (existing) {
     try {
@@ -457,12 +466,14 @@ export async function opPutSemantic(
 
   await db.batch([
     ...folderTreeStatements(db, prefix, parentDir),
-    db.prepare(
-      `INSERT INTO files (prefix,path,content,size,modified_time,etag) VALUES (?1,?2,?3,?4,?5,?6)
+    db
+      .prepare(
+        `INSERT INTO files (prefix,path,content,size,modified_time,etag) VALUES (?1,?2,?3,?4,?5,?6)
        ON CONFLICT(prefix,path) DO UPDATE SET
          content=excluded.content, size=excluded.size,
          modified_time=excluded.modified_time, etag=excluded.etag`,
-    ).bind(prefix, normalized, bytes, bytes.byteLength, now, etag),
+      )
+      .bind(prefix, normalized, bytes, bytes.byteLength, now, etag),
     ...meshDeltaStatements(db, prefix, remoteRoot, delta, now),
   ]);
 
@@ -489,12 +500,14 @@ export async function opPutOverwrite(
 
   await db.batch([
     ...folderTreeStatements(db, prefix, parentDir),
-    db.prepare(
-      `INSERT INTO files (prefix,path,content,size,modified_time,etag) VALUES (?1,?2,?3,?4,?5,?6)
+    db
+      .prepare(
+        `INSERT INTO files (prefix,path,content,size,modified_time,etag) VALUES (?1,?2,?3,?4,?5,?6)
        ON CONFLICT(prefix,path) DO UPDATE SET
          content=excluded.content, size=excluded.size,
          modified_time=excluded.modified_time, etag=excluded.etag`,
-    ).bind(prefix, normalized, bytes, bytes.byteLength, now, etag),
+      )
+      .bind(prefix, normalized, bytes, bytes.byteLength, now, etag),
   ]);
 
   await listingCacheDelete(prefix, parentDir);
@@ -517,11 +530,7 @@ export interface ListChildrenResult {
   folders: string[];
 }
 
-export async function opListChildren(
-  db: D1Database,
-  prefix: string,
-  path: string,
-): Promise<ListChildrenResult> {
+export async function opListChildren(db: D1Database, prefix: string, path: string): Promise<ListChildrenResult> {
   const normalized = normalizePath(path);
 
   // Cache hit: skip D1 entirely. Cache is invalidated by every op that
@@ -534,18 +543,22 @@ export async function opListChildren(
   const depthTarget = slashCount;
 
   const [filesResult, foldersResult] = await db.batch([
-    db.prepare(
-      `SELECT path, size, modified_time, etag FROM files
+    db
+      .prepare(
+        `SELECT path, size, modified_time, etag FROM files
        WHERE prefix = ?1
          AND path LIKE ?2
          AND LENGTH(path) - LENGTH(REPLACE(path, '/', '')) = ?3`,
-    ).bind(prefix, pattern, depthTarget),
-    db.prepare(
-      `SELECT path FROM folders
+      )
+      .bind(prefix, pattern, depthTarget),
+    db
+      .prepare(
+        `SELECT path FROM folders
        WHERE prefix = ?1
          AND path LIKE ?2
          AND LENGTH(path) - LENGTH(REPLACE(path, '/', '')) = ?3`,
-    ).bind(prefix, pattern, depthTarget),
+      )
+      .bind(prefix, pattern, depthTarget),
   ]);
 
   const files: FileEntry[] = (filesResult.results ?? []).map((row) => {
@@ -573,26 +586,34 @@ export async function opListChildren(
 
 // ─── OP: Delete path ─────────────────────────────────────────────────────────
 
-export async function opDeletePath(
-  db: D1Database,
-  prefix: string,
-  path: string,
-  remoteRoot: string | null,
-): Promise<boolean> {
+export async function opDeletePath(db: D1Database, prefix: string, path: string, remoteRoot: string | null): Promise<boolean> {
   const normalized = normalizePath(path);
+
+  const selected =
+    normalized === '/'
+      ? await db.prepare('SELECT path, size FROM files WHERE prefix = ?1').bind(prefix).all<FileSizeRow>()
+      : await db
+          .prepare('SELECT path, size FROM files WHERE prefix = ?1 AND (path = ?2 OR (path >= ?3 AND path < ?4))')
+          .bind(prefix, normalized, `${normalized}/`, `${normalized}/\uFFFF`)
+          .all<FileSizeRow>();
+  const deletedFiles = selected.results ?? [];
 
   if (normalized === '/') {
     await db.batch([
       db.prepare('DELETE FROM files WHERE prefix = ?1').bind(prefix),
       db.prepare('DELETE FROM folders WHERE prefix = ?1').bind(prefix),
     ]);
-    await db.prepare(
-      `UPDATE mesh_paths SET
+    await Promise.allSettled(deletedFiles.map((file) => cacheDelete(prefix, String(file.path))));
+    await db
+      .prepare(
+        `UPDATE mesh_paths SET
          current_file_count = 0, current_total_bytes = 0,
          current_change_bytes = 0, current_mainline_bytes = 0,
          deleted_at = ?2, updated_at = ?2
        WHERE prefix = ?1`,
-    ).bind(prefix, nowIso()).run();
+      )
+      .bind(prefix, nowIso())
+      .run();
     // Whole-prefix wipe: drop the root listing. Per-folder cache entries are
     // best-effort stale; the TTL bounds their lifetime.
     await listingCacheDelete(prefix, '/');
@@ -605,28 +626,50 @@ export async function opDeletePath(
 
   // Avoid LIKE/GLOB on long/special paths in D1/SQLite; do a lexical prefix range instead.
   const [filesDeleted] = await db.batch([
-    db.prepare(
-      'DELETE FROM files WHERE prefix = ?1 AND (path = ?2 OR (path >= ?3 AND path < ?4))',
-    ).bind(prefix, normalized, subtreeStart, subtreeEnd),
-    db.prepare(
-      'DELETE FROM folders WHERE prefix = ?1 AND (path = ?2 OR (path >= ?3 AND path < ?4))',
-    ).bind(prefix, normalized, subtreeStart, subtreeEnd),
+    db
+      .prepare('DELETE FROM files WHERE prefix = ?1 AND (path = ?2 OR (path >= ?3 AND path < ?4))')
+      .bind(prefix, normalized, subtreeStart, subtreeEnd),
+    db
+      .prepare('DELETE FROM folders WHERE prefix = ?1 AND (path = ?2 OR (path >= ?3 AND path < ?4))')
+      .bind(prefix, normalized, subtreeStart, subtreeEnd),
   ]);
 
   const deletedCount = filesDeleted?.meta?.changes ?? 0;
   if (deletedCount === 0) return false;
 
   if (remoteRoot) {
-    await db.batch(meshDeltaStatements(db, prefix, remoteRoot, {
-      fileCountDelta: -deletedCount,
-      totalBytesDelta: 0,
-      changeBytesDelta: 0,
-      mainlineBytesDelta: 0,
-    }, now));
+    const totals = deletedFiles.reduce(
+      (result, file) => {
+        const size = Number(file.size ?? 0);
+        const pathType = classifyPath(String(file.path));
+        result.totalBytes += size;
+        if (pathType === 'change-file') result.changeBytes += size;
+        if (pathType === 'mainline-snapshot') result.mainlineBytes += size;
+        return result;
+      },
+      { totalBytes: 0, changeBytes: 0, mainlineBytes: 0 },
+    );
+    await db.batch(
+      meshDeltaStatements(
+        db,
+        prefix,
+        remoteRoot,
+        {
+          fileCountDelta: -deletedCount,
+          totalBytesDelta: -totals.totalBytes,
+          changeBytesDelta: -totals.changeBytes,
+          mainlineBytesDelta: -totals.mainlineBytes,
+        },
+        now,
+      ),
+    );
   }
 
+  await Promise.allSettled(deletedFiles.map((file) => cacheDelete(prefix, String(file.path))));
+
   // Invalidate the parent folder listing of the deleted path. Subtree listings
-  // (if any were cached) age out via TTL — cheaper than walking children.
+  // (if any were cached) age out via TTL. Change-file reads always consult D1,
+  // so compaction deletion is authoritative across colos.
   await listingCacheDelete(prefix, parentDirOf(normalized));
 
   return true;
@@ -639,35 +682,32 @@ export interface ReconcileResult {
   totalBytes: number;
 }
 
-export async function opReconcileMetrics(
-  db: D1Database,
-  prefix: string,
-  remoteRoot: string,
-): Promise<ReconcileResult> {
+export async function opReconcileMetrics(db: D1Database, prefix: string, remoteRoot: string): Promise<ReconcileResult> {
   const normalized = normalizePath(remoteRoot);
   const pattern = normalized === '/' ? '/%' : `${normalized}/%`;
 
-  const row = await db.prepare(
-    `SELECT
+  const row = await db
+    .prepare(
+      `SELECT
        COUNT(*) as file_count,
        COALESCE(SUM(size), 0) as total_bytes
      FROM files
      WHERE prefix = ?1 AND (path = ?2 OR path LIKE ?3)`,
-  ).bind(prefix, normalized, pattern).first<MetricsRow>();
+    )
+    .bind(prefix, normalized, pattern)
+    .first<MetricsRow>();
 
   const now = nowIso();
-  await db.prepare(
-    `UPDATE mesh_paths SET
+  await db
+    .prepare(
+      `UPDATE mesh_paths SET
        current_file_count = ?3,
        current_total_bytes = ?4,
        updated_at = ?5
      WHERE prefix = ?1 AND remote_root = ?2`,
-  ).bind(
-    prefix, normalized,
-    Number(row?.file_count ?? 0),
-    Number(row?.total_bytes ?? 0),
-    now,
-  ).run();
+    )
+    .bind(prefix, normalized, Number(row?.file_count ?? 0), Number(row?.total_bytes ?? 0), now)
+    .run();
 
   return {
     fileCount: Number(row?.file_count ?? 0),

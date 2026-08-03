@@ -273,6 +273,7 @@ public struct Snapshot: Codable, Sendable {
     public var hlc: String
     public var epoch: Int
     public var schemaVersion: Int
+    public var coveredChangeFiles: [String]?
     public var tables: [String: [String: Row]]
 }
 
@@ -301,6 +302,17 @@ public struct ManifestPointer: Codable, Sendable {
     public var file: String
 }
 
+public struct RetentionPolicy: Codable, Sendable, Equatable {
+    public var compactAfterMs: Int
+    public var maxOfflineDurationMs: Int
+
+    public init(compactAfterMs: Int = 7 * 24 * 60 * 60 * 1_000, maxOfflineDurationMs: Int = 30 * 24 * 60 * 60 * 1_000) {
+        precondition(compactAfterMs > 0 && maxOfflineDurationMs > 0, "Retention durations must be positive")
+        self.compactAfterMs = compactAfterMs
+        self.maxOfflineDurationMs = maxOfflineDurationMs
+    }
+}
+
 public struct Manifest: Codable, Sendable {
     public var generation: Int
     public var parentGeneration: Int
@@ -317,6 +329,7 @@ public struct Manifest: Codable, Sendable {
     public var watermarkHlc: String
     public var snapshotPath: String?
     public var deltaPath: String?
+    public var retention: RetentionPolicy? = nil
 }
 
 // MARK: - Schema / merge policy

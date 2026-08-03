@@ -214,9 +214,10 @@ not compete.
 
 ### What happens to deleted rows?
 
-A small deletion marker is kept long enough to stop an older device from
-bringing the row back. Once active devices have moved past that point, the
-marker can also be removed.
+A small deletion marker is retained in snapshots so an older device cannot
+bring the row back. The current protocol does not garbage-collect tombstones;
+offline expiry prevents stale queued writes from publishing automatically but
+is not yet a tombstone deletion proof.
 
 ### Are files compacted?
 
@@ -247,9 +248,12 @@ memory-only database does not survive a restart.
 
 ### What happens to a device that stays offline for a long time?
 
-It may have to discard its old sync state and rebuild from the latest full
-copy. Do not leave important unsynchronized work on a disconnected device as
-the only copy for an unlimited time.
+In `@interocitor/core`, a device absent longer than the mesh's finite
+`retention.maxOfflineDurationMs` rebuilds from the latest full copy instead of
+publishing its old queue. The default is 30 days. Its queued operations remain
+in a local quarantine for export, review, or deliberate reapplication; they do
+not enter shared history automatically. Do not leave important unsynchronized
+work on a disconnected device as the only copy until that deadline.
 
 ### Is remote storage a backup?
 

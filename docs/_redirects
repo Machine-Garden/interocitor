@@ -9,6 +9,8 @@
 /index-cloud        / 301
 /index-policy       / 301
 /how-it-works       /how-it-works.html 200
+/examples/todo-webdav/ /examples/todomvc/ 301
+/examples/todo-webdav/index.html /examples/todomvc/ 301
 
 /github              https://github.com/TheUiTeam/interocitor 302
 /core                https://github.com/TheUiTeam/interocitor/tree/main/packages/core#readme 302

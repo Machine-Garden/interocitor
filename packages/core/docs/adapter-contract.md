@@ -230,9 +230,9 @@ engine treats a thrown write as "stay in the outbox, retry later".
 - **Bounded retries.** A failed `writeFile` keeps the entry in the
   outbox and retries on the next flush trigger. There is no infinite
   loop.
-- **No sync-history deletes.** Compaction retains every immutable change file
-  in every mode. `deleteFile()` is used only for explicit durable app-file
-  deletion; HLC order is never treated as proof of coverage.
+- **Exact sync-history deletes.** After snapshot and manifest publication,
+  compaction calls `deleteFile()` only for filenames in the snapshot's
+  `coveredChangeFiles`. HLC order is never treated as proof of coverage.
 - **Folder cache invalidation.** Engine calls `resetFolderCache()` on
   mesh swap, transport teardown, and remote poison.
 - **Authoritative format.** All payloads are UTF‑8 JSON or raw bytes.

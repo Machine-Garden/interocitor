@@ -129,11 +129,7 @@ export type BuiltinMergeStrategy = 'lww';
  * convergence this function must be deterministic, commutative, associative,
  * and idempotent. Return `existing`, `incoming`, or a new ColumnEntry.
  */
-export type MergeFunction = (
-  existing: ColumnEntry,
-  incoming: ColumnEntry,
-  context: MergeContext,
-) => ColumnEntry;
+export type MergeFunction = (existing: ColumnEntry, incoming: ColumnEntry, context: MergeContext) => ColumnEntry;
 
 export interface MergeContext {
   table: string;
@@ -177,12 +173,13 @@ export interface SchemaField<T = unknown, K extends SchemaFieldKind = SchemaFiel
   readonly _type: T;
 }
 
-export type OptionalSchemaField<T = unknown, K extends SchemaFieldKind = SchemaFieldKind> =
-  SchemaField<T, K> & { readonly optional: true; readonly __optional: true };
+export type OptionalSchemaField<T = unknown, K extends SchemaFieldKind = SchemaFieldKind> = SchemaField<T, K> & {
+  readonly optional: true;
+  readonly __optional: true;
+};
 
 /** Narrows kind to the set that local indexes can use as a key. */
 export type IndexableSchemaField<T = unknown> = SchemaField<T, IndexableSchemaFieldKind>;
-
 
 /**
  * Schema metadata for a single table, including field kinds and local indexes.
@@ -218,9 +215,7 @@ export interface TableSchemaDefinition<T extends Record<string, unknown> = Recor
  * } satisfies DatabaseSchemaDefinition;
  * // → DatabaseSchemaDefinition<{ tasks: { title: string; status: 'open' | 'done' } }>
  */
-export interface DatabaseSchemaDefinition<
-  S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>,
-> {
+export interface DatabaseSchemaDefinition<S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>> {
   /** Optional logical schema version for app-level compatibility checks. */
   version?: number;
   tables: { [K in keyof S]: TableSchemaDefinition<S[K]> } & Record<string, TableSchemaDefinition>;
@@ -241,16 +236,16 @@ export type InferFieldType<F> = F extends SchemaField<infer T> ? T : unknown;
  * @internal
  */
 type OptionalFieldKeys<F> = {
-  [K in keyof F]-?: F[K] extends { optional: true } ? K : never
+  [K in keyof F]-?: F[K] extends { optional: true } ? K : never;
 }[keyof F];
 
 type RequiredFieldKeys<F> = Exclude<keyof F, OptionalFieldKeys<F>>;
 
-export type InferTableShape<T> =
-  T extends { fields: infer F }
-    ? ({ [K in RequiredFieldKeys<F>]: InferFieldType<F[K]> } &
-       { [K in OptionalFieldKeys<F>]?: InferFieldType<F[K]> })
-    : Record<string, unknown>;
+export type InferTableShape<T> = T extends { fields: infer F }
+  ? { [K in RequiredFieldKeys<F>]: InferFieldType<F[K]> } & {
+      [K in OptionalFieldKeys<F>]?: InferFieldType<F[K]>;
+    }
+  : Record<string, unknown>;
 
 /**
  * Extracts the full database shape from a `DatabaseSchemaDefinition`-shaped literal.
@@ -268,30 +263,18 @@ export type InferTableShape<T> =
  * type TaskRow = InferTableType<typeof schema, 'tasks'>;
  * // → { title: string; status: 'open' | 'done' }
  */
-export type InferSchemaType<D extends DatabaseSchemaDefinition> =
-  D extends { tables: infer Tables }
-    ? { [K in keyof Tables]: InferTableShape<Tables[K]> }
-    : Record<string, Record<string, unknown>>;
+export type InferSchemaType<D extends DatabaseSchemaDefinition> = D extends { tables: infer Tables }
+  ? { [K in keyof Tables]: InferTableShape<Tables[K]> }
+  : Record<string, Record<string, unknown>>;
 
 /**
  * Extracts the row type for a single table `K` from a `DatabaseSchemaDefinition`.
  */
-export type InferTableType<
-  D extends DatabaseSchemaDefinition,
-  K extends keyof InferSchemaType<D> & string,
-> = InferSchemaType<D>[K];
+export type InferTableType<D extends DatabaseSchemaDefinition, K extends keyof InferSchemaType<D> & string> = InferSchemaType<D>[K];
 
 export type WherePrimitive = string | number | boolean | Date;
 
-export type WhereOperator =
-  | 'equals'
-  | 'above'
-  | 'aboveOrEqual'
-  | 'below'
-  | 'belowOrEqual'
-  | 'between'
-  | 'startsWith'
-  | 'anyOf';
+export type WhereOperator = 'equals' | 'above' | 'aboveOrEqual' | 'below' | 'belowOrEqual' | 'between' | 'startsWith' | 'anyOf';
 
 /**
  * Dexie-style predicate description used by {@link Table.where} and
@@ -466,6 +449,29 @@ export interface Manifest {
   /** Reserved for future delta-based catch-up. */
   deltaPath: string | null;
 
+  /** Finite mesh retention policy. Legacy manifests resolve to safe defaults. */
+  retention?: RetentionPolicy;
+}
+
+/** User-controlled retention durations. Both values must be positive and finite. */
+export interface RetentionPolicyInput {
+  /** Oldest uploaded change age before compaction becomes mandatory. Default: 7 days. */
+  compactAfterMs?: number;
+  /** Longest absence after which queued writes are quarantined instead of published. Default: 30 days. */
+  maxOfflineDurationMs?: number;
+}
+
+/** Fully resolved finite retention policy stored in new mesh manifests. */
+export interface RetentionPolicy {
+  compactAfterMs: number;
+  maxOfflineDurationMs: number;
+}
+
+export interface QuarantinedOfflineChanges {
+  expiredAt: string;
+  lastSuccessfulSyncAt: string;
+  maxOfflineDurationMs: number;
+  entries: ChangeEntry[];
 }
 
 export type DeviceType = 'web' | 'ios' | 'android' | 'worker' | 'desktop' | 'tv';
@@ -580,10 +586,7 @@ export interface RemoteInvalidationHooks {
 }
 
 export interface RemoteInvalidationStorageAdapter {
-  subscribeToInvalidations(
-    onInvalidate: (payload: RemoteInvalidationPayload) => void,
-    hooks?: RemoteInvalidationHooks,
-  ): () => void;
+  subscribeToInvalidations(onInvalidate: (payload: RemoteInvalidationPayload) => void, hooks?: RemoteInvalidationHooks): () => void;
 }
 
 /**
@@ -704,9 +707,7 @@ export interface ConnectionStatusDetails {
 
 export type LogLevel = import('./internals.ts').LogLevel;
 
-export interface SyncConfig<
-  S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>,
-> {
+export interface SyncConfig<S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>> {
   /** Cloud folder path prefix, e.g. "/Interocitor" */
   remotePath?: string;
   /**
@@ -752,6 +753,12 @@ export interface SyncConfig<
   compactAutoDeviceCount?: number;
   /** Enable automatic compact scheduling after large churn. Default true. */
   autoCompact?: boolean;
+  /**
+   * Finite retention limits for uploaded history and offline writers.
+   * Defaults to 7 days before mandatory compaction and 30 days of offline
+   * write eligibility. `0`, negative values, `NaN`, and `Infinity` throw.
+   */
+  retention?: RetentionPolicyInput;
   /** First auto-compact delay base in ms (default 10m). Jittered by ± firstCompactDelayJitterMs. */
   firstCompactDelayMs?: number;
   /** First auto-compact delay jitter in ms (default 5m). */
@@ -807,11 +814,7 @@ export interface SyncConfig<
    * configured timeout. Hook must not throw — failures are swallowed
    * to preserve the "never stuck" guarantee.
    */
-  onConnectStalled?: (info: {
-    stage: string;
-    timeoutMs: number;
-    error: unknown;
-  }) => void;
+  onConnectStalled?: (info: { stage: string; timeoutMs: number; error: unknown }) => void;
   /** Optional table/index metadata for local query planning and migrations. */
   schema?: DatabaseSchemaDefinition<S>;
 
@@ -859,20 +862,94 @@ export type SyncEvent =
       writerFrontierHlc?: string;
       legacyGlobalHighWaterHlc?: string;
     }
-  | { type: 'credentials:restored'; source: 'silent-store'; deviceIdChanged: boolean; hadPassphrase: boolean }
+  | {
+      type: 'credentials:restored';
+      source: 'silent-store';
+      deviceIdChanged: boolean;
+      hadPassphrase: boolean;
+    }
   | { type: 'remote:poisoned'; error: Error; path?: string; context?: Record<string, unknown> }
   | { type: 'decode:error'; error: Error; path?: string; context?: Record<string, unknown> }
-  | { type: 'credentials:conflict'; storedDeviceId: string; activeDeviceId: string; dbName: string; remotePath?: string }
-  | { type: 'credentials:meshMismatch'; dbName: string; remotePath?: string; storedMeshId: string; activeMeshId: string }
-  | { type: 'credentials:persisted'; dbName: string; remotePath?: string; deviceId: string; encrypted: boolean }
-  | { type: 'encryption:resolved'; strategy: 'passphrase' | 'existing-key' | 'generated' | string; dbName: string; remotePath?: string; encrypted: boolean }
-  | { type: 'mesh:configured'; dbName: string; remotePath?: string; deviceId: string; encrypted: boolean; hadPassphrase: boolean }
+  | {
+      type: 'credentials:conflict';
+      storedDeviceId: string;
+      activeDeviceId: string;
+      dbName: string;
+      remotePath?: string;
+    }
+  | {
+      type: 'credentials:meshMismatch';
+      dbName: string;
+      remotePath?: string;
+      storedMeshId: string;
+      activeMeshId: string;
+    }
+  | {
+      type: 'credentials:persisted';
+      dbName: string;
+      remotePath?: string;
+      deviceId: string;
+      encrypted: boolean;
+    }
+  | {
+      type: 'encryption:resolved';
+      strategy: 'passphrase' | 'existing-key' | 'generated' | string;
+      dbName: string;
+      remotePath?: string;
+      encrypted: boolean;
+    }
+  | {
+      type: 'mesh:configured';
+      dbName: string;
+      remotePath?: string;
+      deviceId: string;
+      encrypted: boolean;
+      hadPassphrase: boolean;
+    }
   | { type: 'connection:status'; status: ConnectionStatus }
-  | { type: 'connect:state'; dbName: string; remotePath?: string; deviceId: string; localEpoch?: number; remoteEpoch?: number; meshId?: string; encrypted: boolean }
-  | { type: 'join:existing-mesh'; dbName: string; remotePath?: string; deviceId: string; previousMeshId?: string; nextMeshId: string; policy: JoinExistingMeshPolicy; localRowCount: number; queuedChangeCount: number }
-  | { type: 'connect:noop'; dbName: string; remotePath?: string; deviceId: string; reason: 'already-connected' }
-  | { type: 'connect:error'; error: Error; stage: string; dbName: string; remotePath?: string; deviceId: string }
-  | { type: 'transport:teardown'; dbName: string; remotePath?: string; deviceId?: string; reason: 'switch-adapter' | 'disconnect' | 'detach' }
+  | {
+      type: 'connect:state';
+      dbName: string;
+      remotePath?: string;
+      deviceId: string;
+      localEpoch?: number;
+      remoteEpoch?: number;
+      meshId?: string;
+      encrypted: boolean;
+    }
+  | {
+      type: 'join:existing-mesh';
+      dbName: string;
+      remotePath?: string;
+      deviceId: string;
+      previousMeshId?: string;
+      nextMeshId: string;
+      policy: JoinExistingMeshPolicy;
+      localRowCount: number;
+      queuedChangeCount: number;
+    }
+  | {
+      type: 'connect:noop';
+      dbName: string;
+      remotePath?: string;
+      deviceId: string;
+      reason: 'already-connected';
+    }
+  | {
+      type: 'connect:error';
+      error: Error;
+      stage: string;
+      dbName: string;
+      remotePath?: string;
+      deviceId: string;
+    }
+  | {
+      type: 'transport:teardown';
+      dbName: string;
+      remotePath?: string;
+      deviceId?: string;
+      reason: 'switch-adapter' | 'disconnect' | 'detach';
+    }
   | { type: 'relay:subscribe'; adapter: string; remotePath?: string; deviceId: string }
   | { type: 'relay:ready'; adapter: string }
   | { type: 'relay:message'; adapter: string; payload: RemoteInvalidationPayload }
@@ -882,13 +959,117 @@ export type SyncEvent =
   | { type: 'flush:start'; entryCount: number }
   | { type: 'flush:complete' }
   | { type: 'flush:error'; error: Error }
-  | { type: 'compact:warning'; queuedChangeCount: number; threshold: number; autoCompactThreshold: number; remotePath?: string; deviceId: string }
-  | { type: 'compact:auto:start'; queuedChangeCount: number; threshold: number; sampleRoll?: number; sampleWindow?: number; remoteChangeFileCount?: number; trigger: 'immediate' | 'delayed'; remotePath?: string; deviceId: string }
-  | { type: 'compact:auto:skip'; queuedChangeCount: number; threshold: number; sampleRoll?: number; sampleWindow?: number; trigger: 'immediate' | 'delayed'; remotePath?: string; deviceId: string; reason: 'sampling' | 'disabled' | 'not-connected' | 'already-running' | 'poisoned' | 'missing-remote' | 'peer-mode' | 'below-remote-threshold' | 'superseded' }
-  | { type: 'compact:auto:complete'; queuedChangeCount: number; threshold: number; trigger: 'immediate' | 'delayed'; remoteChangeFileCount?: number; remotePath?: string; deviceId: string }
-  | { type: 'compact:auto:error'; queuedChangeCount: number; threshold: number; trigger: 'immediate' | 'delayed'; remoteChangeFileCount?: number; remotePath?: string; deviceId: string; error: Error }
-  | { type: 'compact:delayed:scheduled'; queuedChangeCount: number; delayMs: number; phase: 'check' | 'compact'; remotePath?: string; deviceId: string }
-  | { type: 'compact:delayed:check'; queuedChangeCount: number; remoteChangeFileCount: number; threshold: number; remotePath?: string; deviceId: string }
+  | {
+      type: 'compact:warning';
+      queuedChangeCount: number;
+      threshold: number;
+      autoCompactThreshold: number;
+      remotePath?: string;
+      deviceId: string;
+    }
+  | {
+      type: 'compact:auto:start';
+      queuedChangeCount: number;
+      threshold: number;
+      sampleRoll?: number;
+      sampleWindow?: number;
+      remoteChangeFileCount?: number;
+      trigger: 'immediate' | 'delayed';
+      remotePath?: string;
+      deviceId: string;
+    }
+  | {
+      type: 'compact:auto:skip';
+      queuedChangeCount: number;
+      threshold: number;
+      sampleRoll?: number;
+      sampleWindow?: number;
+      trigger: 'immediate' | 'delayed';
+      remotePath?: string;
+      deviceId: string;
+      reason:
+        | 'sampling'
+        | 'disabled'
+        | 'not-connected'
+        | 'already-running'
+        | 'poisoned'
+        | 'missing-remote'
+        | 'peer-mode'
+        | 'below-remote-threshold'
+        | 'superseded';
+    }
+  | {
+      type: 'compact:auto:complete';
+      queuedChangeCount: number;
+      threshold: number;
+      trigger: 'immediate' | 'delayed';
+      remoteChangeFileCount?: number;
+      remotePath?: string;
+      deviceId: string;
+    }
+  | {
+      type: 'compact:auto:error';
+      queuedChangeCount: number;
+      threshold: number;
+      trigger: 'immediate' | 'delayed';
+      remoteChangeFileCount?: number;
+      remotePath?: string;
+      deviceId: string;
+      error: Error;
+    }
+  | {
+      type: 'compact:retention:scheduled';
+      dueAt: string;
+      oldestChangeAt?: string;
+      remotePath?: string;
+      deviceId: string;
+    }
+  | {
+      type: 'compact:retention:start';
+      oldestChangeAt: string;
+      ageMs: number;
+      remotePath?: string;
+      deviceId: string;
+    }
+  | {
+      type: 'compact:retention:complete';
+      oldestChangeAt: string;
+      ageMs: number;
+      remotePath?: string;
+      deviceId: string;
+    }
+  | {
+      type: 'compact:retention:error';
+      oldestChangeAt?: string;
+      error: Error;
+      remotePath?: string;
+      deviceId: string;
+    }
+  | {
+      type: 'offline:retention-expired';
+      expiredAt: string;
+      lastSuccessfulSyncAt: string;
+      maxOfflineDurationMs: number;
+      quarantinedChangeCount: number;
+      remotePath?: string;
+      deviceId: string;
+    }
+  | {
+      type: 'compact:delayed:scheduled';
+      queuedChangeCount: number;
+      delayMs: number;
+      phase: 'check' | 'compact';
+      remotePath?: string;
+      deviceId: string;
+    }
+  | {
+      type: 'compact:delayed:check';
+      queuedChangeCount: number;
+      remoteChangeFileCount: number;
+      threshold: number;
+      remotePath?: string;
+      deviceId: string;
+    }
   | { type: 'change'; table: string; rowId: string; row: Row }
   | { type: 'delete'; table: string; rowId: string }
   | { type: 'rehydrate:start' }
@@ -904,19 +1085,19 @@ export type SyncEvent =
   | {
       type: 'trace:manifest';
       op: 'read' | 'write' | 'cache-hit' | 'bootstrap-create';
-      reason: string;            // free-form caller tag, e.g. 'connect', 'flush', 'pull', 'compact'
+      reason: string; // free-form caller tag, e.g. 'connect', 'flush', 'pull', 'compact'
       generation?: number;
       path?: string;
-      cached?: boolean;          // true when a read was served from in-memory cache
+      cached?: boolean; // true when a read was served from in-memory cache
     }
   | {
       type: 'trace:head';
       op: 'read' | 'write' | 'skip-no-change';
-      reason: string;            // 'flush', 'pull-fast-path'
+      reason: string; // 'flush', 'pull-fast-path'
       path?: string;
-      priorHlc?: string | null;  // HLC currently in head.json (or local cache)
-      nextHlc?: string | null;   // HLC about to be written
-      regressed?: boolean;       // true when caller tried to write an HLC older than priorHlc (BUG signal)
+      priorHlc?: string | null; // HLC currently in head.json (or local cache)
+      nextHlc?: string | null; // HLC about to be written
+      regressed?: boolean; // true when caller tried to write an HLC older than priorHlc (BUG signal)
     };
 
 /**
@@ -927,9 +1108,7 @@ export type SyncEventListener = (event: SyncEvent) => void;
 /**
  * Event emitted by table-level subscriptions.
  */
-export type TableEvent<T> =
-  | { type: 'change'; rowId: string; row: T }
-  | { type: 'delete'; rowId: string };
+export type TableEvent<T> = { type: 'change'; rowId: string; row: T } | { type: 'delete'; rowId: string };
 
 /**
  * Listener callback for table-level subscriptions.

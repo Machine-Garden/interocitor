@@ -8,7 +8,7 @@ prove that every immutable change file has been observed.
 
 1. Exact immutable change filenames are the authoritative local observation
    record.
-2. Every pull lists retained change files and skips only exact receipts.
+2. Every pull lists remaining change files and skips only exact receipts.
 3. `head.json`, scalar cursors, and per-writer HLC frontiers are hints and
    diagnostics, never completeness proofs.
 4. HLC orders conflicting column values. LWW is the only built-in replicated
@@ -21,8 +21,8 @@ prove that every immutable change file has been observed.
 8. Core emits `sync:late-change` when an unseen file is discovered behind an
    observed global or writer frontier.
 9. A snapshot names its exact `coveredChangeFiles`, and rehydrate restores that
-   set as receipts before catch-up. Every mesh retains every change file until
-   the adapter contract gains a safe remote publication barrier.
+   set as receipts before catch-up. After snapshot and manifest publication,
+   compaction deletes exactly those covered filenames.
 10. Observation metadata commits are serialized per local store and merge exact
     identities. Primary flush persists its receipts before remote publication;
     replica publication is private to that primary operation.
@@ -37,7 +37,7 @@ prove that every immutable change file has been observed.
 
 ## Why the decision is correct
 
-Completeness is set-based: a client can name every retained file it has
+Completeness is set-based: a client can name every available file it has
 observed. Convergence is order-independent: clients with the same file set
 choose the same LWW winners, and duplicate delivery is idempotent. Compaction
 uses concrete snapshot coverage as a receipt base, never an HLC range.
@@ -74,9 +74,9 @@ the low-level adapter publisher outside `flush.ts`.
 - **Snapshot watermark as a retention boundary:** a lower-HLC file can be
   published after snapshot capture, so a scalar watermark cannot authorize
   deletion.
-- **Destructive compaction without CAS:** competing processes can use the same
-  authorized server identity and select different snapshots. Every mode retains
-  immutable history until remote mutual exclusion is enforceable.
+- **Concurrent destructive compaction without CAS:** competing processes can
+  select different snapshots and deletion sets. Deployments must serialize
+  compaction, normally through one active server-managed writer.
 - **A state checksum as catch-up progress:** a mismatch detects divergence but
   does not identify missing history; a match cannot prove that the remote has
   no withheld change.
@@ -87,7 +87,7 @@ the low-level adapter publisher outside `flush.ts`.
 
 ## Consequences
 
-- Pull performs a retained-file listing for correctness. A reload fast path may
+- Pull performs a remaining-file listing for correctness. A reload fast path may
   avoid change-file reads only after verifying that all listed filenames have
   exact receipts.
 - Receipt metadata grows with observed history. Snapshot restore replaces it
@@ -100,7 +100,7 @@ the low-level adapter publisher outside `flush.ts`.
   compaction.
 - Core, Python, and Swift apply the same late-publication and conflict-ordering
   rules.
-- The guarantee assumes an honest remote eventually lists retained files. A
+- The guarantee assumes an honest remote eventually lists remaining files. A
   remote that withholds both a change and every commitment to it remains outside
   this guarantee.
 

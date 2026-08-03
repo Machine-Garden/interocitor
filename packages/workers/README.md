@@ -335,9 +335,11 @@ shape and boundaries: [Audit](docs/audit.md).
 ## Catch-up after absence
 
 A device returning within the current remote epoch catches up incrementally:
-change files are HLC-named and `pull()` merges only those newer than its
-cursor. When compaction advances the remote epoch beyond the local epoch, the
-client rehydrates from the current snapshot and then pulls the newer tail.
+`pull()` lists change files and merges exact filenames absent from its receipt
+set. When compaction advances the remote epoch, the client rehydrates from the
+current snapshot and then pulls the uncovered tail. Covered D1 change objects
+are deleted after snapshot publication, and the handling colo evicts their
+Worker Cache API entries.
 See [Catch-up](docs/catch-up.md).
 
 ## Security guardrails

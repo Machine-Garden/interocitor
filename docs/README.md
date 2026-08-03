@@ -53,11 +53,11 @@ Keep these local anchors stable:
 
 ## Public pages
 
-| Page                              | Reader question                                                               |
-| --------------------------------- | ----------------------------------------------------------------------------- |
-| `index.html`                      | Is Interocitor a fit for my application and threat model?                     |
-| `how-it-works.html`               | How do independent changes converge, and what happens after history piles up? |
-| `examples/todo-webdav/index.html` | Can an Interocitor app work entirely in the browser without a backend?        |
+| Page                          | Reader question                                                               |
+| ----------------------------- | ----------------------------------------------------------------------------- |
+| `index.html`                  | Is Interocitor a fit for my application and threat model?                     |
+| `how-it-works.html`           | How do independent changes converge, and what happens after history piles up? |
+| `examples/todomvc/index.html` | Can two Interocitor clients converge entirely inside one browser tab?         |
 
 ## Publication metadata
 

@@ -175,7 +175,7 @@ final class CoreSwiftInteropIntegrationTests: XCTestCase {
     }
 
     /// Core first compacts the Swift-created mesh at epoch 1. This fresh Swift
-    /// client rehydrates before it publishes epoch 2. Immutable history remains
+    /// client rehydrates before it publishes epoch 2. Uncovered history remains
     /// retained so a fresh Core client can catch up in the runner's final phase.
     func test_swiftBootstrappedMesh_canBeCompactedForCore() async throws {
         let environment = try swiftBootstrapInteropEnvironment()

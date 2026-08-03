@@ -191,20 +191,20 @@
             <article class="task-example todo-example">
               <div class="task-example-copy">
                 <p class="example-label"><span>01</span> Local-first application</p>
-                <h3>TodoMVC can start without a backend.</h3>
+                <h3>TodoMVC, live in this browser.</h3>
                 <p>
-                  With the schema and browser store initialized, ask for the table, then use
-                  ordinary row operations. Reads and writes stay local, so the list works before a
-                  mailbox exists and while the network is away.
+                  Use two familiar TodoMVC clients side by side. A live in-page filesystem exposes
+                  the exact manifest, device, head, and change files without asking the visitor to
+                  provide storage or run a backend.
                 </p>
                 <div class="example-outcome">
-                  <strong>Share when the product is ready.</strong>
+                  <strong>Make convergence observable.</strong>
                   <span
-                    >Add a mailbox adapter, a non-null key source, and pairing. The mailbox moves
-                    encrypted changes; it does not become the Todo API.</span
+                    >Change either client, simulate a disconnect, and inspect the files created on
+                    reconnection. Everything resets when the page reloads.</span
                   >
-                  <a href="/examples/todo-webdav/"
-                    >Open the backend-free TodoMVC <span aria-hidden="true">→</span></a
+                  <a href="/examples/todomvc/"
+                    >Try the live TodoMVC <span aria-hidden="true">→</span></a
                   >
                 </div>
               </div>
@@ -212,19 +212,18 @@
               <div class="code-window" aria-label="Partial TodoMVC application code">
                 <div class="code-window-bar">
                   <span aria-hidden="true"><i></i><i></i><i></i></span>
-                  <b>after db.init()</b>
+                  <b>one page · two clients</b>
                 </div>
-                <pre><code><span class="code-keyword">const</span> todos = db.table(<span class="code-string">'todos'</span>);
+                <pre><code><span class="code-keyword">const</span> memory = <span class="code-keyword">new</span> MemoryAdapter();
+<span class="code-keyword">const</span> left = createDatabase(<span class="code-string">'client-1'</span>);
+<span class="code-keyword">const</span> right = createDatabase(<span class="code-string">'client-2'</span>);
 
-<span class="code-keyword">await</span> todos.add({
+<span class="code-keyword">await</span> left.table(<span class="code-string">'todos'</span>).add({
   title: <span class="code-string">'Ship it'</span>, done: <span class="code-value">false</span>
 });
 
-<span class="code-keyword">const</span> open = <span class="code-keyword">await</span> todos
-  .where(<span class="code-string">'done'</span>).equals(<span class="code-value">false</span>);
-
-<span class="code-comment">// Optional, on a db configured with a mailbox:</span>
-<span class="code-keyword">await</span> db.connect();</code></pre>
+<span class="code-keyword">await</span> left.flush();
+<span class="code-keyword">await</span> right.pull();</code></pre>
               </div>
             </article>
 

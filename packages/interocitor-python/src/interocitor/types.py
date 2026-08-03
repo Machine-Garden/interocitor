@@ -254,9 +254,10 @@ class Snapshot:
     epoch: int
     schema_version: int
     tables: dict[str, dict[str, Row]]
+    covered_change_files: list[str] | None = None
 
     def to_wire(self) -> dict[str, Any]:
-        return {
+        value = {
             "snapshotId": self.snapshot_id,
             "timestamp": self.timestamp,
             "hlc": self.hlc,
@@ -267,6 +268,9 @@ class Snapshot:
                 for table, rows in self.tables.items()
             },
         }
+        if self.covered_change_files is not None:
+            value["coveredChangeFiles"] = list(self.covered_change_files)
+        return value
 
     @classmethod
     def from_wire(cls, value: object) -> "Snapshot":
@@ -276,6 +280,9 @@ class Snapshot:
         for table, rows in tables.items():
             row_map = _mapping(rows, "Snapshot table")
             converted[str(table)] = {str(row_id): Row.from_wire(row) for row_id, row in row_map.items()}
+        covered = record.get("coveredChangeFiles")
+        if covered is not None and (not isinstance(covered, list) or not all(isinstance(name, str) for name in covered)):
+            raise ValueError("Snapshot coveredChangeFiles must be an array of strings")
         return cls(
             snapshot_id=_string(record.get("snapshotId"), "Snapshot snapshotId"),
             timestamp=_string(record.get("timestamp"), "Snapshot timestamp"),
@@ -283,6 +290,7 @@ class Snapshot:
             epoch=_integer(record.get("epoch"), "Snapshot epoch"),
             schema_version=_integer(record.get("schemaVersion"), "Snapshot schemaVersion"),
             tables=converted,
+            covered_change_files=list(covered) if isinstance(covered, list) else None,
         )
 
 
@@ -360,6 +368,7 @@ class Manifest:
     watermark_hlc: str
     snapshot_path: str | None
     delta_path: str | None
+    retention: dict[str, int] | None = None
 
     def payload_wire(self) -> dict[str, Any]:
         """Manifest body in the same insertion order core hashes with JSON.stringify."""
@@ -380,6 +389,8 @@ class Manifest:
             "snapshotPath": self.snapshot_path,
             "deltaPath": self.delta_path,
         }
+        if self.retention is not None:
+            value["retention"] = self.retention
         return value
 
     def to_wire(self) -> dict[str, Any]:
@@ -396,6 +407,17 @@ class Manifest:
         server = _mapping(record.get("server"), "Manifest server")
         snapshot_path = record.get("snapshotPath")
         delta_path = record.get("deltaPath")
+        retention_raw = record.get("retention")
+        retention: dict[str, int] | None = None
+        if isinstance(retention_raw, Mapping):
+            compact_after_ms = _integer(retention_raw.get("compactAfterMs"), "Manifest retention compactAfterMs")
+            max_offline_duration_ms = _integer(retention_raw.get("maxOfflineDurationMs"), "Manifest retention maxOfflineDurationMs")
+            if compact_after_ms <= 0 or max_offline_duration_ms <= 0:
+                raise ValueError("Manifest retention durations must be positive")
+            retention = {
+                "compactAfterMs": compact_after_ms,
+                "maxOfflineDurationMs": max_offline_duration_ms,
+            }
         return cls(
             generation=_integer(record.get("generation"), "Manifest generation"),
             parent_generation=_integer(record.get("parentGeneration"), "Manifest parentGeneration"),
@@ -412,6 +434,7 @@ class Manifest:
             watermark_hlc=_string(record.get("watermarkHlc"), "Manifest watermarkHlc"),
             snapshot_path=snapshot_path if isinstance(snapshot_path, str) else None,
             delta_path=delta_path if isinstance(delta_path, str) else None,
+            retention=retention,
         )
 
 

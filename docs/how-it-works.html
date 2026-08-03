@@ -549,8 +549,8 @@
               </article>
             </div>
             <figcaption id="history-pressure-caption">
-              Compaction does not optimize the normal caught-up pull—it bounds the history that a
-              new or rejoining device must reconstruct.
+              Compaction removes the covered files from normal listings and gives a new or
+              rejoining device one bounded baseline to reconstruct.
             </figcaption>
           </figure>
 
@@ -563,7 +563,7 @@
             <p>
               A snapshot turns the accumulated result into a new starting point. Future devices load
               that one encrypted baseline, restores its exact covered-filename set, and then applies
-              every other retained change. The snapshot must preserve the effect of deletions.
+              every other remaining change. The snapshot must preserve the effect of deletions.
             </p>
           </div>
 
@@ -641,7 +641,7 @@
             </p>
             <p>
               A rejoining device publishes its durable local work before replacing its cache from a
-              newer snapshot. Every retained immutable filename remains eligible for pull,
+              newer snapshot. Every remaining immutable filename remains eligible for pull,
               regardless of where its HLC sorts relative to the snapshot watermark.
             </p>
           </div>
@@ -653,7 +653,7 @@
               <p>
                 A trusted device first flushes, catches up, captures the exact filenames it observed,
                 and scans its merged rows. It writes the current state as one encrypted snapshot and
-                points the mesh at it. Immutable change files remain retained.
+                points the mesh at it, then removes the exact change files captured in the snapshot.
               </p>
               <p>
                 Publication order matters. The snapshot is uploaded before the manifest points to
@@ -677,7 +677,7 @@
                 <li><b>2</b><span>capture filenames</span></li>
                 <li><b>3</b><span>write snapshot</span></li>
                 <li><b>4</b><span>switch manifest</span></li>
-                <li><b>5</b><span>retain history</span></li>
+                <li><b>5</b><span>remove covered changes</span></li>
               </ol>
 
               <div class="baseline-after">

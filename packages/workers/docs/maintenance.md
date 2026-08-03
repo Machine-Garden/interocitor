@@ -7,6 +7,18 @@ Maintenance is destructive. For each eligible remote root it deletes matching
 rows from the D1 `files` and `folders` tables, clears its counters, and marks
 the `mesh_paths` row deleted. It does not delete R2-backed durable files.
 
+Do not use the Worker path TTL as row-history compaction. The Worker does not
+hold the mesh key and cannot merge encrypted changes into a snapshot. A
+connected server-managed Interocitor writer uses D1's server-recorded
+`modifiedTime` and the manifest's finite `retention.compactAfterMs` policy to
+run compaction; the safe default is seven days. The separate Worker path TTL
+removes an entire inactive mesh and must therefore be longer than the mesh's
+supported offline lifetime and backup policy.
+
+Change files deliberately bypass Cloudflare's per-colo Cache API. Snapshot
+files remain cacheable, but every change read consults D1 so an exact
+post-compaction deletion is authoritative in every colo.
+
 The snippets are partial deployment fragments. Supply the host Worker,
 bindings, application policy, and Wrangler database identifiers. Use the
 [runnable Cloudflare example](../../../examples/todo-cloudflare-do/README.md)
@@ -23,12 +35,12 @@ crons = ["0 3 * * *"]
 ```
 
 ```ts
-import { withInterocitor } from '@interocitor/workers';
+import { withInterocitor } from "@interocitor/workers";
 
 export default withInterocitor(appWorker, {
   db: (env) => env.DB,
   runtime: {
-    meshIntegrityGates: [({ address }) => address === 'main'],
+    meshIntegrityGates: [({ address }) => address === "main"],
     enableScheduledMaintenance: () => true,
     pathTtlHours: (env) => env.INTEROCITOR_PATH_TTL_HOURS,
   },
@@ -47,16 +59,14 @@ root may legitimately remain idle.
 ## Expose host-triggered operations
 
 Create the separate system handler only when the host needs mesh-ID,
-compaction, metric-reconciliation, or maintenance operations:
+metric-reconciliation, or maintenance operations. Compaction is initiated by
+an Interocitor client through the normal IO route:
 
 ```ts
-import {
-  checksummedMeshIntegrityGate,
-  createInterocitorSystemHandler,
-} from '@interocitor/workers';
+import { checksummedMeshIntegrityGate, createInterocitorSystemHandler } from "@interocitor/workers";
 
 const system = createInterocitorSystemHandler({
-  mountPrefix: '/sync',
+  mountPrefix: "/sync",
   db: (env) => env.DB,
   runtime: {
     meshIntegrityGates: [checksummedMeshIntegrityGate],
@@ -69,8 +79,8 @@ export default {
   async fetch(request, env, ctx) {
     const pathname = new URL(request.url).pathname;
     if (system.matches(pathname)) {
-      if (!await env.adminPolicy.allows(request)) {
-        return new Response('Forbidden', { status: 403 });
+      if (!(await env.adminPolicy.allows(request))) {
+        return new Response("Forbidden", { status: 403 });
       }
       return system.fetch(request, env, ctx);
     }
@@ -84,13 +94,13 @@ Send JSON POST requests to
 body `op` are both required; a missing value returns `400`. An unknown `op`
 returns `404`.
 
-| Operation | Body fields and defaults | Result |
-| --- | --- | --- |
-| `issue-mesh-id` | No additional fields. The non-empty route address is only a routing anchor, such as `provision`. | Issues a checksummed UUIDv7 `{ meshId }`. |
-| `validate-mesh-id` | Required `meshId`; missing returns `400`. The route address is only a routing anchor. | `{ valid: boolean }`; malformed or wrong-authority IDs return `false`. |
-| `reconcile-metrics` | `remotePath` defaults to `/`. | Recalculates stored metrics for the route-address mesh and remote root. |
-| `run-maintenance` | No additional fields. | Runs the configured TTL sweep for the route-address mesh. |
-| `maintenance-status` | `remotePath` defaults to `/`. | Returns maintenance state for the route-address mesh and remote root. |
+| Operation            | Body fields and defaults                                                                         | Result                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| `issue-mesh-id`      | No additional fields. The non-empty route address is only a routing anchor, such as `provision`. | Issues a checksummed UUIDv7 `{ meshId }`.                               |
+| `validate-mesh-id`   | Required `meshId`; missing returns `400`. The route address is only a routing anchor.            | `{ valid: boolean }`; malformed or wrong-authority IDs return `false`.  |
+| `reconcile-metrics`  | `remotePath` defaults to `/`.                                                                    | Recalculates stored metrics for the route-address mesh and remote root. |
+| `run-maintenance`    | No additional fields.                                                                            | Runs the configured TTL sweep for the route-address mesh.               |
+| `maintenance-status` | `remotePath` defaults to `/`.                                                                    | Returns maintenance state for the route-address mesh and remote root.   |
 
 Operations targeting an existing mesh pass `meshIntegrityGates`. ID issue and
 validation do not target an existing mesh. System operations use the host

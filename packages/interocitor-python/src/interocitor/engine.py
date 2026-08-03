@@ -529,7 +529,11 @@ class Interocitor:
             await self._flush()
 
     async def compact(self) -> Manifest:
-        """Publish a canonical encrypted snapshot and rotate the manifest."""
+        """Publish a snapshot, rotate the manifest, and remove covered changes.
+
+        The caller must serialize compaction across processes because storage
+        adapters do not provide a distributed lease or compare-and-swap write.
+        """
 
         await self.init()
         async with self._state_lock:
@@ -550,6 +554,10 @@ class Interocitor:
             snapshot_tables: dict[str, dict[str, Row]] = {}
             for row in await self._local.get_all_rows():
                 snapshot_tables.setdefault(row._meta.table, {})[row._meta.row_id] = row
+            seen_raw = await self._local.get_meta("seenChangeFiles")
+            covered_change_files = sorted(
+                name for name in seen_raw if isinstance(name, str)
+            ) if isinstance(seen_raw, list) else []
             snapshot = Snapshot(
                 snapshot_id=generate_id("snap"),
                 timestamp=now,
@@ -557,6 +565,7 @@ class Interocitor:
                 epoch=next_epoch,
                 schema_version=manifest.schema,
                 tables=snapshot_tables,
+                covered_change_files=covered_change_files,
             )
             snapshot_path = f"{paths.mainline_folder}/snapshot-{next_epoch}-{self._server_id}.json"
             await self._require_adapter("compact").write_file(
@@ -580,6 +589,7 @@ class Interocitor:
                 watermark_hlc=hlc_serialize(self._hlc),
                 snapshot_path=snapshot_path,
                 delta_path=None,
+                retention=manifest.retention,
             )
             next_manifest.content_hash = _content_hash(next_manifest.payload_wire())
             await self._write_json(paths.manifest_file(next_manifest.generation), next_manifest.to_wire())
@@ -590,6 +600,14 @@ class Interocitor:
             self._manifest = next_manifest
             await self._local.set_meta("epoch", next_epoch)
             await self._local.set_meta("manifestCache", next_manifest.to_wire())
+
+            for file_name in covered_change_files:
+                try:
+                    await self._require_adapter("compact").delete_file(
+                        f"{paths.changes_folder}/{file_name}"
+                    )
+                except Exception:
+                    pass
 
             await self._acknowledge_manifest()
             return Manifest.from_wire(next_manifest.to_wire())
@@ -1076,7 +1094,7 @@ class Interocitor:
             )
             await self._local.clear_rows()
             await self._local.set_meta("cursor", "")
-            await self._local.set_meta("seenChangeFiles", [])
+            await self._local.set_meta("seenChangeFiles", snapshot.covered_change_files or [])
             self._tables = {}
             self._known_tables = set()
             for table, rows in snapshot.tables.items():

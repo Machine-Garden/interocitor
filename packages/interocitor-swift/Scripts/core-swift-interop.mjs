@@ -13,7 +13,7 @@
  *   verify-swift-bootstrap    Core validates, reads, and first-compacts a
  *                             Swift-created mesh at epoch 1.
  *   verify-swift-compacted    Core validates and rehydrates Swift's epoch-2
- *                             snapshot while immutable changes remain.
+ *                             snapshot and removes covered changes.
  *
  * Required environment:
  *   INTEROCITOR_WEBDAV_URL          e.g. http://127.0.0.1:4175
@@ -35,16 +35,9 @@ if (!globalThis.crypto) {
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDir, '../../..');
-const coreEntry = new URL(
-  `file://${join(repositoryRoot, 'packages/core/dist/index.js')}`,
-).href;
+const coreEntry = new URL(`file://${join(repositoryRoot, 'packages/core/dist/index.js')}`).href;
 
-const {
-  Interocitor,
-  MemoryLocalStore,
-  PortablePassphraseKeySource,
-  WebDAVAdapter,
-} = await import(coreEntry);
+const { Interocitor, MemoryLocalStore, PortablePassphraseKeySource, WebDAVAdapter } = await import(coreEntry);
 
 const TEST_PASSPHRASE = '1thX6LZfHDZZKUs92febYZhYRcXddmzfzF2NvTkPNE';
 const CORE_ROW_ID = 'core-created';
@@ -60,24 +53,18 @@ function requiredEnv(name) {
 function interopConfig(flow = 'core') {
   const serverUrl = requiredEnv('INTEROCITOR_WEBDAV_URL').replace(/\/$/, '');
   const isSwiftBootstrap = flow === 'swift-bootstrap';
-  const remotePath = requiredEnv(
-    isSwiftBootstrap
-      ? 'INTEROCITOR_INTEROP_SWIFT_REMOTE_PATH'
-      : 'INTEROCITOR_INTEROP_REMOTE_PATH',
-  );
+  const remotePath = requiredEnv(isSwiftBootstrap ? 'INTEROCITOR_INTEROP_SWIFT_REMOTE_PATH' : 'INTEROCITOR_INTEROP_REMOTE_PATH');
   if (!remotePath.startsWith('/')) {
     throw new Error('Interoperability remote paths must start with /');
   }
 
   return {
-    baseUrl: serverUrl.endsWith('/__webdav__')
-      ? serverUrl
-      : `${serverUrl}/__webdav__`,
+    baseUrl: serverUrl.endsWith('/__webdav__') ? serverUrl : `${serverUrl}/__webdav__`,
     remotePath,
     portableKey: process.env.INTEROCITOR_INTEROP_PASSPHRASE?.trim() || TEST_PASSPHRASE,
     dbName: isSwiftBootstrap
-      ? (process.env.INTEROCITOR_INTEROP_SWIFT_DB_NAME?.trim() || 'swift-core-interop')
-      : (process.env.INTEROCITOR_INTEROP_DB_NAME?.trim() || 'core-swift-interop'),
+      ? process.env.INTEROCITOR_INTEROP_SWIFT_DB_NAME?.trim() || 'swift-core-interop'
+      : process.env.INTEROCITOR_INTEROP_DB_NAME?.trim() || 'core-swift-interop',
   };
 }
 
@@ -132,9 +119,17 @@ async function bootstrap() {
 
     const manifest = await readManifest(adapter, config.remotePath);
     assert(manifest.encrypted === true, 'Core bootstrap did not create an encrypted mesh');
-    assert(typeof manifest.contentHash === 'string' && manifest.contentHash.startsWith('sha256:'),
-      'Core bootstrap did not create a content-hashed manifest');
-    console.log(JSON.stringify({ phase: 'bootstrap', meshId: manifest.meshId, remotePath: config.remotePath }));
+    assert(
+      typeof manifest.contentHash === 'string' && manifest.contentHash.startsWith('sha256:'),
+      'Core bootstrap did not create a content-hashed manifest',
+    );
+    console.log(
+      JSON.stringify({
+        phase: 'bootstrap',
+        meshId: manifest.meshId,
+        remotePath: config.remotePath,
+      }),
+    );
   } finally {
     await db.disconnect();
   }
@@ -142,8 +137,8 @@ async function bootstrap() {
 
 function assertMixedRuntimeRows(rows) {
   const plainRows = toPlainRows(rows);
-  const coreRow = plainRows.find(row => row.origin === 'core');
-  const swiftRow = plainRows.find(row => row.origin === 'swift');
+  const coreRow = plainRows.find((row) => row.origin === 'core');
+  const swiftRow = plainRows.find((row) => row.origin === 'swift');
   const received = JSON.stringify(plainRows);
   assert(coreRow?.title === 'Created by @interocitor/core', `Core-created row is absent or changed; received ${received}`);
   assert(coreRow?.done === false, `Core-created Boolean value did not survive the Swift round trip; received ${received}`);
@@ -160,23 +155,24 @@ function toPlainRows(rows) {
 
 function assertSwiftBootstrapNestedRow(rows) {
   const plainRows = toPlainRows(rows);
-  const rowIndex = rows.findIndex(candidate => candidate?._meta?.rowId === SWIFT_BOOTSTRAP_ROW_ID);
+  const rowIndex = rows.findIndex((candidate) => candidate?._meta?.rowId === SWIFT_BOOTSTRAP_ROW_ID);
   const row = rowIndex === -1 ? undefined : plainRows[rowIndex];
   const details = row?.details;
   const labels = details?.labels;
   const received = JSON.stringify(plainRows);
 
   assert(row, `Swift bootstrap row ${SWIFT_BOOTSTRAP_ROW_ID} is absent; received ${received}`);
-  assert(row?.title === 'Swift bootstrapped encrypted mesh',
-    `Swift bootstrap row is absent or changed; received ${received}`);
-  assert(details?.attempt === 3,
-    `Swift object value was not readable by Core; received ${received}`);
-  assert(Array.isArray(labels) && labels.length === 3,
-    `Swift nested array value was not readable by Core; received ${received}`);
-  assert(labels?.[0] === 'mesh' && labels?.[1]?.retries === 2 && labels?.[1]?.enabled === true,
-    `Swift nested object inside an array was not readable by Core; received ${received}`);
-  assert(labels?.[2] === null && details?.owner?.id === 'worker-7',
-    `Swift nested null/object values were not readable by Core; received ${received}`);
+  assert(row?.title === 'Swift bootstrapped encrypted mesh', `Swift bootstrap row is absent or changed; received ${received}`);
+  assert(details?.attempt === 3, `Swift object value was not readable by Core; received ${received}`);
+  assert(Array.isArray(labels) && labels.length === 3, `Swift nested array value was not readable by Core; received ${received}`);
+  assert(
+    labels?.[0] === 'mesh' && labels?.[1]?.retries === 2 && labels?.[1]?.enabled === true,
+    `Swift nested object inside an array was not readable by Core; received ${received}`,
+  );
+  assert(
+    labels?.[2] === null && details?.owner?.id === 'worker-7',
+    `Swift nested null/object values were not readable by Core; received ${received}`,
+  );
 }
 
 async function verify() {
@@ -184,7 +180,12 @@ async function verify() {
   await db.init();
   try {
     const changeFiles = await adapter.listFiles(`${config.remotePath}/changes`);
-    console.log(JSON.stringify({ phase: 'verify:before-connect', changeFiles: changeFiles.map(file => file.name).sort() }));
+    console.log(
+      JSON.stringify({
+        phase: 'verify:before-connect',
+        changeFiles: changeFiles.map((file) => file.name).sort(),
+      }),
+    );
     await db.connect();
     const rows = await db.query('tasks');
     assertMixedRuntimeRows(rows);
@@ -203,9 +204,14 @@ async function compact() {
     await db.compact();
     const manifest = await readManifest(adapter, config.remotePath);
     assert(manifest.epoch >= 1, 'Core compaction did not advance the mesh epoch');
-    assert(typeof manifest.snapshotPath === 'string' && manifest.snapshotPath.length > 0,
-      'Core compaction did not publish a snapshot');
-    console.log(JSON.stringify({ phase: 'compact', epoch: manifest.epoch, snapshotPath: manifest.snapshotPath }));
+    assert(typeof manifest.snapshotPath === 'string' && manifest.snapshotPath.length > 0, 'Core compaction did not publish a snapshot');
+    console.log(
+      JSON.stringify({
+        phase: 'compact',
+        epoch: manifest.epoch,
+        snapshotPath: manifest.snapshotPath,
+      }),
+    );
   } finally {
     await db.disconnect();
   }
@@ -218,25 +224,30 @@ async function verifySwiftBootstrap() {
     await db.connect();
     const manifest = await readManifest(adapter, config.remotePath);
     assert(manifest.encrypted === true, 'Core did not accept Swift encrypted bootstrap manifest');
-    assert(typeof manifest.contentHash === 'string' && manifest.contentHash.startsWith('sha256:'),
-      'Swift bootstrap manifest is missing its Core-compatible content hash');
+    assert(
+      typeof manifest.contentHash === 'string' && manifest.contentHash.startsWith('sha256:'),
+      'Swift bootstrap manifest is missing its Core-compatible content hash',
+    );
     assertSwiftBootstrapNestedRow(await db.query('tasks'));
 
     // This is deliberately the same Core device that just read Swift's
-    // bootstrap change. Compaction publishes a receipt-bearing snapshot while
-    // retaining immutable history.
+    // bootstrap change. Compaction publishes a receipt-bearing snapshot and
+    // removes the exactly covered immutable history.
     await db.compact();
     const firstCompaction = await readManifest(adapter, config.remotePath);
     assert(firstCompaction.epoch === 1, `Core first compaction expected epoch 1; received ${firstCompaction.epoch}`);
-    assert(!Object.hasOwn(firstCompaction, 'gcFloorHlc'),
-      'Core first compaction must not publish a scalar GC floor');
-    assert(typeof firstCompaction.snapshotPath === 'string' && firstCompaction.snapshotPath.length > 0,
-      'Core first compaction did not publish a snapshot');
-    console.log(JSON.stringify({
-      phase: 'verify-swift-bootstrap',
-      remotePath: config.remotePath,
-      firstEpoch: firstCompaction.epoch,
-    }));
+    assert(!Object.hasOwn(firstCompaction, 'gcFloorHlc'), 'Core first compaction must not publish a scalar GC floor');
+    assert(
+      typeof firstCompaction.snapshotPath === 'string' && firstCompaction.snapshotPath.length > 0,
+      'Core first compaction did not publish a snapshot',
+    );
+    console.log(
+      JSON.stringify({
+        phase: 'verify-swift-bootstrap',
+        remotePath: config.remotePath,
+        firstEpoch: firstCompaction.epoch,
+      }),
+    );
   } finally {
     await db.disconnect();
   }
@@ -247,23 +258,27 @@ async function verifySwiftCompacted() {
   await db.init();
   try {
     const changeFiles = await adapter.listFiles(`${config.remotePath}/changes`);
-    const retainedChanges = changeFiles.filter(file => file.name !== 'head.json');
-    assert(retainedChanges.length > 0, 'Swift compaction must retain immutable changes');
+    const retainedChanges = changeFiles.filter((file) => file.name !== 'head.json');
+    assert(retainedChanges.length === 0, 'Swift compaction must remove exactly covered immutable changes');
 
     await db.connect();
     const manifest = await readManifest(adapter, config.remotePath);
-    assert(manifest.epoch === 2 && typeof manifest.snapshotPath === 'string' && manifest.snapshotPath.length > 0,
-      `Core did not receive Swift's epoch-2 snapshot manifest; received epoch ${manifest.epoch}`);
+    assert(
+      manifest.epoch === 2 && typeof manifest.snapshotPath === 'string' && manifest.snapshotPath.length > 0,
+      `Core did not receive Swift's epoch-2 snapshot manifest; received epoch ${manifest.epoch}`,
+    );
     assert(!Object.hasOwn(manifest, 'gcFloorHlc'), 'Swift manifest must not publish a scalar GC floor');
     // This Core client has a fresh MemoryLocalStore and can restore the Swift
     // snapshot, then verify exact retained change identities during catch-up.
     assertSwiftBootstrapNestedRow(await db.query('tasks'));
-    console.log(JSON.stringify({
-      phase: 'verify-swift-compacted',
-      epoch: manifest.epoch,
-      snapshotPath: manifest.snapshotPath,
-      retainedChangeCount: retainedChanges.length,
-    }));
+    console.log(
+      JSON.stringify({
+        phase: 'verify-swift-compacted',
+        epoch: manifest.epoch,
+        snapshotPath: manifest.snapshotPath,
+        retainedChangeCount: retainedChanges.length,
+      }),
+    );
   } finally {
     await db.disconnect();
   }

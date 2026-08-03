@@ -588,7 +588,7 @@ final class SyncEngineMemoryTests: XCTestCase {
     }
 
     func testCompaction() async throws {
-        let (a, b, _) = makePair()
+        let (a, b, shared) = makePair()
         try await a.initialize()
         try await b.initialize()
         try await a.connect()
@@ -596,6 +596,8 @@ final class SyncEngineMemoryTests: XCTestCase {
         try await a.put(table: "tasks", rowId: "t1", columns: ["title": .string("Hello")])
         try await a.flush()
         try await a.compact()
+        let changes = try await shared.listFiles(path: "/Interocitor/changes")
+        XCTAssertFalse(changes.contains { $0.name.contains("-chg_") })
 
         // B joins after compaction — should rehydrate from snapshot
         try await b.connect()
@@ -679,7 +681,7 @@ final class SyncEngineMemoryTests: XCTestCase {
         XCTAssertEqual(row?.columns["fresh"]?.value, .string("new"))
     }
 
-    func testCompactionRetainsImmutableChangeHistory() async throws {
+    func testCompactionRemovesCoveredImmutableChangeHistory() async throws {
         let adapter = MemoryStorageAdapter()
         let remotePath = "/gc-fractional-core-timestamp"
         let db = Interocitor(
@@ -697,7 +699,7 @@ final class SyncEngineMemoryTests: XCTestCase {
         let changes = try await adapter.listFiles(path: "\(remotePath)/changes")
             .filter { $0.name.contains("-chg_") }
         XCTAssertEqual(manifest?.epoch, 1)
-        XCTAssertEqual(changes.count, 1)
+        XCTAssertEqual(changes.count, 0)
     }
 }
 

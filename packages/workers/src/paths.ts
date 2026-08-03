@@ -4,7 +4,7 @@
  * - `manifest-pointer` — `manifest.json` at a remote root (mutable, semantic merge)
  * - `manifest-snapshot` — `manifest-<gen>.json` (immutable, cached forever)
  * - `head` — `changes/head.json` (mutable, HLC-ordered merge)
- * - `change-file` — `changes/<hlc>-chg_<id>.json` (immutable, cached forever)
+ * - `change-file` — `changes/<hlc>-chg_<id>.json` (immutable until compaction deletes and evicts it)
  * - `mainline-snapshot` — `mainline/<name>` (immutable, cached forever)
  * - `device-heartbeat` — `devices/<id>` (mutable, always overwrite)
  * - `other` — anything not matched above (generic overwrite semantics)
@@ -24,12 +24,7 @@ export const PATH_TYPE: Readonly<typeof PATH_TYPE_VALUES> = Object.freeze(PATH_T
 /** Union of all valid path type strings. */
 export type PathType = (typeof PATH_TYPE)[keyof typeof PATH_TYPE];
 
-const MESH_CHILD_TYPES: PathType[] = [
-  PATH_TYPE.HEAD,
-  PATH_TYPE.CHANGE_FILE,
-  PATH_TYPE.MAINLINE_SNAPSHOT,
-  PATH_TYPE.DEVICE_HEARTBEAT,
-];
+const MESH_CHILD_TYPES: PathType[] = [PATH_TYPE.HEAD, PATH_TYPE.CHANGE_FILE, PATH_TYPE.MAINLINE_SNAPSHOT, PATH_TYPE.DEVICE_HEARTBEAT];
 
 /**
  * Classify an Interocitor path by its structural role.

@@ -1,33 +1,37 @@
 # Catch-up after absence
 
-Incremental catch-up is native within one compaction epoch. Epoch changes are
-the explicit signal to rehydrate from a snapshot.
+Catch-up is defined by exact immutable change-file identity. HLC values order
+CRDT operations deterministically; they do not prove which files a device has
+observed.
 
-## The cursor is the HLC watermark
+## Exact receipts are authoritative
 
-Every change file is named `<HLC>-chg_<id>.json`. The HLC is a monotonic "last operation" timestamp embedded in the file name, so the change folder is implicitly ordered by it.
+Every change has one canonical filename, `<HLC>-<change-id>.json`. On pull, a
+client lists `changes/`, sorts filenames bytewise for deterministic processing,
+and merges every valid filename absent from its exact receipt set. It persists
+the receipt only with the merged rows. A file remains eligible even when its
+HLC sorts below `head.json`, the snapshot watermark, or the client's diagnostic
+cursor.
 
-Each device persists its own cursor: the highest HLC it has fully merged. On pull, the engine lists the change folder and merges only files whose HLC is greater than the cursor. "Give me everything after my cursor" is therefore a direct consequence of the data structure, not an extra protocol.
+`changes/head.json` and the scalar cursor are observability hints only. They
+cannot suppress listing or authorize skipping an unseen filename because
+independent devices can publish in a different order from HLC order.
 
-A device whose local epoch matches the remote manifest epoch pulls only the
-change files newer than its cursor. There is also a fast path: if
-`changes/head.json` has not advanced past the cursor, the engine skips listing
-entirely.
+## Snapshot rehydration
 
-## When snapshot rehydration happens
+Compaction publishes a snapshot with `coveredChangeFiles`, the exact filenames
+whose effects are represented in that snapshot, and advances the manifest
+epoch. A client seeing a newer epoch first publishes its durable local outbox,
+then replaces local rows from the snapshot, restores those exact receipts, and
+pulls every other retained filename.
 
-Compaction publishes a new snapshot and advances the manifest epoch. On
-connect, a client with `localEpoch < remoteEpoch` rehydrates from that snapshot
-and then pulls changes written after it. This happens because the epoch
-advanced, even if some older change files still exist.
-
-Pruning is a separate retention action. Change files through the compaction
-watermark can be removed after the snapshot becomes authoritative. A client
-must not infer snapshot need by looking for a missing tail; it follows the
-manifest epoch.
+Immutable change files and tombstones are retained. The storage API provides no
+mesh-wide lease or compare-and-swap primitive that could prove deletion safe,
+so neither a watermark nor an authorized writer identity permits pruning.
 
 ## Worker role
 
-The HLC-named change files provide the ordered, cursor-filterable history that
-`pull()` consumes. The Worker stores and serves those files and snapshots; the
-engine owns cursor filtering, epoch comparison, rehydration, and CRDT merge.
+The Worker stores and serves immutable changes, snapshots, manifests, and
+device metadata. It does not decide that a change is covered from scalar HLC
+state and exposes no compacted-change pruning operation. The engine owns exact
+receipt tracking, epoch comparison, rehydration, and deterministic CRDT merge.

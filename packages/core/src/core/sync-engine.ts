@@ -54,17 +54,10 @@ import type { MeshKeySource } from '../crypto/key-source.ts';
 import { MeshCredentialMismatchError } from './errors.ts';
 import { ConnectStageTimeoutError, DEFAULT_CONNECT_STAGE_TIMEOUT_MS, withDeadline } from './with-deadline.ts';
 import type { ManifestContext } from './manifest.ts';
-import { flushToAdapter } from './flush.ts';
-import {
-  LocalStoreConnectedStoresApi,
-  type ConnectedStoresApi,
-} from './connected-stores.ts';
-import {
-  pull as doPull,
-  changeFileIsUnseen,
-  parseSeenChangeFiles,
-  parseWriterFrontiers,
-} from './pull.ts';
+import { flushPrimary } from './flush.ts';
+import { LocalStoreConnectedStoresApi, type ConnectedStoresApi } from './connected-stores.ts';
+import { pull as doPull } from './pull.ts';
+import { ChangeObservationLedger } from './change-observation.ts';
 import { compact as doCompact, rehydrate as doRehydrate } from './compaction.ts';
 import { createDeviceId } from './ids.ts';
 
@@ -87,7 +80,6 @@ type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> = {
   secondCompactDelayMs: number;
   secondCompactDelayJitterMs: number;
   compactRemoteChangeThreshold: number;
-  offlineGraceMs: number;
   batchWindowMs: number;
   dbName: string;
   localStore: LocalStore;
@@ -113,8 +105,8 @@ const DEFAULT_FIRST_COMPACT_DELAY_JITTER_MS = 5 * 60_000;
 const DEFAULT_SECOND_COMPACT_DELAY_MS = 15 * 60_000;
 const DEFAULT_SECOND_COMPACT_DELAY_JITTER_MS = 5 * 60_000;
 const DEFAULT_COMPACT_REMOTE_CHANGE_THRESHOLD = 2;
-const DEFAULT_OFFLINE_GRACE_MS = 7 * 24 * 60 * 60_000;
 const DEFAULT_BATCH_WINDOW_MS = 1_000;
+const SYNC_STATE_LOCK = 'sync-state';
 
 // ─── Sync Engine ─────────────────────────────────────────────────────
 
@@ -304,7 +296,6 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       secondCompactDelayMs: config.secondCompactDelayMs ?? DEFAULT_SECOND_COMPACT_DELAY_MS,
       secondCompactDelayJitterMs: config.secondCompactDelayJitterMs ?? DEFAULT_SECOND_COMPACT_DELAY_JITTER_MS,
       compactRemoteChangeThreshold: config.compactRemoteChangeThreshold ?? DEFAULT_COMPACT_REMOTE_CHANGE_THRESHOLD,
-      offlineGraceMs: config.offlineGraceMs ?? DEFAULT_OFFLINE_GRACE_MS,
       batchWindowMs: config.batchWindowMs ?? DEFAULT_BATCH_WINDOW_MS,
       dbName: config.dbName ?? 'interocitor',
       localStore: config.localStore,
@@ -345,12 +336,20 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     return this.initPromise;
   }
 
+  private async refreshHlcFromLocal(): Promise<void> {
+    const saved = await this.local.getMeta('hlc');
+    if (typeof saved !== 'string' || hlcCompareStr(saved, hlcSerialize(this.hlc)) <= 0) return;
+    this.hlc = hlcParse(saved);
+    this.hlc.nodeId = this.deviceId;
+  }
+
   private async putNow<K extends keyof S & string>(
     table: K,
     rowId: string,
     columns: Partial<S[K]>,
     _userId?: string,
   ): Promise<S[K]> {
+    await this.refreshHlcFromLocal();
     const tableName = table as string;
     const current = await this.local.getRow(tableName, rowId);
     const isResurrection = current?._meta.deleted === true;
@@ -378,10 +377,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     row._meta.deletedHlc = undefined;
     row._meta.owner = this.deviceId;
 
-    await this.local.putRow(row);
     const op = this.rowToSyncOp(row);
     const hlc = this.getRowHlc(row);
-    if (op && hlc) await this.queueOpForBatchedFlush(op, hlc);
+    if (op && hlc) await this.commitLocalMutation(row, op, hlc);
+    else await this.local.putRow(row);
     this.knownTables.add(tableName);
 
     this.emit({ type: 'change', table: tableName, rowId, row });
@@ -389,6 +388,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   }
 
   private async deleteNow<K extends keyof S & string>(table: K, rowId: string, _userId?: string): Promise<void> {
+    await this.refreshHlcFromLocal();
     const tableName = table as string;
     const current = await this.local.getRow(tableName, rowId);
     if (!current || current._meta.deleted) return;
@@ -401,10 +401,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     // Tombstones carry only deletion metadata. Payload is no longer needed for
     // CRDT conflict checks and should not retain deleted user data.
     current.payload = {};
-    await this.local.putRow(current);
     const op = this.rowToSyncOp(current);
     const hlc = this.getRowHlc(current);
-    if (op && hlc) await this.queueOpForBatchedFlush(op, hlc);
+    if (op && hlc) await this.commitLocalMutation(current, op, hlc);
+    else await this.local.putRow(current);
     this.emit({ type: 'delete', table: tableName, rowId });
   }
 
@@ -414,8 +414,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
    * implicit period of `batchWindowMs`. Either way the result is one
    * ChangeEntry per batch instead of one per write.
    */
-  private async queueOpForBatchedFlush(op: Op, hlc: string): Promise<void> {
-    this.appendOpToPendingBatch(op, hlc);
+  private async commitLocalMutation(row: Row, op: Op, hlc: string): Promise<void> {
+    this.pendingBatch = await this.local.commitLocalMutation(row, {
+      id: generateId('chg'),
+      ts: Date.now(),
+      device: this.deviceId,
+      hlc,
+      ops: [op],
+    });
     if (this.isBatching()) return;
     if (this.config.batchWindowMs <= 0) {
       await this.flushPendingBatch();
@@ -810,21 +816,18 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
   private async acknowledgeManifest(): Promise<void> {
     if (!this.adapter || !this.config.remotePath || !this.manifest) return;
-    // Before the first compaction there is no canonical watermark/floor to
+    // Before the first compaction there is no canonical watermark to
     // acknowledge. Initial connect already writes device presence metadata;
     // avoid an extra no-op device write/read on every bootstrap/reconnect.
-    if (!this.manifest.watermarkHlc && !this.manifest.gcFloorHlc && this.manifest.epoch === 0) return;
+    if (!this.manifest.watermarkHlc && this.manifest.epoch === 0) return;
     await upsertDeviceMetadata(this.adapter, this.config.remotePath, this.deviceId, {
       displayName: this.config.deviceName,
       deviceType: this.config.deviceType,
       observedManifestGeneration: this.manifest.generation,
       observedEpoch: this.manifest.epoch,
       observedWatermarkHlc: this.manifest.watermarkHlc,
-      observedGcFloorHlc: this.manifest.gcFloorHlc,
       skipTouchIfUnchanged: true,
     });
-    await this.local.setMeta('gcFloorHlc', this.manifest.gcFloorHlc ?? '');
-    await this.local.setMeta('gcEpoch', this.manifest.gcEpoch ?? 0);
   }
 
   // ── Flush / poll timers ────────────────────────────────────────────
@@ -1027,6 +1030,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   private async loadLocalState(): Promise<void> {
     this.tables = {};
     this.knownTables = new Set();
+    const pendingBatch = await this.local.getMeta('pendingBatch');
+    this.pendingBatch = pendingBatch && typeof pendingBatch === 'object'
+      ? { ...pendingBatch as ChangeEntry, ops: [...(pendingBatch as ChangeEntry).ops] }
+      : null;
     const savedHlc = await this.local.getMeta('hlc') as string | undefined;
     if (savedHlc) {
       this.hlc = hlcParse(savedHlc);
@@ -1039,7 +1046,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
   private async applyJoinExistingMeshPolicy(bootstrapped: boolean): Promise<void> {
     const nextMeshId = this.manifest?.meshId;
-    if (!nextMeshId || bootstrapped) return;
+    if (!nextMeshId) return;
+    // The client that creates a mesh must durably bind its local state to that
+    // identity immediately. Otherwise its first reconnect looks like a join to
+    // an unrelated mesh, and the default reset policy can erase queued work.
+    if (bootstrapped) {
+      await this.local.setMeta('meshId', nextMeshId);
+      return;
+    }
 
     const previousMeshIdRaw = await this.local.getMeta('meshId');
     const previousMeshId = typeof previousMeshIdRaw === 'string' ? previousMeshIdRaw : '';
@@ -1078,24 +1092,27 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       localRowCount: localRows.length,
       queuedChangeCount,
     });
-    this.clearBatchTimer();
-    this.pendingBatch = null;
-    await this.local.clearAll();
-    if (this.schema?.version !== undefined) {
-      await this.local.setMeta('schema:version', this.schema.version);
-    }
-    await this.local.setMeta('meshId', nextMeshId);
-    await this.loadLocalState();
-    this.pendingCount = 0;
+    await this.local.withLock(SYNC_STATE_LOCK, async () => {
+      this.clearBatchTimer();
+      this.pendingBatch = null;
+      await ChangeObservationLedger.clearAll(this.local);
+      if (this.schema?.version !== undefined) {
+        await this.local.setMeta('schema:version', this.schema.version);
+      }
+      await this.local.setMeta('meshId', nextMeshId);
+      await this.loadLocalState();
+      this.pendingCount = 0;
+    });
   }
 
   private async ensureRowsCached(ops: Op[]): Promise<void> {
     for (const op of ops) {
-      if (this.tables[op.table]?.[op.rowId] !== undefined) continue;
       const existing = await this.local.getRow(op.table, op.rowId);
       if (existing) {
         if (!this.tables[op.table]) this.tables[op.table] = {};
         this.tables[op.table][op.rowId] = existing;
+      } else if (this.tables[op.table]) {
+        delete this.tables[op.table][op.rowId];
       }
     }
   }
@@ -1509,10 +1526,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
         // wrong. Conflict surfaces via decode:error + remote:poisoned on the
         // next pull, instead of silently proceeding.
         try {
-          await this.local.setMeta('cursor', '');
-          await this.local.setMeta('seenChangeFiles', []);
-          await this.local.setMeta('writerFrontiers', {});
-        } catch { /* best-effort */ }
+          await ChangeObservationLedger.reset(this.local);
+        } catch {
+          /* best-effort */
+        }
       }
     }
 
@@ -1605,12 +1622,12 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       if (!cached || cached.encrypted !== this.encrypted) return false;
       this.manifest = cached;
     }
-    const cursorRaw = await this.local.getMeta('cursor');
-    const cursor = typeof cursorRaw === 'string' ? cursorRaw : '';
+    const observation = await ChangeObservationLedger.load(this.local);
+    const cursor = observation.globalHighWaterHlc;
     if (!cursor) return false;
-    const seenChangeFiles = parseSeenChangeFiles(await this.local.getMeta('seenChangeFiles'));
-    if (!seenChangeFiles) return false;
-    if (await this.local.outboxSize() > 0) return false;
+    if (!observation.hasExactObservationHistory) return false;
+    if ((await this.local.outboxSize()) > 0) return false;
+    if (await this.local.getMeta('pendingBatch')) return false;
 
     const remotePath = this.requireRemotePath('connect() fast-path');
     const p = paths(remotePath);
@@ -1630,7 +1647,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
         // progress before taking the reload fast path. This still avoids all
         // change-file GETs.
         const files = await adapter.listFiles(p.changesFolder);
-        if (files.some(file => changeFileIsUnseen(file.name, seenChangeFiles))) {
+        if (observation.hasUnseenChange(files)) {
           return false;
         }
         this.emit({
@@ -1827,13 +1844,20 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       encrypted: this.encrypted,
     });
 
+    let flushedBeforeSnapshotRestore = false;
     if (localEpoch < remoteEpoch) {
+      // An old client is not equivalent to a new client: it may have durable
+      // writes that no remote snapshot contains. Publish those immutable
+      // entries before clearAll() replaces local state, then rehydrate pulls
+      // the just-published entries back on top of the snapshot.
       this.log('debug', 'connect() — epoch advanced, rehydrating from snapshot');
-      const rehydrateResult = await this.runConnectStage('rehydrate', () => this.rehydrate());
+      const rehydrateResult = await this.runConnectStage('flush-and-rehydrate', () =>
+        this.local.withLock(SYNC_STATE_LOCK, () => this.flushAndRehydrateNow()));
       if (!rehydrateResult.ok) {
         if (rehydrateResult.error instanceof ConnectStageTimeoutError) return;
-        throw stage('rehydrate', rehydrateResult.error);
+        throw stage('flush-and-rehydrate', rehydrateResult.error);
       }
+      flushedBeforeSnapshotRestore = true;
     } else {
       this.log('debug', 'connect() — running initial pull');
       const pullResult = await this.runConnectStage('pull', () => this.pull());
@@ -1845,10 +1869,12 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     if (bootstrapped) {
       await this.rebuildOutboxFromLocalState();
     }
-    const flushResult = await this.runConnectStage('flush', () => this.doFlush());
-    if (!flushResult.ok) {
-      if (flushResult.error instanceof ConnectStageTimeoutError) return;
-      throw stage('flush', flushResult.error);
+    if (!flushedBeforeSnapshotRestore || bootstrapped) {
+      const flushResult = await this.runConnectStage('flush', () => this.flushQueued(true));
+      if (!flushResult.ok) {
+        if (flushResult.error instanceof ConnectStageTimeoutError) return;
+        throw stage('flush', flushResult.error);
+      }
     }
 
     this.startPolling(this.config.pollInterval);
@@ -1867,9 +1893,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     this.clearScheduledFlush();
     this.clearCompactTimers();
     this.clearBatchTimer();
-    await this.flushPendingBatch();
     if (!this.remotePoisonError) {
-      try { await this.doFlush(); } catch (err) {
+      try { await this.flushQueued(true); } catch (err) {
         this.log('warn', 'disconnect() — flush before close failed (continuing)', err);
       }
     }
@@ -1983,7 +2008,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   async setLocalStore(local: LocalStore): Promise<void> {
     await this.ensureReady();
     const wasConnected = this.connected;
-    if (wasConnected) await this.doFlush();
+    if (wasConnected) await this.flushQueued(true);
 
     this.clearScheduledFlush();
     this.pendingCount = 0;
@@ -1996,7 +2021,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
     if (!wasConnected) return;
     await this.pull();
-    await this.doFlush();
+    await this.flushQueued(true);
   }
 
   // ── Manifest (delegated) ───────────────────────────────────────────
@@ -2044,8 +2069,6 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     this.manifest = manifest;
     this.encrypted = manifest.encrypted || this.encrypted;
     await this.local.setMeta('manifestCache', manifest);
-    await this.local.setMeta('remoteGcFloorHlc', manifest.gcFloorHlc ?? '');
-    await this.local.setMeta('remoteGcEpoch', manifest.gcEpoch ?? 0);
     return { bootstrapped };
   }
 
@@ -2058,12 +2081,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     userId?: string,
   ): Promise<S[K]> {
     await this.ensureReady();
-    return this.putNow(table, rowId, columns, userId);
+    if (this.batchDepth > 0) return this.putNow(table, rowId, columns, userId);
+    return this.local.withLock(SYNC_STATE_LOCK, () => this.putNow(table, rowId, columns, userId));
   }
 
   async delete<K extends keyof S & string>(table: K, rowId: string, userId?: string): Promise<void> {
     await this.ensureReady();
-    return this.deleteNow(table, rowId, userId);
+    if (this.batchDepth > 0) return this.deleteNow(table, rowId, userId);
+    return this.local.withLock(SYNC_STATE_LOCK, () => this.deleteNow(table, rowId, userId));
   }
 
 
@@ -2108,14 +2133,17 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
    */
   async batch<R>(fn: () => Promise<R> | R): Promise<R> {
     await this.ensureReady();
-    this.batchDepth += 1;
-    try {
-      const result = await fn();
-      return result;
-    } finally {
-      this.batchDepth -= 1;
-      if (this.batchDepth === 0) await this.flushPendingBatch();
-    }
+    const run = async (): Promise<R> => {
+      this.batchDepth += 1;
+      try {
+        return await fn();
+      } finally {
+        this.batchDepth -= 1;
+        if (this.batchDepth === 0) await this.flushPendingBatch();
+      }
+    };
+    if (this.batchDepth > 0) return run();
+    return this.local.withLock(SYNC_STATE_LOCK, run);
   }
 
   private isBatching(): boolean {
@@ -2128,38 +2156,20 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     this.batchTimer = null;
   }
 
-  private appendOpToPendingBatch(op: Op, hlc: string): void {
-    if (this.pendingBatch) {
-      this.pendingBatch.ops.push(op);
-      // Carry the highest HLC seen in this batch
-      if (hlcCompareStr(hlc, this.pendingBatch.hlc) > 0) this.pendingBatch.hlc = hlc;
-      return;
-    }
-
-    this.pendingBatch = {
-      id: generateId('chg'),
-      ts: Date.now(),
-      device: this.deviceId,
-      hlc,
-      ops: [op],
-    };
-  }
-
   private armImplicitBatchTimer(): void {
     if (this.isBatching()) return;
     if (this.batchTimer) return;
     this.batchTimer = setTimeout(() => {
       this.batchTimer = null;
-      void this.flushPendingBatch();
+      void this.local.withLock(SYNC_STATE_LOCK, () => this.flushPendingBatch());
     }, this.config.batchWindowMs);
   }
 
   private async flushPendingBatch(): Promise<void> {
-    const pending = this.pendingBatch;
-    this.pendingBatch = null;
     this.clearBatchTimer();
+    const pending = await this.local.promotePendingBatch();
     if (!pending) return;
-    await this.local.pushOutbox(pending);
+    this.pendingBatch = null;
     this.scheduleFlush();
   }
 
@@ -2170,12 +2180,12 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     this.maybeEmitCompactWarning();
     this.armDelayedCompactAfterChange();
     if (this.pendingCount >= this.config.flushThreshold) {
-      this.doFlush().catch(err => this.emit({ type: 'flush:error', error: err }));
+      this.flushQueued().catch(err => this.emit({ type: 'flush:error', error: err }));
       return;
     }
     if (this.flushTimer) clearTimeout(this.flushTimer);
     this.flushTimer = setTimeout(() => {
-      this.doFlush().catch(err => this.emit({ type: 'flush:error', error: err }));
+      this.flushQueued().catch(err => this.emit({ type: 'flush:error', error: err }));
     }, this.config.flushDebounce);
   }
 
@@ -2223,6 +2233,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     }
     if (!this.connected) {
       this.emit({ type: 'compact:auto:skip', ...baseEvent, reason: 'not-connected' });
+      return;
+    }
+    if (!this.manifest?.server.managed) {
+      this.emit({ type: 'compact:auto:skip', ...baseEvent, reason: 'peer-mode' });
       return;
     }
     if (this.remotePoisonError) {
@@ -2273,6 +2287,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   private armDelayedCompactAfterChange(): void {
     if (!this.config.autoCompact) return;
     if (!this.config.remotePath) return;
+    if (!this.manifest?.server.managed) return;
 
     const delayMs = this.jitterDelay(this.config.firstCompactDelayMs, this.config.firstCompactDelayJitterMs);
     this.compactScheduleVersion += 1;
@@ -2433,56 +2448,37 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   /** Public flush — waits for init. Safe to call from user code. */
   async flush(): Promise<void> {
     await this.ensureReady();
-    // Drain any pending implicit batch first so its ops reach the outbox
-    // before we read it. Without this, flush() called from user code right
-    // after a write inside the batch period would skip those writes.
-    await this.flushPendingBatch();
-    return this.doFlush();
+    return this.flushQueued(true);
   }
 
-  /** Internal flush — no ensureReady guard (called from connect, pull, doInit). */
-  private hasPreFloorEntries(entries: ChangeEntry[]): boolean {
-    const floor = this.manifest?.gcFloorHlc;
-    if (!floor) return false;
-    return entries.some(entry => entry.hlc && hlcCompareStr(entry.hlc, floor) <= 0);
+  private async flushQueued(includePendingBatch = false): Promise<void> {
+    const triggerQueuedChangeCount = await this.local.withLock(SYNC_STATE_LOCK, async () => {
+      if (includePendingBatch) await this.flushPendingBatch();
+      return this.doFlush();
+    });
+    await this.maybeAutoCompact(triggerQueuedChangeCount);
   }
 
-  private async doFlush(): Promise<void> {
+  private async doFlush(): Promise<number> {
     if (!this.adapter) {
       this.clearScheduledFlush();
-      return;
+      return 0;
     }
 
     const triggerQueuedChangeCount = this.pendingCount;
-    const entries = await this.local.drainOutbox();
+    // Keep entries durable until authoritative publication succeeds. Retrying
+    // the same immutable IDs is safe; deleting them before remote I/O is not.
+    const entries = await this.local.peekOutbox();
     if (entries.length === 0) {
       this.pendingCount = 0;
       this.resetCompactWarning();
-      return;
+      return 0;
     }
 
-    // Reload manifest before deciding whether non-empty outbox entries
-    // predate the current point-of-no-return. A long-sleeping client may have
-    // a cached manifest from before another device compacted. Keep this after
-    // the empty-outbox return so idle flushes and transport teardown do not
-    // perform surprising remote reads or poison adapter switches.
+    // Reload the manifest before publishing after a long offline period.
+    // Completeness is still based on exact immutable filenames, never on a
+    // scalar HLC cutoff.
     await this.doLoadOrCreateManifest('flush');
-
-    // The manifest GC floor is a point of no return. If this local outbox
-    // contains entries at/before the floor, the device missed the retention
-      // period. Do not publish them; align from the canonical snapshot instead.
-    if (this.hasPreFloorEntries(entries)) {
-      this.clearScheduledFlush();
-      if (this.manifest?.snapshotPath) {
-        await this.rehydrate();
-        this.pendingCount = 0;
-        this.resetCompactWarning();
-      } else {
-        for (const entry of entries) await this.local.pushOutbox(entry);
-        this.pendingCount = entries.length;
-      }
-      throw new Error(`Refusing to flush changes at or before gcFloorHlc ${this.manifest?.gcFloorHlc}; rehydrate required`);
-    }
 
     this.log('debug', 'flush() — start', { entryCount: entries.length });
     this.emit({ type: 'flush:start', entryCount: entries.length });
@@ -2492,60 +2488,32 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
     this.clearScheduledFlush();
 
     try {
-      await flushToAdapter(this.adapter, this.requireRemotePath('flush()'), entries, true, this.codecState, this.deviceId, (e) => this.emit(e));
-
-      for (const replica of this.config.replicas) {
-        try {
-          const replicaRoot = replica.remotePath ?? this.requireRemotePath('flush() replica');
-          if (!replica.adapter.isAuthenticated()) await replica.adapter.authenticate();
-          await flushToAdapter(replica.adapter, replicaRoot, entries, false, this.codecState, this.deviceId);
-        } catch (err) {
-          this.log('warn', 'flush() — replica write failed', { adapter: replica.adapter.name }, err);
-          this.emit({ type: 'replica:error', adapter: replica.adapter.name, error: err as Error });
-        }
-      }
-
-      // Record our just-flushed files as locally observed. The scalar cursor
-      // remains a backwards-compatible high-water hint; correctness and
-      // change-file GET suppression use exact immutable filenames because
-      // publication order is not guaranteed to match HLC order.
-      let highestFlushedHlc = '';
-      for (const entry of entries) {
-        if (!entry.hlc) continue;
-        if (!highestFlushedHlc || hlcCompareStr(entry.hlc, highestFlushedHlc) > 0) {
-          highestFlushedHlc = entry.hlc;
-        }
-      }
-      if (highestFlushedHlc) {
-        const cursorRaw = await this.local.getMeta('cursor');
-        const cursor = typeof cursorRaw === 'string' ? cursorRaw : '';
-        if (!cursor || hlcCompareStr(highestFlushedHlc, cursor) > 0) {
-          await this.local.setMeta('cursor', highestFlushedHlc);
-        }
-        const seenChangeFiles =
-          parseSeenChangeFiles(await this.local.getMeta('seenChangeFiles')) ?? new Set<string>();
-        const writerFrontiers = parseWriterFrontiers(await this.local.getMeta('writerFrontiers'));
-        for (const entry of entries) {
-          if (!entry.hlc) continue;
-          seenChangeFiles.add(`${entry.hlc}-${entry.id}.json`);
-          const writerId = hlcParse(entry.hlc).nodeId;
-          const writerFrontierHlc = writerFrontiers[writerId];
-          if (!writerFrontierHlc || hlcCompareStr(entry.hlc, writerFrontierHlc) > 0) {
-            writerFrontiers[writerId] = entry.hlc;
-          }
-        }
-        await this.local.setMeta('seenChangeFiles', [...seenChangeFiles].sort());
-        await this.local.setMeta('writerFrontiers', writerFrontiers);
-      }
+      await flushPrimary(
+        this.adapter,
+        this.local,
+        this.requireRemotePath('flush()'),
+        entries,
+        this.codecState,
+        this.deviceId,
+        (e) => this.emit(e),
+        this.config.replicas.map((replica) => ({
+          adapter: replica.adapter,
+          remotePath: replica.remotePath ?? this.requireRemotePath('flush() replica'),
+        })),
+        (adapterName, err) => {
+          this.log('warn', 'flush() — replica write failed', { adapter: adapterName }, err);
+          this.emit({ type: 'replica:error', adapter: adapterName, error: err as Error });
+        },
+      );
+      await this.local.acknowledgeOutbox(entries.map((entry) => entry.id));
 
       this.log('debug', 'flush() — complete', { entryCount: entries.length });
       this.emit({ type: 'flush:complete' });
       if (this.connected) this.setConnectionStatus('idle');
-      await this.maybeAutoCompact(triggerQueuedChangeCount);
+      return triggerQueuedChangeCount;
     } catch (err) {
       if (this.connected) this.setConnectionStatus('idle');
-      this.log('error', 'flush() — failed, re-queuing entries', err);
-      for (const entry of entries) await this.local.pushOutbox(entry);
+      this.log('error', 'flush() — failed, durable entries remain queued', err);
       this.pendingCount = entries.length;
       this.maybeEmitCompactWarning();
       throw err;
@@ -2556,6 +2524,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
   async pull(): Promise<void> {
     await this.ensureReady();
+    return this.local.withLock(SYNC_STATE_LOCK, () => this.pullNow());
+  }
+
+  private async pullNow(): Promise<void> {
     const adapter = this.requireAdapter('pull()');
     if (this.connected) this.setConnectionStatus('syncing');
     try {
@@ -2584,6 +2556,19 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
 
   async rehydrate(): Promise<void> {
     await this.ensureReady();
+    return this.local.withLock(SYNC_STATE_LOCK, () => this.flushAndRehydrateNow());
+  }
+
+  private async flushAndRehydrateNow(): Promise<void> {
+    // Snapshot replacement is destructive to local metadata. It may proceed
+    // only after every completed local mutation is durably published. A
+    // publication failure aborts before clearAll(), preserving the outbox.
+    await this.flushPendingBatch();
+    await this.doFlush();
+    await this.rehydrateNow();
+  }
+
+  private async rehydrateNow(): Promise<void> {
     const adapter = this.requireAdapter('rehydrate()');
     this.hlc = await doRehydrate({
       adapter,
@@ -2596,7 +2581,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
       knownTables: this.knownTables,
       emit: (e) => this.emit(e),
       poisonRemote: (err, path) => this.poisonRemote(err, path),
-      pull: () => this.pull(),
+      pull: () => this.pullNow(),
     });
     await this.acknowledgeManifest();
   }
@@ -2604,7 +2589,11 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
   async compact(): Promise<void> {
     await this.ensureReady();
     if (this.compactInFlight) return this.compactInFlight;
-    const run = (async () => {
+    const run = this.local.withLock(SYNC_STATE_LOCK, async () => {
+      // Establish one local cut: completed batches are durable and all queued
+      // changes are authoritative before pull/capture can publish a snapshot.
+      await this.flushPendingBatch();
+      await this.doFlush();
       const adapter = this.requireAdapter('compact()');
       if (!this.manifest) throw new Error('Engine is not connected');
       this.manifest = await doCompact({
@@ -2617,13 +2606,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>>
         deviceId: this.deviceId,
         serverId: this.serverId,
         emit: (e) => this.emit(e),
-        pull: () => this.pull(),
-        offlineGraceMs: this.config.offlineGraceMs,
+        pull: () => this.pullNow(),
       });
-      await this.local.setMeta('remoteGcFloorHlc', this.manifest.gcFloorHlc ?? '');
-      await this.local.setMeta('remoteGcEpoch', this.manifest.gcEpoch ?? 0);
       await this.acknowledgeManifest();
-    })().finally(() => {
+    }).finally(() => {
       if (this.compactInFlight === run) this.compactInFlight = null;
     });
     this.compactInFlight = run;

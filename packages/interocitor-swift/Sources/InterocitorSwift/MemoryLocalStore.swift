@@ -129,6 +129,29 @@ public actor MemoryLocalStore: LocalStoreAdapter {
         outbox.append(entry)
     }
 
+    public func commitLocalMutation(row: Row, entry: ChangeEntry, hlc: String) async throws {
+        try ensureOpen()
+        rows[rowKey(table: row._table, rowId: row._rowId)] = row
+        outbox.append(entry)
+        meta["hlc"] = try JSONEncoder().encode(AnyCodable.string(hlc))
+    }
+
+    public func peekOutbox() async throws -> [ChangeEntry] {
+        try ensureOpen()
+        return outbox
+    }
+
+    public func acknowledgeOutbox(entryIds: [String]) async throws {
+        try ensureOpen()
+        let acknowledged = Set(entryIds)
+        outbox.removeAll { acknowledged.contains($0.id) }
+    }
+
+    public func replaceOutbox(_ entries: [ChangeEntry]) async throws {
+        try ensureOpen()
+        outbox = entries
+    }
+
     public func drainOutbox() async throws -> [ChangeEntry] {
         try ensureOpen()
         let drained = outbox

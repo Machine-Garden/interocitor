@@ -25,6 +25,21 @@ import type {
 const DEFAULT_DB_NAME = 'interocitor';
 const DEFAULT_DB_VERSION = 1;
 const CACHE_FINGERPRINT_META_KEY = 'interocitor:cache:fingerprint';
+const fallbackLockTails = new Map<string, Promise<void>>();
+
+async function withFallbackLock<T>(name: string, operation: () => Promise<T>): Promise<T> {
+  const previous = fallbackLockTails.get(name) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  fallbackLockTails.set(name, current);
+  await previous.catch(() => {});
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (fallbackLockTails.get(name) === current) fallbackLockTails.delete(name);
+  }
+}
 
 const STORES = {
   rows: 'rows',         // key: "{table}/{rowId}"
@@ -332,6 +347,14 @@ export class IndexedDbLocalStore implements LocalStore {
     })));
   }
 
+  async withLock<T>(name: string, operation: () => Promise<T>): Promise<T> {
+    const lockName = `interocitor:${this.dbName}:${name}`;
+    if (typeof navigator !== 'undefined' && navigator.locks) {
+      return navigator.locks.request(lockName, operation);
+    }
+    return withFallbackLock(lockName, operation);
+  }
+
   private async readCacheFingerprint(db: IDBDatabase): Promise<string | undefined> {
     const t = tx(db, STORES.meta, 'readonly');
     const value = await reqToPromise(t.objectStore(STORES.meta).get(CACHE_FINGERPRINT_META_KEY));
@@ -527,6 +550,38 @@ export class IndexedDbLocalStore implements LocalStore {
 
   // ── Outbox ───────────────────────────────────────────────────────
 
+  async commitLocalMutation(row: Row, change: ChangeEntry): Promise<ChangeEntry> {
+    const db = this.ensureDB();
+    const t = tx(db, [STORES.rows, STORES.meta], 'readwrite');
+    const meta = t.objectStore(STORES.meta);
+    const current = await reqToPromise(meta.get('pendingBatch')) as ChangeEntry | undefined;
+    const pendingBatch = current
+      ? {
+          ...current,
+          hlc: current.hlc < change.hlc ? change.hlc : current.hlc,
+          ops: [...current.ops, ...change.ops],
+        }
+      : change;
+    t.objectStore(STORES.rows).put(this.withKey(row));
+    meta.put(pendingBatch, 'pendingBatch');
+    meta.put(pendingBatch.hlc, 'hlc');
+    await txComplete(t);
+    return pendingBatch;
+  }
+
+  async promotePendingBatch(): Promise<ChangeEntry | null> {
+    const db = this.ensureDB();
+    const t = tx(db, [STORES.meta, STORES.outbox], 'readwrite');
+    const meta = t.objectStore(STORES.meta);
+    const pending = await reqToPromise(meta.get('pendingBatch')) as ChangeEntry | undefined;
+    if (pending) {
+      t.objectStore(STORES.outbox).add(pending);
+      meta.delete('pendingBatch');
+    }
+    await txComplete(t);
+    return pending ?? null;
+  }
+
   async pushOutbox(entry: ChangeEntry): Promise<void> {
     await this.pushOutboxEntries([entry]);
   }
@@ -537,6 +592,35 @@ export class IndexedDbLocalStore implements LocalStore {
     const t = tx(db, STORES.outbox, 'readwrite');
     const store = t.objectStore(STORES.outbox);
     for (const entry of entries) store.add(entry);
+    await txComplete(t);
+  }
+
+  async peekOutbox(): Promise<ChangeEntry[]> {
+    const db = this.ensureDB();
+    const t = tx(db, STORES.outbox, 'readonly');
+    return reqToPromise(t.objectStore(STORES.outbox).getAll()) as Promise<ChangeEntry[]>;
+  }
+
+  async acknowledgeOutbox(entryIds: readonly string[]): Promise<void> {
+    if (entryIds.length === 0) return;
+    const acknowledged = new Set(entryIds);
+    const db = this.ensureDB();
+    const t = tx(db, STORES.outbox, 'readwrite');
+    const store = t.objectStore(STORES.outbox);
+    await new Promise<void>((resolve, reject) => {
+      const request = store.openCursor();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          resolve();
+          return;
+        }
+        const entry = cursor.value as ChangeEntry;
+        if (acknowledged.has(entry.id)) cursor.delete();
+        cursor.continue();
+      };
+    });
     await txComplete(t);
   }
 

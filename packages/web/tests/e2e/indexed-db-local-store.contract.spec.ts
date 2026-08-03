@@ -91,3 +91,43 @@ test('IndexedDbLocalStore satisfies the LocalStore contract and persists across 
   expect(result.emptyCursors).toEqual({});
   expect(result.emptyMeta).toBeUndefined();
 });
+
+test('IndexedDbLocalStore atomically stages mutations and acknowledges only published IDs', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { IndexedDbLocalStore } = await import('/packages/web/dist/index.js');
+    const dbName = 'interocitor-web-contract';
+    const row = {
+      _meta: { table: 'tasks', rowId: 'durable', deleted: false, schemaVersion: 1 },
+      payload: { title: { value: 'never lost', hlc: '2024-01-01T00:00:00.000Z-0:dev' } },
+    };
+    const first = { id: 'chg_1', ts: 1, device: 'dev', hlc: 'h1', ops: [] };
+    const second = { id: 'chg_2', ts: 2, device: 'dev', hlc: 'h2', ops: [] };
+
+    const store = new IndexedDbLocalStore(dbName);
+    await store.open();
+    await store.commitLocalMutation(row, first);
+    store.close();
+
+    const reopened = new IndexedDbLocalStore(dbName);
+    await reopened.open();
+    const stagedRow = await reopened.getRow('tasks', 'durable');
+    const stagedBatch = await reopened.getMeta('pendingBatch');
+    await reopened.promotePendingBatch();
+    const publicationCut = await reopened.peekOutbox();
+    await reopened.pushOutbox(second);
+    await reopened.acknowledgeOutbox(publicationCut.map((entry: any) => entry.id));
+    await reopened.acknowledgeOutbox(publicationCut.map((entry: any) => entry.id));
+    const remaining = await reopened.peekOutbox();
+    reopened.close();
+
+    return {
+      stagedTitle: stagedRow?.payload.title.value,
+      stagedBatchId: (stagedBatch as any)?.id,
+      remainingIds: remaining.map((entry: any) => entry.id),
+    };
+  });
+
+  expect(result.stagedTitle).toBe('never lost');
+  expect(result.stagedBatchId).toBe('chg_1');
+  expect(result.remainingIds).toEqual(['chg_2']);
+});

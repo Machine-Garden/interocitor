@@ -11,9 +11,9 @@
  *   verify                    A fresh Core client proves it can read Swift's task row.
  *   compact                   Core compacts the mixed-runtime mesh before Swift rehydrates.
  *   verify-swift-bootstrap    Core validates, reads, and first-compacts a
- *                             Swift-created mesh (epoch 1, empty GC floor).
+ *                             Swift-created mesh at epoch 1.
  *   verify-swift-compacted    Core validates and rehydrates Swift's epoch-2
- *                             snapshot with a non-empty GC floor.
+ *                             snapshot while immutable changes remain.
  *
  * Required environment:
  *   INTEROCITOR_WEBDAV_URL          e.g. http://127.0.0.1:4175
@@ -223,20 +223,19 @@ async function verifySwiftBootstrap() {
     assertSwiftBootstrapNestedRow(await db.query('tasks'));
 
     // This is deliberately the same Core device that just read Swift's
-    // bootstrap change. Both devices still lack an epoch acknowledgement, so
-    // the first compaction must be safe but have no GC floor.
+    // bootstrap change. Compaction publishes a receipt-bearing snapshot while
+    // retaining immutable history.
     await db.compact();
     const firstCompaction = await readManifest(adapter, config.remotePath);
     assert(firstCompaction.epoch === 1, `Core first compaction expected epoch 1; received ${firstCompaction.epoch}`);
-    assert(!firstCompaction.gcFloorHlc,
-      `Core first compaction must have an empty GC floor; received ${firstCompaction.gcFloorHlc}`);
+    assert(!Object.hasOwn(firstCompaction, 'gcFloorHlc'),
+      'Core first compaction must not publish a scalar GC floor');
     assert(typeof firstCompaction.snapshotPath === 'string' && firstCompaction.snapshotPath.length > 0,
       'Core first compaction did not publish a snapshot');
     console.log(JSON.stringify({
       phase: 'verify-swift-bootstrap',
       remotePath: config.remotePath,
       firstEpoch: firstCompaction.epoch,
-      firstGcFloorHlc: firstCompaction.gcFloorHlc ?? null,
     }));
   } finally {
     await db.disconnect();
@@ -248,33 +247,22 @@ async function verifySwiftCompacted() {
   await db.init();
   try {
     const changeFiles = await adapter.listFiles(`${config.remotePath}/changes`);
-    const unprunedChanges = changeFiles.filter(file => file.name !== 'head.json');
-    assert(unprunedChanges.length === 0,
-      `Swift compaction did not prune captured changes: ${unprunedChanges.map(file => file.name).join(', ')}`);
+    const retainedChanges = changeFiles.filter(file => file.name !== 'head.json');
+    assert(retainedChanges.length > 0, 'Swift compaction must retain immutable changes');
 
     await db.connect();
     const manifest = await readManifest(adapter, config.remotePath);
     assert(manifest.epoch === 2 && typeof manifest.snapshotPath === 'string' && manifest.snapshotPath.length > 0,
       `Core did not receive Swift's epoch-2 snapshot manifest; received epoch ${manifest.epoch}`);
-    assert(typeof manifest.gcFloorHlc === 'string' && manifest.gcFloorHlc.length > 0,
-      'Swift epoch-2 manifest is missing a non-empty gcFloorHlc');
-    assert(manifest.gcEpoch === 2,
-      `Swift epoch-2 manifest has the wrong gcEpoch: ${manifest.gcEpoch}`);
-    assert(typeof manifest.gcCreatedAt === 'string' && manifest.gcCreatedAt.length > 0,
-      'Swift epoch-2 manifest is missing gcCreatedAt');
-    assert(typeof manifest.offlineGraceMs === 'number' && manifest.offlineGraceMs > 0,
-      'Swift epoch-2 manifest is missing offlineGraceMs');
-    // This Core client has a fresh MemoryLocalStore and the captured changes
-    // above are gone, so this row can only come from the Swift snapshot.
+    assert(!Object.hasOwn(manifest, 'gcFloorHlc'), 'Swift manifest must not publish a scalar GC floor');
+    // This Core client has a fresh MemoryLocalStore and can restore the Swift
+    // snapshot, then verify exact retained change identities during catch-up.
     assertSwiftBootstrapNestedRow(await db.query('tasks'));
     console.log(JSON.stringify({
       phase: 'verify-swift-compacted',
       epoch: manifest.epoch,
       snapshotPath: manifest.snapshotPath,
-      gcFloorHlc: manifest.gcFloorHlc,
-      gcEpoch: manifest.gcEpoch,
-      gcCreatedAt: manifest.gcCreatedAt,
-      offlineGraceMs: manifest.offlineGraceMs,
+      retainedChangeCount: retainedChanges.length,
     }));
   } finally {
     await db.disconnect();

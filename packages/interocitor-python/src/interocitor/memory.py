@@ -114,6 +114,19 @@ class MemoryLocalStore:
     async def push_outbox_entries(self, entries: list[ChangeEntry]) -> None:
         self._outbox.extend(entries)
 
+    async def commit_local_mutation(self, row: Row, entry: ChangeEntry) -> None:
+        key = _row_key(row._meta.table, row._meta.row_id)
+        self._rows[key] = Row(_meta=replace(row._meta, key=key), payload=row.payload)
+        self._outbox.append(entry)
+        self._meta["hlc"] = entry.hlc
+
+    async def peek_outbox(self) -> list[ChangeEntry]:
+        return list(self._outbox)
+
+    async def acknowledge_outbox(self, entry_ids: list[str]) -> None:
+        acknowledged = set(entry_ids)
+        self._outbox = [entry for entry in self._outbox if entry.id not in acknowledged]
+
     async def drain_outbox(self) -> list[ChangeEntry]:
         entries = self._outbox
         self._outbox = []

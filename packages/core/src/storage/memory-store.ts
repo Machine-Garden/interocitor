@@ -73,6 +73,21 @@ export class MemoryLocalStore implements LocalStore {
   private outbox: ChangeEntry[] = [];
   private cursors = new Map<string, number>();
   private meta = new Map<string, unknown>();
+  private readonly lockTails = new Map<string, Promise<void>>();
+
+  async withLock<T>(name: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.lockTails.get(name) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    this.lockTails.set(name, current);
+    await previous.catch(() => {});
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.lockTails.get(name) === current) this.lockTails.delete(name);
+    }
+  }
 
   // Opening cannot block or fail. Closing clears every volatile record so a
   // disconnected test/fallback engine cannot leak state into later reuse.
@@ -131,6 +146,29 @@ export class MemoryLocalStore implements LocalStore {
 
   // ── Outbox ───────────────────────────────────────────────────────
 
+  async commitLocalMutation(row: Row, change: ChangeEntry): Promise<ChangeEntry> {
+    const current = this.meta.get('pendingBatch') as ChangeEntry | undefined;
+    const pendingBatch = current
+      ? {
+          ...current,
+          hlc: current.hlc < change.hlc ? change.hlc : current.hlc,
+          ops: [...current.ops, ...change.ops],
+        }
+      : { ...change, ops: [...change.ops] };
+    this.rows.set(rowKey(row._meta.table, row._meta.rowId), row);
+    this.meta.set('pendingBatch', { ...pendingBatch, ops: [...pendingBatch.ops] });
+    this.meta.set('hlc', pendingBatch.hlc);
+    return pendingBatch;
+  }
+
+  async promotePendingBatch(): Promise<ChangeEntry | null> {
+    const pending = this.meta.get('pendingBatch') as ChangeEntry | undefined;
+    if (!pending) return null;
+    this.outbox.push(pending);
+    this.meta.delete('pendingBatch');
+    return pending;
+  }
+
   async pushOutbox(entry: ChangeEntry): Promise<void> {
     this.outbox.push(entry);
   }
@@ -138,6 +176,16 @@ export class MemoryLocalStore implements LocalStore {
   async pushOutboxEntries(entries: ChangeEntry[]): Promise<void> {
     if (entries.length === 0) return;
     this.outbox.push(...entries);
+  }
+
+  async peekOutbox(): Promise<ChangeEntry[]> {
+    return [...this.outbox];
+  }
+
+  async acknowledgeOutbox(entryIds: readonly string[]): Promise<void> {
+    if (entryIds.length === 0) return;
+    const acknowledged = new Set(entryIds);
+    this.outbox = this.outbox.filter((entry) => !acknowledged.has(entry.id));
   }
 
   async drainOutbox(): Promise<ChangeEntry[]> {

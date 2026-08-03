@@ -317,10 +317,6 @@ public struct Manifest: Codable, Sendable {
     public var watermarkHlc: String
     public var snapshotPath: String?
     public var deltaPath: String?
-    public var gcFloorHlc: String? = nil
-    public var gcEpoch: Int? = nil
-    public var gcCreatedAt: String? = nil
-    public var offlineGraceMs: Int? = nil
 }
 
 // MARK: - Schema / merge policy
@@ -451,7 +447,6 @@ public struct DeviceMetadata: Codable, Sendable {
     public var observedManifestGeneration: Int?
     public var observedEpoch: Int?
     public var observedWatermarkHlc: String?
-    public var observedGcFloorHlc: String?
     public var observedAt: String?
     public var cutOffAt: String?
     public var cutOffReason: String?

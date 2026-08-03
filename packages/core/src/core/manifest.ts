@@ -201,7 +201,6 @@ export async function upsertDeviceMetadata(
     observedManifestGeneration?: number;
     observedEpoch?: number;
     observedWatermarkHlc?: string;
-    observedGcFloorHlc?: string;
     /**
      * When true, skip the read-merge step. Use only when the caller knows
      * no prior device record exists (e.g. immediately after bootstrap of
@@ -229,8 +228,7 @@ export async function upsertDeviceMetadata(
     : await readJsonIfExists<DeviceMetadata>(adapter, p.deviceFile(deviceId));
   const touchedObserved = opts?.observedManifestGeneration !== undefined
     || opts?.observedEpoch !== undefined
-    || opts?.observedWatermarkHlc !== undefined
-    || opts?.observedGcFloorHlc !== undefined;
+    || opts?.observedWatermarkHlc !== undefined;
   const next: DeviceMetadata = {
     deviceId,
     registeredAt: existing?.registeredAt ?? now,
@@ -243,7 +241,6 @@ export async function upsertDeviceMetadata(
     observedManifestGeneration: opts?.observedManifestGeneration ?? existing?.observedManifestGeneration,
     observedEpoch: opts?.observedEpoch ?? existing?.observedEpoch,
     observedWatermarkHlc: opts?.observedWatermarkHlc ?? existing?.observedWatermarkHlc,
-    observedGcFloorHlc: opts?.observedGcFloorHlc ?? existing?.observedGcFloorHlc,
     observedAt: touchedObserved
       ? (opts?.skipTouchIfUnchanged ? (existing?.observedAt ?? now) : now)
       : existing?.observedAt,
@@ -255,7 +252,6 @@ export async function upsertDeviceMetadata(
     const observedChanged = existing.observedManifestGeneration !== next.observedManifestGeneration
       || existing.observedEpoch !== next.observedEpoch
       || existing.observedWatermarkHlc !== next.observedWatermarkHlc
-      || existing.observedGcFloorHlc !== next.observedGcFloorHlc
       || existing.displayName !== next.displayName
       || existing.deviceType !== next.deviceType
       || existing.retired !== next.retired

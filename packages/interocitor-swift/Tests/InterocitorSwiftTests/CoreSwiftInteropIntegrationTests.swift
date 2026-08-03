@@ -175,17 +175,14 @@ final class CoreSwiftInteropIntegrationTests: XCTestCase {
     }
 
     /// Core first compacts the Swift-created mesh at epoch 1. This fresh Swift
-    /// client rehydrates and acknowledges that canonical watermark before it
-    /// publishes epoch 2, so its manifest must carry a non-empty GC floor.
-    /// A fresh Core client then validates the metadata and rehydrates the
-    /// encrypted snapshot in the runner's final phase.
+    /// client rehydrates before it publishes epoch 2. Immutable history remains
+    /// retained so a fresh Core client can catch up in the runner's final phase.
     func test_swiftBootstrappedMesh_canBeCompactedForCore() async throws {
         let environment = try swiftBootstrapInteropEnvironment()
         let db = try await connectCoreInteropEngine(environment)
 
         let firstManifest = await db.getManifest()
         XCTAssertEqual(firstManifest?.epoch, 1)
-        XCTAssertTrue(firstManifest?.gcFloorHlc?.isEmpty ?? true)
 
         let row = try await db.get(table: "tasks", rowId: "swift-bootstrap-nested")
         XCTAssertEqual(row?.columns["origin"]?.value, .string("swift-bootstrap"))
@@ -194,10 +191,6 @@ final class CoreSwiftInteropIntegrationTests: XCTestCase {
         let manifest = await db.getManifest()
         XCTAssertEqual(manifest?.epoch, 2)
         XCTAssertFalse(manifest?.snapshotPath?.isEmpty ?? true)
-        XCTAssertFalse(manifest?.gcFloorHlc?.isEmpty ?? true)
-        XCTAssertEqual(manifest?.gcEpoch, 2)
-        XCTAssertFalse(manifest?.gcCreatedAt?.isEmpty ?? true)
-        XCTAssertNotNil(manifest?.offlineGraceMs)
         try await db.disconnect()
     }
 }

@@ -49,7 +49,6 @@ from .types import (
 )
 
 
-_DEFAULT_OFFLINE_GRACE_MS = 7 * 24 * 60 * 60 * 1000
 
 
 class InterocitorError(RuntimeError):
@@ -138,20 +137,6 @@ def _is_not_found(error: BaseException) -> bool:
     return isinstance(error, FileNotFoundError) or "HTTP 404" in str(error)
 
 
-def _parse_iso_timestamp_ms(value: object) -> int | None:
-    """Parse the ISO timestamps emitted by core, like ``Date.parse`` does."""
-
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return int(parsed.timestamp() * 1000)
-
-
 def _change_file_hlc(name: str) -> str | None:
     marker = name.rfind("-chg_")
     return None if marker < 0 else name[:marker]
@@ -212,12 +197,10 @@ def _validate_snapshot_hlcs(snapshot: Snapshot) -> None:
 
 
 def _validate_manifest_hlcs(manifest: Manifest) -> None:
-    """Validate optional manifest clock fields before using them as cursors."""
+    """Validate the manifest clock used for state ordering."""
 
     if manifest.watermark_hlc:
         hlc_parse(manifest.watermark_hlc)
-    if manifest.gc_floor_hlc:
-        hlc_parse(manifest.gc_floor_hlc)
 
 
 class Table:
@@ -278,14 +261,11 @@ class Interocitor:
         expected_mesh_id: str | None = None,
         require_existing_mesh: bool = False,
         require_encryption: bool = False,
-        offline_grace_ms: int | None = None,
     ) -> None:
         if not db_name:
             raise ValueError("db_name must not be empty")
         if not server_id:
             raise ValueError("server_id must not be empty")
-        if offline_grace_ms is not None and (type(offline_grace_ms) is not int or offline_grace_ms < 0):
-            raise ValueError("offline_grace_ms must be a non-negative integer or None")
         self._adapter = adapter
         self._remote_path = remote_path
         self._local = local_store or MemoryLocalStore()
@@ -301,10 +281,6 @@ class Interocitor:
         self._expected_mesh_id = expected_mesh_id
         self._require_existing_mesh = require_existing_mesh
         self._require_encryption = require_encryption
-        # Match core's resolved configuration: an omitted value is still the
-        # seven-day default and every compactor publishes its configured value.
-        self._offline_grace_ms = _DEFAULT_OFFLINE_GRACE_MS if offline_grace_ms is None else offline_grace_ms
-
         self._initialized = False
         self._connected = False
         self._encrypted = key_source is not None
@@ -398,6 +374,7 @@ class Interocitor:
                 if not isinstance(local_epoch, int):
                     local_epoch = 0
                 if manifest.epoch > local_epoch:
+                    await self._flush()
                     await self._rehydrate()
                 else:
                     await self._pull(reload_manifest=False)
@@ -501,10 +478,12 @@ class Interocitor:
             row._meta.deleted = False
             row._meta.deleted_hlc = None
             row._meta.owner = self._device_id
-            await self._local.put_row(row)
+            entry = self._change_for_row(row)
+            if entry is None:
+                return row_to_plain(row)
+            await self._local.commit_local_mutation(row, entry)
             self._tables.setdefault(table, {})[row_id] = row
             self._known_tables.add(table)
-            await self._queue_row(row)
             return row_to_plain(row)
 
     async def add(self, table: str, columns: Mapping[str, Any], *, row_id: str | None = None) -> dict[str, Any]:
@@ -521,9 +500,11 @@ class Interocitor:
             current._meta.deleted_hlc = hlc_serialize(self._hlc)
             current._meta.owner = self._device_id
             current.payload = {}
-            await self._local.put_row(current)
+            entry = self._change_for_row(current)
+            if entry is None:
+                return
+            await self._local.commit_local_mutation(current, entry)
             self._tables.setdefault(table, {})[row_id] = current
-            await self._queue_row(current)
 
     # ── Sync ─────────────────────────────────────────────────────────
 
@@ -535,10 +516,8 @@ class Interocitor:
             if not isinstance(local_epoch, int):
                 local_epoch = 0
             # A snapshot is the canonical base for a newer manifest epoch.
-            # A stateless worker hits this path after another client compacts
-            # while it is alive; simply listing changes would miss rows whose
-            # old change files have already been pruned.
             if manifest.epoch > local_epoch:
+                await self._flush()
                 await self._rehydrate()
             else:
                 await self._pull(reload_manifest=False)
@@ -568,16 +547,8 @@ class Interocitor:
             paths = self._paths("compact")
             next_epoch = manifest.epoch + 1
             now = _now()
-            gc_floor_hlc = await self._compute_gc_floor(manifest, self._offline_grace_ms)
             snapshot_tables: dict[str, dict[str, Row]] = {}
             for row in await self._local.get_all_rows():
-                if (
-                    gc_floor_hlc
-                    and row._meta.deleted
-                    and row._meta.deleted_hlc
-                    and hlc_compare_str(row._meta.deleted_hlc, gc_floor_hlc) <= 0
-                ):
-                    continue
                 snapshot_tables.setdefault(row._meta.table, {})[row._meta.row_id] = row
             snapshot = Snapshot(
                 snapshot_id=generate_id("snap"),
@@ -609,14 +580,6 @@ class Interocitor:
                 watermark_hlc=hlc_serialize(self._hlc),
                 snapshot_path=snapshot_path,
                 delta_path=None,
-                # Core writes an explicit empty floor after a compaction when
-                # no active-device acknowledgement permits tombstone GC yet.
-                gc_floor_hlc=gc_floor_hlc,
-                gc_epoch=next_epoch if gc_floor_hlc else manifest.gc_epoch,
-                gc_created_at=now if gc_floor_hlc else manifest.gc_created_at,
-                # Core resolves an omitted client setting to seven days and
-                # writes the active compactor policy into every new manifest.
-                offline_grace_ms=self._offline_grace_ms,
             )
             next_manifest.content_hash = _content_hash(next_manifest.payload_wire())
             await self._write_json(paths.manifest_file(next_manifest.generation), next_manifest.to_wire())
@@ -628,17 +591,6 @@ class Interocitor:
             await self._local.set_meta("epoch", next_epoch)
             await self._local.set_meta("manifestCache", next_manifest.to_wire())
 
-            # Snapshot publication is authoritative even if old change cleanup
-            # is interrupted.  Pruning is therefore best-effort, like core.
-            try:
-                for entry in await self._require_adapter("compact").list_files(paths.changes_folder):
-                    if entry.name == "head.json":
-                        continue
-                    marker = entry.name.rfind("-chg_")
-                    if marker >= 0 and hlc_compare_str(entry.name[:marker], next_manifest.watermark_hlc) <= 0:
-                        await self._require_adapter("compact").delete_file(entry.path)
-            except Exception:
-                pass
             await self._acknowledge_manifest()
             return Manifest.from_wire(next_manifest.to_wire())
 
@@ -921,12 +873,10 @@ class Interocitor:
             metadata["deviceType"] = self._device_type
         elif "deviceType" in old:
             metadata["deviceType"] = old["deviceType"]
-        if manifest is not None and (manifest.epoch or manifest.watermark_hlc or manifest.gc_floor_hlc):
+        if manifest is not None and (manifest.epoch or manifest.watermark_hlc):
             metadata["observedManifestGeneration"] = manifest.generation
             metadata["observedEpoch"] = manifest.epoch
             metadata["observedWatermarkHlc"] = manifest.watermark_hlc
-            if manifest.gc_floor_hlc is not None:
-                metadata["observedGcFloorHlc"] = manifest.gc_floor_hlc
             metadata["observedAt"] = now
         await self._write_json(paths.device_file(self._device_id), metadata)
 
@@ -934,58 +884,9 @@ class Interocitor:
         """Record that this device has incorporated the current manifest base."""
 
         manifest = self._manifest
-        if manifest is None or (manifest.epoch == 0 and not manifest.watermark_hlc and not manifest.gc_floor_hlc):
+        if manifest is None or (manifest.epoch == 0 and not manifest.watermark_hlc):
             return
         await self._upsert_device_metadata()
-        await self._local.set_meta("gcFloorHlc", manifest.gc_floor_hlc or "")
-        await self._local.set_meta("gcEpoch", manifest.gc_epoch or 0)
-
-    async def _compute_gc_floor(self, manifest: Manifest, grace_ms: int) -> str:
-        """Find the safe tombstone floor acknowledged by active devices.
-
-        This mirrors core compaction: every non-retired device that is still
-        inside the offline grace period must have observed a watermark before
-        a compactor can advance the garbage-collection floor.
-        """
-
-        existing = manifest.gc_floor_hlc or ""
-        now_ms = int(datetime.now(UTC).timestamp() * 1000)
-        cutoff_ms = now_ms - grace_ms
-        floors: list[str] = []
-        try:
-            paths = self._paths("compaction garbage collection")
-            for file in await self._require_adapter("compact").list_files(paths.devices_folder):
-                if not file.name.endswith(".json"):
-                    continue
-                device_id = file.name[: -len(".json")]
-                metadata = await self._read_json_if_exists(paths.device_file(device_id), "device metadata")
-                # The TypeScript reader treats an unreadable or malformed
-                # active record as an acknowledgement blocker, never as a
-                # reason to remove tombstones early.
-                if not isinstance(metadata, Mapping):
-                    return existing
-                if metadata.get("retired"):
-                    continue
-                last_seen_ms = _parse_iso_timestamp_ms(metadata.get("lastSeenAt"))
-                if last_seen_ms is not None and last_seen_ms < cutoff_ms:
-                    continue
-                observed = metadata.get("observedWatermarkHlc")
-                if not isinstance(observed, str) or not observed:
-                    return existing
-                # Validate here as well as when the values are sorted. A bad
-                # acknowledgement must block collection rather than skew it.
-                hlc_parse(observed)
-                floors.append(observed)
-        except Exception:
-            return existing
-
-        if not floors:
-            return existing
-        floors.sort(key=cmp_to_key(hlc_compare_str))
-        candidate = floors[0]
-        if existing and hlc_compare_str(existing, candidate) > 0:
-            return existing
-        return candidate
 
     def _encode_text(self, plaintext: str) -> str:
         if not self._encrypted:
@@ -1094,9 +995,6 @@ class Interocitor:
                     continue
                 file_hlc = file.name[:marker]
                 hlc_parse(file_hlc)
-                gc_floor_hlc = self._manifest.gc_floor_hlc if self._manifest is not None else None
-                if gc_floor_hlc and hlc_compare_str(file_hlc, gc_floor_hlc) <= 0:
-                    continue
                 if file.name in seen_change_files:
                     continue
                 entry = self._decode_change_payload(await self._require_adapter("pull").read_file(file.path), file.path)
@@ -1121,96 +1019,64 @@ class Interocitor:
                 raise self._poison_remote(error) from error
         if latest and latest != cursor:
             await self._local.set_meta("cursor", latest)
-        gc_floor_hlc = self._manifest.gc_floor_hlc if self._manifest is not None else None
-        retained_seen = sorted(
-            name
-            for name in seen_change_files
-            if not gc_floor_hlc
-            or (name.rfind("-chg_") >= 0 and hlc_compare_str(name[: name.rfind("-chg_")], gc_floor_hlc) > 0)
-        )
-        await self._local.set_meta("seenChangeFiles", retained_seen)
+        await self._local.set_meta("seenChangeFiles", sorted(seen_change_files))
         await self._local.set_meta("hlc", hlc_serialize(self._hlc))
 
     async def _flush(self) -> None:
         if self._adapter is None:
             return
         self._require_adapter("flush")
-        entries = await self._local.drain_outbox()
+        entries = await self._local.peek_outbox()
         if not entries:
             return
-        requeue = True
-        try:
-            manifest, _ = await self._load_or_create_manifest()
-            if manifest.gc_floor_hlc and any(hlc_compare_str(entry.hlc, manifest.gc_floor_hlc) <= 0 for entry in entries):
-                if manifest.snapshot_path:
-                    # A GC floor is a protocol point of no return. Match the
-                    # TypeScript core by replacing this stale local outbox
-                    # with the canonical snapshot instead of endlessly
-                    # replaying entries that the mesh has already retired.
-                    # Do not flip ``requeue`` until rehydration succeeds: a
-                    # broken/cancelled remote read must still leave the
-                    # caller's drained entries available for a later retry.
-                    await self._rehydrate(preserve_outbox=False)
-                    requeue = False
-                raise InterocitorError(
-                    f"Refusing to flush changes at or before gcFloorHlc {manifest.gc_floor_hlc}; rehydrate required"
-                )
-            paths = self._paths("flush")
-            adapter = self._require_adapter("flush")
-            await adapter.ensure_folder(paths.changes_folder)
-            highest = ""
-            for entry in entries:
-                name = f"{entry.hlc}-{entry.id}.json"
-                await adapter.write_file(paths.change_file(name), self._encode_change_payload(entry).encode("utf-8"))
-                if not highest or hlc_compare_str(entry.hlc, highest) > 0:
-                    highest = entry.hlc
-            if highest:
-                prior_wire = await self._read_json_if_exists(paths.changes_head, "changes head")
-                prior = ""
-                if prior_wire is not None:
-                    try:
-                        prior = ChangesHead.from_wire(prior_wire).latest_hlc
-                    except (ValueError, TypeError):
-                        prior = ""
-                if not prior or hlc_compare_str(highest, prior) > 0:
-                    await self._write_json(paths.changes_head, ChangesHead(highest).to_wire())
-                cursor = await self._local.get_meta("cursor")
-                if not isinstance(cursor, str) or not cursor or hlc_compare_str(highest, cursor) > 0:
-                    await self._local.set_meta("cursor", highest)
-                seen_raw = await self._local.get_meta("seenChangeFiles")
-                seen_change_files = (
-                    set(seen_raw)
-                    if isinstance(seen_raw, list) and all(isinstance(name, str) for name in seen_raw)
-                    else set()
-                )
-                seen_change_files.update(f"{entry.hlc}-{entry.id}.json" for entry in entries if entry.hlc)
-                await self._local.set_meta("seenChangeFiles", sorted(seen_change_files))
-            await self._upsert_device_metadata()
-            requeue = False
-        finally:
-            if requeue:
-                await self._local.push_outbox_entries(entries)
+        await self._load_or_create_manifest()
+        paths = self._paths("flush")
+        adapter = self._require_adapter("flush")
+        await adapter.ensure_folder(paths.changes_folder)
+        highest = ""
+        for entry in entries:
+            name = f"{entry.hlc}-{entry.id}.json"
+            await adapter.write_file(paths.change_file(name), self._encode_change_payload(entry).encode("utf-8"))
+            if not highest or hlc_compare_str(entry.hlc, highest) > 0:
+                highest = entry.hlc
+        if highest:
+            prior_wire = await self._read_json_if_exists(paths.changes_head, "changes head")
+            prior = ""
+            if prior_wire is not None:
+                try:
+                    prior = ChangesHead.from_wire(prior_wire).latest_hlc
+                except (ValueError, TypeError):
+                    prior = ""
+            if not prior or hlc_compare_str(highest, prior) > 0:
+                await self._write_json(paths.changes_head, ChangesHead(highest).to_wire())
+            cursor = await self._local.get_meta("cursor")
+            if not isinstance(cursor, str) or not cursor or hlc_compare_str(highest, cursor) > 0:
+                await self._local.set_meta("cursor", highest)
+            seen_raw = await self._local.get_meta("seenChangeFiles")
+            seen_change_files = (
+                set(seen_raw)
+                if isinstance(seen_raw, list) and all(isinstance(name, str) for name in seen_raw)
+                else set()
+            )
+            seen_change_files.update(f"{entry.hlc}-{entry.id}.json" for entry in entries if entry.hlc)
+            await self._local.set_meta("seenChangeFiles", sorted(seen_change_files))
+        await self._upsert_device_metadata()
+        await self._local.acknowledge_outbox([entry.id for entry in entries])
 
-    async def _rehydrate(self, *, preserve_outbox: bool = True) -> None:
+    async def _rehydrate(self) -> None:
         if self._manifest is None:
             return
         snapshot_path = self._manifest.snapshot_path
         if not snapshot_path:
             await self._pull(reload_manifest=False)
             return
-        # Rehydration replaces the local cache with the canonical snapshot.
-        # For a normal epoch transition, drain first so an offline/pre-connect
-        # write is not erased by ``clear_all()``. After loading the snapshot
-        # we apply and requeue those same CRDT entries. A GC-floor recovery is
-        # intentionally different: its stale entries have passed the mesh's
-        # point of no return and must be discarded.
-        pending_entries = await self._local.drain_outbox() if preserve_outbox else []
-        pending_restored = False
         try:
             snapshot = self._decode_snapshot_payload(
                 await self._require_adapter("rehydrate").read_file(snapshot_path), snapshot_path
             )
-            await self._local.clear_all()
+            await self._local.clear_rows()
+            await self._local.set_meta("cursor", "")
+            await self._local.set_meta("seenChangeFiles", [])
             self._tables = {}
             self._known_tables = set()
             for table, rows in snapshot.tables.items():
@@ -1225,15 +1091,7 @@ class Interocitor:
             await self._local.set_meta("epoch", snapshot.epoch)
             await self._local.set_meta("hlc", hlc_serialize(self._hlc))
             await self._pull(reload_manifest=False)
-            await self._restore_rehydrated_outbox(pending_entries)
-            pending_restored = True
         except BaseException as error:
-            if pending_entries and not pending_restored:
-                # Preserve entries for a caller that repairs the remote and
-                # reconnects. A memory-only worker still deliberately drops
-                # them on ``disconnect()``, so an explicit ``flush()`` remains
-                # the delivery boundary.
-                await self._local.push_outbox_entries(pending_entries)
             # ``CancelledError`` inherits from BaseException in supported
             # Python versions. It is a lifecycle signal, not evidence that
             # the remote mesh is corrupt; requeue first, then propagate it
@@ -1244,27 +1102,7 @@ class Interocitor:
                 raise self._poison_remote(error) from error
             raise
 
-    async def _restore_rehydrated_outbox(self, entries: list[ChangeEntry]) -> None:
-        """CRDT-merge and requeue mutations saved before snapshot replacement."""
-
-        if not entries:
-            return
-        for entry in entries:
-            _validate_change_hlcs(entry)
-            self._hlc = hlc_receive(self._hlc, hlc_parse(entry.hlc))
-            affected = apply_change_entry(
-                self._tables,
-                entry,
-                self._manifest.schema if self._manifest is not None else 1,
-                self._schema,
-            )
-            if affected:
-                await self._local.put_rows(affected)
-                self._known_tables.update(row._meta.table for row in affected)
-        await self._local.push_outbox_entries(entries)
-        await self._local.set_meta("hlc", hlc_serialize(self._hlc))
-
-    async def _queue_row(self, row: Row) -> None:
+    def _change_for_row(self, row: Row) -> ChangeEntry | None:
         if row._meta.deleted:
             hlc = row._meta.deleted_hlc
             operation = DeleteOp(row._meta.table, row._meta.row_id, hlc or "") if hlc else None
@@ -1273,10 +1111,8 @@ class Interocitor:
             hlc = self._row_hlc(row)
             operation = UpsertOp(row._meta.table, row._meta.row_id, columns) if columns else None
         if operation is None or not hlc:
-            return
-        await self._local.push_outbox(
-            ChangeEntry(id=generate_id("chg"), ts=self._hlc.ts, device=self._device_id, hlc=hlc, ops=[operation])
-        )
+            return None
+        return ChangeEntry(id=generate_id("chg"), ts=self._hlc.ts, device=self._device_id, hlc=hlc, ops=[operation])
 
     @staticmethod
     def _row_hlc(row: Row) -> str:

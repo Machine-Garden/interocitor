@@ -6,31 +6,29 @@ mesh `files/` namespace. They do not participate in the local row outbox,
 pull, flush, or compaction, so callers need live transport and their own retry
 policy. For the project overview, see [README.md](../README.md).
 
-## Pull — fast-skip and merge
+## Pull — exact receipt and merge
 
 ```mermaid
 flowchart TD
     A([pull]) --> B[loadOrCreateManifest]
-    B --> C[GET changes/head.json]
-    C --> D{head.latestHlc\n≤ cursor?}
-    D -- Yes --> SKIP([sync:complete\nentriesMerged=0])
-    D -- No or no head --> F[list changes/]
-    F -- 404 / empty --> SKIP
-    F -- files --> G[sort by filename\nHLC prefix = chronological]
+    B --> F[list changes/]
+    F -- 404 / empty --> DONE([sync:complete\nentriesMerged=0])
+    F -- files --> G[sort filenames bytewise\nfor deterministic processing]
     G --> H{next file?}
-    H -- done --> I[cursor ← latestMergedHlc\nemit sync:complete]
+    H -- done --> I[persist observation ledger\nemit sync:complete]
     H -- head.json --> H
-    H -- change file --> J{file HLC > cursor?}
-    J -- No → skip --> H
-    J -- Yes --> K[GET + decodeFromCloud + JSON.parse]
+    H -- change file --> J{exact filename\nalready observed?}
+    J -- Yes --> H
+    J -- No --> K[GET + decodeFromCloud + JSON.parse]
     K --> L[applyChangeEntry\n→ putRows in local store]
-    L --> M[emit change/delete events]
-    M --> H
+    L --> M[atomically persist rows\n+ exact filename receipt]
+    M --> N[emit change/delete events]
+    N --> H
 ```
 
-**Key invariant:** the cursor is an HLC string. It advances monotonically.
-Files whose HLC prefix sorts ≤ cursor are never downloaded — the filename
-itself is enough to skip them.
+**Key invariant:** exact immutable filename identity is authoritative. HLCs
+order conflicting CRDT operations deterministically, but neither a cursor nor
+`head.json` proves that a lower-HLC file was previously observed.
 
 ## Connect and engine lifecycle
 
@@ -47,12 +45,7 @@ flowchart TD
     E --> E1{stage completed\nbefore deadline?}
     E1 -- No --> Z[offline-ready degrade\nemit connect:error + onConnectStalled]
     E1 -- Yes --> D
-    D -- Yes --> FP{cached manifest + cursor\nand empty outbox?}
-    FP -- Yes --> FH[head fast-path probe\noutside stage deadline]
-    FH --> FC{remote head\n≤ cursor?}
-    FC -- Yes --> O
-    FC -- No / read error --> F
-    FP -- No --> F["bounded stage:\nensureFolder ×4\nremotePath → devices\n→ mainline → changes"]
+    D -- Yes --> F["bounded stage:\nensureFolder ×4\nremotePath → devices\n→ mainline → changes"]
     F --> F1{stage completed\nbefore deadline?}
     F1 -- No --> Z
     F1 -- Yes --> G[bounded stage:\nloadOrCreateManifest]
@@ -71,17 +64,18 @@ flowchart TD
     I1 --> I2{stage completed\nbefore deadline?}
     I2 -- No --> Z
     I2 -- Yes --> J{localEpoch\n< remoteEpoch?}
-    J -- Yes: new snapshot --> K[bounded stage:\nrehydrate]
+    J -- Yes: new snapshot --> KF[bounded stage:\nflush durable outbox]
+    KF --> K[bounded stage:\nrehydrate]
     K --> K0{stage completed\nbefore deadline?}
     K0 -- No --> Z
     K0 -- Yes --> K1[GET snapshotPath from manifest]
-    K1 --> K2[clearAll local store]
+    K1 --> K2[clear rows and reset\nobservation ledger; preserve outbox]
     K2 --> K3[write snapshot rows\nrestore HLC]
     K3 --> M
-    J -- No --> L[bounded stage:\npull change files]
+    J -- No --> L[bounded stage:\npull exact unseen filenames]
     L --> L0{stage completed\nbefore deadline?}
     L0 -- No --> Z
-    L0 -- Yes --> M[bounded stage:\nflush outbox]
+    L0 -- Yes --> M[bounded stage:\nflush durable outbox]
     M --> M0{stage completed\nbefore deadline?}
     M0 -- No --> Z
     M0 -- Yes --> N[flush to replicas\nbest-effort]
@@ -102,11 +96,7 @@ direct adapter operations and do not share the offline row behavior.
 lifecycle. Authentication, folder setup, manifest loading, device metadata,
 rehydration, pull, and flush use `connectStageTimeoutMs` (15s by default). A
 timeout in one of those guarded stages emits `connect:error`, calls
-`onConnectStalled`, and returns offline-ready so the app can retry later. This
-is not a hard wall-clock bound for the whole method: the eligible
-cached-manifest fast path probes `changes/head.json` outside the stage
-deadline. An adapter that never settles that read can leave `connect()`
-pending.
+`onConnectStalled`, and returns offline-ready so the app can retry later.
 
 **Join-existing-mesh policy:** after `connect()` loads an existing remote
 manifest and before device metadata, pull, or flush, the engine compares the
@@ -135,23 +125,21 @@ supports IndexedDB enumeration; cleanup must never block app startup.
 ```mermaid
 flowchart TD
     A([flush]) --> A1[reload manifest]
-    A1 --> B[drainOutbox from local store]
+    A1 --> B[peek durable outbox]
     B --> C{entries.length\n== 0?}
     C -- Yes --> DONE([return])
-    C -- No --> C1{any entry.hlc\n<= gcFloorHlc?}
-    C1 -- Yes --> R[rehydrate from snapshot\nrefuse stale flush]
-    R --> ERR([throw rehydrate required])
-    C1 -- No --> D[emit flush:start]
+    C -- No --> D[emit flush:start]
     D --> E[flushToAdapter — primary]
     E --> F{replicas\nconfigured?}
-    F -- No --> G[emit flush:complete]
+    F -- No --> ACK[acknowledge exact published IDs]
     F -- Yes --> H[for each replica]
     H --> I[flushToAdapter — replica]
     I --> J{replica\nsucceeded?}
     J -- No --> K[emit replica:error\ncontinue]
     J -- Yes --> H
     K --> H
-    H -- done --> G
+    H -- done --> ACK
+    ACK --> G[emit flush:complete]
 ```
 
 Each `flushToAdapter` call writes one JSON file per change entry,
@@ -165,36 +153,30 @@ sequenceDiagram
     participant C as Cloud
 
     Note over E: compactInFlight prevents overlap inside one engine instance
-    E->>E: pull() — merge all remote changes first
-    E->>C: LIST devices/
-    E->>E: active = not retired and lastSeenAt inside offlineGraceMs
-    E->>E: gcFloorHlc = min(active observedWatermarkHlc)
+    E->>E: flush durable local work, then pull all remote changes
+    E->>C: LIST changes/
+    E->>E: capture exact observed filenames
     E->>E: getAllRows() — full local-store scan
-    E->>E: omit tombstones where deletedHlc <= gcFloorHlc
     E->>C: PUT mainline/snapshot-{epoch}-{writer}.json
-    E->>C: PUT manifest-{gen}.json (epoch, watermarkHlc, snapshotPath, gcFloorHlc)
+    E->>C: PUT manifest-{gen}.json (epoch, watermarkHlc, snapshotPath, coveredChangeFiles)
     E->>C: PUT manifest.json { currentGeneration, file }
     E->>C: PUT devices/{deviceId}.json observation ack
-    Note over C: pointer switches — other devices see new epoch/floor on next connect/pull/flush
+    Note over C: pointer switches — other devices see the new epoch on next connect/pull
 
     E->>E: setMeta epoch ← nextEpoch
 
-    E->>C: list changes/ (all files)
-    loop each change file with HLC ≤ watermarkHlc
-        E->>C: DELETE {hlc}-{changeId}.json
-    end
-    Note over E,C: changes/ now contains only post-watermark files
+    Note over E,C: every immutable change file and tombstone remains retained
 ```
 
 **Write ordering:** snapshot → manifest file → manifest pointer.
 Readers loading `manifest.json` always see a consistent pair; the
 snapshot file exists before any reader is directed to it.
 
-Other devices detect epoch/floor advancement on the next `connect()`,
-`pull()`, or `flush()` manifest reload. If `remoteEpoch > localEpoch`,
-they `rehydrate()` from the snapshot and then pull deltas above the
-watermark. If their outbox contains entries at or before `gcFloorHlc`,
-flush is refused and the device aligns from the canonical snapshot.
+Other devices detect epoch advancement on the next `connect()` or `pull()`.
+If `remoteEpoch > localEpoch`, an old client first publishes durable local
+work, then rehydrates from the snapshot and pulls every retained filename not
+present in the snapshot's exact receipt set. A new client has no local work and
+can restore immediately.
 
 The adapter contract does not provide CAS/ETag writes, so compaction is not
 strictly race-safe across concurrent devices: one valid manifest pointer can
@@ -221,8 +203,8 @@ sequenceDiagram
     E->>C: GET manifest.json → pointer
     E->>C: GET manifest-1.json → validate hash
     E->>E: manifest.epoch = 0, localEpoch = 0 → pull()
-    E->>C: GET changes/head.json
-    C-->>E: 404 (no changes yet)
+    E->>C: LIST changes/
+    C-->>E: empty
     Note over E: sync:complete entriesMerged=0
 ```
 
@@ -230,7 +212,8 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A([rehydrate]) --> B{manifest.snapshotPath\nexists?}
+    A([rehydrate]) --> A1[flush durable outbox]
+    A1 --> B{manifest.snapshotPath\nexists?}
     B -- No --> C[emit rehydrate:complete rowCount=0]
     C --> D[pull]
     B -- Yes --> E[GET snapshot file]
@@ -238,9 +221,9 @@ flowchart TD
     F -- Yes --> G[decodeFromCloud]
     F -- No --> H[parse JSON]
     G --> H
-    H --> I[clearAll local store]
+    H --> I[clear rows; preserve durable outbox]
     I --> J[write all snapshot rows to local store]
-    J --> K[restore HLC from snapshot]
+    J --> K[restore HLC and exact\ncoveredChangeFiles receipts]
     K --> L[setMeta epoch]
     L --> M[emit rehydrate:complete]
     M --> D

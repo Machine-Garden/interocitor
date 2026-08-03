@@ -309,9 +309,8 @@ test('reload + fresh-client read budget: own writes not re-read on reload; fresh
   ).toEqual(result.changeFilePaths);
   expect(result.peerRowCountAfterFirstConnect).toBe(2);
 
-  // Phase 4: wiped peer reload. MUST NOT re-read any change file.
-  // Manifest pointer + head probe are allowed (and expected) — the
-  // pull fast-path needs head to decide whether to skip listing.
+  // Phase 4: wiped peer reload. MUST NOT re-read any change file. Pull still
+  // lists immutable filenames; exact receipts suppress redundant downloads.
   const phase4ChangeReads = result.phase4Reads.filter(p => result.changeFilePaths.includes(p));
   expect(
     phase4ChangeReads,

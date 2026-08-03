@@ -215,17 +215,16 @@ later `put` creates a new row incarnation and publishes only its new fields.
 | `flush()` | Writes queued local changes to the primary adapter and configured replicas |
 | `pull()` | Lists retained changes and merges filenames not recorded in the local exact-file receipt set |
 | `rehydrate()` | Rebuilds local state from the current snapshot, then pulls newer changes |
-| `compact()` | Pulls, publishes a new snapshot and manifest generation, and prunes changes through the watermark |
+| `compact()` | Pulls and publishes a new snapshot/manifest generation while retaining immutable changes and tombstones |
 | `disconnect()` | Stops polling, flushes when the remote is healthy, and closes the local store |
 | `setRemoteStorage(_:)` | Switches adapters or enters local-only mode |
 
 `compact()` is an explicit maintenance operation. The runtime does not provide
 a distributed compaction lease, idle-time policy, or automatic “20 changes”
 threshold. If multiple peers may compact, the application must coordinate
-that operation. Compaction retains tombstones until active devices have
-acknowledged a watermark. A stale outbox entry at or before the published GC
-floor is not uploaded; the client rehydrates from the canonical snapshot
-instead.
+that operation. Compaction retains every immutable change file and tombstone.
+Before replacing local rows from a newer snapshot, a client publishes its
+durable outbox; scalar HLC state never suppresses a queued or unseen change.
 
 ## Adapters
 
@@ -261,7 +260,7 @@ supported application surface listed above.
 `SyncConfig` defaults are `serverManaged: false`,
 `serverId: "server_relay_1"`, `pollInterval: 30`, `flushDebounce: 2`,
 `flushThreshold: 50`, `dbName: "interocitor"`, a seven-day
-`offlineGraceMs`, and no replicas. `deviceName` and `deviceType` are written
+no replicas. `deviceName` and `deviceType` are written
 to peer-visible device metadata. The `_owner` field assigned to a local write
 is snapshot metadata, not a last-writer identity across peers.
 

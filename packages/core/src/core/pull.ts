@@ -14,32 +14,13 @@ import type {
   DatabaseSchemaDefinition,
 } from './types.ts';
 import type { HLC } from './types.ts';
-import { hlcParse, hlcReceive, hlcCompareStr, hlcSerialize } from './hlc.ts';
+import { hlcParse, hlcReceive, hlcSerialize } from './hlc.ts';
 import { applyChangeEntry } from './crdt.ts';
 import { paths, textDecoder, log } from './internals.ts';
 import { decodeChangePayload } from './codec.ts';
 import type { CodecState } from './codec.ts';
 import { readJsonIfExists } from './manifest.ts';
-
-const SEEN_CHANGE_FILES_META_KEY = 'seenChangeFiles';
-const WRITER_FRONTIERS_META_KEY = 'writerFrontiers';
-
-export type SeenChangeFiles = Set<string>;
-export type WriterFrontiers = Record<string, string>;
-
-export function parseSeenChangeFiles(value: unknown): SeenChangeFiles | null {
-  if (!Array.isArray(value) || value.some(name => typeof name !== 'string')) return null;
-  return new Set(value);
-}
-
-export function parseWriterFrontiers(value: unknown): WriterFrontiers {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  const frontiers: WriterFrontiers = {};
-  for (const [writerId, hlc] of Object.entries(value)) {
-    if (typeof hlc === 'string' && hlc) frontiers[writerId] = hlc;
-  }
-  return frontiers;
-}
+import { ChangeObservationLedger, changeFileHlc, compareChangeFiles } from './change-observation.ts';
 
 export interface PullContext {
   adapter: StorageAdapter;
@@ -72,33 +53,6 @@ function emitAffectedRows(
   }
 }
 
-export function changeFileHlc(name: string): string | null {
-  const marker = name.lastIndexOf('-chg_');
-  return marker === -1 ? null : name.slice(0, marker);
-}
-
-export function changeFileIsUnseen(name: string, seenChangeFiles: SeenChangeFiles): boolean {
-  return changeFileHlc(name) !== null && !seenChangeFiles.has(name);
-}
-
-function compareChangeFiles(left: { name: string }, right: { name: string }): number {
-  const leftHlc = changeFileHlc(left.name);
-  const rightHlc = changeFileHlc(right.name);
-  if (leftHlc && rightHlc) {
-    // Merge order is protocol data, not a display order. In particular,
-    // ``localeCompare`` can place same-tick device IDs differently across
-    // runtimes and make any order-sensitive custom merge produce different values.
-    // Keep malformed names on the normal per-file error path below.
-    const compared = hlcCompareStr(leftHlc, rightHlc);
-    if (Number.isFinite(compared) && compared !== 0) return compared;
-  }
-  // JavaScript relational string comparison is a stable UTF-16 code-unit
-  // tiebreaker, unlike localeCompare.
-  if (left.name < right.name) return -1;
-  if (left.name > right.name) return 1;
-  return 0;
-}
-
 /** Returns the updated HLC after pull. */
 export async function pull(ctx: PullContext): Promise<HLC> {
   const { adapter, local, remotePath, codecState, tables, knownTables, emit } = ctx;
@@ -111,9 +65,7 @@ export async function pull(ctx: PullContext): Promise<HLC> {
     await ctx.loadOrCreateManifest();
     const p = paths(remotePath);
 
-    const legacyGlobalHighWaterRaw = await local.getMeta('cursor');
-    const legacyGlobalHighWaterHlc =
-      typeof legacyGlobalHighWaterRaw === 'string' ? legacyGlobalHighWaterRaw : '';
+    const observation = await ChangeObservationLedger.load(local);
 
     // head.json remains a cheap invalidation hint for adapters with push
     // support, but it is not an authoritative pull cursor. HLCs are globally
@@ -140,29 +92,13 @@ export async function pull(ctx: PullContext): Promise<HLC> {
     files.sort(compareChangeFiles);
 
     let totalMerged = 0;
-    let latestMergedHlc = legacyGlobalHighWaterHlc;
-    const storedSeenChangeFiles = parseSeenChangeFiles(
-      await local.getMeta(SEEN_CHANGE_FILES_META_KEY),
-    );
-    // A scalar cursor from an older release cannot prove which concrete files
-    // were observed. Start empty once after upgrade and safely replay retained
-    // change files; CRDT application is idempotent.
-    const seenChangeFiles: SeenChangeFiles = storedSeenChangeFiles ?? new Set();
-    const hasExactObservationHistory = storedSeenChangeFiles !== null;
-    const writerFrontiers = parseWriterFrontiers(await local.getMeta(WRITER_FRONTIERS_META_KEY));
-
     for (const file of files) {
       if (file.name === 'head.json') continue;
 
       try {
-        const chgIdx = file.name.lastIndexOf('-chg_');
-        if (chgIdx === -1) continue;
-        const fileHlc = file.name.slice(0, chgIdx);
-        const gcFloorHlc = codecState.manifest?.gcFloorHlc ?? '';
-        if (gcFloorHlc && hlcCompareStr(fileHlc, gcFloorHlc) <= 0) continue;
-        const writerId = hlcParse(fileHlc).nodeId;
-        const writerFrontierHlc = writerFrontiers[writerId];
-        if (seenChangeFiles.has(file.name)) continue;
+        const fileHlc = changeFileHlc(file.name);
+        if (fileHlc === null) continue;
+        if (!observation.isUnseenChange(file.name)) continue;
 
         const raw = textDecoder.decode(await adapter.readFile(file.path));
         const entry = await decodeChangePayload(codecState, local, raw, file.path);
@@ -178,52 +114,22 @@ export async function pull(ctx: PullContext): Promise<HLC> {
           emitAffectedRows(affected, knownTables, emit);
         }
 
-        if (!latestMergedHlc || hlcCompareStr(entry.hlc, latestMergedHlc) > 0) {
-          latestMergedHlc = entry.hlc;
-        }
-        const behindWriterFrontier = writerFrontierHlc
-          ? hlcCompareStr(fileHlc, writerFrontierHlc) <= 0
-          : false;
-        const behindLegacyGlobalHighWater = legacyGlobalHighWaterHlc
-          ? hlcCompareStr(fileHlc, legacyGlobalHighWaterHlc) <= 0
-          : false;
-        if (hasExactObservationHistory && (behindWriterFrontier || behindLegacyGlobalHighWater)) {
+        const lateChange = observation.observe(file.name, entry.hlc);
+        if (lateChange) {
           emit({
             type: 'sync:late-change',
-            writerId,
-            changeHlc: fileHlc,
-            fileName: file.name,
-            relation: behindWriterFrontier ? 'behind-writer-frontier' : 'behind-global-high-water',
-            writerFrontierHlc,
-            legacyGlobalHighWaterHlc: legacyGlobalHighWaterHlc || undefined,
+            ...lateChange,
           });
         }
-        if (!writerFrontierHlc || hlcCompareStr(fileHlc, writerFrontierHlc) > 0) {
-          writerFrontiers[writerId] = fileHlc;
-        }
-        seenChangeFiles.add(file.name);
       } catch (err) {
         emit({ type: 'decode:error', error: err instanceof Error ? err : new Error(String(err)), path: file.path, context: { stage: 'pull', name: file.name } });
         throw await ctx.poisonRemote(err, file.path);
       }
     }
 
-    if (latestMergedHlc && latestMergedHlc !== legacyGlobalHighWaterHlc) {
-      await local.setMeta('cursor', latestMergedHlc);
-    }
     // A listing is explicitly allowed to be non-monotonic, so absence from
     // this response cannot retire proof that a file was already observed.
-    // Only the manifest GC floor is an authoritative retirement boundary.
-    const observationGcFloorHlc = codecState.manifest?.gcFloorHlc ?? '';
-    const retainedSeenChangeFiles = [...seenChangeFiles]
-      .filter(name => {
-        if (!observationGcFloorHlc) return true;
-        const fileHlc = changeFileHlc(name);
-        return fileHlc === null || hlcCompareStr(fileHlc, observationGcFloorHlc) > 0;
-      })
-      .sort();
-    await local.setMeta(SEEN_CHANGE_FILES_META_KEY, retainedSeenChangeFiles);
-    await local.setMeta(WRITER_FRONTIERS_META_KEY, writerFrontiers);
+    await observation.persist(local);
 
     await local.setMeta('hlc', hlcSerialize(hlc));
     log('debug', 'pull() — complete', { totalMerged });

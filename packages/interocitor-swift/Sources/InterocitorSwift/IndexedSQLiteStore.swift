@@ -191,6 +191,72 @@ public actor IndexedSQLiteStore: LocalStoreAdapter {
         try step(stmt)
     }
 
+    public func commitLocalMutation(row: Row, entry: ChangeEntry, hlc: String) async throws {
+        try exec("BEGIN IMMEDIATE;")
+        do {
+            try await putRow(row)
+            try await pushOutbox(entry)
+            try await setMeta(key: "hlc", value: AnyCodable.string(hlc))
+            try exec("COMMIT;")
+        } catch {
+            try? exec("ROLLBACK;")
+            throw error
+        }
+    }
+
+    public func peekOutbox() async throws -> [ChangeEntry] {
+        try fetchOutbox()
+    }
+
+    public func acknowledgeOutbox(entryIds: [String]) async throws {
+        let acknowledged = Set(entryIds)
+        guard !acknowledged.isEmpty else { return }
+        let sql = "SELECT seq, data FROM outbox ORDER BY seq ASC;"
+        var select: OpaquePointer?
+        try prepare(sql, &select)
+        defer { sqlite3_finalize(select) }
+        var sequences: [Int64] = []
+        while sqlite3_step(select) == SQLITE_ROW {
+            guard let json = column(select, 1),
+                  let entry = try? decode(ChangeEntry.self, from: json),
+                  acknowledged.contains(entry.id) else { continue }
+            sequences.append(sqlite3_column_int64(select, 0))
+        }
+        try exec("BEGIN IMMEDIATE;")
+        do {
+            for sequence in sequences {
+                var statement: OpaquePointer?
+                try prepare("DELETE FROM outbox WHERE seq=?;", &statement)
+                sqlite3_bind_int64(statement, 1, sequence)
+                do {
+                    try step(statement)
+                    sqlite3_finalize(statement)
+                } catch {
+                    sqlite3_finalize(statement)
+                    throw error
+                }
+            }
+            try exec("COMMIT;")
+        } catch {
+            try? exec("ROLLBACK;")
+            throw error
+        }
+    }
+
+    public func replaceOutbox(_ entries: [ChangeEntry]) async throws {
+        try exec("BEGIN IMMEDIATE;")
+        do {
+            try exec("DELETE FROM outbox;")
+            for entry in entries {
+                try await pushOutbox(entry)
+            }
+            try exec("COMMIT;")
+        } catch {
+            try? exec("ROLLBACK;")
+            throw error
+        }
+    }
+
     public func drainOutbox() async throws -> [ChangeEntry] {
         let entries = try fetchOutbox()
         try exec("DELETE FROM outbox;")

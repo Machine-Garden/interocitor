@@ -360,6 +360,15 @@ final class MemoryLocalStoreTests: XCTestCase {
         let size0 = try await store.outboxSize(); XCTAssertEqual(size0, 0)
     }
 
+    func testReplaceOutbox() async throws {
+        let old = ChangeEntry(id: "chg_old", ts: 1, device: "dev_a", hlc: "001000000000000-0000-dev_a", ops: [])
+        let replacement = ChangeEntry(id: "chg_new", ts: 2, device: "dev_a", hlc: "001000000000001-0000-dev_a", ops: [])
+        try await store.pushOutbox(old)
+        try await store.replaceOutbox([replacement])
+        let replaced = try await store.peekOutbox()
+        XCTAssertEqual(replaced.map(\.id), ["chg_new"])
+    }
+
     func testCursors() async throws {
         try await store.setCursor(deviceId: "dev_a", offset: 42)
         let v = try await store.getCursor(deviceId: "dev_a")
@@ -385,6 +394,29 @@ final class MemoryLocalStoreTests: XCTestCase {
 
 // MARK: - Interocitor (memory) Tests
 
+private actor FailingChangeStorageAdapter: StorageAdapter {
+    nonisolated let name = "failing-memory"
+    private let base = MemoryStorageAdapter()
+    private var failNextChange = false
+
+    func armChangeFailure() { failNextChange = true }
+    func authenticate() async throws { try await base.authenticate() }
+    func isAuthenticated() async -> Bool { await base.isAuthenticated() }
+    func ensureFolder(path: String) async throws { try await base.ensureFolder(path: path) }
+    func listFiles(path: String) async throws -> [FileEntry] { try await base.listFiles(path: path) }
+    func listFolders(path: String) async throws -> [String] { try await base.listFolders(path: path) }
+    func readFile(path: String) async throws -> Data { try await base.readFile(path: path) }
+    func writeFile(path: String, data: Data) async throws {
+        if failNextChange && path.contains("/changes/") && !path.hasSuffix("/head.json") {
+            failNextChange = false
+            throw InterocitorError.protocolCorruption("injected change publication failure")
+        }
+        try await base.writeFile(path: path, data: data)
+    }
+    func deleteFile(path: String) async throws { try await base.deleteFile(path: path) }
+    func getFileMetadata(path: String) async throws -> FileEntry? { try await base.getFileMetadata(path: path) }
+}
+
 final class SyncEngineMemoryTests: XCTestCase {
 
     func makePair() -> (Interocitor, Interocitor, MemoryStorageAdapter) {
@@ -407,6 +439,37 @@ final class SyncEngineMemoryTests: XCTestCase {
         try await b.connect()
         let row = try await b.get(table: "tasks", rowId: "t1")
         XCTAssertEqual(row?.columns["title"]?.value, .string("Hello"))
+    }
+
+    func testFailedPublicationPreservesExactOutboxIdForRetry() async throws {
+        let adapter = FailingChangeStorageAdapter()
+        let local = MemoryLocalStore()
+        let config = SyncConfig(remotePath: "/FailedPublication", pollInterval: 9_999, flushDebounce: 9_999)
+        let writer = Interocitor(adapter: adapter, config: config, localStore: local)
+        let reader = Interocitor(adapter: adapter, config: config, localStore: MemoryLocalStore())
+        try await writer.initialize()
+        try await writer.connect()
+        try await writer.put(table: "tasks", rowId: "durable", columns: ["state": .string("queued")])
+        let queued = try await local.peekOutbox()
+        XCTAssertEqual(queued.count, 1)
+
+        await adapter.armChangeFailure()
+        do {
+            try await writer.flush()
+            XCTFail("Expected injected publication failure")
+        } catch {
+            XCTAssertTrue(String(describing: error).contains("injected change publication failure"))
+        }
+        let afterFailure = try await local.peekOutbox()
+        XCTAssertEqual(afterFailure.map(\.id), queued.map(\.id))
+
+        try await writer.flush()
+        let outboxSizeAfterRetry = try await local.outboxSize()
+        XCTAssertEqual(outboxSizeAfterRetry, 0)
+        try await reader.initialize()
+        try await reader.connect()
+        let row = try await reader.get(table: "tasks", rowId: "durable")
+        XCTAssertEqual(row?.columns["state"]?.value, .string("queued"))
     }
 
     func testLatePublishedChangeBehindGlobalHeadIsNotLost() async throws {
@@ -464,6 +527,34 @@ final class SyncEngineMemoryTests: XCTestCase {
 
         let row = try await a.get(table: "notes", rowId: "n1")
         XCTAssertEqual(row?.columns["body"]?.value, .string("offline"))
+    }
+
+    func testOfflineWritePublishesBeforeAdvancedSnapshotRehydrate() async throws {
+        let shared = MemoryStorageAdapter()
+        let config = SyncConfig(remotePath: "/AdvancedSnapshot", pollInterval: 9_999, flushDebounce: 9_999)
+        let writer = Interocitor(adapter: shared, config: config, localStore: MemoryLocalStore())
+        let staleStore = MemoryLocalStore()
+        let stale = Interocitor(adapter: shared, config: config, localStore: staleStore)
+        try await writer.initialize()
+        try await stale.initialize()
+        try await writer.connect()
+        try await writer.put(table: "tasks", rowId: "initial", columns: ["state": .string("ready")])
+        try await writer.flush()
+        try await stale.connect()
+        try await writer.compact()
+        try await stale.pull()
+
+        try await stale.put(table: "tasks", rowId: "offline", columns: ["state": .string("queued")])
+        try await writer.put(table: "tasks", rowId: "newer", columns: ["state": .string("done")])
+        try await writer.flush()
+        try await writer.compact()
+
+        try await stale.pull()
+        let staleOutboxSize = try await staleStore.outboxSize()
+        XCTAssertEqual(staleOutboxSize, 0)
+        try await writer.pull()
+        let recovered = try await writer.get(table: "tasks", rowId: "offline")
+        XCTAssertEqual(recovered?.columns["state"]?.value, .string("queued"))
     }
 
     func testDeleteSync() async throws {
@@ -588,7 +679,7 @@ final class SyncEngineMemoryTests: XCTestCase {
         XCTAssertEqual(row?.columns["fresh"]?.value, .string("new"))
     }
 
-    func testCompactionIgnoresStaleCoreTimestampWithFractionalSeconds() async throws {
+    func testCompactionRetainsImmutableChangeHistory() async throws {
         let adapter = MemoryStorageAdapter()
         let remotePath = "/gc-fractional-core-timestamp"
         let db = Interocitor(
@@ -599,39 +690,14 @@ final class SyncEngineMemoryTests: XCTestCase {
         try await db.initialize()
         try await db.connect()
 
-        let deviceId = await db.getDeviceId()
-        let activeWatermark = hlcSerialize(HLC(ts: 2_000, counter: 0, nodeId: "swift"))
-        let staleWatermark = hlcSerialize(HLC(ts: 1_000, counter: 0, nodeId: "core"))
-        let now = ISO8601DateFormatter().string(from: Date())
-
-        let active = DeviceMetadata(
-            deviceId: deviceId,
-            registeredAt: now,
-            lastSeenAt: now,
-            observedWatermarkHlc: activeWatermark
-        )
-        // Node's Date#toISOString() uses millisecond fractional seconds.
-        // This record is outside the offline grace window and must not hold
-        // the floor back merely because it was written by Core.
-        let staleCore = DeviceMetadata(
-            deviceId: "core-device",
-            registeredAt: "2020-01-01T00:00:00.123Z",
-            lastSeenAt: "2020-01-01T00:00:00.123Z",
-            observedWatermarkHlc: staleWatermark
-        )
-        let encoder = JSONEncoder()
-        try await adapter.writeFile(
-            path: "\(remotePath)/devices/\(deviceId).json",
-            data: try encoder.encode(active)
-        )
-        try await adapter.writeFile(
-            path: "\(remotePath)/devices/core-device.json",
-            data: try encoder.encode(staleCore)
-        )
-
+        try await db.put(table: "tasks", rowId: "retained", columns: ["title": .string("history")])
+        try await db.flush()
         try await db.compact()
         let manifest = await db.getManifest()
-        XCTAssertEqual(manifest?.gcFloorHlc, activeWatermark)
+        let changes = try await adapter.listFiles(path: "\(remotePath)/changes")
+            .filter { $0.name.contains("-chg_") }
+        XCTAssertEqual(manifest?.epoch, 1)
+        XCTAssertEqual(changes.count, 1)
     }
 }
 

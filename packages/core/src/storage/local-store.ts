@@ -12,6 +12,8 @@ import type {
  * memory for tests, browser storage in web packages, and future Node stores.
  */
 export interface LocalStore {
+  /** Serialize a named correctness-critical operation across store wrappers. */
+  withLock<T>(name: string, operation: () => Promise<T>): Promise<T>;
   open(): Promise<void>;
   close(): void;
 
@@ -24,8 +26,12 @@ export interface LocalStore {
   clearRows(): Promise<void>;
   getTableNames(): Promise<string[]>;
 
+  commitLocalMutation(row: Row, change: ChangeEntry): Promise<ChangeEntry>;
+  promotePendingBatch(): Promise<ChangeEntry | null>;
   pushOutbox(entry: ChangeEntry): Promise<void>;
   pushOutboxEntries(entries: ChangeEntry[]): Promise<void>;
+  peekOutbox(): Promise<ChangeEntry[]>;
+  acknowledgeOutbox(entryIds: readonly string[]): Promise<void>;
   drainOutbox(): Promise<ChangeEntry[]>;
   outboxSize(): Promise<number>;
 

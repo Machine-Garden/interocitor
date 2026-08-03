@@ -106,16 +106,16 @@ framework integrations; most applications should use the result handles.
 
 ## Sync and maintenance
 
-| API | Contract |
-| --- | --- |
-| `flush()` | Move queued local changes to the primary adapter, then attempt configured write-only replicas. |
-| `pull()` | Read and merge remote changes from the primary adapter. |
-| `rehydrate()` | Replace local state with the manifest snapshot, then catch up. |
-| `compact()` | Publish a snapshot/manifest generation and prune covered change files. |
+| API           | Contract                                                                                                     |
+| ------------- | ------------------------------------------------------------------------------------------------------------ |
+| `flush()`     | Move queued local changes to the primary adapter, then attempt configured write-only replicas.               |
+| `pull()`      | Read and merge remote changes from the primary adapter.                                                      |
+| `rehydrate()` | Publish durable local work, replace local state with the manifest snapshot, then catch up. |
+| `compact()`   | Publish a snapshot/manifest generation while retaining immutable change files.              |
 
 Replica failures emit `replica:error` and do not fail a successful primary
 flush. Pull and rehydrate never read replicas. See [Compaction](compaction.md)
-for pruning and automatic scheduling.
+for retention guarantees and automatic scheduling.
 
 ## Durable files
 
@@ -188,7 +188,9 @@ in the [Compaction reference](compaction.md#auto-compaction-defaults).
 | --- | --- |
 | `open()` / `close()` | Acquire and release the store. `init()` awaits open; disconnect closes. |
 | Row methods | Read/write individual rows, tables, all rows, table names, and `WhereClause` queries; support `clearRows()`. |
-| Outbox methods | Append one/many `ChangeEntry` values, atomically drain the current queue, and report its size. |
+| Local commit methods | Atomically commit a row with its pending batch, then atomically promote the completed pending batch to the outbox. |
+| Outbox methods | Append one/many `ChangeEntry` values, peek without deletion, acknowledge exact published IDs atomically, and report queue size. |
+| Locking | `withLock(name, operation)` serializes correctness-critical store operations, including sync-state cuts and observation commits. |
 | Cursor methods | Read/write per-device numeric cursors and enumerate all cursors. |
 | Metadata methods | Read/write engine-owned keys and support `clearAll()` across rows, outbox, cursors, and metadata. |
 

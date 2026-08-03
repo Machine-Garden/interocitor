@@ -88,7 +88,6 @@ returns `404`.
 | --- | --- | --- |
 | `issue-mesh-id` | No additional fields. The non-empty route address is only a routing anchor, such as `provision`. | Issues a checksummed UUIDv7 `{ meshId }`. |
 | `validate-mesh-id` | Required `meshId`; missing returns `400`. The route address is only a routing anchor. | `{ valid: boolean }`; malformed or wrong-authority IDs return `false`. |
-| `prune-compacted-changes` / `compact` | `remotePath` defaults to `/`; `watermarkHlc` defaults to the empty string. | Removes qualifying compacted change objects through the storage operation. |
 | `reconcile-metrics` | `remotePath` defaults to `/`. | Recalculates stored metrics for the route-address mesh and remote root. |
 | `run-maintenance` | No additional fields. | Runs the configured TTL sweep for the route-address mesh. |
 | `maintenance-status` | `remotePath` defaults to `/`. | Returns maintenance state for the route-address mesh and remote root. |

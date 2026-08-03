@@ -113,17 +113,11 @@ async function cachePut(
   );
 }
 
-async function cacheDelete(prefix: string, path: string): Promise<void> {
-  const cache = getDefaultCache();
-  if (!cache) return;
-  await cache.delete(cacheKeyFor(prefix, path));
-}
-
 // ─── Listing cache helpers ───────────────────────────────────────────────────
 //
 // `caches.default` lookup keyed by (prefix, folderPath). Used to short-circuit
 // `opListChildren` so repeated polls cost nothing in CPU or D1 — only request
-// quota. Mutations (put/delete/prune) explicitly invalidate the parent folder
+// quota. Mutations (put/delete) explicitly invalidate the parent folder
 // listing via `listingCacheDelete`.
 
 // Short TTL: `caches.default` is per-colo and we cannot invalidate across
@@ -636,87 +630,6 @@ export async function opDeletePath(
   await listingCacheDelete(prefix, parentDirOf(normalized));
 
   return true;
-}
-
-// ─── OP: Prune compacted changes ─────────────────────────────────────────────
-
-export interface PruneResult {
-  pruned: number;
-  bytesPruned: number;
-  totalCandidates: number;
-  remotePath?: string;
-  watermarkHlc?: string;
-}
-
-interface FileSizeRow extends QueryRow {
-  path: string;
-  size: number | null;
-}
-
-export async function opPruneCompacted(
-  db: D1Database,
-  prefix: string,
-  remotePath: string,
-  watermarkHlc: string,
-): Promise<PruneResult> {
-  const root = normalizePath(remotePath);
-  const changesPattern = `${root === '/' ? '' : root}/changes/%`;
-
-  const { results = [] } = await db.prepare(
-    'SELECT path, size FROM files WHERE prefix = ?1 AND path LIKE ?2',
-  ).bind(prefix, changesPattern).all<FileSizeRow>();
-
-  const toDelete: string[] = [];
-  let bytesPruned = 0;
-
-  for (const row of results) {
-    const filePath = String(row.path);
-    const name = fileNameFromPath(filePath);
-    if (name === 'head.json') continue;
-    const hlcEnd = name.lastIndexOf('-chg_');
-    const hlc = hlcEnd > 0 ? name.slice(0, hlcEnd) : null;
-    if (hlc && hlc <= watermarkHlc) {
-      toDelete.push(filePath);
-      bytesPruned += Number(row.size ?? 0);
-    }
-  }
-
-  if (toDelete.length === 0) {
-    return { pruned: 0, bytesPruned: 0, totalCandidates: results.length };
-  }
-
-  const CHUNK = 90;
-  for (let i = 0; i < toDelete.length; i += CHUNK) {
-    const chunk = toDelete.slice(i, i + CHUNK);
-    await db.batch(
-      chunk.map((p) =>
-        db.prepare('DELETE FROM files WHERE prefix = ?1 AND path = ?2').bind(prefix, p),
-      ),
-    );
-  }
-
-  await Promise.allSettled(toDelete.map((p) => cacheDelete(prefix, p)));
-
-  // All pruned files live under the same `<remoteRoot>/changes/` folder.
-  // Invalidate that single listing once.
-  const changesFolder = `${root === '/' ? '' : root}/changes`;
-  await listingCacheDelete(prefix, changesFolder);
-
-  const now = nowIso();
-  await db.batch(meshDeltaStatements(db, prefix, root, {
-    fileCountDelta: -toDelete.length,
-    totalBytesDelta: -bytesPruned,
-    changeBytesDelta: -bytesPruned,
-    mainlineBytesDelta: 0,
-  }, now));
-
-  return {
-    pruned: toDelete.length,
-    bytesPruned,
-    totalCandidates: results.length,
-    remotePath: root,
-    watermarkHlc,
-  };
 }
 
 // ─── OP: Reconcile metrics ───────────────────────────────────────────────────

@@ -180,6 +180,7 @@ export function createNamedLocalStore(options: NamedLocalStoreOptions): LocalSto
   };
 
   return {
+    withLock: (name, operation) => inner.withLock(name, operation),
     async open() {
       await inner.open();
       scheduleCleanup();
@@ -193,8 +194,12 @@ export function createNamedLocalStore(options: NamedLocalStoreOptions): LocalSto
     getAllRows: () => inner.getAllRows(),
     clearRows: () => inner.clearRows(),
     getTableNames: () => inner.getTableNames(),
+    commitLocalMutation: (row, pendingBatch) => inner.commitLocalMutation(row, pendingBatch),
+    promotePendingBatch: () => inner.promotePendingBatch(),
     pushOutbox: (entry) => inner.pushOutbox(entry),
     pushOutboxEntries: (entries) => inner.pushOutboxEntries(entries),
+    peekOutbox: () => inner.peekOutbox(),
+    acknowledgeOutbox: (entryIds) => inner.acknowledgeOutbox(entryIds),
     drainOutbox: () => inner.drainOutbox(),
     outboxSize: () => inner.outboxSize(),
     getCursor: (deviceId) => inner.getCursor(deviceId),

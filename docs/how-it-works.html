@@ -514,9 +514,9 @@
               <h2 id="compaction-title">Fold history into the baseline.</h2>
             </div>
             <p>
-              A caught-up device already skips changes at or behind its cursor. Compaction solves
-              the other growth problem: a fresh or long-absent device should not need an ever-longer
-              replay, and the remote should not keep old change files forever.
+              A caught-up device lists immutable filenames and skips only exact identities it has
+              already observed. Compaction gives a fresh or long-absent device a bounded baseline
+              without turning HLC order into a coverage claim.
             </p>
           </div>
 
@@ -537,15 +537,15 @@
             <div class="reader-comparison">
               <article class="reader-card reader-current">
                 <span>caught-up device</span>
-                <code>cursor = 100</code>
+                <code>100 exact receipts</code>
                 <strong>0 old changes</strong>
-                <small>head unchanged → skip the listing and pull</small>
+                <small>list, then skip only observed filenames</small>
               </article>
               <article class="reader-card reader-fresh">
                 <span>fresh device / no snapshot</span>
-                <code>cursor = ∅</code>
-                <strong>replay 001…100</strong>
-                <small>the catch-up path grows with the full history</small>
+                <code>snapshot coverage</code>
+                <strong>load one baseline</strong>
+                <small>then pull filenames absent from its exact coverage</small>
               </article>
             </div>
             <figcaption id="history-pressure-caption">
@@ -556,16 +556,14 @@
 
           <div class="article-prose">
             <p>
-              After operation 100, a device whose cursor is already 100 has almost no work to do. If
-              the remote head has not moved, it can skip even listing the change directory. A fresh
-              device is different: without a baseline, it must reconstruct the current state by
-              replaying operations 1 through 100.
+              After operation 100, a caught-up device still lists the change directory because a
+              lower-HLC file may have been published late. Its exact receipt set makes the merge a
+              no-op without confusing timestamp order for observation.
             </p>
             <p>
               A snapshot turns the accumulated result into a new starting point. Future devices load
-              that one encrypted baseline and then apply only changes newer than its watermark.
-              Before old operations can be discarded, however, the snapshot must preserve the effect
-              of deletions.
+              that one encrypted baseline, restores its exact covered-filename set, and then applies
+              every other retained change. The snapshot must preserve the effect of deletions.
             </p>
           </div>
 
@@ -579,14 +577,12 @@
                 update bring the row back.
               </p>
               <p>
-                Until every active device has advanced beyond that logical time, “row 7a is gone”
-                remains part of the current state. The tombstone carries no old user payload, but it
-                still wins against updates from before the deletion.
+                “Row 7a is gone” remains part of the current state. The tombstone carries no old user
+                payload, but it still wins against updates from before the deletion.
               </p>
               <p>
-                To know when that memory is no longer needed, devices record how far through the
-                history they have observed. The lowest watermark among active devices becomes the
-                safe floor: nothing at or below it is new to any of them.
+                A scalar timestamp cannot prove that every device has observed every independently
+                published file. Without a mesh-wide deletion proof, the tombstone remains retained.
               </p>
             </div>
 
@@ -614,10 +610,10 @@
                 </div>
                 <div class="tombstone-arrow" aria-hidden="true">→</div>
                 <div class="tombstone-step row-collected">
-                  <span>safe floor ≥ 37</span>
+                  <span>future snapshots</span>
                   <i aria-hidden="true"></i>
-                  <b>omit from snapshot</b>
-                  <code>all active devices observed it</code>
+                  <b>retain tombstone</b>
+                  <code>no scalar deletion proof</code>
                 </div>
               </div>
               <div class="stale-writer">
@@ -627,29 +623,26 @@
                 </div>
                 <b aria-hidden="true">×</b>
                 <p>
-                  An operation at or before the garbage-collection floor is refused. The stale
-                  device rehydrates the new baseline before it can publish again.
+                  The durable queued operation is published before rehydration. CRDT order decides
+                  whether it changes the row; snapshot age never suppresses publication.
                 </p>
               </div>
               <figcaption id="tombstone-caption">
-                Newer tombstones stay in the snapshot. Only tombstones at or below the minimum
-                observed watermark of active devices can be forgotten safely.
+                Tombstones stay in snapshots because an HLC watermark does not prove complete
+                observation across independently publishing devices.
               </figcaption>
             </figure>
           </section>
 
           <div class="article-prose">
             <p>
-              A tombstone at or below the safe floor has done its job. Every device participating in
-              the decision has moved past it, so a new baseline can omit it. The floor is also a
-              point of no return.
+              Tombstones remain in the baseline. A scalar watermark cannot prove that an offline
+              device has no older queued write left to publish.
             </p>
             <p>
-              A device that stayed offline beyond the active-device window may still hold an older
-              queued write. If that operation is at or before the floor, Interocitor refuses to
-              publish it. The device first replaces its local baseline with the canonical snapshot,
-              preventing an obsolete write from resurrecting data that the mesh has safely
-              forgotten.
+              A rejoining device publishes its durable local work before replacing its cache from a
+              newer snapshot. Every retained immutable filename remains eligible for pull,
+              regardless of where its HLC sorts relative to the snapshot watermark.
             </p>
           </div>
 
@@ -658,14 +651,13 @@
               <p class="section-index">Compaction</p>
               <h3 id="baseline-title">The current result becomes operation zero.</h3>
               <p>
-                A trusted device first catches up, calculates the safe floor, and scans its merged
-                rows. Only now does the mesh need <code>mainline/</code>: the device writes the
-                current state there as one encrypted snapshot, points the mesh at it, then prunes
-                the change files already represented by that baseline.
+                A trusted device first flushes, catches up, captures the exact filenames it observed,
+                and scans its merged rows. It writes the current state as one encrypted snapshot and
+                points the mesh at it. Immutable change files remain retained.
               </p>
               <p>
                 Publication order matters. The snapshot is uploaded before the manifest points to
-                it, and pruning happens only after that pointer is visible. A reader therefore sees
+                it. A reader therefore sees
                 either the previous complete generation or the new complete generation, never a
                 promise of a baseline that has not been written.
               </p>
@@ -682,10 +674,10 @@
 
               <ol class="compaction-pipeline" aria-label="Safe compaction sequence">
                 <li><b>1</b><span>pull latest</span></li>
-                <li><b>2</b><span>find safe floor</span></li>
+                <li><b>2</b><span>capture filenames</span></li>
                 <li><b>3</b><span>write snapshot</span></li>
                 <li><b>4</b><span>switch manifest</span></li>
-                <li><b>5</b><span>prune ≤ watermark</span></li>
+                <li><b>5</b><span>retain history</span></li>
               </ol>
 
               <div class="baseline-after">
@@ -705,11 +697,11 @@
                 <span>fresh or rejoining device</span>
                 <strong>1 snapshot</strong>
                 <i aria-hidden="true">+</i>
-                <strong>changes after 100</strong>
-                <code>replace local baseline → continue from watermark</code>
+                <strong>uncovered filenames</strong>
+                <code>publish outbox → baseline → exact pull</code>
               </div>
               <figcaption id="baseline-caption">
-                Snapshot first, manifest pointer last, pruning after publication. A reader is never
+                Snapshot first and manifest pointer last. A reader is never
                 directed to a baseline that has not been written.
               </figcaption>
             </figure>
@@ -926,7 +918,7 @@
               <p role="cell">Limits, logs, and retention are provider-specific.</p>
               <p role="cell">
                 Typed body limits, a per-mesh durable-file quota, upload policy, structured audit
-                events, and admin-routed pruning or TTL maintenance are available.
+                events and TTL maintenance are available.
               </p>
             </div>
           </div>

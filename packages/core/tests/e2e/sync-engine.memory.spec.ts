@@ -183,6 +183,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         // failure that we observed in production Sentry data.
         private failedOnce = false;
         private meta = new Map<string, unknown>();
+        async withLock<T>(_name: string, operation: () => Promise<T>): Promise<T> { return operation(); }
         async open(): Promise<void> { /* success */ }
         close(): void { /* noop */ }
         async getRow(_table: string, _rowId: string): Promise<any> { return undefined; }
@@ -193,8 +194,12 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         async getAllRows(): Promise<any[]> { return []; }
         async clearRows(): Promise<void> { /* noop */ }
         async getTableNames(): Promise<string[]> { return []; }
+        async commitLocalMutation(_row: any, _pendingBatch: any): Promise<void> { /* noop */ }
+        async promotePendingBatch(): Promise<any> { return null; }
         async pushOutbox(_entry: any): Promise<void> { /* noop */ }
         async pushOutboxEntries(_entries: any[]): Promise<void> { /* noop */ }
+        async peekOutbox(): Promise<any[]> { return []; }
+        async acknowledgeOutbox(_entryIds: readonly string[]): Promise<void> { /* noop */ }
         async drainOutbox(): Promise<any[]> { return []; }
         async outboxSize(): Promise<number> { return 0; }
         async getCursor(_deviceId: string): Promise<number> { return 0; }
@@ -741,7 +746,9 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await right.pull();
 
       await right.put('tasks', 'second', { done: true });
-      await new Promise(resolve => setTimeout(resolve, 2));
+      await new Promise((resolve) => {
+        setTimeout(resolve, 2);
+      });
       await left.put('tasks', 'third', { done: true });
       await left.flush();
 
@@ -779,6 +786,312 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         relation: 'behind-global-high-water',
       }),
     ]);
+  });
+
+  test('failed publication leaves the exact durable outbox entry for retry', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, MemoryLocalStore } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      class FailOneChangeWriteAdapter extends MemoryAdapter {
+        failNextChange = true;
+        override async writeFile(path: string, data: Uint8Array | string): Promise<void> {
+          if (this.failNextChange && path.includes('/changes/') && path.endsWith('.json')) {
+            this.failNextChange = false;
+            throw new Error('simulated publication failure');
+          }
+          return super.writeFile(path, data);
+        }
+      }
+
+      const adapter = new FailOneChangeWriteAdapter();
+      const local = new MemoryLocalStore();
+      const engine = new Interocitor(adapter, {
+        batchWindowMs: 0,
+        deviceId: 'dev_crash_safe_flush',
+        flushDebounce: 600_000,
+        flushThreshold: 999,
+        keySource: null,
+        localStore: local,
+        pollInterval: 600_000,
+        remotePath: '/MeshCrashSafeFlush',
+      });
+      await engine.connect();
+      await engine.put('tasks', 'durable', { title: 'never lost' });
+
+      let error = '';
+      try { await engine.flush(); } catch (cause) { error = String(cause); }
+      const afterFailure = (await local.peekOutbox()).map((entry) => entry.id);
+      await engine.flush();
+      const afterRetry = (await local.peekOutbox()).map((entry) => entry.id);
+      const remoteChanges = Object.keys(adapter.dump()).filter((path) => path.includes('/changes/') && path.includes('-chg_'));
+
+      return { afterFailure, afterRetry, error, remoteChanges };
+    });
+
+    expect(result.error).toContain('simulated publication failure');
+    expect(result.afterFailure).toHaveLength(1);
+    expect(result.afterRetry).toEqual([]);
+    expect(result.remoteChanges).toHaveLength(1);
+  });
+
+  test('compaction waits for an explicit batch and snapshots its one published file', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, MemoryLocalStore } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      const adapter = new MemoryAdapter();
+      const engine = new Interocitor(adapter, {
+        batchWindowMs: 60_000,
+        deviceId: 'dev_compaction_cut',
+        keySource: null,
+        localStore: new MemoryLocalStore(),
+        pollInterval: 600_000,
+        remotePath: '/MeshCompactionCut',
+        serverId: 'dev_compaction_cut',
+        serverManaged: true,
+      });
+      await engine.connect();
+
+      let releaseBatch!: () => void;
+      let firstWriteDone!: () => void;
+      const firstWrite = new Promise<void>((resolve) => { firstWriteDone = resolve; });
+      const batchGate = new Promise<void>((resolve) => { releaseBatch = resolve; });
+      const batch = engine.batch(async () => {
+        await engine.put('tasks', 'first', { title: 'first' });
+        firstWriteDone();
+        await batchGate;
+        await engine.put('tasks', 'second', { title: 'second' });
+      });
+      await firstWrite;
+
+      let compactCompleted = false;
+      const compact = engine.compact().then(() => { compactCompleted = true; });
+      await Promise.resolve();
+      const completedBeforeBatch = compactCompleted;
+      releaseBatch();
+      await batch;
+      await compact;
+
+      const manifest = engine.getManifest();
+      if (!manifest?.snapshotPath) throw new Error('snapshot missing');
+      const snapshot = JSON.parse(adapter.dump()[manifest.snapshotPath]).snapshot;
+      const remoteChanges = Object.keys(adapter.dump()).filter((path) => path.includes('/changes/') && path.includes('-chg_'));
+      return {
+        completedBeforeBatch,
+        coveredChangeFiles: snapshot.coveredChangeFiles,
+        rowIds: Object.keys(snapshot.tables.tasks ?? {}).toSorted(),
+        remoteChanges,
+      };
+    });
+
+    expect(result.completedBeforeBatch).toBe(false);
+    expect(result.rowIds).toEqual(['first', 'second']);
+    expect(result.coveredChangeFiles).toHaveLength(1);
+    expect(result.remoteChanges).toHaveLength(1);
+  });
+
+  test('compaction never deletes a late file that the snapshot did not observe', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, MemoryLocalStore, readColumn } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      class LatePublishingAdapter extends MemoryAdapter {
+        private latePublication: { snapshotPrefix: string; path: string; payload: string } | null = null;
+
+        publishDuringSnapshot(snapshotPrefix: string, path: string, payload: string) {
+          this.latePublication = { snapshotPrefix, path, payload };
+        }
+
+        override async writeFile(path: string, data: Uint8Array | string): Promise<void> {
+          await super.writeFile(path, data);
+          const late = this.latePublication;
+          if (late && path.startsWith(late.snapshotPrefix)) {
+            this.latePublication = null;
+            await super.writeFile(late.path, new TextEncoder().encode(late.payload));
+          }
+        }
+      }
+
+      const remotePath = '/MeshCompactLatePublish';
+      const adapter = new LatePublishingAdapter();
+      const compactor = new Interocitor(adapter, {
+        batchWindowMs: 0,
+        dbName: 'compact-late-compactor',
+        deviceId: 'dev_compactor',
+        keySource: null,
+        localStore: new MemoryLocalStore(),
+        pollInterval: 600_000,
+        remotePath,
+        serverId: 'dev_compactor',
+        serverManaged: true,
+      });
+      await compactor.connect();
+      await compactor.put('tasks', 'captured', { title: 'in snapshot' });
+      await compactor.flush();
+
+      const meshId = compactor.getMeshId();
+      if (!meshId) throw new Error('mesh id missing');
+      const lateHlc = '000000000000001-0000-dev_compactor';
+      const lateFileName = `${lateHlc}-chg_late_during_compaction.json`;
+      const latePath = `${remotePath}/changes/${lateFileName}`;
+      const latePayload = JSON.stringify({
+        meshId,
+        kind: 'change',
+        entry: {
+          id: 'chg_late_during_compaction',
+          ts: 1,
+          device: 'dev_compactor',
+          hlc: lateHlc,
+          ops: [
+            {
+              type: 'upsert',
+              table: 'tasks',
+              rowId: 'late',
+              columns: { title: { value: 'published during compaction', hlc: lateHlc } },
+            },
+          ],
+        },
+      });
+      adapter.publishDuringSnapshot(`${remotePath}/mainline/snapshot-`, latePath, latePayload);
+
+      await compactor.compact();
+      const manifest = compactor.getManifest();
+      const dumpAfterCompact = adapter.dump();
+      const snapshotPayload = JSON.parse(dumpAfterCompact[manifest?.snapshotPath ?? '']);
+
+      const reader = new Interocitor(adapter, {
+        batchWindowMs: 0,
+        dbName: 'compact-late-reader',
+        deviceId: 'dev_reader',
+        keySource: null,
+        localStore: new MemoryLocalStore(),
+        pollInterval: 600_000,
+        remotePath,
+        serverId: 'dev_compactor',
+      });
+      await reader.connect();
+      const captured = await reader.loadRow({ table: 'tasks', rowId: 'captured' });
+      const late = await reader.loadRow({ table: 'tasks', rowId: 'late' });
+
+      return {
+        captured: captured ? readColumn(captured, 'title') : null,
+        coveredChangeFiles: snapshotPayload.snapshot.coveredChangeFiles,
+        late: late ? readColumn(late, 'title') : null,
+        lateFileSurvivedPrune: Object.hasOwn(dumpAfterCompact, latePath),
+        lateFileName,
+      };
+    });
+
+    expect(result.captured).toBe('in snapshot');
+    expect(result.late).toBe('published during compaction');
+    expect(result.lateFileSurvivedPrune).toBe(true);
+    expect(result.coveredChangeFiles).not.toContain(result.lateFileName);
+  });
+
+  test('rehydrate does not replay a snapshot-covered retained file', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, MemoryLocalStore, readColumn } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      class RetainingAdapter extends MemoryAdapter {
+        changeReads = 0;
+
+        override async readFile(path: string): Promise<Uint8Array> {
+          if (path.includes('/changes/') && path.endsWith('.json') && !path.endsWith('/head.json')) {
+            this.changeReads += 1;
+          }
+          return super.readFile(path);
+        }
+
+        override async deleteFile(path: string): Promise<void> {
+          if (path.includes('/changes/')) return;
+          return super.deleteFile(path);
+        }
+      }
+
+      const adapter = new RetainingAdapter();
+      const config = {
+        batchWindowMs: 0,
+        keySource: null,
+        pollInterval: 600_000,
+        remotePath: '/MeshRetainedCoveredChange',
+        serverId: 'dev_retained_compactor',
+        serverManaged: true,
+      };
+      const compactor = new Interocitor(adapter, {
+        ...config,
+        deviceId: 'dev_retained_compactor',
+        localStore: new MemoryLocalStore(),
+      });
+      await compactor.connect();
+      await compactor.put('tasks', 'covered', { title: 'snapshot value' });
+      await compactor.flush();
+      await compactor.compact();
+
+      const dump = adapter.dump();
+      const retainedCoveredFiles = Object.keys(dump).filter((path) => path.includes('/changes/') && path.includes('-chg_'));
+      const readsBeforeRehydrate = adapter.changeReads;
+
+      const reader = new Interocitor(adapter, {
+        ...config,
+        deviceId: 'dev_retained_reader',
+        localStore: new MemoryLocalStore(),
+      });
+      await reader.connect();
+      const row = await reader.loadRow({ table: 'tasks', rowId: 'covered' });
+
+      return {
+        retainedCoveredFileCount: retainedCoveredFiles.length,
+        replayReads: adapter.changeReads - readsBeforeRehydrate,
+        title: row ? readColumn(row, 'title') : null,
+      };
+    });
+
+    expect(result.retainedCoveredFileCount).toBe(1);
+    expect(result.replayReads).toBe(0);
+    expect(result.title).toBe('snapshot value');
+  });
+
+  test('peer compaction retains immutable history', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, MemoryLocalStore } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      const remotePath = '/MeshPeerCheckpoint';
+      const adapter = new MemoryAdapter();
+      const peer = new Interocitor(adapter, {
+        batchWindowMs: 0,
+        compactAutoDeviceCount: 1,
+        compactAutoSampleNumerator: 1,
+        compactAutoThreshold: 1,
+        deviceId: 'dev_peer_checkpoint',
+        keySource: null,
+        localStore: new MemoryLocalStore(),
+        pollInterval: 600_000,
+        remotePath,
+      });
+      const autoSkipReasons: string[] = [];
+      peer.on((event) => {
+        if (event.type === 'compact:auto:skip') autoSkipReasons.push(event.reason);
+      });
+      await peer.connect();
+      await peer.put('tasks', 'retained', { title: 'immutable history' });
+      await peer.flush();
+      await peer.compact();
+
+      const manifest = peer.getManifest();
+      const changeFiles = Object.keys(adapter.dump()).filter((path) => path.includes('/changes/') && path.includes('-chg_'));
+      return {
+        changeFileCount: changeFiles.length,
+        snapshotPath: manifest?.snapshotPath ?? '',
+        autoSkipReasons,
+      };
+    });
+
+    expect(result.changeFileCount).toBe(1);
+    expect(result.snapshotPath).toContain('/mainline/snapshot-');
+    expect(result.autoSkipReasons).toContain('peer-mode');
   });
 
   test('supports schema indexes + table.where queries', async ({ page }) => {
@@ -1941,8 +2254,8 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     // Phase 1: clientA writes 10 todos, flushes → 10 change files on remote
     // Phase 2: clientB pulls, sees 10 rows
     // Phase 3: clientA writes 20 more todos, flushes → 30 change files on remote
-    // Phase 4: clientA compacts → 1 snapshot, change files for epoch pruned
-    // Phase 5: fresh clientC pulls → reads 1 snapshot, sees all 30 rows, no raw change files needed
+    // Phase 4: clientA checkpoints → 1 snapshot; peer mode retains immutable files
+    // Phase 5: fresh clientC restores exact snapshot receipts, sees all 30 rows, and does not replay files
     const result = await page.evaluate(async () => {
       const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
@@ -2027,13 +2340,13 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await engineC.disconnect();
 
       return {
-        changeFilesAfterPhase1,   // expect 10
-        rowsAfterPhase2,          // expect 10
-        changeFilesAfterPhase3,   // expect 30
-        snapshotsBeforeCompact,   // expect 0
-        changeFilesAfterCompact,  // expect 0 (all pruned, within compaction epoch)
-        snapshotsAfterCompact,    // expect 1
-        rowsAfterPhase5,          // expect 30
+        changeFilesAfterPhase1, // expect 10
+        rowsAfterPhase2, // expect 10
+        changeFilesAfterPhase3, // expect 30
+        snapshotsBeforeCompact, // expect 0
+        changeFilesAfterCompact, // peer mode retains all 30 immutable files
+        snapshotsAfterCompact, // expect 1
+        rowsAfterPhase5, // expect 30
         firstRowTitle: firstRow ? readColumn(firstRow, 'title') : null,
         lastRowTitle: lastRow ? readColumn(lastRow, 'title') : null,
       };
@@ -2043,7 +2356,7 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result.rowsAfterPhase2).toBe(10);
     expect(result.changeFilesAfterPhase3).toBe(30);
     expect(result.snapshotsBeforeCompact).toBe(0);
-    expect(result.changeFilesAfterCompact).toBe(0);
+    expect(result.changeFilesAfterCompact).toBe(30);
     expect(result.snapshotsAfterCompact).toBe(1);
     expect(result.rowsAfterPhase5).toBe(30);
     expect(result.firstRowTitle).toBe('todo 0');
@@ -2072,6 +2385,9 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         secondCompactDelayJitterMs: 0,
         compactRemoteChangeThreshold: 5,
         batchWindowMs: 0,
+        deviceId: 'dev_delayed_check',
+        serverId: 'dev_delayed_check',
+        serverManaged: true,
       });
 
       const events: any[] = [];
@@ -2122,6 +2438,9 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
         secondCompactDelayJitterMs: 0,
         compactRemoteChangeThreshold: 2,
         batchWindowMs: 0,
+        deviceId: 'dev_delayed_run',
+        serverId: 'dev_delayed_run',
+        serverManaged: true,
       });
 
       const events: any[] = [];
@@ -2157,23 +2476,26 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
     expect(result.complete).toBeDefined();
   });
 
-  test('compaction publishes a GC floor and omits known tombstones after all active devices ack', async ({ page }) => {
+  test('compaction preserves tombstones because scalar acknowledgements cannot prove safe deletion', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { Interocitor } = await import('/packages/core/dist/index.js');
+      const { Interocitor, MemoryLocalStore } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
 
       const adapter = new MemoryAdapter();
       const engine = new Interocitor(adapter, {
         remotePath: '/GcFloorMesh',
-        dbName: 'gc-floor-db',
+        dbName: 'tombstone-snapshot-db',
+        localStore: new MemoryLocalStore(),
         encrypted: false,
+        keySource: null,
         pollInterval: 600_000,
         flushThreshold: 9999,
         flushDebounce: 60_000,
         autoCompact: false,
         batchWindowMs: 0,
         deviceId: 'dev_gc_a',
-        offlineGraceMs: 7 * 24 * 60 * 60_000,
+        serverId: 'dev_gc_a',
+        serverManaged: true,
       });
 
       await engine.init();
@@ -2184,130 +2506,163 @@ test.describe('Interocitor protocol (MemoryAdapter)', () => {
       await engine.flush();
 
       await engine.compact();
-      const manifestAfterFirst = engine.getManifest();
-      const firstSnapshotPath = manifestAfterFirst?.snapshotPath ?? '';
-      const firstSnapshotPayload = JSON.parse(adapter.dump()[firstSnapshotPath]);
-      const firstSnapshot = firstSnapshotPayload.snapshot;
-      const firstHasTombstone = Boolean(firstSnapshot.tables.tasks?.gone?._meta.deleted);
-
       await engine.compact();
-      const manifestAfterSecond = engine.getManifest();
-      const secondSnapshotPath = manifestAfterSecond?.snapshotPath ?? '';
-      const secondSnapshotPayload = JSON.parse(adapter.dump()[secondSnapshotPath]);
-      const secondSnapshot = secondSnapshotPayload.snapshot;
-      const secondHasGoneRow = Boolean(secondSnapshot.tables.tasks?.gone);
-      const deviceMeta = JSON.parse(adapter.dump()['/GcFloorMesh/devices/dev_gc_a.json']);
+      const manifest = engine.getManifest();
+      const snapshotPayload = JSON.parse(adapter.dump()[manifest?.snapshotPath ?? '']);
+      const tombstone = snapshotPayload.snapshot.tables.tasks?.gone;
 
       await engine.disconnect();
 
       return {
-        firstHasTombstone,
-        secondHasGoneRow,
-        firstWatermark: manifestAfterFirst?.watermarkHlc,
-        gcFloor: manifestAfterSecond?.gcFloorHlc,
-        gcEpoch: manifestAfterSecond?.gcEpoch,
-        deviceObserved: deviceMeta.observedWatermarkHlc,
+        deleted: tombstone?._meta.deleted,
+        hasGcFloor: Object.hasOwn(manifest ?? {}, 'gcFloorHlc'),
       };
     });
 
-    expect(result.firstHasTombstone).toBe(true);
-    expect(result.secondHasGoneRow).toBe(false);
-    expect(result.gcFloor).toBe(result.firstWatermark);
-    expect(result.gcEpoch).toBe(2);
-    expect(result.deviceObserved).toBeTruthy();
+    expect(result.deleted).toBe(true);
+    expect(result.hasGcFloor).toBe(false);
   });
 
-  test('stale pre-floor outbox is refused and aligned from snapshot', async ({ page }) => {
+  test('old client publishes durable offline writes before restoring an advanced snapshot', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { Interocitor } = await import('/packages/core/dist/index.js');
+      const { Interocitor, MemoryLocalStore, readColumn } = await import('/packages/core/dist/index.js');
       const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
-      const { LocalStore } = await import('/packages/core/dist/storage/local-store.js');
-
-      const countChangeFiles = (dump: Record<string, string>) => Object.keys(dump)
-        .filter(path => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(path)).length;
 
       const adapter = new MemoryAdapter();
-      const active = new Interocitor(adapter, {
-        remotePath: '/StaleFloorMesh',
-        dbName: 'stale-floor-active-db',
+      const remotePath = '/OfflineBeforeSnapshotMesh';
+      const oldLocal = new MemoryLocalStore();
+      const oldClient = new Interocitor(adapter, {
+        remotePath,
+        dbName: 'offline-old-client-db',
+        localStore: oldLocal,
         encrypted: false,
+        keySource: null,
         pollInterval: 600_000,
         flushThreshold: 9999,
-        flushDebounce: 60_000,
+        flushDebounce: 600_000,
         autoCompact: false,
         batchWindowMs: 0,
-        deviceId: 'dev_active_gc',
+        deviceId: 'dev_offline_old',
+        serverId: 'dev_offline_compactor',
+        serverManaged: true,
       });
 
-      await active.init();
-      await active.connect();
-      await active.put('tasks', 'canonical', { title: 'remote truth' });
-      await active.flush();
-      await active.compact();
-      await active.compact();
-      const manifest = active.getManifest();
-      const gcFloor = manifest?.gcFloorHlc ?? '';
-      const changeFilesBefore = countChangeFiles(adapter.dump());
-      await active.disconnect();
+      await oldClient.connect();
+      await oldClient.setRemoteStorage(null);
+      await oldClient.put('tasks', 'offline', { title: 'durable offline write' });
 
-      const staleLocal = new LocalStore('stale-floor-client-db');
-      const stale = new Interocitor(adapter, {
-        remotePath: '/StaleFloorMesh',
-        dbName: 'stale-floor-client-db',
-        localStoreFactory: () => staleLocal,
+      const compactor = new Interocitor(adapter, {
+        remotePath,
+        dbName: 'offline-compactor-db',
+        localStore: new MemoryLocalStore(),
         encrypted: false,
+        keySource: null,
         pollInterval: 600_000,
         flushThreshold: 9999,
-        flushDebounce: 60_000,
+        flushDebounce: 600_000,
         autoCompact: false,
         batchWindowMs: 0,
-        deviceId: 'dev_stale_gc',
+        deviceId: 'dev_offline_compactor',
+        serverId: 'dev_offline_compactor',
+        serverManaged: true,
       });
 
-      await stale.init();
-      await staleLocal.pushOutbox({
-        id: 'stale-change',
-        ts: Date.now(),
-        device: 'dev_stale_gc',
-        hlc: gcFloor,
-        ops: [{
-          type: 'upsert',
-          table: 'tasks',
-          rowId: 'poison',
-          columns: { title: { value: 'stale poison', hlc: gcFloor } },
-        }],
+      await compactor.connect();
+      await compactor.put('tasks', 'canonical', { title: 'snapshot state' });
+      await compactor.flush();
+      await compactor.compact();
+      const pendingBeforeRestart = await oldLocal.getMeta('pendingBatch');
+      const outboxBeforeRestart = await oldLocal.outboxSize();
+      const localEpochBeforeRestart = await oldLocal.getMeta('epoch');
+      const remoteEpochBeforeRestart = compactor.getManifest()?.epoch;
+
+      const restartedOldClient = new Interocitor(adapter, {
+        remotePath,
+        dbName: 'offline-old-client-db',
+        localStore: oldLocal,
+        encrypted: false,
+        keySource: null,
+        pollInterval: 600_000,
+        flushThreshold: 9999,
+        flushDebounce: 600_000,
+        autoCompact: false,
+        batchWindowMs: 0,
+        deviceId: 'dev_offline_old',
+        serverId: 'dev_offline_compactor',
+        serverManaged: true,
       });
 
-      let error = '';
-      try {
-        await stale.flush();
-      } catch (err) {
-        error = err instanceof Error ? err.message : String(err);
-      }
-
-      const rows = await stale.table('tasks').query().load({ bypassCache: true });
-      const poison = await stale.loadRow({ table: 'tasks', rowId: 'poison' }, { bypassCache: true });
-      const outboxSize = await staleLocal.outboxSize();
-      const changeFilesAfter = countChangeFiles(adapter.dump());
-      await stale.disconnect();
+      await restartedOldClient.connect();
+      const offline = await restartedOldClient.loadRow({ table: 'tasks', rowId: 'offline' });
+      const canonical = await restartedOldClient.loadRow({ table: 'tasks', rowId: 'canonical' });
+      const outboxSize = await oldLocal.outboxSize();
+      const retainedChangeFileCount = Object.keys(adapter.dump()).filter((path) =>
+        path.includes('/changes/') && path.includes('-chg_')).length;
 
       return {
-        gcFloor,
-        error,
+        offline: offline ? readColumn(offline, 'title') : null,
+        canonical: canonical ? readColumn(canonical, 'title') : null,
         outboxSize,
-        changeFilesBefore,
-        changeFilesAfter,
-        rows: rows.map((row: any) => row.title).toSorted(),
-        poison,
+        retainedChangeFileCount,
+        pendingBeforeRestart: Boolean(pendingBeforeRestart),
+        outboxBeforeRestart,
+        localEpochBeforeRestart,
+        remoteEpochBeforeRestart,
       };
     });
 
-    expect(result.gcFloor).toBeTruthy();
-    expect(result.error).toContain('Refusing to flush changes at or before gcFloorHlc');
+    expect(result.pendingBeforeRestart).toBe(false);
+    expect(result.outboxBeforeRestart).toBe(1);
+    expect(result.localEpochBeforeRestart).toBeUndefined();
+    expect(result.remoteEpochBeforeRestart).toBe(1);
+    expect(result.offline).toBe('durable offline write');
+    expect(result.canonical).toBe('snapshot state');
     expect(result.outboxSize).toBe(0);
-    expect(result.changeFilesAfter).toBe(result.changeFilesBefore);
-    expect(result.rows).toEqual(['remote truth']);
-    expect(result.poison).toBeUndefined();
+    expect(result.retainedChangeFileCount).toBe(2);
+  });
+
+  test('explicit rehydrate publishes a completed local mutation before replacing state', async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, MemoryLocalStore, readColumn } = await import('/packages/core/dist/index.js');
+      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+
+      const adapter = new MemoryAdapter();
+      const local = new MemoryLocalStore();
+      const engine = new Interocitor(adapter, {
+        batchWindowMs: 0,
+        dbName: 'explicit-rehydrate-durable-db',
+        deviceId: 'dev_explicit_rehydrate',
+        keySource: null,
+        localStore: local,
+        pollInterval: 600_000,
+        remotePath: '/ExplicitRehydrateDurableMesh',
+        serverId: 'dev_explicit_rehydrate',
+        serverManaged: true,
+      });
+
+      await engine.connect();
+      await engine.put('tasks', 'snapshot', { title: 'snapshot row' });
+      await engine.flush();
+      await engine.compact();
+      await engine.put('tasks', 'pending', { title: 'must publish first' });
+      await engine.rehydrate();
+
+      const snapshot = await engine.loadRow({ table: 'tasks', rowId: 'snapshot' });
+      const pending = await engine.loadRow({ table: 'tasks', rowId: 'pending' });
+      const changeFileCount = Object.keys(adapter.dump()).filter((path) =>
+        path.includes('/changes/') && path.includes('-chg_')).length;
+      return {
+        snapshot: snapshot ? readColumn(snapshot, 'title') : null,
+        pending: pending ? readColumn(pending, 'title') : null,
+        outboxSize: await local.outboxSize(),
+        changeFileCount,
+      };
+    });
+
+    expect(result.snapshot).toBe('snapshot row');
+    expect(result.pending).toBe('must publish first');
+    expect(result.outboxSize).toBe(0);
+    expect(result.changeFileCount).toBe(2);
   });
 
   test('put after delete starts a fresh local row incarnation', async ({ page }) => {

@@ -129,6 +129,10 @@ public protocol LocalStoreAdapter: Sendable {
     func getTableNames() async throws -> [String]
 
     func pushOutbox(_ entry: ChangeEntry) async throws
+    func commitLocalMutation(row: Row, entry: ChangeEntry, hlc: String) async throws
+    func peekOutbox() async throws -> [ChangeEntry]
+    func acknowledgeOutbox(entryIds: [String]) async throws
+    func replaceOutbox(_ entries: [ChangeEntry]) async throws
     func drainOutbox() async throws -> [ChangeEntry]
     func outboxSize() async throws -> Int
 
@@ -155,7 +159,6 @@ public enum InterocitorError: Error, LocalizedError, Sendable {
     case unauthorized(String)
     case contentHashMismatch
     case protocolCorruption(String)
-    case staleOutboxAtGcFloor(String)
     case remotePoisoned(String)
 
     public var errorDescription: String? {
@@ -172,8 +175,6 @@ public enum InterocitorError: Error, LocalizedError, Sendable {
         case .unauthorized(let w):           return "Unauthorized manifest writer: \(w)"
         case .contentHashMismatch:           return "Manifest content hash mismatch"
         case .protocolCorruption(let reason): return "Protocol corruption: \(reason)"
-        case .staleOutboxAtGcFloor(let floor):
-            return "Refusing to flush changes at or before gcFloorHlc \(floor); rehydrate required"
         case .remotePoisoned(let reason):    return "Remote poisoned: \(reason)"
         }
     }

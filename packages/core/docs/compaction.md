@@ -1,9 +1,10 @@
 # Compaction
 
-Compaction collapses the remote change log into a single snapshot, prunes
-the old change files, and bumps the manifest generation. It is purely a
-maintenance operation: sync still works without it, but the remote folder
-grows unbounded until *some* device compacts.
+Compaction publishes a full-state snapshot and bumps the manifest generation.
+Peer meshes retain immutable change files because storage adapters provide no
+CAS or lease that could make concurrent deletion safe. Server-managed meshes
+have one authorized compactor identity and enable automatic checkpointing, but
+they retain immutable change files and tombstones too.
 
 This document covers the protocol details. The README has a one‑page
 summary; everything below is for operators, debugging, or anyone tuning
@@ -17,30 +18,33 @@ changes/   ─┐
 mainline/   ─┘                    on every device
 ```
 
-A snapshot at HLC watermark `W` captures every row whose latest write was
-at HLC ≤ `W`. After compaction the engine deletes every change file with
-HLC ≤ `W`. Devices that re‑join the mesh load the snapshot first, then
-catch up on any change files newer than `W`.
+A snapshot carries the exact filenames of the change files merged into its row
+state. After publishing it, the engine deletes only that captured set. Devices
+that rejoin the mesh restore the snapshot and its exact receipts first, then
+apply every retained filename absent from the receipt set. The snapshot
+`watermarkHlc` orders state and acknowledgements; it does not prove coverage.
 
 ## What `compact()` does
 
-1. `pull()` — merge any newer remote changes into local state so the
-   snapshot is not stale.
-2. Build a full snapshot from the local store (not the in‑memory cache —
-   the cache is partial).
-3. Write `mainline/snapshot-<epoch>-<serverId>.json` (encrypted if the
+1. Acquire the local sync-state lock, promote the completed pending batch, and
+   flush every durable outbox entry. A publication failure aborts compaction.
+2. `pull()` — merge newer remote changes while new local writes remain behind
+   the same lock.
+3. Capture the exact observed change filenames.
+4. Build a full snapshot from the local store (not the in‑memory cache — the
+   cache is partial), including tombstones.
+5. Write `mainline/snapshot-<epoch>-<serverId>.json` (encrypted if the
    mesh is encrypted).
-4. Write `manifest-<generation+1>.json` and overwrite `manifest.json`
+6. Write `manifest-<generation+1>.json` and overwrite `manifest.json`
    (the pointer) to reference it.
-5. Compute `gcFloorHlc` from active device acknowledgements.
-6. Omit tombstones whose `deletedHlc <= gcFloorHlc` from the snapshot.
 7. Set `local.epoch = nextEpoch`.
-8. List `changes/` and delete every entry whose HLC ≤ `watermarkHlc`.
-   Failure here is logged but non‑fatal — the snapshot is still valid.
+8. Retain every immutable change file. `coveredChangeFiles` initializes exact
+   receipts during restore; it is not deletion authorization.
 
 ## Triggers
 
-There are three ways `compact()` runs:
+Manual checkpoints are available in both modes. Automatic compaction runs only
+in server-managed mode:
 
 | Path | Trigger | Cost |
 | --- | --- | --- |
@@ -84,7 +88,6 @@ have measured the actual mesh size.
 | `secondCompactDelayJitterMs` | `5 * 60_000` (±5m) | Jitter on the second delay |
 | `compactRemoteChangeThreshold` | `2` | Delayed path skips while remote change-file count is at or below this value; the second timer is armed only above it |
 | `compactWarnThreshold` | `50` | Outbox size that triggers a single `compact:warning` event |
-| `offlineGraceMs` | `7 * 24 * 60 * 60_000` | How long an unseen device remains in GC consensus before it must realign from snapshot |
 
 > **Manual policy ≠ auto defaults.** The manual recommendation above
 > ("> 20 changes, idle > 1 min") is what to gate a button on. The auto
@@ -140,21 +143,22 @@ db.on(event => {
 
 `compact:auto:skip` reasons:
 
-| Reason | Meaning |
-| --- | --- |
-| `disabled` | `autoCompact: false` |
-| `not-connected` | Engine not connected to remote |
-| `missing-remote` | No adapter or no `remotePath` |
-| `poisoned` | Remote in poisoned state (decode error earlier) |
-| `already-running` | Another compaction is in flight |
-| `sampling` | Immediate path lost the sampling roll |
-| `below-remote-threshold` | Delayed path saw too few remote change files |
-| `superseded` | A newer write replaced this delayed schedule |
+| Reason                   | Meaning                                                               |
+| ------------------------ | --------------------------------------------------------------------- |
+| `disabled`               | `autoCompact: false`                                                  |
+| `not-connected`          | Engine not connected to remote                                        |
+| `missing-remote`         | No adapter or no `remotePath`                                         |
+| `peer-mode`              | Peer mode retains immutable history; automatic compaction is disabled |
+| `poisoned`               | Remote in poisoned state (decode error earlier)                       |
+| `already-running`        | Another compaction is in flight                                       |
+| `sampling`               | Immediate path lost the sampling roll                                 |
+| `below-remote-threshold` | Delayed path saw too few remote change files                          |
+| `superseded`             | A newer write replaced this delayed schedule                          |
 
 ## Coordination & locking
 
-> **The current adapter contract has no CAS/ETag write.** Compaction is
-> therefore *not* race‑safe in the strict sense.
+> **The adapter contract has no CAS/ETag write.** Peer snapshot pointers may
+> race, so peer mode never makes destructive retention decisions.
 
 What the engine does:
 
@@ -162,25 +166,20 @@ What the engine does:
   one engine instance*.
 - Inside `compact()` the engine pulls before snapshotting, so the snapshot
   reflects the latest remote state observable at that moment.
+- Peer mode retains every immutable change file.
+  Whichever snapshot pointer wins, exact catch-up can recover every file absent
+  from that snapshot.
+- Server-managed mode admits one authorized compactor identity and enables
+  automatic checkpoints, but does not assume identity implies mutual exclusion.
 
 What the engine does **not** do:
 
 - Take a remote lease (`mainline/compact-lock.json` or similar).
 - Use conditional writes when overwriting `manifest.json` (the pointer)
   or the `manifest-<gen>.json` file.
-- Detect a concurrent compactor that started between this device's
-  `pull()` and its `writeFile(manifest.json)`.
-
-In practice two devices rarely race because:
-
-- The sampling path makes simultaneous fires statistically unlikely
-  (each device rolls independently).
-- The delayed path's first‑then‑second timer gives a wide jitter window.
-- Most meshes are small (1–3 devices).
-
-If you operate a larger mesh or need strict safety, run with
-`serverManaged: true` and a single authorized writer (see "Server‑managed
-mode" below).
+- Select one peer snapshot deterministically when concurrent pointer writes
+  occur. This can leave an orphan snapshot, but retained change files preserve
+  the complete catch-up path.
 
 ### Server‑managed mode
 
@@ -192,74 +191,40 @@ device's `compact()` throws:
 Compaction is allowed only for the authorized server writer
 ```
 
-Use this to delegate compaction to a single trusted worker and avoid the
-race entirely.
+Use this to nominate the canonical checkpoint writer and enable automatic
+compaction. Both modes deliberately keep immutable change files indefinitely.
 
-## Pruning safety: device acknowledgements and GC floor
+## Retention safety: exact snapshot coverage
 
-Compaction has two separate prune decisions:
+Compaction makes no prune decision. The new snapshot's `coveredChangeFiles`
+records concrete observation and becomes the restored client's initial receipt
+set. It does not authorize deletion. A lower HLC alone never proves that a file
+was observed, and an authorized server identity can still run concurrently in
+multiple processes.
 
-1. **Change-file prune.** Delete remote change files whose HLC is ≤ the
-   new snapshot `watermarkHlc`. Those entries are redundant because the
-   snapshot captures the merged state.
-2. **Tombstone GC.** Omit deleted rows from a snapshot only when their
-   `deletedHlc <= manifest.gcFloorHlc`.
+This is the safety boundary imposed by adapters without CAS or leases:
+concurrent snapshots may race for the pointer, but all immutable files remain
+available for exact catch-up.
 
-The GC floor is the mesh's point of no return. Devices acknowledge what
-they have actually observed by updating `devices/<deviceId>.json` after
-`pull()`, `rehydrate()`, `connect()` alignment, and `compact()`:
+Tombstones are not garbage-collected. A device acknowledgement contains a
+scalar watermark, and that scalar cannot prove that the device has no older
+durable batch left to publish. Using it as a cutoff recreates the late-file
+loss bug at the retention boundary.
 
-```ts
-{
-  observedManifestGeneration,
-  observedEpoch,
-  observedWatermarkHlc,
-  observedGcFloorHlc,
-  observedAt
-}
-```
+The retention invariant is:
 
-During compaction the engine lists device metadata and computes:
-
-```text
-activeDevices = devices where retired != true
-             and lastSeenAt >= now - offlineGraceMs
-
-gcFloorHlc = min(activeDevices.observedWatermarkHlc)
-```
-
-`gcFloorHlc` is monotonic. It never moves backwards. Any active device
-without `observedWatermarkHlc` blocks advancement because it is still
-inside the offline grace period but has not acknowledged a canonical
-watermark.
-
-Devices not seen within `offlineGraceMs` are excluded from the active
-set. They may return later, but they are no longer trusted to publish
-old history directly. On `flush()`, the engine reloads the manifest and
-refuses to publish any local outbox entry whose `entry.hlc <=
-manifest.gcFloorHlc`. If a snapshot exists, it rehydrates from that
-snapshot instead, clearing the stale outbox and aligning with the point
-of no return.
-
-Invariant the prune step relies on:
-
-> Every active device has acknowledged a watermark ≥ `gcFloorHlc`, and no
-> stale device may flush entries at or before `gcFloorHlc` without first
-> rehydrating from the canonical snapshot.
+> Every immutable change file remains retained and every unseen filename remains
+> eligible for pull, regardless of whether its HLC is below a watermark.
 
 ### What can still go wrong
 
-- **Concurrent compactor races.** Without CAS, the second compactor's
-  manifest pointer may overwrite the first. Both snapshots are valid;
-  only the manifest is wrong. The losing device's snapshot becomes an
-  orphan file that no rehydrate will ever read.
-- **Adapter that lies about list ordering.** The prune step trusts
-  `listFiles()`. An adapter that omits files (eventual consistency) may
-  leave change files older than the watermark on disk. They are
-  redundant, not corrupting — the next compaction will catch them.
-- **Adapter that fails mid‑prune.** Logged as a non‑fatal warning. The
-  snapshot is still valid; leftover change files will be deleted by the
-  next successful compaction.
+- **Concurrent peer checkpoints.** Without CAS, one peer's manifest pointer may
+  overwrite another's. Peer mode retains all immutable files, so a reader loads
+  the selected snapshot and catches up by exact filename. The losing snapshot
+  is an orphan, not lost history.
+- **Incomplete adapter listing.** An omitted file is not added to
+  `coveredChangeFiles`. Because it remains retained, a later pull can still
+  observe it.
 
 ## Rehydrate flow
 
@@ -267,11 +232,16 @@ Invariant the prune step relies on:
 The engine calls it automatically when local `epoch < remote epoch`, but
 you can call it manually as a recovery path.
 
+On automatic reconnect, an old client first promotes and publishes any durable
+pending/outbox work. Only then may snapshot replacement clear local state. A
+new client has no such work and can restore immediately. Catch-up applies every
+retained filename not named by the snapshot receipts.
+
 ```
 manifest.snapshotPath  ──►  download  ──►  decrypt  ──►  clearAll
                                                           │
                                                           ▼
-                                                       putRows
+                                             putRows + exact receipts
                                                           │
                                                           ▼
                                                   pull() catch‑up
@@ -294,6 +264,6 @@ Rehydrate emits:
   clients (`autoCompact: false`).
 - **Read‑heavy app, very few writes.** Manual `compact()` from a cron is
   fine; the auto paths will rarely fire.
-- **Privacy‑sensitive deletes.** Tombstones carry no payload. They are
-  retained only until compaction can advance `gcFloorHlc` past their
-  `deletedHlc`, after all active devices have acknowledged the floor.
+- **Privacy‑sensitive deletes.** Tombstones carry no user payload, but their
+  metadata is retained. Do not rely on compaction for hard deletion until a
+  contiguous publication protocol is implemented.

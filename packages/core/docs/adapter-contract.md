@@ -126,8 +126,8 @@ semantics.
 ### `deleteFile(path)`
 
 - Removes the file. Subsequent `readFile(path)` should fail.
-- Deleting a missing file should be a no‑op (no throw). The engine
-  prunes during compaction and may race with concurrent compactors.
+- Deleting a missing file should be a no‑op (no throw). Core uses this for
+  explicit durable app-file deletion; compaction retains sync change files.
 
 ### Durable app-file methods
 
@@ -230,8 +230,9 @@ engine treats a thrown write as "stay in the outbox, retry later".
 - **Bounded retries.** A failed `writeFile` keeps the entry in the
   outbox and retries on the next flush trigger. There is no infinite
   loop.
-- **No surprise deletes.** The engine only deletes change files during
-  compaction, and only those whose HLC is ≤ the snapshot watermark.
+- **No sync-history deletes.** Compaction retains every immutable change file
+  in every mode. `deleteFile()` is used only for explicit durable app-file
+  deletion; HLC order is never treated as proof of coverage.
 - **Folder cache invalidation.** Engine calls `resetFolderCache()` on
   mesh swap, transport teardown, and remote poison.
 - **Authoritative format.** All payloads are UTF‑8 JSON or raw bytes.

@@ -157,6 +157,17 @@ final class IndexedSQLiteStoreOutboxTests: XCTestCase {
         XCTAssertTrue(drained.isEmpty)
     }
 
+    func test_replaceOutbox_atomicallyReplacesPriorQueue() async throws {
+        try await store.pushOutbox(makeEntry(id: "chg_old"))
+        try await store.replaceOutbox([
+            makeEntry(id: "chg_new_1"),
+            makeEntry(id: "chg_new_2"),
+        ])
+
+        let replaced = try await store.peekOutbox()
+        XCTAssertEqual(replaced.map(\.id), ["chg_new_1", "chg_new_2"])
+    }
+
     func test_outboxSize_empty() async throws {
         let s = try await store.outboxSize()
         XCTAssertEqual(s, 0)

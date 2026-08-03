@@ -146,10 +146,6 @@ const manifestBody = {
   watermarkHlc: "001785108800124-0000-dev_node_fixture",
   snapshotPath: "/worker-fixture/mainline/snap_019fa13e-cfab-7a91-b759-ca02e12e69d3.json",
   deltaPath: null,
-  gcFloorHlc: "001785108800120-0000-dev_node_fixture",
-  gcEpoch: 4,
-  gcCreatedAt: "2026-07-27T00:00:00.000Z",
-  offlineGraceMs: 86400000,
 };
 const manifest = {
   ...manifestBody,

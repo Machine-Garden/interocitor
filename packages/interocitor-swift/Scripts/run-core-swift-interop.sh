@@ -66,7 +66,7 @@ fi
 export INTEROCITOR_WEBDAV_URL="http://127.0.0.1:$PORT"
 
 cd "$MONOREPO_DIR"
-env -u YARN_NO_PROXY yarn workspace @interocitor/core build
+env -u YARN_NO_PROXY -u NPM_CONFIG_NOPROXY -u npm_config_noproxy yarn workspace @interocitor/core build
 node "$CORE_PHASES" bootstrap
 
 cd "$PACKAGE_DIR"
@@ -79,10 +79,9 @@ node "$CORE_PHASES" compact
 cd "$PACKAGE_DIR"
 swift test --no-parallel --filter CoreSwiftInteropIntegrationTests/test_coreCompactedSnapshot_canBeRehydratedBySwift
 
-# Reverse direction: Core validates Swift bootstrap then makes an epoch-1
-# snapshot without a floor. A fresh Swift client acknowledges it and makes an
-# epoch-2 snapshot with a GC floor; a new Core client must validate both its
-# metadata and encrypted snapshot rows.
+# Reverse direction: Core validates Swift bootstrap and makes an epoch-1
+# snapshot. A fresh Swift client observes it and makes an epoch-2 snapshot; a
+# new Core client must validate both metadata and encrypted snapshot rows.
 swift test --no-parallel --filter CoreSwiftInteropIntegrationTests/test_swiftBootstrappedEncryptedMesh_canBeReadByCore
 
 cd "$MONOREPO_DIR"

@@ -21,9 +21,26 @@ none proves that every lower HLC was observed.
 
 On pull, a client lists retained change files and applies every filename absent
 from its local receipt set. A successful local flush records its own filenames
-as observed. Receipts survive incomplete or non-monotonic listings and retire
-only at the manifest GC floor, where the retained snapshot becomes the
-authoritative base.
+before publication, so a receipt-storage failure cannot leave an authoritative
+file locally unrecorded. The durable outbox is only acknowledged after primary
+publication; retries use the same immutable IDs. Row mutation plus pending
+batch, and pending batch plus outbox promotion, are atomic local-store commits.
+Concurrent pull and flush commits merge under one per-store observation writer.
+Receipts survive incomplete or non-monotonic listings. On snapshot restore, the
+exact receipt set carried by the retained snapshot becomes the authoritative
+base.
+
+Compaction writes the exact observed filename set into the snapshot as
+`coveredChangeFiles`. Rehydrate restores that set as receipts before catch-up.
+Peer meshes retain all immutable files because concurrent pointer updates lack
+CAS. Server-managed mode retains them too: an authorized identity does not
+prove that only one process is running. A file that appears during compaction
+therefore survives regardless of whether its HLC is below the snapshot
+watermark.
+
+Compaction holds the local sync-state lock, promotes and publishes completed
+batches, pulls remote changes, and then captures exact receipts and rows. A
+write or explicit batch is therefore wholly before or wholly after that cut.
 
 This makes a new client and an existing client the same algorithm with different
 starting receipts:

@@ -68,8 +68,6 @@ export interface MaintenanceResult {
   ttlCandidates: number;
   /** Number of remote roots whose files were actually deleted. */
   ttlDeleted: number;
-  /** Reserved for future compaction sweeps. Always `0` currently. */
-  pruned: number;
 }
 
 /**
@@ -90,7 +88,7 @@ export async function runMaintenance(
   prefix: string | null = null,
 ): Promise<MaintenanceResult> {
   if (!(Number.isFinite(pathTtlHours) && pathTtlHours > 0)) {
-    return { ttlCandidates: 0, ttlDeleted: 0, pruned: 0 };
+    return { ttlCandidates: 0, ttlDeleted: 0 };
   }
 
   const threshold = new Date(Date.now() - pathTtlHours * 3600_000).toISOString();
@@ -114,5 +112,5 @@ export async function runMaintenance(
     deleted += 1;
   }
 
-  return { ttlCandidates: candidates.length, ttlDeleted: deleted, pruned: 0 };
+  return { ttlCandidates: candidates.length, ttlDeleted: deleted };
 }

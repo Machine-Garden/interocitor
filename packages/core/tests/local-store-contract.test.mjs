@@ -64,6 +64,44 @@ test('MemoryLocalStore contract: outbox FIFO and drain', async () => {
   });
 });
 
+test('MemoryLocalStore contract: local mutation staging and exact acknowledgement are crash-safe', async () => {
+  await withStore(async (store) => {
+    const first = { id: 'chg_1', ts: 1, device: 'dev', hlc: 'h1', ops: [] };
+    const second = { id: 'chg_2', ts: 2, device: 'dev', hlc: 'h2', ops: [] };
+    const stagedRow = row('tasks', 'staged', { title: 'Durable' });
+
+    await store.commitLocalMutation(stagedRow, first);
+    assert.equal((await store.getRow('tasks', 'staged')).payload.title.value, 'Durable');
+    assert.deepEqual(await store.getMeta('pendingBatch'), first);
+
+    assert.deepEqual(await store.promotePendingBatch(), first);
+    assert.equal(await store.getMeta('pendingBatch'), undefined);
+    await store.pushOutbox(second);
+
+    const publicationCut = await store.peekOutbox();
+    await store.pushOutbox({ id: 'chg_3', ts: 3, device: 'dev', hlc: 'h3', ops: [] });
+    await store.acknowledgeOutbox(publicationCut.map((entry) => entry.id));
+    await store.acknowledgeOutbox(publicationCut.map((entry) => entry.id));
+
+    assert.deepEqual((await store.peekOutbox()).map((entry) => entry.id), ['chg_3']);
+  });
+});
+
+test('MemoryLocalStore contract: independent writers merge the durable pending batch', async () => {
+  await withStore(async (store) => {
+    const first = { id: 'chg_first', ts: 1, device: 'dev', hlc: 'h1', ops: [{ type: 'delete', table: 'tasks', rowId: 'a', hlc: 'h1' }] };
+    const second = { id: 'chg_second', ts: 2, device: 'dev', hlc: 'h2', ops: [{ type: 'delete', table: 'tasks', rowId: 'b', hlc: 'h2' }] };
+
+    await store.commitLocalMutation(row('tasks', 'a', { title: 'A' }), first);
+    const merged = await store.commitLocalMutation(row('tasks', 'b', { title: 'B' }), second);
+
+    assert.equal(merged.id, first.id);
+    assert.equal(merged.hlc, second.hlc);
+    assert.deepEqual(merged.ops, [...first.ops, ...second.ops]);
+    assert.deepEqual(await store.getMeta('pendingBatch'), merged);
+  });
+});
+
 test('MemoryLocalStore contract: cursors, meta, and clearAll', async () => {
   await withStore(async (store) => {
     await store.putRow(row('notes', 'n1', { title: 'Note' }));

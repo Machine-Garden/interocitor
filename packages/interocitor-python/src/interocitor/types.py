@@ -360,10 +360,6 @@ class Manifest:
     watermark_hlc: str
     snapshot_path: str | None
     delta_path: str | None
-    gc_floor_hlc: str | None = None
-    gc_epoch: int | None = None
-    gc_created_at: str | None = None
-    offline_grace_ms: int | None = None
 
     def payload_wire(self) -> dict[str, Any]:
         """Manifest body in the same insertion order core hashes with JSON.stringify."""
@@ -384,14 +380,6 @@ class Manifest:
             "snapshotPath": self.snapshot_path,
             "deltaPath": self.delta_path,
         }
-        if self.gc_floor_hlc is not None:
-            value["gcFloorHlc"] = self.gc_floor_hlc
-        if self.gc_epoch is not None:
-            value["gcEpoch"] = self.gc_epoch
-        if self.gc_created_at is not None:
-            value["gcCreatedAt"] = self.gc_created_at
-        if self.offline_grace_ms is not None:
-            value["offlineGraceMs"] = self.offline_grace_ms
         return value
 
     def to_wire(self) -> dict[str, Any]:
@@ -424,10 +412,6 @@ class Manifest:
             watermark_hlc=_string(record.get("watermarkHlc"), "Manifest watermarkHlc"),
             snapshot_path=snapshot_path if isinstance(snapshot_path, str) else None,
             delta_path=delta_path if isinstance(delta_path, str) else None,
-            gc_floor_hlc=record.get("gcFloorHlc") if isinstance(record.get("gcFloorHlc"), str) else None,
-            gc_epoch=record.get("gcEpoch") if type(record.get("gcEpoch")) is int else None,
-            gc_created_at=record.get("gcCreatedAt") if isinstance(record.get("gcCreatedAt"), str) else None,
-            offline_grace_ms=record.get("offlineGraceMs") if type(record.get("offlineGraceMs")) is int else None,
         )
 
 

@@ -41,7 +41,16 @@ function fileEntry(path, data) {
 }
 
 function createPullHarness({ payloads, listings, initialMetadata = {}, schema, manifest }) {
-  const metadata = new Map(Object.entries(initialMetadata));
+  const { cursor, seenChangeFiles, writerFrontiers, ...otherMetadata } = initialMetadata;
+  const metadata = new Map(Object.entries(otherMetadata));
+  if (cursor !== undefined || seenChangeFiles !== undefined || writerFrontiers !== undefined) {
+    metadata.set("changeObservation", {
+      generation: 0,
+      globalHighWaterHlc: cursor ?? "",
+      seenChangeFiles: seenChangeFiles ?? [],
+      writerFrontiers: writerFrontiers ?? {},
+    });
+  }
   const tables = {};
   const events = [];
   const changeReads = [];
@@ -305,7 +314,7 @@ test("exact receipts suppress duplicate application even for an invalid custom-m
   assert.equal(harness.tables.tasks.counter.payload.state.value, 3);
 });
 
-test("changes at or below the manifest GC floor are retired and cannot replay", async () => {
+test("an unseen older file is applied even behind the manifest watermark", async () => {
   const retired = "000000000000010-0000-writer-a";
   const current = "000000000000020-0000-writer-b";
   const retiredPath = changePath(retired, "chg_retired");
@@ -316,36 +325,32 @@ test("changes at or below the manifest GC floor are retired and cannot replay", 
       [currentPath, changePayload(current, "chg_current", "current", "current-row")],
     ]),
     listings: [[retiredPath, currentPath]],
-    initialMetadata: {
-      seenChangeFiles: [retiredPath.slice(retiredPath.lastIndexOf("/") + 1)],
-    },
     manifest: {
       meshId: "mesh_pull_order",
       schema: 1,
-      gcFloorHlc: "000000000000015-0000-compactor",
+      watermarkHlc: "000000000000015-0000-compactor",
     },
   });
 
   await harness.pull();
 
-  assert.equal(harness.tables.tasks["retired-row"], undefined);
+  assert.equal(harness.tables.tasks["retired-row"].payload.state.value, "must-not-replay");
   assert.equal(harness.tables.tasks["current-row"].payload.state.value, "current");
-  assert.deepEqual(harness.changeReads, [currentPath]);
-  assert.deepEqual(harness.metadata.get("seenChangeFiles"), [
+  assert.deepEqual(harness.changeReads, [retiredPath, currentPath]);
+  assert.deepEqual(harness.metadata.get("changeObservation").seenChangeFiles, [
+    retiredPath.slice(retiredPath.lastIndexOf("/") + 1),
     currentPath.slice(currentPath.lastIndexOf("/") + 1),
   ]);
 });
 
-test("legacy scalar cursor migration replays retained older files without a false late-change alarm", async () => {
+test("a fresh receiptless client replays retained files without a false late-change alarm", async () => {
   const older = "000000000000010-0000-writer-old";
-  const legacyHigh = "000000000000020-0000-writer-high";
   const olderPath = changePath(older, "chg_older");
   const harness = createPullHarness({
     payloads: new Map([
       [olderPath, changePayload(older, "chg_older", "restored-value", "restored-row")],
     ]),
     listings: [[olderPath]],
-    initialMetadata: { cursor: legacyHigh },
   });
 
   await harness.pull();
@@ -356,7 +361,7 @@ test("legacy scalar cursor migration replays retained older files without a fals
     harness.events.some((event) => event.type === "sync:late-change"),
     false,
   );
-  assert.deepEqual(harness.metadata.get("seenChangeFiles"), [
+  assert.deepEqual(harness.metadata.get("changeObservation").seenChangeFiles, [
     olderPath.slice(olderPath.lastIndexOf("/") + 1),
   ]);
 });
@@ -435,8 +440,8 @@ test("fresh bootstrap and incremental sync agree after observing the same exact 
 
   assert.deepEqual(incrementalClient.tables, freshClient.tables);
   assert.deepEqual(
-    incrementalClient.metadata.get("seenChangeFiles"),
-    freshClient.metadata.get("seenChangeFiles"),
+    incrementalClient.metadata.get("changeObservation").seenChangeFiles,
+    freshClient.metadata.get("changeObservation").seenChangeFiles,
   );
 });
 

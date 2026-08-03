@@ -125,12 +125,10 @@ A malicious or compromised remote can:
 - **Withhold change files.** Skip files in a `listFiles` response.
   Affected rows simply look stale to the device that didn't see them.
   Other devices may see the full set, leading to divergence.
-- **Replay deleted change files.** Re‑upload a change file the engine
-  thought was pruned. The engine will accept it during pull and apply it
-  through CRDT merge. Because HLC monotonicity holds per row, a *true*
-  replay of an already‑observed change is a no‑op. A rotated
-  `<HLC>-chg_<id>` with the same ciphertext is also a no‑op. Ciphertext
-  mutation is rejected by AES‑GCM.
+- **Duplicate a retained change file.** Exact filename receipts suppress a
+  true replay. Publishing the same logical payload under a new filename still
+  passes through idempotent CRDT merge; ciphertext mutation is rejected by
+  AES‑GCM.
 - **Poison the manifest.** Write a manifest the client cannot decrypt or
   whose content hash does not match. The engine emits `decode:error`
   and `remote:poisoned`; sync stops until manually recovered.

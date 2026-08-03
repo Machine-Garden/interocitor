@@ -76,17 +76,12 @@ private enum ManifestCodingKey: String, CodingKey, CaseIterable {
     case watermarkHlc
     case snapshotPath
     case deltaPath
-    case gcFloorHlc
-    case gcEpoch
-    case gcCreatedAt
-    case offlineGraceMs
 }
 
 private let coreManifestKeyOrder: [ManifestCodingKey] = [
     .generation, .parentGeneration, .writtenBy, .writtenAt, .version,
     .meshId, .schema, .encrypted, .server, .createdAt, .epoch,
-    .watermarkHlc, .snapshotPath, .deltaPath, .gcFloorHlc, .gcEpoch,
-    .gcCreatedAt, .offlineGraceMs, .contentHash,
+    .watermarkHlc, .snapshotPath, .deltaPath, .contentHash,
 ]
 
 private let sortedManifestKeyOrder: [ManifestCodingKey] =
@@ -119,9 +114,6 @@ public struct SyncConfig: Sendable {
     /// Optional logical mesh schema. Its version is checked against the
     /// manifest and its merge policies participate in CRDT resolution.
     public var schema: DatabaseSchema?
-    /// Active-device grace used when a Swift client publishes compaction GC
-    /// metadata. Matches Core's seven-day default.
-    public var offlineGraceMs: Int
 
     public init(
         remotePath: String,
@@ -134,8 +126,7 @@ public struct SyncConfig: Sendable {
         deviceName: String? = nil,
         deviceType: String? = nil,
         replicas: [ReplicaConfig] = [],
-        schema: DatabaseSchema? = nil,
-        offlineGraceMs: Int = 7 * 24 * 60 * 60 * 1_000
+        schema: DatabaseSchema? = nil
     ) {
         self.remotePath = remotePath
         self.serverManaged = serverManaged
@@ -148,7 +139,6 @@ public struct SyncConfig: Sendable {
         self.deviceType = deviceType
         self.replicas = replicas
         self.schema = schema
-        self.offlineGraceMs = offlineGraceMs
     }
 }
 
@@ -322,13 +312,6 @@ public actor Interocitor {
         row._deletedHlc = nil
         row._owner = deviceId
 
-        if tables[table] == nil { tables[table] = [:] }
-        tables[table]![rowId] = row
-        knownTables.insert(table)
-
-        try await local.putRow(row)
-        try await local.setMeta(key: "hlc", value: AnyCodable.string(hlcSerialize(hlc)))
-
         let entry = ChangeEntry(
             id: "chg_\(Interocitor.randomHex(8))",
             ts: Int64(Date().timeIntervalSince1970 * 1000),
@@ -340,7 +323,10 @@ public actor Interocitor {
             // the new incarnation's fields may leave the device.
             ops: [.upsert(UpsertOp(table: table, rowId: rowId, columns: row.columns))]
         )
-        try await local.pushOutbox(entry)
+        try await local.commitLocalMutation(row: row, entry: entry, hlc: hlcStr)
+        if tables[table] == nil { tables[table] = [:] }
+        tables[table]![rowId] = row
+        knownTables.insert(table)
         emit(.change(table: table, rowId: rowId, row: row))
         scheduleFlush()
         return row
@@ -358,12 +344,6 @@ public actor Interocitor {
         row._deletedHlc = hlcStr
         row._owner = deviceId
         row.columns = [:]
-        if tables[table] == nil { tables[table] = [:] }
-        tables[table]![rowId] = row
-        try await local.putRow(row)
-
-        try await local.setMeta(key: "hlc", value: AnyCodable.string(hlcSerialize(hlc)))
-
         let entry = ChangeEntry(
             id: "chg_\(Interocitor.randomHex(8))",
             ts: Int64(Date().timeIntervalSince1970 * 1000),
@@ -372,7 +352,9 @@ public actor Interocitor {
             hlc: hlcStr,
             ops: [.delete(DeleteOp(table: table, rowId: rowId, hlc: hlcStr))]
         )
-        try await local.pushOutbox(entry)
+        try await local.commitLocalMutation(row: row, entry: entry, hlc: hlcStr)
+        if tables[table] == nil { tables[table] = [:] }
+        tables[table]![rowId] = row
         emit(.delete(table: table, rowId: rowId))
         scheduleFlush()
     }
@@ -453,28 +435,16 @@ public actor Interocitor {
     public func flush() async throws {
         guard adapter != nil else { cancelFlushTimer(); return }
 
-        let entries = try await local.drainOutbox()
+        let entries = try await local.peekOutbox()
         guard !entries.isEmpty else { return }
 
         emit(.flushStart(entryCount: entries.count))
         cancelFlushTimer()
-        var requeueEntries = true
-
         do {
             let adapter = try requireAdapter("flush()")
-            // A long-sleeping client must observe the current manifest before
-            // it republishes queued history. The GC floor is a point of no
-            // return: publishing at/below it could resurrect retired data.
+            // A long-sleeping client reloads the manifest before publishing,
+            // but scalar HLC state never suppresses a durable queued entry.
             try await loadOrCreateManifest()
-            if let floor = manifest?.gcFloorHlc, !floor.isEmpty,
-               entries.contains(where: { !$0.hlc.isEmpty && hlcCompareStr($0.hlc, floor) <= 0 }) {
-                if manifest?.snapshotPath != nil {
-                    try await rehydrate()
-                    requeueEntries = false
-                    pendingCount = 0
-                }
-                throw InterocitorError.staleOutboxAtGcFloor(floor)
-            }
 
             pendingCount = 0
             try await flushToAdapter(adapter, remotePath: config.remotePath, entries: entries, isPrimary: true)
@@ -510,12 +480,10 @@ public actor Interocitor {
                     value: AnyCodable.array(seenChangeFiles.sorted().map(AnyCodable.string))
                 )
             }
+            try await local.acknowledgeOutbox(entryIds: entries.map(\.id))
             emit(.flushComplete)
         } catch {
-            if requeueEntries {
-                for entry in entries { try await local.pushOutbox(entry) }
-                pendingCount = entries.count
-            }
+            pendingCount = entries.count
             emit(.flushError(error))
             throw error
         }
@@ -558,6 +526,15 @@ public actor Interocitor {
 
         do {
             try await loadOrCreateManifest()
+            let localEpoch = (try await local.getMeta(key: "epoch") as? AnyCodable)?.intValue ?? 0
+            let remoteEpoch = manifest?.epoch ?? 0
+            if localEpoch < remoteEpoch {
+                // Publication must precede snapshot replacement. rehydrate()
+                // flushes the durable outbox before clearing local rows, then
+                // restores exact snapshot coverage and resumes pull.
+                try await rehydrate()
+                return
+            }
             let p = CloudPaths(root: config.remotePath)
 
             let cursorRaw = try await local.getMeta(key: "cursor")
@@ -583,8 +560,6 @@ public actor Interocitor {
             for file in sorted {
                 do {
                     guard let fileHlc = changeFileHlc(file.name) else { continue }
-                    if let floor = manifest?.gcFloorHlc, !floor.isEmpty,
-                       hlcCompareStr(fileHlc, floor) <= 0 { continue }
                     if seenChangeFiles.contains(file.name) { continue }
 
                     let rawData = try await adapter.readFile(path: file.path)
@@ -630,14 +605,9 @@ public actor Interocitor {
             if !latestMergedHlc.isEmpty && latestMergedHlc != cursor {
                 try await local.setMeta(key: "cursor", value: AnyCodable.string(latestMergedHlc))
             }
-            let retainedSeen = seenChangeFiles.filter { name in
-                guard let floor = manifest?.gcFloorHlc, !floor.isEmpty,
-                      let fileHlc = changeFileHlc(name) else { return true }
-                return hlcCompareStr(fileHlc, floor) > 0
-            }
             try await local.setMeta(
                 key: "seenChangeFiles",
-                value: AnyCodable.array(retainedSeen.sorted().map(AnyCodable.string))
+                value: AnyCodable.array(seenChangeFiles.sorted().map(AnyCodable.string))
             )
             try await local.setMeta(key: "hlc", value: AnyCodable.string(hlcSerialize(hlc)))
             try await acknowledgeManifest()
@@ -652,6 +622,7 @@ public actor Interocitor {
 
     /// Rebuild local store from the current remote snapshot, then pull newer changes.
     public func rehydrate() async throws {
+        try await flush()
         let adapter = try requireAdapter("rehydrate()")
         emit(.rehydrateStart)
 
@@ -665,7 +636,9 @@ public actor Interocitor {
             let rawData = try await adapter.readFile(path: snapshotPath)
             let snapshot = try await decodeSnapshotPayload(rawData, path: snapshotPath)
 
-            try await local.clearAll()
+            try await local.clearRows()
+            try await local.setMeta(key: "cursor", value: AnyCodable.string(""))
+            try await local.setMeta(key: "seenChangeFiles", value: AnyCodable.array([]))
             tables = [:]
             knownTables = []
 
@@ -708,16 +681,11 @@ public actor Interocitor {
             throw InterocitorError.compactionNotAllowed
         }
 
+        try await flush()
         try await pull()
 
         let p = CloudPaths(root: config.remotePath)
-        let nowDate = Date()
-        let now = ISO8601DateFormatter().string(from: nowDate)
-        let gcFloorHlc = try await computeGcFloor(
-            manifest: currentManifest,
-            adapter: adapter,
-            now: nowDate
-        )
+        let now = ISO8601DateFormatter().string(from: Date())
         let nextEpoch = currentManifest.epoch + 1
         let nextGeneration = currentManifest.generation + 1
         let snapshotPath = "\(p.mainlineFolder)/snapshot-\(nextEpoch)-\(config.serverId).json"
@@ -725,12 +693,6 @@ public actor Interocitor {
         let allRows = try await local.getAllRows()
         var snapshotTables: [String: [String: Row]] = [:]
         for row in allRows {
-            if !gcFloorHlc.isEmpty,
-               row._deleted,
-               let deletedHlc = row._deletedHlc,
-               hlcCompareStr(deletedHlc, gcFloorHlc) <= 0 {
-                continue
-            }
             if snapshotTables[row._table] == nil { snapshotTables[row._table] = [:] }
             snapshotTables[row._table]![row._rowId] = row
         }
@@ -762,11 +724,7 @@ public actor Interocitor {
             epoch: nextEpoch,
             watermarkHlc: hlcSerialize(hlc),
             snapshotPath: snapshotPath,
-            deltaPath: nil,
-            gcFloorHlc: gcFloorHlc,
-            gcEpoch: gcFloorHlc.isEmpty ? currentManifest.gcEpoch : nextEpoch,
-            gcCreatedAt: gcFloorHlc.isEmpty ? currentManifest.gcCreatedAt : now,
-            offlineGraceMs: config.offlineGraceMs
+            deltaPath: nil
         )
 
         let writtenManifest = try await writeManifest(
@@ -783,19 +741,6 @@ public actor Interocitor {
         try await local.setMeta(key: "epoch", value: AnyCodable.int(nextEpoch))
         try await acknowledgeManifest()
 
-        // Prune change files captured in the snapshot
-        let watermarkHlc = writtenManifest.watermarkHlc
-        do {
-            let files = try await adapter.listFiles(path: p.changesFolder)
-            for file in files {
-                guard file.name != "head.json",
-                      let chgRange = file.name.range(of: "-chg_", options: .backwards) else { continue }
-                let fileHlc = String(file.name[file.name.startIndex..<chgRange.lowerBound])
-                if hlcCompareStr(fileHlc, watermarkHlc) <= 0 {
-                    try? await adapter.deleteFile(path: file.path)
-                }
-            }
-        } catch { /* pruning is non-fatal */ }
     }
 
 
@@ -944,14 +889,6 @@ public actor Interocitor {
         case .watermarkHlc: return try jsonString(manifest.watermarkHlc)
         case .snapshotPath: return try jsonOptionalString(manifest.snapshotPath)
         case .deltaPath: return try jsonOptionalString(manifest.deltaPath)
-        case .gcFloorHlc:
-            return try manifest.gcFloorHlc.map { try jsonString($0) }
-        case .gcEpoch:
-            return manifest.gcEpoch.map(String.init)
-        case .gcCreatedAt:
-            return try manifest.gcCreatedAt.map { try jsonString($0) }
-        case .offlineGraceMs:
-            return manifest.offlineGraceMs.map(String.init)
         }
     }
 
@@ -1058,9 +995,8 @@ public actor Interocitor {
     }
 
     private func rebuildOutboxFromLocalState() async throws -> Int {
-        _ = try await local.drainOutbox()
         let rows = try await local.getAllRows()
-        var queued = 0
+        var entries: [ChangeEntry] = []
         for row in rows {
             guard let op = rowToSyncOp(row) else { continue }
             let hlcStr = getRowHlc(row)
@@ -1072,11 +1008,14 @@ public actor Interocitor {
                 hlc: hlcStr,
                 ops: [op]
             )
-            try await local.pushOutbox(entry)
-            queued += 1
+            entries.append(entry)
         }
-        pendingCount = queued
-        return queued
+        // Remote migration replaces the outbox in one local transaction. A
+        // crash therefore leaves either the prior durable queue or the full
+        // state-republication queue, never an empty gap between them.
+        try await local.replaceOutbox(entries)
+        pendingCount = entries.count
+        return entries.count
     }
 
     private func rowToSyncOp(_ row: Row) -> Op? {
@@ -1094,56 +1033,6 @@ public actor Interocitor {
             if latest.isEmpty || hlcCompareStr(entry.hlc, latest) > 0 { latest = entry.hlc }
         }
         return latest
-    }
-
-    private func computeGcFloor(
-        manifest: Manifest,
-        adapter: any StorageAdapter,
-        now: Date
-    ) async throws -> String {
-        let existingFloor = manifest.gcFloorHlc ?? ""
-        let cutoff = now.addingTimeInterval(-TimeInterval(config.offlineGraceMs) / 1_000)
-        let paths = CloudPaths(root: config.remotePath)
-        let fractionalDateParser = ISO8601DateFormatter()
-        fractionalDateParser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let dateParser = ISO8601DateFormatter()
-        var floors: [String] = []
-
-        do {
-            let files = try await adapter.listFiles(path: paths.devicesFolder)
-            for file in files where file.name.hasSuffix(".json") {
-                let suffix = ".json"
-                let deviceId = String(file.name.dropLast(suffix.count))
-                guard let data = try? await adapter.readFile(path: paths.deviceFile(deviceId)),
-                      let metadata = try? decoder.decode(DeviceMetadata.self, from: data),
-                      metadata.retired != true else {
-                    continue
-                }
-                let lastSeen = fractionalDateParser.date(from: metadata.lastSeenAt)
-                    ?? dateParser.date(from: metadata.lastSeenAt)
-                if let lastSeen, lastSeen < cutoff {
-                    continue
-                }
-                guard let watermark = metadata.observedWatermarkHlc, !watermark.isEmpty else {
-                    // Any active peer that has not acknowledged the current
-                    // canonical watermark prevents advancing the floor.
-                    return existingFloor
-                }
-                floors.append(watermark)
-            }
-        } catch {
-            // Failing open here could erase tombstones; retain the existing
-            // floor until the device list is readable again.
-            return existingFloor
-        }
-
-        guard let candidate = floors.min(by: { hlcCompareStr($0, $1) < 0 }) else {
-            return existingFloor
-        }
-        if !existingFloor.isEmpty, hlcCompareStr(existingFloor, candidate) > 0 {
-            return existingFloor
-        }
-        return candidate
     }
 
     private func loadOrCreateManifest() async throws {
@@ -1207,14 +1096,12 @@ public actor Interocitor {
 
     private func acknowledgeManifest() async throws {
         guard let manifest else { return }
-        // Epoch zero has no canonical watermark/floor to acknowledge. Presence
+        // Epoch zero has no canonical watermark to acknowledge. Presence
         // was already written during connect, so avoid needless device writes.
-        if manifest.epoch == 0, manifest.watermarkHlc.isEmpty, (manifest.gcFloorHlc ?? "").isEmpty {
+        if manifest.epoch == 0, manifest.watermarkHlc.isEmpty {
             return
         }
         try await upsertDeviceMetadata(acknowledgeManifest: true)
-        try await local.setMeta(key: "gcFloorHlc", value: AnyCodable.string(manifest.gcFloorHlc ?? ""))
-        try await local.setMeta(key: "gcEpoch", value: AnyCodable.int(manifest.gcEpoch ?? 0))
     }
 
     private func upsertDeviceMetadata(acknowledgeManifest: Bool = false) async throws {
@@ -1237,7 +1124,6 @@ public actor Interocitor {
             observedManifestGeneration: acknowledgeManifest ? manifest?.generation : existing?.observedManifestGeneration,
             observedEpoch: acknowledgeManifest ? manifest?.epoch : existing?.observedEpoch,
             observedWatermarkHlc: acknowledgeManifest ? manifest?.watermarkHlc : existing?.observedWatermarkHlc,
-            observedGcFloorHlc: acknowledgeManifest ? manifest?.gcFloorHlc : existing?.observedGcFloorHlc,
             observedAt: acknowledgeManifest ? now : existing?.observedAt,
             cutOffAt: existing?.cutOffAt,
             cutOffReason: existing?.cutOffReason

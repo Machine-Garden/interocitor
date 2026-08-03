@@ -63,7 +63,57 @@ class _PausingSnapshotAdapter(MemoryAdapter):
         return await super().read_file(path)
 
 
+class _FailingChangeAdapter(MemoryAdapter):
+    """Fails one immutable change publication, then behaves normally."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.fail_next_change = False
+
+    async def write_file(self, path: str, data: bytes | str) -> None:
+        if self.fail_next_change and "/changes/" in path and not path.endswith("/head.json"):
+            self.fail_next_change = False
+            raise OSError("injected change publication failure")
+        await super().write_file(path, data)
+
+
 class EngineTests(unittest.TestCase):
+    def test_failed_publication_preserves_exact_outbox_id_for_retry(self) -> None:
+        async def scenario() -> None:
+            adapter = _FailingChangeAdapter()
+            local = MemoryLocalStore()
+            writer = Interocitor(
+                adapter,
+                remote_path="/failed-publication-mesh",
+                local_store=local,
+                schema=_SCHEMA,
+                device_id="dev_writer",
+            )
+            reader = Interocitor(
+                adapter,
+                remote_path="/failed-publication-mesh",
+                local_store=MemoryLocalStore(),
+                schema=_SCHEMA,
+                device_id="dev_reader",
+                require_existing_mesh=True,
+            )
+            await writer.connect()
+            await writer.put("tasks", "durable", {"state": "queued"})
+            queued = await local.peek_outbox()
+            self.assertEqual(len(queued), 1)
+
+            adapter.fail_next_change = True
+            with self.assertRaisesRegex(OSError, "injected change publication failure"):
+                await writer.flush()
+            self.assertEqual([entry.id for entry in await local.peek_outbox()], [queued[0].id])
+
+            await writer.flush()
+            self.assertEqual(await local.outbox_size(), 0)
+            await reader.connect()
+            self.assertEqual((await reader.get("tasks", "durable"))["state"], "queued")
+
+        asyncio.run(scenario())
+
     def test_late_published_change_behind_global_head_is_not_lost(self) -> None:
         async def scenario() -> None:
             adapter = MemoryAdapter()
@@ -186,8 +236,8 @@ class EngineTests(unittest.TestCase):
             compacted_wire = json.loads(
                 (await adapter.read_file("/compact-mesh/manifest-2.json")).decode("utf-8")
             )
-            self.assertEqual(compacted_wire["gcFloorHlc"], "")
-            self.assertEqual(compacted_wire["offlineGraceMs"], 7 * 24 * 60 * 60 * 1000)
+            self.assertNotIn("gcFloorHlc", compacted_wire)
+            self.assertNotIn("offlineGraceMs", compacted_wire)
             await writer.disconnect()
 
             worker = Interocitor(
@@ -375,13 +425,13 @@ class EngineTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
-    def test_gc_floor_recovery_discards_stale_outbox_once(self) -> None:
+    def test_older_offline_outbox_publishes_after_multiple_compactions(self) -> None:
         async def scenario() -> None:
             adapter = MemoryAdapter()
             portable_key = generate_portable_key()
             writer = Interocitor(
                 adapter,
-                remote_path="/gc-floor-recovery-mesh",
+                remote_path="/offline-recovery-mesh",
                 key_source=PortablePassphraseKeySource(portable_key=portable_key, generate_if_missing=False),
                 schema=_SCHEMA,
                 device_id="019fa13e-efab-7a91-b759-ca02e12e69d3",
@@ -390,7 +440,7 @@ class EngineTests(unittest.TestCase):
             stale_store = MemoryLocalStore()
             stale_worker = Interocitor(
                 adapter,
-                remote_path="/gc-floor-recovery-mesh",
+                remote_path="/offline-recovery-mesh",
                 local_store=stale_store,
                 key_source=PortablePassphraseKeySource(portable_key=portable_key, generate_if_missing=False),
                 schema=_SCHEMA,
@@ -411,29 +461,25 @@ class EngineTests(unittest.TestCase):
             await asyncio.sleep(0.01)
             await writer.put("tasks", "newer", {"state": "complete"})
             await writer.flush()
-            second = await writer.compact()
+            await writer.compact()
 
-            # Rehydration retains an ordinary pre-connect/offline outbox so
-            # this device can acknowledge the second snapshot. The following
-            # compaction then makes that old entry pre-floor.
+            # Epoch recovery publishes the durable offline outbox before it
+            # replaces local rows from the newer snapshot. Its older HLC is
+            # never treated as a publication cutoff.
             await stale_worker.pull()
-            third = await writer.compact()
-            self.assertEqual(third.gc_floor_hlc, second.watermark_hlc)
-            self.assertEqual(await stale_store.outbox_size(), 1)
-
-            with self.assertRaisesRegex(InterocitorError, "Refusing to flush changes at or before gcFloorHlc"):
-                await stale_worker.flush()
+            await writer.compact()
             self.assertEqual(await stale_store.outbox_size(), 0)
 
-            # The canonical snapshot has replaced the stale queue. A second
-            # flush is a no-op rather than an endless rehydrate/failure loop.
             await stale_worker.flush()
+            self.assertEqual(await stale_store.outbox_size(), 0)
+            await writer.pull()
+            self.assertEqual((await writer.get("tasks", "stale"))["state"], "queued")
             await stale_worker.disconnect()
             await writer.disconnect()
 
         asyncio.run(scenario())
 
-    def test_cancelled_rehydrate_requeues_a_preconnect_mutation(self) -> None:
+    def test_cancelled_rehydrate_preserves_a_preconnect_mutation(self) -> None:
         async def scenario() -> None:
             adapter = _PausingSnapshotAdapter()
             portable_key = generate_portable_key()
@@ -469,10 +515,12 @@ class EngineTests(unittest.TestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await connect_task
             self.assertFalse(worker.connected)
-            self.assertEqual(await local.outbox_size(), 1)
+            self.assertEqual(await local.outbox_size(), 0)
 
-            # Cancellation is not remote corruption. Once the caller retries,
-            # the preserved change rebases and can be delivered normally.
+            # Publication completed before snapshot replacement began, so
+            # cancellation cannot strand or discard the queued mutation.
+            # Cancellation is not remote corruption; retrying pulls the
+            # already-durable change normally.
             adapter.release_snapshot_read.set()
             await worker.connect()
             await worker.flush()
@@ -551,7 +599,7 @@ class EngineTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
-    def test_active_device_acknowledgements_advance_compaction_gc_floor(self) -> None:
+    def test_compaction_retains_changes_and_has_no_scalar_gc_floor(self) -> None:
         async def scenario() -> None:
             adapter = MemoryAdapter()
             portable_key = generate_portable_key()
@@ -579,51 +627,15 @@ class EngineTests(unittest.TestCase):
             await writer.flush()
             await reader.connect()
 
-            first = await writer.compact()
-            self.assertEqual(first.gc_floor_hlc, "")
+            await writer.compact()
             await reader.pull()
             second = await writer.compact()
-            self.assertEqual(second.gc_floor_hlc, first.watermark_hlc)
-            self.assertEqual(second.gc_epoch, second.epoch)
+            wire = json.loads((await adapter.read_file(f"/gc-mesh/manifest-{second.generation}.json")).decode("utf-8"))
+            self.assertNotIn("gcFloorHlc", wire)
+            changes = await adapter.list_files("/gc-mesh/changes")
+            self.assertEqual(len([entry for entry in changes if "-chg_" in entry.name]), 2)
             await reader.disconnect()
             await writer.disconnect()
-
-        asyncio.run(scenario())
-
-    def test_compaction_uses_configured_or_default_offline_grace_policy(self) -> None:
-        async def scenario() -> None:
-            adapter = MemoryAdapter()
-            portable_key = generate_portable_key()
-            custom_grace_ms = 30 * 24 * 60 * 60 * 1000
-            configured = Interocitor(
-                adapter,
-                remote_path="/grace-mesh",
-                key_source=PortablePassphraseKeySource(portable_key=portable_key, generate_if_missing=False),
-                schema=_SCHEMA,
-                device_id="019fa13e-cfab-7a91-b759-ca02e12e69d3",
-                require_encryption=True,
-                offline_grace_ms=custom_grace_ms,
-            )
-            await configured.connect()
-            await configured.put("tasks", "task", {"state": "queued"})
-            await configured.flush()
-            first = await configured.compact()
-            self.assertEqual(first.offline_grace_ms, custom_grace_ms)
-            await configured.disconnect()
-
-            defaulting = Interocitor(
-                adapter,
-                remote_path="/grace-mesh",
-                key_source=PortablePassphraseKeySource(portable_key=portable_key, generate_if_missing=False),
-                schema=_SCHEMA,
-                device_id="019fa13e-d000-7a91-b759-ca02e12e69d3",
-                require_existing_mesh=True,
-                require_encryption=True,
-            )
-            await defaulting.connect()
-            second = await defaulting.compact()
-            self.assertEqual(second.offline_grace_ms, 7 * 24 * 60 * 60 * 1000)
-            await defaulting.disconnect()
 
         asyncio.run(scenario())
 

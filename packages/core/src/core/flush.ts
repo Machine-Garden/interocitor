@@ -4,19 +4,20 @@
  * Extracted from Interocitor. Not part of the public API.
  */
 
-import type {
-  StorageAdapter,
-  ChangeEntry,
-  ChangesHead,
-  SyncEvent,
-} from './types.ts';
+import type { StorageAdapter, LocalStore, ChangeEntry, ChangesHead, SyncEvent } from './types.ts';
 import { hlcCompareStr } from './hlc.ts';
 import { paths, textEncoder, textDecoder } from './internals.ts';
 import { encodeChangePayload } from './codec.ts';
 import type { CodecState } from './codec.ts';
 import { upsertDeviceMetadata } from './manifest.ts';
+import { changeFileName, recordFlushedChanges } from './change-observation.ts';
 
-export async function flushToAdapter(
+export interface FlushReplicaTarget {
+  adapter: StorageAdapter;
+  remotePath: string;
+}
+
+async function flushToAdapter(
   adapter: StorageAdapter,
   remotePath: string,
   entries: ChangeEntry[],
@@ -31,7 +32,7 @@ export async function flushToAdapter(
   let lastWrittenHlc = '';
 
   for (const entry of entries) {
-    const fileName = `${entry.hlc}-${entry.id}.json`;
+    const fileName = changeFileName(entry);
     const payload = await encodeChangePayload(codecState, entry);
     console.log('[interocitor:write] flush.changeFile', { path: p.changeFile(fileName), deviceId, isPrimary, entryId: entry.id, hlc: entry.hlc });
     await adapter.writeFile(p.changeFile(fileName), textEncoder.encode(payload));
@@ -41,7 +42,7 @@ export async function flushToAdapter(
     }
   }
 
-  // Update global head — monotonic HLC hint for fast poll skipping.
+  // Update global head — monotonic diagnostic hint, never coverage proof.
   // Tracing rules (see SyncEvent `trace:head`):
   //  - read → emit { op: 'read', reason: 'flush', priorHlc }
   //  - write strictly forward → emit { op: 'write', priorHlc, nextHlc }
@@ -125,4 +126,36 @@ export async function flushToAdapter(
   if (isPrimary) {
     await upsertDeviceMetadata(adapter, remotePath, deviceId);
   }
+}
+
+/** Record exact local receipts, then publish to the authoritative remote. */
+export async function flushPrimary(
+  adapter: StorageAdapter,
+  local: LocalStore,
+  remotePath: string,
+  entries: ChangeEntry[],
+  codecState: CodecState,
+  deviceId: string,
+  emit: (event: SyncEvent) => void = () => {},
+  replicas: readonly FlushReplicaTarget[] = [],
+  onReplicaError: (adapterName: string, error: unknown) => void = () => {},
+): Promise<void> {
+  // A receipt failure prevents publication. A later remote failure is safe:
+  // sync-engine requeues the same immutable identities for retry.
+  await recordFlushedChanges(local, entries);
+  await flushToAdapter(adapter, remotePath, entries, true, codecState, deviceId, emit);
+
+  for (const replica of replicas) {
+    try {
+      if (!replica.adapter.isAuthenticated()) await replica.adapter.authenticate();
+      await flushReplica(replica.adapter, replica.remotePath, entries, codecState, deviceId);
+    } catch (error) {
+      onReplicaError(replica.adapter.name, error);
+    }
+  }
+}
+
+/** Replicas mirror bytes but never advance authoritative local observation. */
+async function flushReplica(adapter: StorageAdapter, remotePath: string, entries: ChangeEntry[], codecState: CodecState, deviceId: string): Promise<void> {
+  await flushToAdapter(adapter, remotePath, entries, false, codecState, deviceId);
 }

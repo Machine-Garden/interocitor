@@ -171,6 +171,7 @@ export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {})
   };
 
   const adapter: LocalStore = {
+    withLock: (name, operation) => runWithRecovery((store) => store.withLock(name, operation)),
     async open(): Promise<void> {
       if (active) return;
       // If the platform has no IDB at all (worker without IDB exposed,
@@ -204,8 +205,12 @@ export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {})
     clearRows: () => runWithRecovery((store) => store.clearRows()),
     getTableNames: () => runWithRecovery((store) => store.getTableNames()),
 
+    commitLocalMutation: (row, pendingBatch) => runWithRecovery((store) => store.commitLocalMutation(row, pendingBatch)),
+    promotePendingBatch: () => runWithRecovery((store) => store.promotePendingBatch()),
     pushOutbox: (entry) => runWithRecovery((store) => store.pushOutbox(entry)),
     pushOutboxEntries: (entries) => runWithRecovery((store) => store.pushOutboxEntries(entries)),
+    peekOutbox: () => runWithRecovery((store) => store.peekOutbox()),
+    acknowledgeOutbox: (entryIds) => runWithRecovery((store) => store.acknowledgeOutbox(entryIds)),
     drainOutbox: () => runWithRecovery((store) => store.drainOutbox()),
     outboxSize: () => runWithRecovery((store) => store.outboxSize()),
 

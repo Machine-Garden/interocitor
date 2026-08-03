@@ -186,10 +186,12 @@ For the threat model, the metadata table, and full mitigations see
 | `flush()` / `pull()` / `compact()` | Yes |
 | `putFile()` / `getFile()` / `openFile()` / `deleteFile()` | Yes |
 
-Row writes are persisted through the configured `LocalStore` and queued in an
-outbox. They survive reloads and crashes only when that store is durable.
+The configured `LocalStore` atomically commits each row mutation with its
+pending immutable batch, then atomically promotes completed batches to the
+outbox. Flush reads without deleting, publishes idempotently, and acknowledges
+only the exact published IDs. With a durable store, a crash therefore leaves
+either retryable local work or an already-published immutable file.
 `MemoryLocalStore` lasts for the current process/session and clears on close.
-On reconnect the engine drains a surviving outbox to the remote.
 
 ### Never-stuck principle
 
@@ -230,8 +232,12 @@ behavior of `@interocitor/core`.
 - **Per‑device HLC monotonicity.** A single device's HLCs strictly
   increase. Cross‑device order is total but only as wall‑clocks allow.
 - **Restore via snapshot.** A device that joins late (or rehydrates after
-  a long offline) loads the latest snapshot, then applies any change
-  files newer than the snapshot watermark.
+  a long offline) loads the latest snapshot and its exact change-file receipts,
+  then applies every retained file not covered by the snapshot.
+- **One compaction cut.** Local writes, explicit batches, pulls, flushes, and
+  snapshot capture share the local-store sync lock. Compaction first publishes
+  completed local work, then pulls, captures receipts and rows, and only then
+  publishes the snapshot.
 
 What we do **not** guarantee:
 
@@ -444,7 +450,8 @@ On `connect()` the engine:
    one. Mismatch → `MeshCredentialMismatchError`.
 3. If local epoch < remote epoch, calls `rehydrate()` to load the
    latest snapshot.
-4. Pulls any change files newer than the snapshot watermark.
+4. Pulls every retained change file not covered by the snapshot's exact
+   receipts.
 5. Starts polling.
 
 > **If portable key material is lost and no other device holds it, the mesh is
@@ -748,16 +755,11 @@ Re-inserting the same row id after a delete starts a fresh row
 incarnation. Columns from the old incarnation are not carried forward;
 a partial insert only contains the new columns.
 
-Compaction can later hard-delete tombstones from snapshots. The engine
-tracks per-device acknowledgements in `devices/<deviceId>.json`; once
-all active devices have observed a manifest watermark, compaction
-publishes `manifest.gcFloorHlc` as a point of no return. Tombstones with
-`deletedHlc <= gcFloorHlc` are omitted from the next snapshot.
-
-Devices not seen within `offlineGraceMs` (default seven days) are
-excluded from GC consensus. If one wakes up with local outbox entries at
-or before `gcFloorHlc`, the engine refuses to flush those entries and
-rehydrates from the canonical snapshot instead.
+Compaction preserves tombstones in snapshots. An HLC watermark cannot prove
+that an offline device will never publish an older queued change, so it is not
+a safe garbage-collection boundary. Hard deletion requires a future protocol
+with contiguous per-writer publication progress or an equivalent publication
+barrier.
 
 ### Local store
 
@@ -873,12 +875,15 @@ manifest and poison the remote.
 
 ## Maintenance / compaction
 
-Compaction collapses the change log into a snapshot, bumps the manifest,
-prunes old change files, and advances the tombstone GC floor when active
-devices have acknowledged the prior watermark. Sync works without it;
-the remote folder just grows until *some* device compacts.
+Compaction publishes a snapshot and bumps the manifest. Peer meshes retain the
+immutable change log because their adapters provide no CAS for safe destructive
+coordination. Server-managed mode publishes canonical checkpoints and enables
+automatic compaction. Immutable change files and tombstones remain retained:
+an authorized identity does not prove that only one process is running.
 
-Two paths run automatically:
+In server-managed mode, two paths run automatically. Peer mode supports manual
+checkpoints but does not schedule automatic compaction because it retains the
+immutable history:
 
 - **Immediate sampled** — after a flush of ≥ `compactAutoThreshold`
   (default 50) ops, with probability ≈
@@ -901,8 +906,8 @@ Both paths are deduped by a single in‑flight guard. You can also call
 > avoidance for small meshes, or run with `serverManaged: true` and a
 > single authorized writer.
 
-Full protocol, events, lock story, device acknowledgement / GC-floor
-rules, prune invariants, and tuning checklist: [Compaction](docs/compaction.md).
+Full protocol, events, lock story, retention invariants, and tuning checklist:
+[Compaction](docs/compaction.md).
 
 ## Connected stores
 
@@ -972,8 +977,9 @@ Recommended pattern for logical migrations:
 2. Implement a one-shot `onInit` migration that reads old rows from the
    local store and writes the new shape back. Use `db.batch(...)` to
    keep it atomic per row group.
-3. Trigger compaction after the migration so the snapshot is written
-   under the new logical version and old change files are pruned.
+3. Trigger compaction after the migration so the snapshot is written under the
+   new logical version. Immutable change files remain available for exact
+   catch-up.
 4. During rollout, make sure old clients either tolerate both shapes or
    are blocked by the manifest version mismatch on connect.
 

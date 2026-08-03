@@ -410,6 +410,8 @@ export interface Snapshot {
   hlc: string;
   epoch: number;
   schemaVersion: number;
+  /** Exact immutable change files whose effects are included in this snapshot. */
+  coveredChangeFiles?: string[];
   tables: Record<string, Record<string, Row>>;
 }
 
@@ -457,25 +459,13 @@ export interface Manifest {
 
   /** Compaction epoch — incremented on each snapshot. */
   epoch: number;
-  /** HLC watermark — all data ≤ this HLC is captured in the snapshot. */
+  /** Snapshot HLC for state order and acknowledgement; exact coverage is named by the snapshot. */
   watermarkHlc: string;
   /** Cloud path to the latest snapshot file, or null before first compaction. */
   snapshotPath: string | null;
   /** Reserved for future delta-based catch-up. */
   deltaPath: string | null;
 
-  /**
-   * Point of no return for this mesh. Local or remote change entries at or
-   * before this HLC are considered captured by canonical snapshots and must
-   * not be flushed by stale clients.
-   */
-  gcFloorHlc?: string;
-  /** Epoch that published gcFloorHlc. */
-  gcEpoch?: number;
-  /** Timestamp when gcFloorHlc was computed. */
-  gcCreatedAt?: string;
-  /** Offline grace used to compute the active device set. */
-  offlineGraceMs?: number;
 }
 
 export type DeviceType = 'web' | 'ios' | 'android' | 'worker' | 'desktop' | 'tv';
@@ -495,13 +485,11 @@ export interface DeviceMetadata extends DeviceInfo {
   observedEpoch?: number;
   /** Latest manifest watermark this device has fully observed. */
   observedWatermarkHlc?: string;
-  /** Latest manifest GC floor this device has accepted. */
-  observedGcFloorHlc?: string;
   /** Timestamp of the observation acknowledgement. */
   observedAt?: string;
-  /** Timestamp when this device was excluded from the active set. */
+  /** Timestamp when this device was manually retired. */
   cutOffAt?: string;
-  cutOffReason?: 'offline-grace-expired' | 'manual-retire';
+  cutOffReason?: 'manual-retire';
 }
 
 export interface DeviceHead {
@@ -511,7 +499,7 @@ export interface DeviceHead {
   fileCount: number;
 }
 
-/** Global change-folder head — monotonic HLC hint for fast poll skipping. */
+/** Global change-folder head — monotonic diagnostic hint, never coverage proof. */
 export interface ChangesHead {
   latestHlc: string;
 }
@@ -774,12 +762,6 @@ export interface SyncConfig<
   secondCompactDelayJitterMs?: number;
   /** Minimum remote change-file count required before the second delay starts (default 2). */
   compactRemoteChangeThreshold?: number;
-  /**
-   * How long an unseen device remains part of compaction/tombstone-GC
-   * consensus. Devices older than this are excluded from the active set and
-   * must align from the current snapshot before writing again. Default 7 days.
-   */
-  offlineGraceMs?: number;
   /** Implicit batch period in ms. All local writes inside the period join one ChangeEntry. Default 1000. */
   batchWindowMs?: number;
   /**
@@ -902,7 +884,7 @@ export type SyncEvent =
   | { type: 'flush:error'; error: Error }
   | { type: 'compact:warning'; queuedChangeCount: number; threshold: number; autoCompactThreshold: number; remotePath?: string; deviceId: string }
   | { type: 'compact:auto:start'; queuedChangeCount: number; threshold: number; sampleRoll?: number; sampleWindow?: number; remoteChangeFileCount?: number; trigger: 'immediate' | 'delayed'; remotePath?: string; deviceId: string }
-  | { type: 'compact:auto:skip'; queuedChangeCount: number; threshold: number; sampleRoll?: number; sampleWindow?: number; trigger: 'immediate' | 'delayed'; remotePath?: string; deviceId: string; reason: 'sampling' | 'disabled' | 'not-connected' | 'already-running' | 'poisoned' | 'missing-remote' | 'below-remote-threshold' | 'superseded' }
+  | { type: 'compact:auto:skip'; queuedChangeCount: number; threshold: number; sampleRoll?: number; sampleWindow?: number; trigger: 'immediate' | 'delayed'; remotePath?: string; deviceId: string; reason: 'sampling' | 'disabled' | 'not-connected' | 'already-running' | 'poisoned' | 'missing-remote' | 'peer-mode' | 'below-remote-threshold' | 'superseded' }
   | { type: 'compact:auto:complete'; queuedChangeCount: number; threshold: number; trigger: 'immediate' | 'delayed'; remoteChangeFileCount?: number; remotePath?: string; deviceId: string }
   | { type: 'compact:auto:error'; queuedChangeCount: number; threshold: number; trigger: 'immediate' | 'delayed'; remoteChangeFileCount?: number; remotePath?: string; deviceId: string; error: Error }
   | { type: 'compact:delayed:scheduled'; queuedChangeCount: number; delayMs: number; phase: 'check' | 'compact'; remotePath?: string; deviceId: string }

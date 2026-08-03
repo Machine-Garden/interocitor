@@ -6,7 +6,6 @@ import {
   opDeletePath,
   opGetFile,
   opListChildren,
-  opPruneCompacted,
   opPutImmutable,
   opPutOverwrite,
   opPutSemantic,
@@ -668,11 +667,6 @@ async function handleSystemOperation<Env>(
       const mesh = await resolveMesh(prefix, request, env, runtime);
       if (mesh instanceof Response) return mesh;
       storageKey = mesh;
-    }
-    if (op === 'prune-compacted-changes' || op === 'compact') {
-      const remotePath = normalizePath(String(body?.remotePath || '/'));
-      const watermarkHlc = String(body?.watermarkHlc || '');
-      return jsonResponse(await opPruneCompacted(db.raw, storageKey, remotePath, watermarkHlc), 200);
     }
     if (op === 'reconcile-metrics') {
       const remotePath = normalizePath(String(body?.remotePath || '/'));

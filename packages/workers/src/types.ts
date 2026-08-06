@@ -94,23 +94,36 @@ export interface WorkerCache {
   delete(input: RequestInfo | URL): Promise<boolean>;
 }
 
-/** R2 object body shape consumed by durable-file reads. */
-export interface R2ObjectBody {
-  body: ReadableStream;
+/** Object body shape consumed by durable-file reads. */
+export interface StoredFileObjectBody {
+  body: ReadableStream<Uint8Array>;
   size: number;
   etag?: string;
   httpEtag?: string;
   writeHttpMetadata(headers: Headers): void;
 }
 
-export interface R2Bucket {
-  get(key: string): Promise<R2ObjectBody | null>;
+/** Object-store operations required for durable file bodies. */
+export interface StoredFileBucket {
+  get(key: string): Promise<StoredFileObjectBody | null>;
   put(
     key: string,
     value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob,
     options?: { httpMetadata?: Record<string, string>; customMetadata?: Record<string, string> },
   ): Promise<unknown>;
   delete(key: string): Promise<void>;
+}
+
+/** Cloudflare R2 object body shape. */
+export interface R2ObjectBody extends StoredFileObjectBody {}
+
+/** Cloudflare R2 binding accepted as a durable-file object store. */
+export interface R2Bucket extends StoredFileBucket {}
+
+/** Stable mesh context supplied while selecting a durable-file object store. */
+export interface StoredFileStorageContext {
+  /** Accepted mesh address whose durable file is being accessed. */
+  address: string;
 }
 
 /**
@@ -306,15 +319,15 @@ export interface InterocitorRuntimeOptions<Env = unknown> {
   maxMainlineBytes?: (env: Env) => string | number | undefined;
   /** Max bytes for another D1 sync object. Default: 8 MiB. */
   maxGenericFileBytes?: (env: Env) => string | number | undefined;
-  /** Max stored bytes for one R2 durable-file upload. Default: 32 MiB. */
+  /** Max stored bytes for one object-store durable-file upload. Default: 32 MiB. */
   maxStoredFileBytes?: (env: Env) => string | number | undefined;
-  /** Max aggregate R2 durable-file bytes for one mesh. Default: 512 MiB. */
+  /** Max aggregate durable-file object-store bytes for one mesh. Default: 512 MiB. */
   maxMeshStoredBytes?: (env: Env) => string | number | undefined;
   /**
    * Additional application policy for durable-file uploads.
    *
-   * Runs after size, quota, and required device-header checks and before R2
-   * storage. Request metadata such as device ID and plaintext size is
+   * Runs after size, quota, and required device-header checks and before the
+   * object-store write. Request metadata such as device ID and plaintext size is
    * client-asserted.
    *
    * Return `true` to allow, `false` to reject with default status, or an
@@ -360,8 +373,12 @@ export interface InterocitorMountOptions<Env = unknown> {
    *
    */
   db: (env: Env) => D1Database;
-  /** Resolve the R2 bucket for durable app file bodies. */
-  files?: (env: Env) => R2Bucket | undefined;
+  /**
+   * Resolve the R2 or S3-compatible object store for durable app file bodies.
+   * The same mesh must resolve to the same store across reads, writes, and
+   * deletes; changing its selection strands previously stored bodies.
+   */
+  files?: (env: Env, context: StoredFileStorageContext) => StoredFileBucket | undefined;
   /** Runtime address, access, limits, maintenance, and instrumentation policy. */
   runtime?: InterocitorRuntimeOptions<Env>;
   /**

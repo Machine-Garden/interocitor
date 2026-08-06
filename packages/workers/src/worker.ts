@@ -24,7 +24,7 @@ import type {
   InterocitorSystemHandlerOptions,
   InterocitorRuntimeOptions,
   WorkerLike,
-  R2Bucket,
+  StoredFileBucket,
   FileUploadAuthorizationResult,
   MeshAccess,
   MeshAuthorization,
@@ -533,7 +533,7 @@ async function handleStoredFileMetadata<Env>(db: DatabaseAdapter, prefix: string
   return jsonResponse({ file: storedFileMetadata(row) }, 200);
 }
 
-async function handleGetStoredFile<Env>(db: DatabaseAdapter, bucket: R2Bucket | undefined, prefix: string, path: string, request: Request, runtime: ResolvedRuntimeConfig, env: Env): Promise<Response> {
+async function handleGetStoredFile<Env>(db: DatabaseAdapter, bucket: StoredFileBucket | undefined, prefix: string, path: string, request: Request, runtime: ResolvedRuntimeConfig, env: Env): Promise<Response> {
   if (!bucket) return jsonResponse({ error: 'File storage bucket not configured' }, 501);
   const normalized = normalizePath(path);
   const row = await db.first<StoredFileRow>('SELECT * FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
@@ -564,7 +564,7 @@ async function normalizeAuthorization(result: FileUploadAuthorizationResult): Pr
 
 async function handlePutStoredFile<Env>(
   db: DatabaseAdapter,
-  bucket: R2Bucket | undefined,
+  bucket: StoredFileBucket | undefined,
   prefix: string,
   path: string,
   request: Request,
@@ -634,7 +634,7 @@ async function handlePutStoredFile<Env>(
   return jsonResponse({ file: storedFileMetadata(row ?? { path: normalized, size: bytes.byteLength, uploaded_by_device_id: uploadedByDeviceId, uploaded_at: now, modified_time: now, etag, taint }) }, status);
 }
 
-async function handleDeleteStoredFile<Env>(db: DatabaseAdapter, bucket: R2Bucket | undefined, prefix: string, path: string, request: Request, runtime: ResolvedRuntimeConfig, env: Env): Promise<Response> {
+async function handleDeleteStoredFile<Env>(db: DatabaseAdapter, bucket: StoredFileBucket | undefined, prefix: string, path: string, request: Request, runtime: ResolvedRuntimeConfig, env: Env): Promise<Response> {
   if (!bucket) return jsonResponse({ error: 'File storage bucket not configured' }, 501);
   const normalized = normalizePath(path);
   const row = await db.first<StoredFileRow>('SELECT r2_key, size, taint FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
@@ -754,7 +754,7 @@ async function handleIoRequest<Env>(
   url: URL,
   dbGetter: (env: Env) => D1Database,
   relayGetter?: (env: Env) => DurableObjectNamespace,
-  filesGetter?: (env: Env) => R2Bucket | undefined,
+  filesGetter?: InterocitorMountOptions<Env>['files'],
 ): Promise<Response> {
   const method = request.method.toUpperCase();
   const { prefix, op } = parseIo(url);
@@ -769,7 +769,7 @@ async function handleIoRequest<Env>(
     async () => {
       const db = resolveDatabase(env, dbGetter);
       const relay = relayGetter ? relayGetter(env) : undefined;
-      const files = filesGetter ? filesGetter(env) : undefined;
+      const files = filesGetter ? filesGetter(env, { address: mesh }) : undefined;
       const storageKey = mesh;
 
   if (op === 'health' && method === 'GET') {
@@ -978,7 +978,7 @@ const interocitorWorker = {
     dbGetter: (env: Env) => D1Database,
     relayGetter?: (env: Env) => DurableObjectNamespace,
     runtimeOptions?: InterocitorRuntimeOptions<Env>,
-    filesGetter?: (env: Env) => R2Bucket | undefined,
+    filesGetter?: InterocitorMountOptions<Env>['files'],
   ): Promise<Response> {
     const runtime = resolveRuntimeConfig(env, runtimeOptions);
     const db = dbGetter;

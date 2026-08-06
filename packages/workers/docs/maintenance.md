@@ -5,7 +5,8 @@ to remote roots that have been inactive for a defined number of hours.
 
 Maintenance is destructive. For each eligible remote root it deletes matching
 rows from the D1 `files` and `folders` tables, clears its counters, and marks
-the `mesh_paths` row deleted. It does not delete R2-backed durable files.
+the `mesh_paths` row deleted. It does not delete R2- or S3-backed durable file
+bodies.
 
 Do not use the Worker path TTL as row-history compaction. The Worker does not
 hold the mesh key and cannot merge encrypted changes into a snapshot. A

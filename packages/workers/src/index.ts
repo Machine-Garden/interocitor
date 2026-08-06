@@ -27,6 +27,9 @@ export type {
   WorkerLike,
   R2Bucket,
   R2ObjectBody,
+  StoredFileBucket,
+  StoredFileObjectBody,
+  StoredFileStorageContext,
   FileUploadAuthorizationRequest,
   FileUploadAuthorizationResult,
   MeshAccess,
@@ -41,3 +44,5 @@ export type {
 } from './types.ts';
 
 export { applySchema, ensureSchema, SCHEMA_STATEMENTS } from './schema.ts';
+export { S3StoredFileBucket } from './s3-stored-file-bucket.ts';
+export type { S3StoredFileBucketConfig } from './s3-stored-file-bucket.ts';

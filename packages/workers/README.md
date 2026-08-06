@@ -6,7 +6,7 @@
 
 # @interocitor/workers
 
-Cloudflare Workers runtime for [Interocitor](https://github.com/TheUiTeam/interocitor). Handles both app-data surfaces — CRDT row sync and R2-backed durable file/image storage — plus optional realtime relay, all behind a single URL prefix in your existing Worker.
+Cloudflare Workers runtime for [Interocitor](https://github.com/TheUiTeam/interocitor). Handles both app-data surfaces — CRDT row sync in D1 and durable file/image bodies in R2 or regional AWS S3 — plus optional realtime relay, all behind a single URL prefix in your existing Worker.
 
 > **Public release:** build the `0.1.0` API from the matching monorepo
 > workspaces.
@@ -111,9 +111,10 @@ Documented entrypoints in this package:
 | `InterocitorMount`, `InterocitorSystemHandler`, `WithInterocitorOptions` | Returned handler and wrapper contracts |
 | `MeshIntegrityGate`, `MeshMiddleware`, `MeshAuthorizer`, `MeshAuthorization`, `MeshRequestContext`, `MeshIntegrityContext`, `MeshAccess` | Mesh integrity and application-policy contracts |
 | `FileUploadAuthorizationRequest`, `FileUploadAuthorizationResult` | You need app-owned policy before durable file uploads are accepted |
+| `S3StoredFileBucket`, `S3StoredFileBucketConfig` | You keep the Worker and D1 control plane while placing durable file bodies in an explicit AWS region |
 | `WorkerAuditEvent`, `WorkerAuditOutcome` | Completed storage-operation instrumentation contracts |
 | `BroadcastDiagnostics` | Optional logging controls for `broadcast` |
-| `D1Database`, `R2Bucket`, `R2ObjectBody`, `DurableObjectNamespace`, `ExecutionContextLike`, `WorkerLike` | Minimal Cloudflare-compatible structural types used by the package API |
+| `D1Database`, `StoredFileBucket`, `StoredFileObjectBody`, `StoredFileStorageContext`, `R2Bucket`, `R2ObjectBody`, `DurableObjectNamespace`, `ExecutionContextLike`, `WorkerLike` | Minimal structural types used by the package API |
 
 ## Runtime
 
@@ -152,7 +153,7 @@ tag = "v1"
 new_classes = ["InterocitorRelayDurableObject"]
 ```
 
-Binding names are ultimately yours. Pass them to `withInterocitor(...)` or `createInterocitorMount(...)` via getters. D1 is required for sync; R2 is required only if clients call durable file/image APIs; Durable Objects are required only for realtime relay.
+Binding names are ultimately yours. Pass them to `withInterocitor(...)` or `createInterocitorMount(...)` via getters. D1 is required for sync. Durable file/image APIs require either an R2 binding or an `S3StoredFileBucket`; Durable Objects are required only for realtime relay.
 
 Apply the canonical D1 schema from the public repository root:
 
@@ -211,7 +212,20 @@ export default {
 
 ## File and image storage
 
-Durable app files are stored in R2 and tracked in D1 metadata. This is separate from sync change files: files are uploaded, read, overwritten, and deleted directly; they are never compacted or merged.
+Durable app file bodies are stored in the object store returned by `files` and tracked in D1 metadata. The conventional store is R2; `S3StoredFileBucket` places the bodies in an explicit AWS region while the Worker and D1 continue serving sync. This is separate from sync change files: files are uploaded, read, overwritten, and deleted directly; they are never compacted or merged.
+
+The resolver receives the accepted mesh address, so one deployment can keep
+ordinary meshes in R2 and route residency-sensitive meshes to S3. A mesh must
+always resolve to the same store: changing the result later strands its existing
+file bodies. `taint` remains opaque metadata and does not select a store.
+
+| Store | Choose it when |
+| --- | --- |
+| R2 binding | The Cloudflare deployment's normal placement meets the mesh's requirements |
+| `S3StoredFileBucket` | Durable file bodies must be written through a named AWS regional endpoint |
+
+For the AWS bucket, IAM, Worker secrets, per-mesh resolver, and exact data
+boundary, follow [Store durable file bodies in AWS S3](docs/s3-file-storage.md).
 
 Worker metadata tracks:
 
@@ -223,7 +237,7 @@ Worker metadata tracks:
 - total read count
 - `taint` — an opaque label set by the client for [sealed files](../core/docs/tainted-files.md). The worker stores and returns it but never interprets it; the bytes stay opaque to the server regardless.
 
-Uploads are guarded before R2 write:
+Uploads are guarded before the object-store write:
 
 - `maxStoredFileBytes` limits one upload.
 - `maxMeshStoredBytes` limits total stored file bytes for a mesh, accounting for overwrites and deletes.
@@ -277,7 +291,7 @@ Start with the behavior your deployment needs:
 | --- | --- |
 | Define valid mesh addresses | `meshIntegrityGates` |
 | Apply application access or request policy | `meshMiddleware` |
-| Set D1/R2 request and quota limits | `maxControlBytes`, `maxChangeBytes`, `maxMainlineBytes`, `maxGenericFileBytes`, `maxStoredFileBytes`, `maxMeshStoredBytes` |
+| Set D1/object-store request and quota limits | `maxControlBytes`, `maxChangeBytes`, `maxMainlineBytes`, `maxGenericFileBytes`, `maxStoredFileBytes`, `maxMeshStoredBytes` |
 | Add durable-file-specific policy | `authorizeFileUpload` |
 | Reclaim inactive D1 sync roots | `enableScheduledMaintenance`, `pathTtlHours` |
 | Instrument completed storage operations | `storageOperationAudit` |
@@ -344,8 +358,9 @@ See [Catch-up](docs/catch-up.md).
 
 ## Security guardrails
 
-For the Cloudflare implementation's security boundary — D1, R2, application
-encryption, metadata exposure, and the limits of server-side access control —
+For the Cloudflare implementation's security boundary — D1, the selected file
+object store, application encryption, metadata exposure, and the limits of
+server-side access control —
 see [Security guardrails](docs/security-guardrails.md).
 
 ## License

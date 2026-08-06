@@ -227,7 +227,7 @@ async function upload(mount, env, meshId, path, body, headers = {}) {
   }), env, createCtx());
 }
 
-test('R2 stored files support PUT, GET, metadata, use count, and DELETE', async () => {
+test('durable-file object stores support PUT, GET, metadata, use count, and DELETE', async () => {
   const { env, mount, system } = createHarness();
   const meshId = await issueMeshId(system, env);
 
@@ -259,6 +259,30 @@ test('R2 stored files support PUT, GET, metadata, use count, and DELETE', async 
 
   const missing = await mount.fetch(new Request(`https://example.test/io/${encodeURIComponent(meshId)}/stored-file?path=%2Fdocs%2Fa.txt`), env, createCtx());
   assert.equal(missing.status, 404);
+});
+
+test('durable-file storage can be selected by accepted mesh address', async () => {
+  const env = { DB: new MemoryD1(), FILES: new MemoryR2() };
+  const selections = [];
+  const mount = createInterocitorMount({
+    db: (value) => value.DB,
+    files: (value, { address }) => {
+      selections.push(address);
+      return value.FILES;
+    },
+    runtime: { meshIntegrityGates: [({ address }) => address === 'sensitive-au'] },
+  });
+
+  const put = await upload(mount, env, 'sensitive-au', '/private.txt', 'secret');
+  assert.equal(put.status, 201);
+  const get = await mount.fetch(
+    new Request('https://example.test/io/sensitive-au/stored-file?path=%2Fprivate.txt'),
+    env,
+    createCtx(),
+  );
+  assert.equal(get.status, 200);
+  assert.equal(await get.text(), 'secret');
+  assert.deepEqual(selections, ['sensitive-au', 'sensitive-au']);
 });
 
 test('durable-file storage requires the explicit files getter', async () => {
@@ -512,7 +536,7 @@ test('worker audit callback receives completed storage-operation events', async 
   assert.ok(write.at, 'expected timestamp');
 });
 
-test('R2 stored files enforce device id, file size, mesh quota, callback rejection, and delete quota recovery', async () => {
+test('durable-file stores enforce device id, file size, mesh quota, callback rejection, and delete quota recovery', async () => {
   const rejected = [];
   const { env, mount, system } = createHarness({
     authorizeFileUpload: async (upload) => {

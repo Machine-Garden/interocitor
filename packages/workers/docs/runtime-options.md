@@ -10,7 +10,7 @@ options described below.
 | --- | --- | --- |
 | `mountPrefix` | `string \| null` | URL prefix shared by the Interocitor routes. The default, `null`, and `/` place those routes at the Worker root. Root mounting claims only Interocitor health, IO, notify, and recovery paths. |
 | `db` | `(env) => D1Database` | Required. Supplies D1 storage for sync objects, metadata, recovery wrappers, and maintenance. |
-| `files` | `(env) => R2Bucket \| undefined` | Supplies R2 storage for durable files. Without it, durable-file routes return `501`; row sync still works. |
+| `files` | `(env, { address }) => StoredFileBucket \| undefined` | Supplies R2 or AWS S3 storage for durable file bodies. The accepted mesh address permits stable per-mesh selection. Without a store, durable-file routes return `501`; row sync still works. |
 | `relay` | `(env) => DurableObjectNamespace` | Supplies the optional invalidation relay. Without it, notify routes return `501`; clients continue by polling. |
 | `runtime` | `InterocitorRuntimeOptions<Env>` | Address integrity, request policy, limits, maintenance, diagnostics, and instrumentation. |
 
@@ -29,7 +29,7 @@ against the `env` supplied to the current request or scheduled event.
 The mesh mount claims
 `/<mountPrefix>/recovery/<locator>` so a client can retrieve an opaque
 credential wrapper without first knowing a mesh address. Recovery uses D1 and
-`maxControlBytes`; it does not require the R2 `files` binding.
+`maxControlBytes`; it does not require the durable-file `files` store.
 
 | Request | Result |
 | --- | --- |
@@ -80,7 +80,8 @@ normalizes authorizer exceptions and invalid decisions to `503`.
 | `pathTtlHours` | `(env: Env) => string \| number \| undefined` | `0` (disabled) | Positive hours since `mesh_paths.last_operation_at` before a D1 sync root becomes eligible for deletion. Omitted, invalid, zero, or negative values disable TTL deletion. Fractional hours are accepted. |
 
 TTL maintenance removes D1 sync objects for an inactive remote root and marks
-its `mesh_paths` row deleted. It does not remove R2 durable files. Read the
+its `mesh_paths` row deleted. It does not remove durable file bodies from R2 or
+S3. Read the
 destructive semantics and cron wiring in [Maintenance and system
 operations](maintenance.md) before enabling it.
 
@@ -95,10 +96,25 @@ use the documented default. An over-limit request returns `413`.
 | `maxChangeBytes` | `(env: Env) => string \| number \| undefined` | 8 MiB | One CRDT change object. |
 | `maxMainlineBytes` | `(env: Env) => string \| number \| undefined` | 16 MiB | One mainline snapshot. |
 | `maxGenericFileBytes` | `(env: Env) => string \| number \| undefined` | 8 MiB | One D1 sync object not covered by the control, change, or mainline limits. |
-| `maxStoredFileBytes` | `(env: Env) => string \| number \| undefined` | 32 MiB | One R2-backed durable-file PUT body. |
+| `maxStoredFileBytes` | `(env: Env) => string \| number \| undefined` | 32 MiB | One object-store-backed durable-file PUT body. |
 | `maxMeshStoredBytes` | `(env: Env) => string \| number \| undefined` | 512 MiB | Sum of D1-tracked durable-file sizes for one mesh address. An overwrite subtracts the previous stored size before adding the replacement. |
 
-The D1 sync-object limits and R2 durable-file limits are independent.
+The D1 sync-object limits and durable-file object-store limits are independent.
+
+### Durable-file object store
+
+`StoredFileBucket` is the exact-key `get` / `put` / `delete` boundary used for
+durable file bodies. An R2 binding satisfies it directly. `S3StoredFileBucket`
+implements it with signed requests to the configured AWS regional endpoint.
+
+The `files` resolver runs after mesh integrity and middleware have accepted the
+address. Its `address` is the canonical storage address. Selection must be a
+stable function of that address and deployment configuration: D1 records one
+opaque object key, not a provider identifier, so changing a mesh from one store
+to another does not migrate existing bodies.
+
+See [AWS S3 durable-file storage](s3-file-storage.md) for the configuration
+contract and security boundary.
 
 ### Durable-file upload policy
 
@@ -108,8 +124,8 @@ checks proceeds. The callback has type
 `(request: FileUploadAuthorizationRequest, env: Env) => FileUploadAuthorizationResult | Promise<FileUploadAuthorizationResult>`.
 It adds application policy to durable-file
 PUTs. It runs after the per-file limit, required
-`X-Interocitor-Device-Id` header, and per-mesh quota checks, and before the R2
-write.
+`X-Interocitor-Device-Id` header, and per-mesh quota checks, and before the
+object-store write.
 
 The request includes:
 

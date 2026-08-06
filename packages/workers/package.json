@@ -1,7 +1,7 @@
 {
   "name": "@interocitor/workers",
   "version": "0.1.0",
-  "description": "Cloudflare Workers runtime for Interocitor-native sync endpoints, semantic storage ops, relay wiring, and maintenance flows.",
+  "description": "Cloudflare Workers runtime for Interocitor sync with D1 plus R2 or regional AWS S3 durable-file storage.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/TheUiTeam/interocitor.git",
@@ -39,6 +39,7 @@
   "keywords": [
     "interocitor",
     "cloudflare-workers",
+    "aws-s3",
     "durable-objects",
     "d1"
   ],

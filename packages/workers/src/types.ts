@@ -94,34 +94,69 @@ export interface WorkerCache {
   delete(input: RequestInfo | URL): Promise<boolean>;
 }
 
-/** Object body shape consumed by durable-file reads. */
-export interface StoredFileObjectBody {
+/** Bytes returned by a configured durable file-body destination. */
+export interface FileBody {
+  body: ReadableStream<Uint8Array>;
+  size: number;
+  /** Provider ETag formatted for an HTTP `ETag` response header, when available. */
+  etag?: string;
+}
+
+/** Request bodies accepted by a durable file-body destination. */
+export type FileBodyValue =
+  | ReadableStream<Uint8Array>
+  | ArrayBuffer
+  | ArrayBufferView
+  | string
+  | null
+  | Blob;
+
+/** Provider-neutral information supplied with a durable file-body write. */
+export interface FileBodyWriteOptions {
+  /** Media type persisted with the body when the provider supports it. */
+  contentType?: string;
+}
+
+/**
+ * Exact-key destination for durable file bodies.
+ *
+ * The Worker owns authorization, mesh routing, quotas, and D1 metadata. A
+ * store implementation owns only body persistence and provider credentials.
+ */
+export interface FileBodyStore {
+  /** Return the exact body stored at `key`, or `null` when it is absent. */
+  get(key: string): Promise<FileBody | null>;
+  /** Fully replace the body at `key`; reject instead of exposing a partial write. */
+  put(
+    key: string,
+    value: FileBodyValue,
+    options?: FileBodyWriteOptions,
+  ): Promise<void>;
+  /** Remove `key`; an absent key is a successful no-op. */
+  delete(key: string): Promise<void>;
+}
+
+/** Object body returned by a Cloudflare R2 binding. */
+export interface R2ObjectBody {
   body: ReadableStream<Uint8Array>;
   size: number;
   etag?: string;
   httpEtag?: string;
-  writeHttpMetadata(headers: Headers): void;
 }
 
-/** Object-store operations required for durable file bodies. */
-export interface StoredFileBucket {
-  get(key: string): Promise<StoredFileObjectBody | null>;
+/** Cloudflare R2 binding wrapped by `R2FileBodyStore`. */
+export interface R2Bucket {
+  get(key: string): Promise<R2ObjectBody | null>;
   put(
     key: string,
-    value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob,
+    value: FileBodyValue,
     options?: { httpMetadata?: Record<string, string>; customMetadata?: Record<string, string> },
-  ): Promise<unknown>;
+  ): Promise<{ etag?: string } | unknown>;
   delete(key: string): Promise<void>;
 }
 
-/** Cloudflare R2 object body shape. */
-export interface R2ObjectBody extends StoredFileObjectBody {}
-
-/** Cloudflare R2 binding accepted as a durable-file object store. */
-export interface R2Bucket extends StoredFileBucket {}
-
-/** Stable mesh context supplied while selecting a durable-file object store. */
-export interface StoredFileStorageContext {
+/** Stable mesh context supplied while selecting a durable file-body destination. */
+export interface FileBodyStorageContext {
   /** Accepted mesh address whose durable file is being accessed. */
   address: string;
 }
@@ -319,15 +354,15 @@ export interface InterocitorRuntimeOptions<Env = unknown> {
   maxMainlineBytes?: (env: Env) => string | number | undefined;
   /** Max bytes for another D1 sync object. Default: 8 MiB. */
   maxGenericFileBytes?: (env: Env) => string | number | undefined;
-  /** Max stored bytes for one object-store durable-file upload. Default: 32 MiB. */
+  /** Max stored bytes for one durable file-body upload. Default: 32 MiB. */
   maxStoredFileBytes?: (env: Env) => string | number | undefined;
-  /** Max aggregate durable-file object-store bytes for one mesh. Default: 512 MiB. */
+  /** Max aggregate durable file-body bytes for one mesh. Default: 512 MiB. */
   maxMeshStoredBytes?: (env: Env) => string | number | undefined;
   /**
    * Additional application policy for durable-file uploads.
    *
    * Runs after size, quota, and required device-header checks and before the
-   * object-store write. Request metadata such as device ID and plaintext size is
+   * file-body-store write. Request metadata such as device ID and plaintext size is
    * client-asserted.
    *
    * Return `true` to allow, `false` to reject with default status, or an
@@ -374,11 +409,11 @@ export interface InterocitorMountOptions<Env = unknown> {
    */
   db: (env: Env) => D1Database;
   /**
-   * Resolve the R2 or S3-compatible object store for durable app file bodies.
+   * Resolve the configured destination for durable app file bodies.
    * The same mesh must resolve to the same store across reads, writes, and
    * deletes; changing its selection strands previously stored bodies.
    */
-  files?: (env: Env, context: StoredFileStorageContext) => StoredFileBucket | undefined;
+  files?: (env: Env, context: FileBodyStorageContext) => FileBodyStore | undefined;
   /** Runtime address, access, limits, maintenance, and instrumentation policy. */
   runtime?: InterocitorRuntimeOptions<Env>;
   /**

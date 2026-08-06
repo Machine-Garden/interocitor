@@ -24,7 +24,7 @@ import type {
   InterocitorSystemHandlerOptions,
   InterocitorRuntimeOptions,
   WorkerLike,
-  StoredFileBucket,
+  FileBodyStore,
   FileUploadAuthorizationResult,
   MeshAccess,
   MeshAuthorization,
@@ -481,7 +481,7 @@ interface StoredFileRow {
   [key: string]: unknown;
   prefix?: string;
   path?: string;
-  r2_key?: string;
+  body_key?: string;
   size?: number;
   plaintext_size?: number | null;
   content_type?: string | null;
@@ -533,15 +533,15 @@ async function handleStoredFileMetadata<Env>(db: DatabaseAdapter, prefix: string
   return jsonResponse({ file: storedFileMetadata(row) }, 200);
 }
 
-async function handleGetStoredFile<Env>(db: DatabaseAdapter, bucket: StoredFileBucket | undefined, prefix: string, path: string, request: Request, runtime: ResolvedRuntimeConfig, env: Env): Promise<Response> {
-  if (!bucket) return jsonResponse({ error: 'File storage bucket not configured' }, 501);
+async function handleGetStoredFile<Env>(db: DatabaseAdapter, store: FileBodyStore | undefined, prefix: string, path: string, request: Request, runtime: ResolvedRuntimeConfig, env: Env): Promise<Response> {
+  if (!store) return jsonResponse({ error: 'File body store not configured' }, 501);
   const normalized = normalizePath(path);
-  const row = await db.first<StoredFileRow>('SELECT * FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
-  if (!row?.r2_key) {
+  const row = await db.first<StoredFileRow>('SELECT *, r2_key AS body_key FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
+  if (!row?.body_key) {
     await emitAudit(runtime, env, { op: 'stored-file-read', address: prefix, path: normalized, status: 404, outcome: 'not-found', requestId: requestId(request) });
     return withCors(new Response('Not found', { status: 404 }));
   }
-  const object = await bucket.get(String(row.r2_key));
+  const object = await store.get(String(row.body_key));
   if (!object) {
     await emitAudit(runtime, env, { op: 'stored-file-read', address: prefix, path: normalized, status: 404, outcome: 'not-found', taint: row.taint || undefined, requestId: requestId(request) });
     return withCors(new Response('Not found', { status: 404 }));
@@ -553,7 +553,7 @@ async function handleGetStoredFile<Env>(db: DatabaseAdapter, bucket: StoredFileB
     'Content-Type': String(row.content_type || 'application/octet-stream'),
     'Content-Length': String(object.size),
   });
-  if (object.httpEtag || object.etag || row.etag) headers.set('ETag', String(object.httpEtag || object.etag || row.etag));
+  if (object.etag || row.etag) headers.set('ETag', String(object.etag || row.etag));
   return withCors(new Response(object.body, { status: 200, headers }));
 }
 
@@ -564,14 +564,14 @@ async function normalizeAuthorization(result: FileUploadAuthorizationResult): Pr
 
 async function handlePutStoredFile<Env>(
   db: DatabaseAdapter,
-  bucket: StoredFileBucket | undefined,
+  store: FileBodyStore | undefined,
   prefix: string,
   path: string,
   request: Request,
   runtime: ResolvedRuntimeConfig,
   env: Env,
 ): Promise<Response> {
-  if (!bucket) return jsonResponse({ error: 'File storage bucket not configured' }, 501);
+  if (!store) return jsonResponse({ error: 'File body store not configured' }, 501);
   const bytes = await readBytes(request);
   if (!bytes) return jsonResponse({ error: 'Invalid request body' }, 400);
   if (bytes.byteLength > runtime.maxStoredFileBytes) return jsonResponse({ error: 'Payload too large', limit: runtime.maxStoredFileBytes }, 413);
@@ -582,7 +582,7 @@ async function handlePutStoredFile<Env>(
   const taint = String(request.headers.get('X-Interocitor-Taint') || '').trim() || null;
   const plaintextSizeHeader = request.headers.get('X-Interocitor-Plaintext-Size');
   const plaintextSize = plaintextSizeHeader ? Number.parseInt(plaintextSizeHeader, 10) : undefined;
-  const existing = await db.first<StoredFileRow>('SELECT size, r2_key FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
+  const existing = await db.first<StoredFileRow>('SELECT size, r2_key AS body_key FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
   const current = await currentStoredBytes(db, prefix);
   const nextTotal = current - Number(existing?.size ?? 0) + bytes.byteLength;
   if (nextTotal > runtime.maxMeshStoredBytes) return jsonResponse({ error: 'Mesh storage quota exceeded', limit: runtime.maxMeshStoredBytes }, 413);
@@ -601,11 +601,10 @@ async function handlePutStoredFile<Env>(
     }, env));
     if (!auth.allowed) return jsonResponse({ error: auth.reason || 'Upload rejected' }, auth.status);
   }
-  const key = String(existing?.r2_key || storedFileKey(prefix, normalized));
+  const key = String(existing?.body_key || storedFileKey(prefix, normalized));
   const now = new Date().toISOString();
-  await bucket.put(key, bytes, {
-    httpMetadata: { contentType },
-    customMetadata: { prefix, path: normalized, uploadedByDeviceId },
+  await store.put(key, bytes, {
+    contentType,
   });
   const etag = crypto.randomUUID();
   await db.run(
@@ -634,15 +633,15 @@ async function handlePutStoredFile<Env>(
   return jsonResponse({ file: storedFileMetadata(row ?? { path: normalized, size: bytes.byteLength, uploaded_by_device_id: uploadedByDeviceId, uploaded_at: now, modified_time: now, etag, taint }) }, status);
 }
 
-async function handleDeleteStoredFile<Env>(db: DatabaseAdapter, bucket: StoredFileBucket | undefined, prefix: string, path: string, request: Request, runtime: ResolvedRuntimeConfig, env: Env): Promise<Response> {
-  if (!bucket) return jsonResponse({ error: 'File storage bucket not configured' }, 501);
+async function handleDeleteStoredFile<Env>(db: DatabaseAdapter, store: FileBodyStore | undefined, prefix: string, path: string, request: Request, runtime: ResolvedRuntimeConfig, env: Env): Promise<Response> {
+  if (!store) return jsonResponse({ error: 'File body store not configured' }, 501);
   const normalized = normalizePath(path);
-  const row = await db.first<StoredFileRow>('SELECT r2_key, size, taint FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
-  if (!row?.r2_key) {
+  const row = await db.first<StoredFileRow>('SELECT r2_key AS body_key, size, taint FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1', prefix, normalized);
+  if (!row?.body_key) {
     await emitAudit(runtime, env, { op: 'stored-file-delete', address: prefix, path: normalized, status: 404, outcome: 'not-found', requestId: requestId(request) });
     return emptyResponse(404);
   }
-  await bucket.delete(String(row.r2_key));
+  await store.delete(String(row.body_key));
   await db.run('DELETE FROM stored_files WHERE prefix=?1 AND path=?2', prefix, normalized);
   await emitAudit(runtime, env, { op: 'stored-file-delete', address: prefix, path: normalized, status: 204, outcome: 'ok', bytes: Number(row.size ?? 0), taint: row.taint || undefined, requestId: requestId(request) });
   return emptyResponse(204);

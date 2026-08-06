@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
 import test from "node:test";
-import { S3StoredFileBucket } from "../dist/index.js";
+import { S3FileBodyStore } from "../dist/index.js";
 
 function hmac(key, value) {
   return createHmac("sha256", key).update(value).digest();
@@ -51,7 +51,7 @@ function expectedAuthorization(
   return `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
 }
 
-test("S3 durable-file bucket signs regional PUT, GET, and DELETE requests", async () => {
+test("S3 file-body store signs regional PUT, GET, and DELETE requests", async () => {
   const calls = [];
   const fetcher = async (input, init) => {
     const url = new URL(input);
@@ -73,7 +73,7 @@ test("S3 durable-file bucket signs regional PUT, GET, and DELETE requests", asyn
   };
   const accessKeyId = "AKIDEXAMPLE";
   const secretAccessKey = "example-secret-key";
-  const bucket = new S3StoredFileBucket({
+  const store = new S3FileBodyStore({
     bucket: "interocitor-sensitive-files",
     region: "ap-southeast-2",
     accessKeyId,
@@ -85,17 +85,16 @@ test("S3 durable-file bucket signs regional PUT, GET, and DELETE requests", asyn
   });
 
   const bytes = new TextEncoder().encode("classified");
-  const put = await bucket.put("meshes/main/files/report.txt", bytes, {
-    httpMetadata: { contentType: "application/octet-stream" },
+  await store.put("meshes/main/files/report.txt", bytes, {
+    contentType: "application/octet-stream",
   });
-  assert.equal(put.etag, '"put-etag"');
 
-  const object = await bucket.get("meshes/main/files/report.txt");
+  const object = await store.get("meshes/main/files/report.txt");
   assert.ok(object);
   assert.equal(object.size, 10);
-  assert.equal(object.etag, "stored-etag");
+  assert.equal(object.etag, '"stored-etag"');
   assert.equal(await new Response(object.body).text(), "classified");
-  await bucket.delete("meshes/main/files/report.txt");
+  await store.delete("meshes/main/files/report.txt");
 
   assert.equal(calls.length, 3);
   const putCall = calls[0];
@@ -133,9 +132,9 @@ test("S3 durable-file bucket signs regional PUT, GET, and DELETE requests", asyn
   assert.equal(calls[2].init.method, "DELETE");
 });
 
-test("S3 durable-file bucket uses a regional path-style URL for dotted bucket names", async () => {
+test("S3 file-body store uses a regional path-style URL for dotted bucket names", async () => {
   const calls = [];
-  const bucket = new S3StoredFileBucket({
+  const store = new S3FileBodyStore({
     bucket: "sensitive.files.example",
     region: "eu-central-1",
     accessKeyId: "access",
@@ -146,15 +145,15 @@ test("S3 durable-file bucket uses a regional path-style URL for dotted bucket na
     },
   });
 
-  assert.equal(await bucket.get("meshes/eu/files/a b.txt"), null);
+  assert.equal(await store.get("meshes/eu/files/a b.txt"), null);
   assert.equal(
     calls[0].url,
     "https://s3.eu-central-1.amazonaws.com/sensitive.files.example/meshes/eu/files/a%20b.txt",
   );
 });
 
-test("S3 durable-file bucket reports regional storage failures without response bodies", async () => {
-  const bucket = new S3StoredFileBucket({
+test("S3 file-body store reports regional storage failures without response bodies", async () => {
+  const store = new S3FileBodyStore({
     bucket: "interocitor-sensitive-files",
     region: "eu-west-1",
     accessKeyId: "access",
@@ -167,15 +166,15 @@ test("S3 durable-file bucket reports regional storage failures without response 
   });
 
   await assert.rejects(
-    bucket.put("meshes/main/files/blocked.txt", "blocked"),
+    store.put("meshes/main/files/blocked.txt", "blocked"),
     /S3 PUT failed: HTTP 403 \(request request-123\)/,
   );
 });
 
-test("S3 durable-file bucket requires an explicit valid region", () => {
+test("S3 file-body store requires an explicit valid region", () => {
   assert.throws(
     () =>
-      new S3StoredFileBucket({
+      new S3FileBodyStore({
         bucket: "interocitor-sensitive-files",
         region: "auto",
         accessKeyId: "access",
@@ -185,10 +184,10 @@ test("S3 durable-file bucket requires an explicit valid region", () => {
   );
 });
 
-test("S3 durable-file bucket rejects a KMS key from another region", () => {
+test("S3 file-body store rejects a KMS key from another region", () => {
   assert.throws(
     () =>
-      new S3StoredFileBucket({
+      new S3FileBodyStore({
         bucket: "interocitor-sensitive-files",
         region: "ap-southeast-2",
         accessKeyId: "access",

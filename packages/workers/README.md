@@ -6,7 +6,7 @@
 
 # @interocitor/workers
 
-Cloudflare Workers runtime for [Interocitor](https://github.com/TheUiTeam/interocitor). Handles both app-data surfaces — CRDT row sync in D1 and durable file/image bodies in R2 or regional AWS S3 — plus optional realtime relay, all behind a single URL prefix in your existing Worker.
+Cloudflare Workers runtime for [Interocitor](https://github.com/TheUiTeam/interocitor). Handles both app-data surfaces — CRDT row sync in D1 and durable file/image bodies in a configured file-body store — plus optional realtime relay, all behind a single URL prefix in your existing Worker. Built-in store adapters support Cloudflare R2 and regional AWS S3.
 
 > **Public release:** build the `0.1.0` API from the matching monorepo
 > workspaces.
@@ -34,7 +34,10 @@ values supplied by the host; the complete runnable deployment is
 ```ts
 import {
   createMeshAuthorizationMiddleware,
+  R2FileBodyStore,
   withInterocitor,
+  type D1Database,
+  type R2Bucket,
 } from '@interocitor/workers';
 
 interface Env {
@@ -61,7 +64,7 @@ const appWorker = {
 export default withInterocitor<Env>(appWorker, {
   mountPrefix: '/sync',
   db: (env) => env.MY_DB,
-  files: (env) => env.MY_FILES,
+  files: (env) => new R2FileBodyStore(env.MY_FILES),
   runtime: {
     meshIntegrityGates: [({ address }) => address === 'main'],
     meshMiddleware: [authorizeMain],
@@ -111,10 +114,12 @@ Documented entrypoints in this package:
 | `InterocitorMount`, `InterocitorSystemHandler`, `WithInterocitorOptions` | Returned handler and wrapper contracts |
 | `MeshIntegrityGate`, `MeshMiddleware`, `MeshAuthorizer`, `MeshAuthorization`, `MeshRequestContext`, `MeshIntegrityContext`, `MeshAccess` | Mesh integrity and application-policy contracts |
 | `FileUploadAuthorizationRequest`, `FileUploadAuthorizationResult` | You need app-owned policy before durable file uploads are accepted |
-| `S3StoredFileBucket`, `S3StoredFileBucketConfig` | You keep the Worker and D1 control plane while placing durable file bodies in an explicit AWS region |
+| `FileBodyStore`, `FileBody`, `FileBodyValue`, `FileBodyWriteOptions`, `FileBodyStorageContext` | You implement or select a durable file-body destination without changing Worker authorization or D1 metadata |
+| `R2FileBodyStore`, `R2Bucket`, `R2ObjectBody` | You use a Cloudflare R2 binding as the file-body destination |
+| `S3FileBodyStore`, `S3FileBodyStoreConfig` | You keep the Worker and D1 control plane while placing durable file bodies in an explicit AWS region |
 | `WorkerAuditEvent`, `WorkerAuditOutcome` | Completed storage-operation instrumentation contracts |
 | `BroadcastDiagnostics` | Optional logging controls for `broadcast` |
-| `D1Database`, `StoredFileBucket`, `StoredFileObjectBody`, `StoredFileStorageContext`, `R2Bucket`, `R2ObjectBody`, `DurableObjectNamespace`, `ExecutionContextLike`, `WorkerLike` | Minimal structural types used by the package API |
+| `D1Database`, `DurableObjectNamespace`, `ExecutionContextLike`, `WorkerLike` | Minimal runtime structural types used by the package API |
 
 ## Runtime
 
@@ -126,7 +131,7 @@ The conventional app wiring is:
 const mount = createInterocitorMount({
   mountPrefix: '/sync',
   db: (env) => env.INTEROCITOR_DB,
-  files: (env) => env.INTEROCITOR_FILES,
+  files: (env) => new R2FileBodyStore(env.INTEROCITOR_FILES),
   relay: (env) => env.INTEROCITOR_RELAY,
   runtime: {
     meshIntegrityGates: [({ address }) => address === 'main'],
@@ -153,7 +158,7 @@ tag = "v1"
 new_classes = ["InterocitorRelayDurableObject"]
 ```
 
-Binding names are ultimately yours. Pass them to `withInterocitor(...)` or `createInterocitorMount(...)` via getters. D1 is required for sync. Durable file/image APIs require either an R2 binding or an `S3StoredFileBucket`; Durable Objects are required only for realtime relay.
+Binding names are ultimately yours. Pass them to `withInterocitor(...)` or `createInterocitorMount(...)` via getters. D1 is required for sync. Durable file/image APIs require a `FileBodyStore`; wrap an R2 binding with `R2FileBodyStore` or configure `S3FileBodyStore`. Durable Objects are required only for realtime relay.
 
 Apply the canonical D1 schema from the public repository root:
 
@@ -186,12 +191,13 @@ If you need manual routing instead of wrapping the whole worker:
 ```ts
 import {
   createInterocitorMount,
+  R2FileBodyStore,
 } from '@interocitor/workers';
 
 const mount = createInterocitorMount<Env>({
   mountPrefix: '/sync',
   db: (env) => env.MY_DB,
-  files: (env) => env.MY_FILES,
+  files: (env) => new R2FileBodyStore(env.MY_FILES),
   relay: (env) => env.MY_RELAY,
   runtime: {
     meshIntegrityGates: [({ address }) => address === 'main'],
@@ -212,17 +218,22 @@ export default {
 
 ## File and image storage
 
-Durable app file bodies are stored in the object store returned by `files` and tracked in D1 metadata. The conventional store is R2; `S3StoredFileBucket` places the bodies in an explicit AWS region while the Worker and D1 continue serving sync. This is separate from sync change files: files are uploaded, read, overwritten, and deleted directly; they are never compacted or merged.
+Durable app file bodies are stored in the `FileBodyStore` returned by `files`, while paths, quotas, and operational metadata remain in D1. `R2FileBodyStore` adapts an R2 binding; `S3FileBodyStore` places bodies in an explicit AWS region. Other destinations can implement the same exact-key contract. This is separate from sync change files: files are uploaded, read, overwritten, and deleted directly; they are never compacted or merged.
 
 The resolver receives the accepted mesh address, so one deployment can keep
 ordinary meshes in R2 and route residency-sensitive meshes to S3. A mesh must
 always resolve to the same store: changing the result later strands its existing
 file bodies. `taint` remains opaque metadata and does not select a store.
 
+The host deployment owns store construction, endpoint allowlisting, and
+provider credentials. The browser and request metadata cannot supply a shared
+storage endpoint or credential.
+
 | Store | Choose it when |
 | --- | --- |
-| R2 binding | The Cloudflare deployment's normal placement meets the mesh's requirements |
-| `S3StoredFileBucket` | Durable file bodies must be written through a named AWS regional endpoint |
+| `R2FileBodyStore` | The Cloudflare deployment's normal placement meets the mesh's requirements |
+| `S3FileBodyStore` | Durable file bodies must be written through a named AWS regional endpoint |
+| Custom `FileBodyStore` | Another trusted destination can provide exact-key `get`, `put`, and `delete` |
 
 For the AWS bucket, IAM, Worker secrets, per-mesh resolver, and exact data
 boundary, follow [Store durable file bodies in AWS S3](docs/s3-file-storage.md).
@@ -237,7 +248,7 @@ Worker metadata tracks:
 - total read count
 - `taint` — an opaque label set by the client for [sealed files](../core/docs/tainted-files.md). The worker stores and returns it but never interprets it; the bytes stay opaque to the server regardless.
 
-Uploads are guarded before the object-store write:
+Uploads are guarded before the file-body-store write:
 
 - `maxStoredFileBytes` limits one upload.
 - `maxMeshStoredBytes` limits total stored file bytes for a mesh, accounting for overwrites and deletes.
@@ -252,6 +263,7 @@ import {
   checksummedMeshIntegrityGate,
   createInterocitorMount,
   createMeshAuthorizationMiddleware,
+  R2FileBodyStore,
 } from '@interocitor/workers';
 
 const authorizeMesh = createMeshAuthorizationMiddleware(async ({ address, access, request }, env) => {
@@ -266,7 +278,7 @@ const authorizeMesh = createMeshAuthorizationMiddleware(async ({ address, access
 const mount = createInterocitorMount<Env>({
   mountPrefix: '/sync',
   db: env => env.INTEROCITOR_DB,
-  files: env => env.INTEROCITOR_FILES,
+  files: env => new R2FileBodyStore(env.INTEROCITOR_FILES),
   runtime: {
     maxStoredFileBytes: env => env.INTEROCITOR_MAX_STORED_FILE_BYTES,
     maxMeshStoredBytes: env => env.INTEROCITOR_MAX_MESH_STORED_BYTES,
@@ -291,7 +303,7 @@ Start with the behavior your deployment needs:
 | --- | --- |
 | Define valid mesh addresses | `meshIntegrityGates` |
 | Apply application access or request policy | `meshMiddleware` |
-| Set D1/object-store request and quota limits | `maxControlBytes`, `maxChangeBytes`, `maxMainlineBytes`, `maxGenericFileBytes`, `maxStoredFileBytes`, `maxMeshStoredBytes` |
+| Set D1/file-body-store request and quota limits | `maxControlBytes`, `maxChangeBytes`, `maxMainlineBytes`, `maxGenericFileBytes`, `maxStoredFileBytes`, `maxMeshStoredBytes` |
 | Add durable-file-specific policy | `authorizeFileUpload` |
 | Reclaim inactive D1 sync roots | `enableScheduledMaintenance`, `pathTtlHours` |
 | Instrument completed storage operations | `storageOperationAudit` |
@@ -327,10 +339,10 @@ what TTL deletes and how the host applies its administrative policy.
 operations:
 
 ```ts
-runtime: {
+const runtime = {
   // Simplest useful sink: structured log to `wrangler tail` / Logpush.
-  storageOperationAudit: (event) => console.log(JSON.stringify(event)),
-}
+  storageOperationAudit: (event: WorkerAuditEvent) => console.log(JSON.stringify(event)),
+};
 ```
 
 The Worker does not persist events. Callback failures do not fail the request,
@@ -359,7 +371,7 @@ See [Catch-up](docs/catch-up.md).
 ## Security guardrails
 
 For the Cloudflare implementation's security boundary — D1, the selected file
-object store, application encryption, metadata exposure, and the limits of
+body store, application encryption, metadata exposure, and the limits of
 server-side access control —
 see [Security guardrails](docs/security-guardrails.md).
 

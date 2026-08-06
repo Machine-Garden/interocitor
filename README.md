@@ -33,15 +33,15 @@ boundary.
 
 ## Package map
 
-| Package                | Start here                                                                                              |
-| ---------------------- | ------------------------------------------------------------------------------------------------------- |
-| `@interocitor/core`    | [Engine, schemas, adapters, pairing, recovery, and file APIs](packages/core/README.md)                  |
-| `@interocitor/web`     | [Browser local stores, credential custody, and image helpers](packages/web/README.md)                   |
-| `@interocitor/react`   | [Context and reactive row/image hooks](packages/react/README.md)                                        |
-| `@interocitor/workers` | [Cloudflare Worker runtime with D1 plus R2 or regional AWS S3 file storage](packages/workers/README.md) |
-| `@interocitor/webdav`  | [Loopback development and test server](packages/webdav/README.md)                                       |
-| InterocitorSwift       | [Swift source package](packages/interocitor-swift/README.md)                                            |
-| `interocitor`          | [Python core for headless workers and protocol integrations](packages/interocitor-python/README.md)     |
+| Package                | Start here                                                                                                  |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `@interocitor/core`    | [Engine, schemas, adapters, pairing, recovery, and file APIs](packages/core/README.md)                      |
+| `@interocitor/web`     | [Browser local stores, credential custody, and image helpers](packages/web/README.md)                       |
+| `@interocitor/react`   | [Context and reactive row/image hooks](packages/react/README.md)                                            |
+| `@interocitor/workers` | [Cloudflare Worker runtime with D1 plus configurable durable file-body storage](packages/workers/README.md) |
+| `@interocitor/webdav`  | [Loopback development and test server](packages/webdav/README.md)                                           |
+| InterocitorSwift       | [Swift source package](packages/interocitor-swift/README.md)                                                |
+| `interocitor`          | [Python core for headless workers and protocol integrations](packages/interocitor-python/README.md)         |
 
 The browser package is the recommended entry point for browser applications;
 it supplies the local-store and credential-store implementations used with the

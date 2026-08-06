@@ -1,7 +1,8 @@
 # Cloudflare security guardrails
 
 The Cloudflare Worker backend stores sync state and durable-file metadata in D1
-and file bodies in its configured object store: R2 or regional AWS S3.
+and file bodies in its configured `FileBodyStore`. Built-in adapters support R2
+and regional AWS S3.
 Protected meshes reach both stores as client-encrypted payloads; routing and
 operational metadata remain visible. Applications keep mesh keys on clients and
 must supply request authentication and authorization.
@@ -12,7 +13,8 @@ This document applies to the Cloudflare Workers backend in `@interocitor/workers
 
 - row/change storage in **D1**;
 - durable file/image storage metadata in **D1**;
-- durable file/image bytes in **R2 or regional AWS S3**, selected per mesh;
+- durable file/image bytes in the configured **`FileBodyStore`**, selected per
+  mesh; the built-in implementations target R2 and regional AWS S3;
 - optional realtime relay via Durable Objects.
 
 It defines the package's storage, encryption, metadata, and access-control
@@ -22,8 +24,8 @@ boundaries.
 
 - **Interocitor encrypts application data on the client before upload** when the mesh is configured with a non-null `keySource`.
 - **Cloudflare D1** stores row/change payloads, routing metadata, and durable-file metadata. Interocitor's application confidentiality does not depend on the platform storage layer.
-- **The configured object store** holds durable file/image bodies. [R2 encrypts objects and object metadata at rest with Cloudflare-managed keys](https://developers.cloudflare.com/r2/reference/data-security/); AWS S3 encrypts new objects at rest and can use a configured customer-managed KMS key. Protected Interocitor files arrive at either store as application ciphertext.
-- **The server cannot read protected application payloads** without the mesh key. That includes encrypted row data in D1 and encrypted file bytes in the configured object store.
+- **The configured file-body store** holds durable file/image bodies. [R2 encrypts objects and object metadata at rest with Cloudflare-managed keys](https://developers.cloudflare.com/r2/reference/data-security/); AWS S3 encrypts new objects at rest and can use a configured customer-managed KMS key. Protected Interocitor files arrive at either built-in store as application ciphertext. A custom store owns its provider-level encryption contract.
+- **The server cannot read protected application payloads** without the mesh key. That includes encrypted row data in D1 and encrypted file bytes in the configured file-body store.
 - **Request access is application policy.** The host supplies AuthN/AuthZ through `meshMiddleware`, at the mesh-address level.
 - **Simple key protection exists, but it is not document-level or row-level ACL.** The main protection is that data is useless without the client-held mesh key (or bound key components in the bound-shared-key scenario).
 
@@ -48,14 +50,18 @@ level, that means two classes of information:
 At the security boundary, D1 is a **ciphertext plus metadata store** for
 protected meshes.
 
-### Durable-file object store
+### Durable file-body store
 
-R2 or `S3StoredFileBucket` stores durable file/image object bytes. For protected
+The configured `FileBodyStore` stores durable file/image bytes. For protected
 meshes, those objects are Interocitor-encrypted application payloads. The
-selected platform also applies encryption at rest: R2 uses
+built-in platforms also apply encryption at rest: R2 uses
 [platform-managed encryption](https://developers.cloudflare.com/r2/reference/data-security/),
 and S3 applies its bucket encryption configuration plus an optional
 customer-managed KMS key supplied by the Worker.
+
+The host constructs the store from trusted deployment configuration. Browser
+input, request headers, file metadata, and `taint` do not select an endpoint or
+supply shared provider credentials.
 
 S3 selection changes only the durable body location. File paths, sizes,
 classification, uploader, timestamps, access counters, and object keys remain
@@ -71,7 +77,7 @@ for transport. See [R2 data security](https://developers.cloudflare.com/r2/refer
 
 [AWS documents automatic encryption at rest for S3
 objects](https://docs.aws.amazon.com/AmazonS3/latest/userguide/serv-side-encryption.html).
-When the `S3StoredFileBucket` `kmsKeyId` option is configured, every PUT
+When the `S3FileBodyStore` `kmsKeyId` option is configured, every PUT
 explicitly requests SSE-KMS with that customer-managed key. The Worker sends S3
 requests over TLS and authenticates them with Signature Version 4.
 
@@ -179,7 +185,7 @@ Their impact:
 
 For this Cloudflare deployment, asymmetric keys should be described as improving
 **key distribution and recipient identity**, not as changing what D1 or the
-object store can see. Those stores still hold ciphertext plus metadata; clients
+file-body store can see. Those stores still hold ciphertext plus metadata; clients
 still hold or derive the material required to decrypt protected data.
 
 ### Cloudflare WARP / Zero Trust access
@@ -210,7 +216,7 @@ and key material**.
 
 Mesh-key protection makes possession of storage alone insufficient.
 
-A copy of D1 plus the selected R2 or S3 objects does **not** reveal protected
+A copy of D1 plus the selected file-body-store objects does **not** reveal protected
 application data without the client-held mesh key material.
 
 Depending on configuration:
@@ -226,20 +232,20 @@ This is key protection. It is useful and real. But it is **not** the same thing 
 
 Use language like this:
 
-- **Correct:** "The Worker stores encrypted application payloads in D1 and the configured R2 or S3 object store. Interocitor encrypts protected application data on the client before upload."
+- **Correct:** "The Worker stores encrypted application payloads in D1 and the configured file-body store. Interocitor encrypts protected application data on the client before upload."
 - **Correct:** "The server cannot read protected row/file contents without client-held mesh key material."
 - **Correct:** "The implementation provides mesh-level access gating, not fine-grained server-enforced ACL."
 - **Incorrect:** "The server has no access to any data."
 - **Incorrect:** "Cloudflare cannot see any metadata."
 - **Incorrect:** "Interocitor enforces per-document access control on the backend."
-- **Incorrect:** "R2 or S3 encryption at rest means application administrators cannot access object contents."
+- **Incorrect:** "Provider encryption at rest means application administrators cannot access object contents."
 
 ## Auditor notes
 
 For SOC or similar review, the important statements are:
 
 1. **Application confidentiality boundary**
-   - Protected business payloads are encrypted by the client before storage in D1 and the selected object store.
+   - Protected business payloads are encrypted by the client before storage in D1 and the selected file-body store.
 
 2. **Platform encryption boundary**
    - Platform storage controls complement application encryption; they do not replace client-held mesh keys.
@@ -258,10 +264,10 @@ For SOC or similar review, the important statements are:
 
 For a Cloudflare backend deployment:
 
-- treat D1 and the selected object store as **ciphertext + metadata stores**, not as trusted confidentiality boundaries by themselves;
+- treat D1 and the selected file-body store as **ciphertext + metadata stores**, not as trusted confidentiality boundaries by themselves;
 - do not claim document-level or row-level backend ACL unless you actually add it;
-- do not store plaintext business data in D1 or the object store for meshes that are supposed to be confidential;
-- keep the object-store selection stable for each mesh and migrate bodies before changing it;
+- do not store plaintext business data in D1 or the file-body store for meshes that are supposed to be confidential;
+- keep the file-body-store selection stable for each mesh and migrate bodies before changing it;
 - do not describe S3 body placement as whole-mesh residency while D1 metadata and sync objects remain on Cloudflare;
 - document whether you use the portable shared key or bound shared key scenario for each product surface;
 - review whether routing, lookup, size, timing, file classification, and device-bookkeeping metadata are acceptable leakage for your compliance posture.

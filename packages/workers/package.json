@@ -1,7 +1,7 @@
 {
   "name": "@interocitor/workers",
   "version": "0.1.0",
-  "description": "Cloudflare Workers runtime for Interocitor sync with D1 plus R2 or regional AWS S3 durable-file storage.",
+  "description": "Cloudflare Workers runtime for Interocitor sync with D1 plus configurable durable file-body storage.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/TheUiTeam/interocitor.git",

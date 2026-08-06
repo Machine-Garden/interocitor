@@ -3,6 +3,7 @@ import {
   createMeshAuthorizationMiddleware,
   createInterocitorSystemHandler,
   InterocitorRelayDurableObject,
+  R2FileBodyStore,
   withInterocitor,
 } from '../../packages/workers/dist/index.js';
 
@@ -22,7 +23,7 @@ const meshBearerAuthorization = createMeshAuthorizationMiddleware(async ({ addre
 const interocitorOptions = {
   mountPrefix: '/todo-interocitor',
   db: (env) => env.INTEROCITOR_DB,
-  files: (env) => env.INTEROCITOR_FILES,
+  files: (env) => new R2FileBodyStore(env.INTEROCITOR_FILES),
   relay: (env) => env.INTEROCITOR_RELAY,
   runtime: {
     meshIntegrityGates: [checksummedMeshIntegrityGate],

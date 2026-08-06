@@ -65,19 +65,24 @@ class MemoryD1 {
       }
       return { total };
     }
-    if (sql.includes('SELECT size, r2_key FROM stored_files')) {
+    if (sql.includes('SELECT size, r2_key AS body_key FROM stored_files')) {
       const [prefix, path] = params;
       const row = this.storedFiles.get(this.key(prefix, path));
-      return row ? { size: row.size, r2_key: row.r2_key } : null;
+      return row ? { size: row.size, body_key: row.r2_key } : null;
+    }
+    if (sql.includes('SELECT *, r2_key AS body_key FROM stored_files')) {
+      const [prefix, path] = params;
+      const row = this.storedFiles.get(this.key(prefix, path));
+      return row ? { ...row, body_key: row.r2_key } : null;
     }
     if (sql.includes('SELECT * FROM stored_files')) {
       const [prefix, path] = params;
       return this.storedFiles.get(this.key(prefix, path)) ?? null;
     }
-    if (sql.includes('SELECT r2_key') && sql.includes('FROM stored_files')) {
+    if (sql.includes('SELECT r2_key AS body_key') && sql.includes('FROM stored_files')) {
       const [prefix, path] = params;
       const row = this.storedFiles.get(this.key(prefix, path));
-      return row ? { r2_key: row.r2_key, size: row.size, taint: row.taint } : null;
+      return row ? { body_key: row.r2_key, size: row.size, taint: row.taint } : null;
     }
     return null;
   }
@@ -141,31 +146,23 @@ class MemoryD1 {
   }
 }
 
-class MemoryR2Object {
-  constructor(bytes, contentType, etag) {
-    this.bytes = bytes;
-    this.size = bytes.byteLength;
-    this.etag = etag;
-    this.httpEtag = etag;
-    this.body = new Blob([bytes]).stream();
-    this.contentType = contentType;
-  }
-
-  writeHttpMetadata(headers) {
-    if (this.contentType) headers.set('Content-Type', this.contentType);
-  }
-}
-
-class MemoryR2 {
+class MemoryFileBodyStore {
   constructor() {
     this.objects = new Map();
   }
 
   async get(key) {
-    return this.objects.get(key) ?? null;
+    const object = this.objects.get(key);
+    return object
+      ? {
+          body: new Blob([object.bytes]).stream(),
+          size: object.bytes.byteLength,
+          etag: object.etag,
+        }
+      : null;
   }
 
-  async put(key, value, options = {}) {
+  async put(key, value) {
     let bytes;
     if (value instanceof Uint8Array) bytes = value;
     else if (value instanceof ArrayBuffer) bytes = new Uint8Array(value);
@@ -174,7 +171,7 @@ class MemoryR2 {
     else if (typeof value === 'string') bytes = new TextEncoder().encode(value);
     else bytes = new Uint8Array();
     const etag = `etag-${this.objects.size + 1}`;
-    this.objects.set(key, new MemoryR2Object(bytes, options.httpMetadata?.contentType, etag));
+    this.objects.set(key, { bytes, etag });
     return { etag };
   }
 
@@ -198,7 +195,7 @@ async function issueMeshId(system, env) {
 }
 
 function createHarness(runtime = {}) {
-  const env = { DB: new MemoryD1(), FILES: new MemoryR2() };
+  const env = { DB: new MemoryD1(), FILES: new MemoryFileBodyStore() };
   const options = {
     db: (e) => e.DB,
     files: (e) => e.FILES,
@@ -227,7 +224,7 @@ async function upload(mount, env, meshId, path, body, headers = {}) {
   }), env, createCtx());
 }
 
-test('durable-file object stores support PUT, GET, metadata, use count, and DELETE', async () => {
+test('durable file-body stores support PUT, GET, metadata, use count, and DELETE', async () => {
   const { env, mount, system } = createHarness();
   const meshId = await issueMeshId(system, env);
 
@@ -262,7 +259,7 @@ test('durable-file object stores support PUT, GET, metadata, use count, and DELE
 });
 
 test('durable-file storage can be selected by accepted mesh address', async () => {
-  const env = { DB: new MemoryD1(), FILES: new MemoryR2() };
+  const env = { DB: new MemoryD1(), FILES: new MemoryFileBodyStore() };
   const selections = [];
   const mount = createInterocitorMount({
     db: (value) => value.DB,
@@ -286,7 +283,7 @@ test('durable-file storage can be selected by accepted mesh address', async () =
 });
 
 test('durable-file storage requires the explicit files getter', async () => {
-  const env = { DB: new MemoryD1(), INTEROCITOR_FILES: new MemoryR2() };
+  const env = { DB: new MemoryD1(), INTEROCITOR_FILES: new MemoryFileBodyStore() };
   const mount = createInterocitorMount({
     db: (value) => value.DB,
     runtime: { meshIntegrityGates: [({ address }) => address === 'main'] },

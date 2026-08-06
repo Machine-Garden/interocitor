@@ -4,6 +4,8 @@ Use a regional AWS S3 bucket when a mesh's durable file bodies need placement
 in a specific AWS region while its Interocitor Worker, CRDT sync objects, and
 operational metadata remain on Cloudflare. This is a file-body placement
 control, not an AWS-native Interocitor backend or a whole-mesh residency claim.
+`S3FileBodyStore` implements the same provider-neutral `FileBodyStore` contract
+used by the Worker for every durable body destination.
 
 ## Storage boundary
 
@@ -57,7 +59,8 @@ are application-owned setup.
 
 ```ts
 import {
-  S3StoredFileBucket,
+  R2FileBodyStore,
+  S3FileBodyStore,
   createInterocitorMount,
   type D1Database,
   type R2Bucket,
@@ -76,8 +79,10 @@ const mount = createInterocitorMount<Env>({
   mountPrefix: "/sync",
   db: (env) => env.INTEROCITOR_DB,
   files: (env, { address }) => {
-    if (!address.startsWith("sensitive-au-")) return env.INTEROCITOR_FILES;
-    return new S3StoredFileBucket({
+    if (!address.startsWith("sensitive-au-")) {
+      return new R2FileBodyStore(env.INTEROCITOR_FILES);
+    }
+    return new S3FileBodyStore({
       bucket: env.AWS_S3_BUCKET,
       region: "ap-southeast-2",
       accessKeyId: env.AWS_S3_ACCESS_KEY_ID,
@@ -98,7 +103,7 @@ resolver receives only the accepted mesh address; `taint`, file path, and
 request headers do not choose the provider. Moving an existing mesh between R2
 and S3 requires an explicit body migration before changing the resolver.
 
-## `S3StoredFileBucket` configuration
+## `S3FileBodyStore` configuration
 
 | Option            | Required | Behavior                                                                                             |
 | ----------------- | -------- | ---------------------------------------------------------------------------------------------------- |
@@ -118,8 +123,10 @@ and AWS request ID when one is present; response bodies are not copied into the
 error.
 
 The implementation signs the request body, uses HTTPS, and performs exact-key
-GET, PUT, and DELETE only. D1 remains authoritative for quotas and returned
-file metadata; S3 persists the body and content type, not the D1 metadata. A
+GET, PUT, and DELETE only. D1 remains authoritative for quotas and durable-file
+application and operational metadata. S3 persists the body and content type
+and reports the stored size and optional ETag needed to serve that body; it
+does not own the D1 metadata. A
 successful S3 PUT followed by a D1 failure can leave an orphan
 object, and a successful S3 delete followed by a D1 failure can leave stale D1
 metadata; this is the same two-store failure boundary as the R2 configuration.

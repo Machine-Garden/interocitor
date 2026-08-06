@@ -1,9 +1,9 @@
-import type { StoredFileBucket, StoredFileObjectBody } from "./types.ts";
+import type { FileBody, FileBodyStore, FileBodyValue, FileBodyWriteOptions } from "./types.ts";
 
 const encoder = new TextEncoder();
 const EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
-export interface S3StoredFileBucketConfig {
+export interface S3FileBodyStoreConfig {
   /** AWS S3 bucket name. */
   bucket: string;
   /** Exact AWS region used in both the endpoint and SigV4 credential scope. */
@@ -22,7 +22,7 @@ export interface S3StoredFileBucketConfig {
   fetcher?: typeof fetch;
 }
 
-function assertConfig(config: S3StoredFileBucketConfig): void {
+function assertConfig(config: S3FileBodyStoreConfig): void {
   if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(config.bucket) || config.bucket.includes("..")) {
     throw new Error("S3 bucket must be a valid general-purpose bucket name");
   }
@@ -102,9 +102,7 @@ function sortedStrings(values: Iterable<string>): string[] {
   return sorted;
 }
 
-async function bytesFromValue(
-  value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob,
-): Promise<Uint8Array> {
+async function bytesFromValue(value: FileBodyValue): Promise<Uint8Array> {
   if (value === null) return new Uint8Array();
   if (typeof value === "string") return encoder.encode(value);
   if (value instanceof Uint8Array) return value;
@@ -115,72 +113,53 @@ async function bytesFromValue(
   return new Uint8Array(await new Response(value).arrayBuffer());
 }
 
-class S3ObjectBody implements StoredFileObjectBody {
+class S3ObjectBody implements FileBody {
   readonly body: ReadableStream<Uint8Array>;
   readonly size: number;
   readonly etag?: string;
-  readonly httpEtag?: string;
-  private readonly contentType?: string;
 
   constructor(response: Response) {
     this.body = response.body ?? new Blob([]).stream();
     this.size = Number.parseInt(response.headers.get("Content-Length") || "0", 10) || 0;
-    this.httpEtag = response.headers.get("ETag") || undefined;
-    this.etag =
-      this.httpEtag?.startsWith('"') && this.httpEtag.endsWith('"')
-        ? this.httpEtag.slice(1, -1)
-        : this.httpEtag;
-    this.contentType = response.headers.get("Content-Type") || undefined;
-  }
-
-  writeHttpMetadata(headers: Headers): void {
-    if (this.contentType) headers.set("Content-Type", this.contentType);
+    this.etag = response.headers.get("ETag") || undefined;
   }
 }
 
 /**
- * AWS S3 implementation of the durable-file object-store boundary.
+ * AWS S3 implementation of the durable file-body-store boundary.
  *
  * It deliberately implements only exact-key GET, PUT, and DELETE. CRDT sync
  * objects, recovery wrappers, quotas, and durable-file metadata remain in D1.
  */
-export class S3StoredFileBucket implements StoredFileBucket {
-  private readonly config: S3StoredFileBucketConfig;
+export class S3FileBodyStore implements FileBodyStore {
+  private readonly config: S3FileBodyStoreConfig;
   private readonly fetcher: typeof fetch;
   private readonly prefix: string;
 
-  constructor(config: S3StoredFileBucketConfig) {
+  constructor(config: S3FileBodyStoreConfig) {
     assertConfig(config);
     this.config = { ...config };
     this.fetcher = config.fetcher ?? fetch;
     this.prefix = normalizePrefix(config.keyPrefix);
   }
 
-  async get(key: string): Promise<StoredFileObjectBody | null> {
+  async get(key: string): Promise<FileBody | null> {
     const response = await this.request("GET", key);
     if (response.status === 404) return null;
     await this.assertOk(response, "GET");
     return new S3ObjectBody(response);
   }
 
-  async put(
-    key: string,
-    value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob,
-    options: {
-      httpMetadata?: Record<string, string>;
-      customMetadata?: Record<string, string>;
-    } = {},
-  ): Promise<unknown> {
+  async put(key: string, value: FileBodyValue, options: FileBodyWriteOptions = {}): Promise<void> {
     const bytes = await bytesFromValue(value);
     const headers = new Headers();
-    headers.set("Content-Type", options.httpMetadata?.contentType || "application/octet-stream");
+    headers.set("Content-Type", options.contentType || "application/octet-stream");
     if (this.config.kmsKeyId) {
       headers.set("x-amz-server-side-encryption", "aws:kms");
       headers.set("x-amz-server-side-encryption-aws-kms-key-id", this.config.kmsKeyId);
     }
     const response = await this.request("PUT", key, bytes, headers);
     await this.assertOk(response, "PUT");
-    return { etag: response.headers.get("ETag") || undefined };
   }
 
   async delete(key: string): Promise<void> {

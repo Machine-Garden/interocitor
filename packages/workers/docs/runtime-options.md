@@ -10,7 +10,7 @@ options described below.
 | --- | --- | --- |
 | `mountPrefix` | `string \| null` | URL prefix shared by the Interocitor routes. The default, `null`, and `/` place those routes at the Worker root. Root mounting claims only Interocitor health, IO, notify, and recovery paths. |
 | `db` | `(env) => D1Database` | Required. Supplies D1 storage for sync objects, metadata, recovery wrappers, and maintenance. |
-| `files` | `(env, { address }) => StoredFileBucket \| undefined` | Supplies R2 or AWS S3 storage for durable file bodies. The accepted mesh address permits stable per-mesh selection. Without a store, durable-file routes return `501`; row sync still works. |
+| `files` | `(env, { address }) => FileBodyStore \| undefined` | Supplies the configured destination for durable file bodies. The accepted mesh address permits stable per-mesh selection. Without a store, durable-file routes return `501`; row sync still works. |
 | `relay` | `(env) => DurableObjectNamespace` | Supplies the optional invalidation relay. Without it, notify routes return `501`; clients continue by polling. |
 | `runtime` | `InterocitorRuntimeOptions<Env>` | Address integrity, request policy, limits, maintenance, diagnostics, and instrumentation. |
 
@@ -80,8 +80,8 @@ normalizes authorizer exceptions and invalid decisions to `503`.
 | `pathTtlHours` | `(env: Env) => string \| number \| undefined` | `0` (disabled) | Positive hours since `mesh_paths.last_operation_at` before a D1 sync root becomes eligible for deletion. Omitted, invalid, zero, or negative values disable TTL deletion. Fractional hours are accepted. |
 
 TTL maintenance removes D1 sync objects for an inactive remote root and marks
-its `mesh_paths` row deleted. It does not remove durable file bodies from R2 or
-S3. Read the
+its `mesh_paths` row deleted. It does not remove durable file bodies from the
+configured store. Read the
 destructive semantics and cron wiring in [Maintenance and system
 operations](maintenance.md) before enabling it.
 
@@ -96,22 +96,41 @@ use the documented default. An over-limit request returns `413`.
 | `maxChangeBytes` | `(env: Env) => string \| number \| undefined` | 8 MiB | One CRDT change object. |
 | `maxMainlineBytes` | `(env: Env) => string \| number \| undefined` | 16 MiB | One mainline snapshot. |
 | `maxGenericFileBytes` | `(env: Env) => string \| number \| undefined` | 8 MiB | One D1 sync object not covered by the control, change, or mainline limits. |
-| `maxStoredFileBytes` | `(env: Env) => string \| number \| undefined` | 32 MiB | One object-store-backed durable-file PUT body. |
+| `maxStoredFileBytes` | `(env: Env) => string \| number \| undefined` | 32 MiB | One file-body-store PUT body. |
 | `maxMeshStoredBytes` | `(env: Env) => string \| number \| undefined` | 512 MiB | Sum of D1-tracked durable-file sizes for one mesh address. An overwrite subtracts the previous stored size before adding the replacement. |
 
-The D1 sync-object limits and durable-file object-store limits are independent.
+The D1 sync-object limits and durable file-body-store limits are independent.
 
-### Durable-file object store
+### Durable file-body store
 
-`StoredFileBucket` is the exact-key `get` / `put` / `delete` boundary used for
-durable file bodies. An R2 binding satisfies it directly. `S3StoredFileBucket`
-implements it with signed requests to the configured AWS regional endpoint.
+`FileBodyStore` is the provider-neutral exact-key `get` / `put` / `delete`
+boundary used for durable file bodies. It does not own authorization, mesh
+routing, quotas, or durable-file application and operational metadata; the
+Worker and D1 retain those responsibilities. On reads, the store reports only
+representation facts needed to serve the body: its stored `size` and optional
+HTTP-formatted `etag`. `R2FileBodyStore` adapts a Cloudflare R2 binding, and
+`S3FileBodyStore` signs requests to a configured AWS regional endpoint.
+
+| Method | Required behavior |
+| --- | --- |
+| `get(key)` | Return the exact stored bytes, size, and optional HTTP-formatted ETag; return `null` when the key is absent. |
+| `put(key, value, { contentType })` | Fully replace the bytes at the key or reject. Partial successful writes are not valid. |
+| `delete(key)` | Remove the bytes. Deleting an absent key is a successful no-op. |
+
+Keys are opaque provider-independent strings. A store may map them to a bucket
+key, remote path, or provider file identifier, but it must not reinterpret the
+mesh or application path encoded by the Worker. Listing, authentication, and
+provider account discovery are outside this interface.
 
 The `files` resolver runs after mesh integrity and middleware have accepted the
 address. Its `address` is the canonical storage address. Selection must be a
 stable function of that address and deployment configuration: D1 records one
 opaque object key, not a provider identifier, so changing a mesh from one store
 to another does not migrate existing bodies.
+
+Store construction, endpoint allowlisting, and provider credentials belong to
+trusted deployment configuration. Request data and browser-controlled metadata
+must not choose an arbitrary destination or supply a shared credential.
 
 See [AWS S3 durable-file storage](s3-file-storage.md) for the configuration
 contract and security boundary.
@@ -125,7 +144,7 @@ checks proceeds. The callback has type
 It adds application policy to durable-file
 PUTs. It runs after the per-file limit, required
 `X-Interocitor-Device-Id` header, and per-mesh quota checks, and before the
-object-store write.
+file-body-store write.
 
 The request includes:
 

@@ -422,6 +422,60 @@ test('a denied or unavailable mesh authorizer fails closed', async () => {
   assert.equal((await unavailableAuthorizer.fetch(new Request(`https://example.test/io/${encodeURIComponent(meshId)}/file?path=%2Fmanifest.json`), env, createCtx())).status, 503);
 });
 
+test('concealed authorization denial is indistinguishable from an invalid mesh address', async () => {
+  const { env, system } = createHarness();
+  const meshId = await issueMeshId(system, env);
+  const mount = createInterocitorMount({
+    db: (e) => e.DB,
+    runtime: {
+      meshIntegrityGates: [checksummedMeshIntegrityGate],
+      meshMiddleware: [createMeshAuthorizationMiddleware(() => 'deny', { concealDenied: true })],
+    },
+  });
+
+  const denied = await mount.fetch(new Request(`https://example.test/io/${encodeURIComponent(meshId)}/file?path=%2Fmanifest.json`), env, createCtx());
+  const invalid = await mount.fetch(new Request('https://example.test/io/not-a-checksummed-mesh/file?path=%2Fmanifest.json'), env, createCtx());
+
+  assert.equal(denied.status, 404);
+  assert.equal(await denied.text(), await invalid.text());
+});
+
+test('explicit CORS origins replace the legacy wildcard on all mount responses', async () => {
+  const env = { DB: new MemoryD1(), APP_ORIGIN: 'https://app.example.test' };
+  const mount = createInterocitorMount({
+    db: (e) => e.DB,
+    cors: { allowedOrigins: (e) => [e.APP_ORIGIN] },
+    runtime: { meshIntegrityGates: [({ address }) => address === 'main'] },
+  });
+
+  const allowed = await mount.fetch(new Request('https://example.test/io/main/health', {
+    headers: { Origin: env.APP_ORIGIN },
+  }), env, createCtx());
+  assert.equal(allowed.headers.get('Access-Control-Allow-Origin'), env.APP_ORIGIN);
+  assert.match(allowed.headers.get('Vary') || '', /Origin/i);
+
+  const disallowed = await mount.fetch(new Request('https://example.test/io/main/health', {
+    headers: { Origin: 'https://other.example.test' },
+  }), env, createCtx());
+  assert.equal(disallowed.headers.get('Access-Control-Allow-Origin'), null);
+
+  const preflight = await mount.fetch(new Request('https://example.test/io/main/health', {
+    method: 'OPTIONS',
+    headers: { Origin: env.APP_ORIGIN },
+  }), env, createCtx());
+  assert.equal(preflight.headers.get('Access-Control-Allow-Origin'), env.APP_ORIGIN);
+
+  const system = createInterocitorSystemHandler({
+    db: (e) => e.DB,
+    cors: { allowedOrigins: (e) => [e.APP_ORIGIN] },
+  });
+  const systemPreflight = await system.fetch(new Request('https://example.test/__interocitor/system/bootstrap', {
+    method: 'OPTIONS',
+    headers: { Origin: env.APP_ORIGIN },
+  }), env, createCtx());
+  assert.equal(systemPreflight.headers.get('Access-Control-Allow-Origin'), env.APP_ORIGIN);
+});
+
 test('named mesh integrity gates and middleware compose around authorization', async () => {
   const { env } = createHarness();
   const audit = [];

@@ -9,6 +9,7 @@ options described below.
 | Option | Type | Behavior |
 | --- | --- | --- |
 | `mountPrefix` | `string \| null` | URL prefix shared by the Interocitor routes. The default, `null`, and `/` place those routes at the Worker root. Root mounting claims only Interocitor health, IO, notify, and recovery paths. |
+| `cors` | `CorsOptions<Env>` | Optional exact-origin browser policy. Omit it to preserve `Access-Control-Allow-Origin: *`; when configured, only an exact listed request `Origin` receives the allow-origin header and every response varies by `Origin`. |
 | `db` | `(env) => D1Database` | Required. Supplies D1 storage for sync objects, metadata, recovery wrappers, and maintenance. |
 | `files` | `(env, { address }) => FileBodyStore \| undefined` | Supplies the configured destination for durable file bodies. The accepted mesh address permits stable per-mesh selection. Without a store, durable-file routes return `501`; row sync still works. |
 | `relay` | `(env) => DurableObjectNamespace` | Supplies the optional invalidation relay. Without it, notify routes return `501`; clients continue by polling. |
@@ -23,6 +24,19 @@ route is separate from that mount. See
 
 Environment binding names belong to the host Worker. Getters are evaluated
 against the `env` supplied to the current request or scheduled event.
+
+### CORS policy
+
+`cors` has one required field: `allowedOrigins`, either a readonly array or an
+`(env) => readonly string[]` resolver. Each entry is an exact browser origin;
+an empty list allows no cross-origin browser reads. The package never reflects
+an unlisted `Origin`, and configured responses include `Vary: Origin` so a
+cache cannot reuse one origin's CORS decision for another. `cors` controls
+browser response access only; use mesh middleware for request authentication
+and authorization.
+
+`createInterocitorSystemHandler(...)` also accepts `cors`, independently from
+the mesh mount, because hosts route its system endpoints separately.
 
 ## Recovery wrapper route
 
@@ -71,6 +85,13 @@ authorization helper.
 A second call to the same layer's `next()` returns `500`. Uncaught middleware
 exceptions propagate to the Worker runtime. `createMeshAuthorizationMiddleware`
 normalizes authorizer exceptions and invalid decisions to `503`.
+
+Its optional second argument, `{ concealDenied: true }`, maps `deny` and a
+readonly write rejection to the same `404 Not found` response returned when no
+integrity gate accepts the address. It protects deployments where revealing
+that an issued or named mesh exists is not acceptable. The default is `false`,
+which retains `403 Forbidden` for an accepted address whose caller lacks
+access; this gives clients a clearer authorization failure.
 
 ### Scheduled maintenance
 

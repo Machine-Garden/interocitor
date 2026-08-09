@@ -26,8 +26,10 @@ import type {
   WorkerLike,
   FileBodyStore,
   FileUploadAuthorizationResult,
+  CorsOptions,
   MeshAccess,
   MeshAuthorization,
+  MeshAuthorizationMiddlewareOptions,
   MeshAuthorizer,
   MeshIntegrityContext,
   MeshIntegrityGate,
@@ -194,7 +196,14 @@ function fileSizeLimitForPathType(pathType: string, runtime: ResolvedRuntimeConf
  * `none` and `full` continue, `readonly` rejects writes, and `deny` rejects
  * every request. Authorizer failures and invalid decisions return `503`.
  */
-export function createMeshAuthorizationMiddleware<Env>(authorizer: MeshAuthorizer<Env>): MeshMiddleware<Env> {
+export function createMeshAuthorizationMiddleware<Env>(
+  authorizer: MeshAuthorizer<Env>,
+  options: MeshAuthorizationMiddlewareOptions = {},
+): MeshMiddleware<Env> {
+  const denied = () => jsonResponse(
+    { error: options.concealDenied ? 'Not found' : 'Forbidden' },
+    options.concealDenied ? 404 : 403,
+  );
   return async (context, env, next) => {
     let decision: MeshAuthorization;
     try {
@@ -203,8 +212,8 @@ export function createMeshAuthorizationMiddleware<Env>(authorizer: MeshAuthorize
       return jsonResponse({ error: 'Authorization unavailable' }, 503);
     }
     if (decision === 'none' || decision === 'full') return next();
-    if (decision === 'readonly') return context.access === 'write' ? jsonResponse({ error: 'Forbidden' }, 403) : next();
-    if (decision === 'deny') return jsonResponse({ error: 'Forbidden' }, 403);
+    if (decision === 'readonly') return context.access === 'write' ? denied() : next();
+    if (decision === 'deny') return denied();
     return jsonResponse({ error: 'Authorization unavailable' }, 503);
   };
 }
@@ -297,6 +306,32 @@ function withCors(response: Response): Response {
   headers.set('Access-Control-Allow-Methods', 'OPTIONS, GET, PUT, DELETE, POST');
   headers.set('Access-Control-Allow-Headers', '*');
   headers.set('Access-Control-Expose-Headers', 'ETag');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function appendVary(headers: Headers, value: string): void {
+  const values = headers.get('Vary')?.split(',').map(item => item.trim()).filter(Boolean) ?? [];
+  if (!values.some(item => item.toLowerCase() === value.toLowerCase())) values.push(value);
+  headers.set('Vary', values.join(', '));
+}
+
+function applyConfiguredCors<Env>(response: Response, request: Request, env: Env, cors?: CorsOptions<Env>): Response {
+  // A WebSocket upgrade response carries Cloudflare-specific state that cannot
+  // be preserved by reconstructing Response. Browsers do not apply CORS to it.
+  if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') return response;
+
+  const headers = new Headers(response.headers);
+  if (cors) {
+    const origins = typeof cors.allowedOrigins === 'function' ? cors.allowedOrigins(env) : cors.allowedOrigins;
+    const origin = request.headers.get('Origin');
+    headers.delete('Access-Control-Allow-Origin');
+    appendVary(headers, 'Origin');
+    if (origin && origin !== '*' && origins.includes(origin)) headers.set('Access-Control-Allow-Origin', origin);
+  }
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -880,7 +915,7 @@ export function createInterocitorMount<Env = unknown>(
     const strippedPath = stripMountPrefix(url.pathname, mountPrefix);
     if (strippedPath === null) return new Response('Not found', { status: 404 });
     url.pathname = strippedPath;
-    return interocitorWorker.fetch(new Request(url.toString(), request), env, ctx, dbGetter, relayGetter, runtimeOptions, filesGetter);
+    return interocitorWorker.fetch(new Request(url.toString(), request), env, ctx, dbGetter, relayGetter, runtimeOptions, filesGetter, options.cors);
   }
 
   return Object.freeze({ mountPrefix, healthPath, ioBase, notifyBase, recoveryBase, matches, fetch });
@@ -910,14 +945,15 @@ export function createInterocitorSystemHandler<Env = unknown>(
       return new Response('Not found', { status: 404 });
     }
     url.pathname = strippedPath;
-    if (request.method.toUpperCase() === 'OPTIONS') return preflightResponse();
-    return handleSystemOperation(
+    if (request.method.toUpperCase() === 'OPTIONS') return applyConfiguredCors(preflightResponse(), request, env, options.cors);
+    const response = await handleSystemOperation(
       resolveDatabase(env, options.db),
       new Request(url.toString(), request),
       url,
       resolveRuntimeConfig(env, options.runtime),
       env,
     );
+    return applyConfiguredCors(response, request, env, options.cors);
   }
 
   return Object.freeze({ systemBase, matches, fetch });
@@ -978,27 +1014,28 @@ const interocitorWorker = {
     relayGetter?: (env: Env) => DurableObjectNamespace,
     runtimeOptions?: InterocitorRuntimeOptions<Env>,
     filesGetter?: InterocitorMountOptions<Env>['files'],
+    cors?: CorsOptions<Env>,
   ): Promise<Response> {
     const runtime = resolveRuntimeConfig(env, runtimeOptions);
     const db = dbGetter;
     const url = new URL(request.url);
     const method = request.method.toUpperCase();
 
-    if (method === 'OPTIONS') return preflightResponse();
+    if (method === 'OPTIONS') return applyConfiguredCors(preflightResponse(), request, env, cors);
     if (url.pathname === '/' || url.pathname === '/health') {
-      return withCors(new Response('interocitor cloudflare worker\n', { status: 200 }));
+      return applyConfiguredCors(withCors(new Response('interocitor cloudflare worker\n', { status: 200 })), request, env, cors);
     }
     if (url.pathname.startsWith(`${NOTIFY_PREFIX}/`)) {
       const prefix = decodeURIComponent(url.pathname.slice(`${NOTIFY_PREFIX}/`.length).split('/')[0] || '');
-      return handleWsUpgrade(request, env, runtime, ctx, prefix, relayGetter);
+      return applyConfiguredCors(await handleWsUpgrade(request, env, runtime, ctx, prefix, relayGetter), request, env, cors);
     }
     if (url.pathname.startsWith(`${IO_PREFIX}/`)) {
-      return handleIoRequest(request, env, runtime, ctx, url, db, relayGetter, filesGetter);
+      return applyConfiguredCors(await handleIoRequest(request, env, runtime, ctx, url, db, relayGetter, filesGetter), request, env, cors);
     }
     if (url.pathname.startsWith(`${RECOVERY_PREFIX}/`)) {
       const locator = decodeURIComponent(url.pathname.slice(`${RECOVERY_PREFIX}/`.length).split('/')[0] || '');
-      return handleRecoveryRequest(request, env, runtime, resolveDatabase(env, db), locator);
+      return applyConfiguredCors(await handleRecoveryRequest(request, env, runtime, resolveDatabase(env, db), locator), request, env, cors);
     }
-    return withCors(new Response('Not found', { status: 404 }));
+    return applyConfiguredCors(withCors(new Response('Not found', { status: 404 })), request, env, cors);
   },
 };

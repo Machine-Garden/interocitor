@@ -113,6 +113,27 @@ The four results are:
 
 An authorizer exception or invalid result returns `503`.
 
+### Conceal accepted addresses from denied callers
+
+The default `403` denial tells a caller that the address passed the integrity
+gate but they lack access. That can disclose issuance for checksummed IDs. A
+deployment that needs invalid and unauthorized addresses to be indistinguishable
+can opt into matching `404` responses:
+
+```ts
+const authorizeMesh = createMeshAuthorizationMiddleware(
+  async ({ request }, env) => {
+    const subject = await env.identity.verify(request);
+    return subject ? 'full' : 'deny';
+  },
+  { concealDenied: true },
+);
+```
+
+This applies to `deny` and readonly write rejections. It intentionally trades
+the client's explicit authorization diagnostic for address-existence concealment;
+authorization-service failures remain `503`.
+
 ## Compose other request policy
 
 `meshMiddleware` wraps accepted IO and notify requests in array order. Each

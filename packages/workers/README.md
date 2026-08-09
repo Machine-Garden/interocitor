@@ -110,9 +110,9 @@ Documented entrypoints in this package:
 | `InterocitorRelayDurableObject` | You want realtime invalidation over WebSockets in addition to polling |
 | `broadcast` | You need to enqueue a custom relay invalidation outside the built-in write/delete paths |
 | `applySchema`, `ensureSchema`, `SCHEMA_STATEMENTS` | You need programmatic D1 schema setup instead of the packaged SQL file |
-| `InterocitorMountOptions`, `InterocitorRuntimeOptions`, `InterocitorSystemHandlerOptions` | Configuration contracts; see the [reference](docs/runtime-options.md) |
+| `InterocitorMountOptions`, `InterocitorRuntimeOptions`, `InterocitorSystemHandlerOptions`, `CorsOptions` | Configuration contracts; see the [reference](docs/runtime-options.md) |
 | `InterocitorMount`, `InterocitorSystemHandler`, `WithInterocitorOptions` | Returned handler and wrapper contracts |
-| `MeshIntegrityGate`, `MeshMiddleware`, `MeshAuthorizer`, `MeshAuthorization`, `MeshRequestContext`, `MeshIntegrityContext`, `MeshAccess` | Mesh integrity and application-policy contracts |
+| `MeshIntegrityGate`, `MeshMiddleware`, `MeshAuthorizer`, `MeshAuthorization`, `MeshAuthorizationMiddlewareOptions`, `MeshRequestContext`, `MeshIntegrityContext`, `MeshAccess` | Mesh integrity and application-policy contracts |
 | `FileUploadAuthorizationRequest`, `FileUploadAuthorizationResult` | You need app-owned policy before durable file uploads are accepted |
 | `FileBodyStore`, `FileBody`, `FileBodyValue`, `FileBodyWriteOptions`, `FileBodyStorageContext` | You implement or select a durable file-body destination without changing Worker authorization or D1 metadata |
 | `R2FileBodyStore`, `R2Bucket`, `R2ObjectBody` | You use a Cloudflare R2 binding as the file-body destination |
@@ -301,6 +301,7 @@ Start with the behavior your deployment needs:
 
 | Need | Options |
 | --- | --- |
+| Serve browser clients from named application origins | `cors.allowedOrigins` |
 | Define valid mesh addresses | `meshIntegrityGates` |
 | Apply application access or request policy | `meshMiddleware` |
 | Set D1/file-body-store request and quota limits | `maxControlBytes`, `maxChangeBytes`, `maxMainlineBytes`, `maxGenericFileBytes`, `maxStoredFileBytes`, `maxMeshStoredBytes` |
@@ -311,6 +312,33 @@ Start with the behavior your deployment needs:
 
 The [Worker configuration reference](docs/runtime-options.md) defines every
 type, default, route surface, ordering rule, and failure behavior.
+
+### CORS allowlists
+
+The default preserves the package's original broad browser behavior:
+Interocitor responses include `Access-Control-Allow-Origin: *`. A deployment
+that owns an explicit origin allowlist should configure it on the mount rather
+than putting the mailbox on a separate Worker or origin:
+
+```ts
+const mount = createInterocitorMount<Env>({
+  mountPrefix: '/sync',
+  db: env => env.INTEROCITOR_DB,
+  cors: {
+    allowedOrigins: env => [env.APP_ORIGIN],
+  },
+  runtime: {
+    meshIntegrityGates: [({ address }) => address === 'main'],
+  },
+});
+```
+
+`allowedOrigins` is an exact list. A request from a listed origin receives that
+origin in `Access-Control-Allow-Origin` plus `Vary: Origin`; an unlisted or
+missing origin receives no allow-origin header. CORS only controls browser
+access to responses. It does not authenticate a caller or replace mesh
+middleware. `createInterocitorSystemHandler(...)` accepts the same `cors`
+option when system routes are exposed.
 
 ## Mesh addresses and access
 

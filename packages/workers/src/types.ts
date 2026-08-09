@@ -260,6 +260,16 @@ export type MeshAuthorization = 'none' | 'readonly' | 'full' | 'deny';
  */
 export type MeshAuthorizer<Env = unknown> = (request: MeshRequestContext, env: Env) => MeshAuthorization | Promise<MeshAuthorization>;
 
+/** Options for {@link createMeshAuthorizationMiddleware}. */
+export interface MeshAuthorizationMiddlewareOptions {
+  /**
+   * Return `404 Not found` for authorization denials instead of `403 Forbidden`.
+   * Enable this when callers must not learn that an integrity-accepted mesh
+   * address exists. Defaults to `false`.
+   */
+  concealDenied?: boolean;
+}
+
 /** Outcome recorded after a storage operation completes. */
 export type WorkerAuditOutcome = 'ok' | 'rejected' | 'not-found';
 
@@ -399,6 +409,12 @@ export interface InterocitorMountOptions<Env = unknown> {
    */
   mountPrefix?: string | null;
   /**
+   * Cross-origin policy for this deployment's Interocitor routes. Omit it to
+   * preserve the legacy `Access-Control-Allow-Origin: *` response. When set,
+   * only exact request origins in `allowedOrigins` receive that header.
+   */
+  cors?: CorsOptions<Env>;
+  /**
    * Resolve the D1 database from the Worker env at request time.
    *
    * Use this when your D1 binding has a non-default name:
@@ -427,6 +443,15 @@ export interface InterocitorMountOptions<Env = unknown> {
   relay?: (env: Env) => DurableObjectNamespace;
 }
 
+/** Cross-origin policy for an Interocitor route handler. */
+export interface CorsOptions<Env = unknown> {
+  /**
+   * Exact browser origins permitted to read Interocitor responses. An empty
+   * list disables cross-origin browser access. `'*'` is not a permitted entry.
+   */
+  allowedOrigins: readonly string[] | ((env: Env) => readonly string[]);
+}
+
 /** Frozen request handler bundle returned by {@link createInterocitorMount}. */
 export interface InterocitorMount<Env = unknown> {
   /** The normalized URL prefix claimed by this mount, e.g. `'/io'`. */
@@ -449,6 +474,8 @@ export interface InterocitorMount<Env = unknown> {
 export interface InterocitorSystemHandlerOptions<Env = unknown> {
   /** URL prefix shared with the mesh mount. */
   mountPrefix?: string | null;
+  /** Cross-origin policy for system-operation responses. */
+  cors?: CorsOptions<Env>;
   /** Resolve the D1 database used by system operations. */
   db: (env: Env) => D1Database;
   /** Integrity, TTL, checksum, and diagnostic settings used by system operations. */

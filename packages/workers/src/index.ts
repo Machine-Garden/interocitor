@@ -36,11 +36,13 @@ export type {
   FileUploadAuthorizationResult,
   MeshAccess,
   MeshAuthorization,
+  MeshAuthorizationMiddlewareOptions,
   MeshAuthorizer,
   MeshIntegrityContext,
   MeshIntegrityGate,
   MeshMiddleware,
   MeshRequestContext,
+  CorsOptions,
   WorkerAuditEvent,
   WorkerAuditOutcome,
 } from './types.ts';

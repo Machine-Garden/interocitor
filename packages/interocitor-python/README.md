@@ -191,10 +191,11 @@ indexes, publish field definitions, or change a mesh's version by itself. Omit
 it when no explicit compatibility gate is needed; an omitted version does not
 reject an existing manifest.
 
-For a breaking data-meaning change, arrange a rollout or a new mesh in your
-application. Do not rely on merely changing the number to transform existing
-data. The [core schema migration discussion](../core/README.md#schema-migration)
-explains the wider browser/local-store context.
+Data migration is application-owned. An application can keep one global
+version, version individual tables or rows, or simply update recognizable old
+data without a version. Do not rely on merely changing Schema.version to
+transform existing data. The [core data migration discussion](../core/README.md#application-owned-data-migrations)
+shows these patterns and the guarantees Interocitor deliberately does not add.
 
 ## Connect a real worker
 

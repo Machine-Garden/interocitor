@@ -145,7 +145,7 @@ Use a row for offline-readable file references and policy labels. See
 | `keySource`                 | Required            | `MeshKeySource`; `null` selects an unencrypted mesh. The mode must match the remote manifest. |
 | `remotePath`                | None                | Mesh root inside the adapter. Required before remote operations.                              |
 | `dbName`                    | `'interocitor'`     | Local diagnostic and credential-store namespace; it does not create a store.                  |
-| `schema`                    | None                | Table fields, indexes, logical version, and merge policy.                                     |
+| `schema`                    | None                | Table fields, local indexes, merge policy, and an optional manifest compatibility marker. A version set at bootstrap must match on later clients; it does not migrate an existing mesh. |
 | `deviceId`                  | Generated           | Test/host override for the device identity.                                                   |
 | `deviceName` / `deviceType` | None                | Plaintext remote device metadata.                                                             |
 | `joinExistingMeshPolicy`    | `'reset-to-remote'` | On a different existing mesh, either clear local state or intentionally merge it.             |
@@ -159,7 +159,7 @@ The engine emits `join:existing-mesh` before applying the selected policy.
 | Option                  | Default  | Contract                                                                                                                  |
 | ----------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `resolveInitialState`   | None     | Runs during `init()` before persisted credentials; returned fields override constructor defaults and may be asynchronous. |
-| `onInit`                | None     | Runs once after local open, credential/encryption resolution, and local-state load.                                       |
+| `onInit`                | None     | Runs once per initialization after local open, credential/encryption resolution, and local-state load, before `connect()`. It sees the current local cache and is not a synchronized migration hook. |
 | `logLevel`              | `'info'` | Per-engine logging threshold.                                                                                             |
 | `connectStageTimeoutMs` | `15000`  | Deadline for each named full-pipeline connect stage, not every adapter call.                                              |
 | `onConnectStalled`      | None     | Notification for a timed-out connect stage; exceptions from the hook are swallowed.                                       |

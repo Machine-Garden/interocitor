@@ -216,7 +216,14 @@ export interface TableSchemaDefinition<T extends Record<string, unknown> = Recor
  * // → DatabaseSchemaDefinition<{ tasks: { title: string; status: 'open' | 'done' } }>
  */
 export interface DatabaseSchemaDefinition<S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>> {
-  /** Optional logical schema version for app-level compatibility checks. */
+  /**
+   * Optional transport-level compatibility marker for a mesh.
+   *
+   * Core records this value when it bootstraps a mesh, then requires clients
+   * that supply a version to match the existing manifest exactly. It does not
+   * run a migration, represent an application's data version, or advance the
+   * manifest value of an existing mesh.
+   */
   version?: number;
   tables: { [K in keyof S]: TableSchemaDefinition<S[K]> } & Record<string, TableSchemaDefinition>;
   /** Default merge strategy for all tables. Default: `'lww'`. */
@@ -815,7 +822,7 @@ export interface SyncConfig<S extends Record<string, Record<string, unknown>> = 
    * to preserve the "never stuck" guarantee.
    */
   onConnectStalled?: (info: { stage: string; timeoutMs: number; error: unknown }) => void;
-  /** Optional table/index metadata for local query planning and migrations. */
+  /** Optional table/index metadata for local query planning and compatibility checks. */
   schema?: DatabaseSchemaDefinition<S>;
 
   /**
@@ -826,8 +833,12 @@ export interface SyncConfig<S extends Record<string, Record<string, unknown>> = 
   resolveInitialState?: () => SyncInitialState | Promise<SyncInitialState | null> | null;
 
   /**
-   * Called once after the engine has fully initialized (local store open,
-   * encryption resolved, local state loaded). Use for migrations.
+   * Called once per engine initialization after the local store opens,
+   * encryption resolves, and local state loads. It runs before `connect()`.
+   *
+   * It may perform application-owned bootstrap work or local transformations,
+   * but it sees only the current local cache. Core assigns no migration
+   * semantics to this hook and does not coordinate it across devices.
    *
    * @example
    * onInit: async (engine) => {

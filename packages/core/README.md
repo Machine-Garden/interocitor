@@ -964,40 +964,111 @@ Notes:
 - The engine never reads `keySource`/`adapter`/`remotePath` from these
   records — apps construct their own `Interocitor` instances from them.
 
-## Schema migration
+## Application-owned data migrations
 
-Interocitor manages **local cache/index upgrades automatically**. Adding or
-removing `types.index(...)` fields does not require a public schema-version
-change just to keep IndexedDB in sync. The local store
-computes its own cache fingerprint, repairs missing indexes on open, and
-falls back to scans if a stale cache slips through.
+Interocitor is a low-level transport and persistence layer for CRDT changes
+and durable files. You can build any migration model on top of it, but Core
+does not prescribe one. A migration is application code that reads data and
+writes the desired replacement through the normal table or file APIs.
 
-`schema.version` is **optional** and matters only when the application wants
-an explicit logical compatibility gate in the remote manifest. When set, the
-engine writes it to `manifest.schema` and rejects manifests written under a
-different logical version.
+The application decides what a version means, where to store it, when an
+update runs, and how to handle old clients, concurrency, partial completion,
+validation, and cleanup. The following are three equally valid patterns, not
+special Interocitor migration APIs.
 
-Use `schema.version` only for app-level data meaning changes such as:
+The snippets assume each task stores its Interocitor row ID in an
+application-owned `id` field so a query result can be written back by ID.
 
-1. row shapes that old clients cannot safely read,
-2. `onInit` migrations that rewrite logical data,
-3. staged rollouts where you want explicit manifest compatibility checks.
+### Example 1: one global data version
 
-Recommended pattern for logical migrations:
+Store an application version in a well-known row and advance it after applying
+the corresponding data update:
 
-1. Bump `schema.version` in your code.
-2. Implement a one-shot `onInit` migration that reads old rows from the
-   local store and writes the new shape back. Use `db.batch(...)` to
-   keep it atomic per row group.
-3. Trigger compaction after the migration so the snapshot is written under the
-   new logical version. Immutable change files remain available for exact
-   catch-up.
-4. During rollout, make sure old clients either tolerate both shapes or
-   are blocked by the manifest version mismatch on connect.
+```ts
+const meta = db.table('app_meta');
+const tasks = db.table('tasks');
+const state = await meta.row('data');
 
-For breaking changes that cannot be rolled out gradually, the
-heavier path is to bootstrap a fresh mesh, replicate data over, and
-retire the old mesh. The engine does not automate this.
+if (state?.version === 1) {
+  const rows = await tasks.query();
+
+  await db.batch(async () => {
+    for (const task of rows) {
+      await tasks.patch(task.id, {
+        status: task.done ? 'done' : 'open',
+      });
+    }
+    await meta.patch('data', { version: 2 });
+  });
+}
+```
+
+The application can run this from one designated client, behind its own lease,
+or on every client if the transformation is safe to repeat. `batch()` writes
+one `ChangeEntry`; it is not a distributed lock.
+
+### Example 2: a table or row version
+
+A version can belong to one table, or to each row when records may be upgraded
+lazily and coexist at different versions:
+
+```ts
+const tasks = db.table('tasks');
+
+async function readTask(taskId: string) {
+  const task = await tasks.row(taskId);
+  if (!task || task.dataVersion !== 1) return task;
+
+  return tasks.patch(taskId, {
+    dataVersion: 2,
+    status: task.done ? 'done' : 'open',
+  });
+}
+```
+
+A table-wide variant stores the marker in a well-known metadata row for that
+table. The application defines whether upgrades happen on read, on write, in a
+background job, or during a coordinated release.
+
+### Example 3: just update the data
+
+Not every update needs a version. If the old representation is recognizable
+and the transformation is safe to repeat, update matching rows directly:
+
+```ts
+const tasks = db.table('tasks');
+const rows = await tasks.query();
+
+await db.batch(async () => {
+  for (const task of rows) {
+    if (task.status === undefined) {
+      await tasks.patch(task.id, {
+        status: task.done ? 'done' : 'open',
+      });
+    }
+  }
+});
+```
+
+These writes have the same CRDT behavior as every other application write.
+Core transports and merges them; it does not provide exactly-once execution,
+elect a migration owner, or decide which concurrent transformation is
+semantically correct. Make repeated execution deterministic and idempotent, or
+provide application-level coordination.
+
+Do not confuse application-owned version fields with `schema.version`.
+`schema.version` is an optional remote-manifest compatibility gate: Core
+records it when a mesh is created and later rejects clients that supply a
+different value. It does not run a migration or advance an existing mesh's
+version. It is not the `version` or `dataVersion` field in the examples. Local
+`types.index(...)` changes are maintained separately and do not require an
+application data version.
+
+Run transformations that need current remote rows after `connect()` or an
+explicit `pull()`. `onInit` runs before connection and only sees the current
+local cache. Durable files are direct remote objects rather than CRDT rows;
+file conversion, progress tracking, switchover, and deletion are likewise
+application-owned, and file operations are not included in `batch()`.
 
 ## Events
 

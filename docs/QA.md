@@ -20,9 +20,16 @@ contents.
 
 ### Can someone still learn anything from the remote storage?
 
-Yes. They can see things such as file names, sizes, device identifiers, and
-when activity happened. Encryption hides the contents, not every trace of
-their existence.
+Yes. Row-sync objects use protocol names: for example, change names contain a
+timestamp and device identifier, while `manifest.json` and snapshot names have
+fixed protocol roles. They do not contain a client-facing filename.
+
+Durable files are different. Their storage path comes from the path passed to
+`putFile()`. Use an opaque path such as a random ID when the client-facing name
+is sensitive, and keep that display name in an encrypted row or the encrypted
+file content instead. The remote can also see sizes, device identifiers, and
+when activity happened. Encryption hides contents, not every operational trace
+of their existence.
 
 ### What happens if someone changes the encrypted data?
 

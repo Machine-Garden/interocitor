@@ -35,6 +35,7 @@
           <a href="#journey">One change</a>
           <a href="#compaction">100 changes</a>
           <a href="#boundary">The boundary</a>
+          <a href="#protection">Access &amp; protection</a>
           <a href="#adapter-boundary">Storage choices</a>
         </nav>
         <a class="nav-cta" href="index.html">Overview <span aria-hidden="true">↗</span></a>
@@ -549,8 +550,8 @@
               </article>
             </div>
             <figcaption id="history-pressure-caption">
-              Compaction removes the covered files from normal listings and gives a new or
-              rejoining device one bounded baseline to reconstruct.
+              Compaction removes the covered files from normal listings and gives a new or rejoining
+              device one bounded baseline to reconstruct.
             </figcaption>
           </figure>
 
@@ -577,8 +578,8 @@
                 update bring the row back.
               </p>
               <p>
-                “Row 7a is gone” remains part of the current state. The tombstone carries no old user
-                payload, but it still wins against updates from before the deletion.
+                “Row 7a is gone” remains part of the current state. The tombstone carries no old
+                user payload, but it still wins against updates from before the deletion.
               </p>
               <p>
                 A scalar timestamp cannot prove that every device has observed every independently
@@ -651,15 +652,15 @@
               <p class="section-index">Compaction</p>
               <h3 id="baseline-title">The current result becomes operation zero.</h3>
               <p>
-                A trusted device first flushes, catches up, captures the exact filenames it observed,
-                and scans its merged rows. It writes the current state as one encrypted snapshot and
-                points the mesh at it, then removes the exact change files captured in the snapshot.
+                A trusted device first flushes, catches up, captures the exact filenames it
+                observed, and scans its merged rows. It writes the current state as one encrypted
+                snapshot and points the mesh at it, then removes the exact change files captured in
+                the snapshot.
               </p>
               <p>
                 Publication order matters. The snapshot is uploaded before the manifest points to
-                it. A reader therefore sees
-                either the previous complete generation or the new complete generation, never a
-                promise of a baseline that has not been written.
+                it. A reader therefore sees either the previous complete generation or the new
+                complete generation, never a promise of a baseline that has not been written.
               </p>
             </div>
 
@@ -701,8 +702,8 @@
                 <code>publish outbox → baseline → exact pull</code>
               </div>
               <figcaption id="baseline-caption">
-                Snapshot first and manifest pointer last. A reader is never
-                directed to a baseline that has not been written.
+                Snapshot first and manifest pointer last. A reader is never directed to a baseline
+                that has not been written.
               </figcaption>
             </figure>
           </section>
@@ -801,6 +802,85 @@
                 Direct remote put, get, overwrite, and delete. No CRDT merge or core offline queue.
               </p>
             </article>
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="protection"
+        class="works-section protection-section"
+        aria-labelledby="protection-title"
+      >
+        <div class="shell">
+          <div class="works-heading protection-heading">
+            <div>
+              <p class="section-index">A separate decision</p>
+              <h2 id="protection-title">
+                Encryption protects contents. Authorization protects the mesh.
+              </h2>
+            </div>
+            <p>
+              These controls work together, but answer different questions. A mesh key makes a
+              protected payload unreadable to storage; a Worker policy decides whether a request may
+              reach that mesh at all.
+            </p>
+          </div>
+
+          <figure class="protection-model" aria-labelledby="protection-caption">
+            <article class="protection-card content-protection">
+              <span>client-held protection</span>
+              <div class="protection-symbol key-symbol" aria-hidden="true"><i></i><b></b></div>
+              <h3>Mesh key</h3>
+              <p>
+                Encrypts rows and ordinary durable-file bytes before they reach storage. A tainted
+                file is sealed with an application-owned file key instead.
+              </p>
+              <small>Taint labels identify a key scope; they do not grant remote access.</small>
+            </article>
+
+            <div class="protection-join" aria-hidden="true"><span>and</span><i></i></div>
+
+            <article class="protection-card request-protection">
+              <span>Worker request policy</span>
+              <div class="protection-symbol gate-symbol" aria-hidden="true">
+                <i></i><i></i><b></b>
+              </div>
+              <h3>Mesh authorization</h3>
+              <p>
+                Uses application authentication to grant read-only, full, or denied mesh access.
+              </p>
+              <small>Does not give an authorized caller plaintext.</small>
+            </article>
+
+            <figcaption id="protection-caption">
+              A caller normally needs both the right request access and the right key material to
+              use protected data. Neither layer turns the Worker into a per-row or per-file ACL.
+            </figcaption>
+          </figure>
+
+          <div class="article-prose">
+            <p>
+              This request-authorization layer is specific to a protocol-aware backend such as the
+              Cloudflare Worker. Generic WebDAV access follows the account or directory policy of
+              the selected host. A named mesh such as <code>main</code> is a stable, predictable
+              namespace—not a credential—and needs Worker authorization unless it is intentionally
+              public. A checksummed address can reject an unissued namespace, but it is not proof
+              that the caller is allowed to use one that already exists.
+            </p>
+            <p>
+              Application policy can be narrower than full mesh access—for example, an expiring
+              one-time grant that permits only one opaque durable-file upload at one path. That is
+              an application-owned Worker policy, not a built-in file ACL: a trusted client or
+              service still records any CRDT row reference after the upload.
+            </p>
+            <p class="technical-link">
+              Deployment details:
+              <a href="../packages/workers/docs/mesh-access.md">mesh access</a> and
+              <a href="../packages/workers/docs/security-guardrails.md"
+                >Worker security guardrails</a
+              >; file-key custody:
+              <a href="../packages/core/docs/tainted-files.md">tainted files</a>.
+            </p>
           </div>
         </div>
       </section>

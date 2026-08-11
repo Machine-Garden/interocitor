@@ -47,9 +47,13 @@ The crypto is end‑to‑end at the row/change, snapshot, and durable-file paylo
 boundaries. Routing and operational metadata around those payloads is
 plaintext on the remote.
 
-- **File names.** Change files are named `<HLC>-chg_<id>.json`. The HLC
-  encodes a wall‑clock timestamp and a device id. An observer can see
-  *when* you wrote and *which device* did it.
+- **Protocol object names and durable-file paths.** Change files are named
+  `<HLC>-chg_<id>.json`; the HLC encodes a wall-clock timestamp and a device
+  id. Snapshot and manifest names have fixed protocol roles. These are not
+  client-facing filenames. A durable file path, however, comes from the path
+  supplied to `putFile()` and is visible to the remote. Use an opaque,
+  application-generated path rather than a real filename when that name is
+  sensitive.
 - **Folder layout.** The remote folder structure (`changes/`, `mainline/`,
   `devices/`, `files/`, `manifest.json`) is fixed and visible.
 - **Manifest contents.** `manifest.json` and `manifest-<gen>.json` are
@@ -91,20 +95,21 @@ plaintext on the remote.
 
 Even with encryption on, a remote with full access to the bucket sees:
 
-| Signal | Source | What it reveals |
-| --- | --- | --- |
-| Mesh ID | `manifest.meshId` | Logical identity recorded by the mesh manifest |
-| Worker mesh address | `/io/<address>` | D1/R2 namespace selected by the host; it may be a stable name or checksummed ID |
-| Device IDs | `devices/<id>.json`, change‑file names | One value per device joined to the mesh |
-| Device metadata | `devices/<id>.json` | Plaintext device ID, optional `displayName`/type, last-seen time, and compaction acknowledgements |
-| Schema version | `manifest.schema` | Optional logical compatibility marker when app code sets `schema.version` |
-| Write timestamps | `<HLC>-chg_<id>.json` names | Activity timeline per device |
-| Write rate | File creation rate | Bursts and idle periods |
-| Row size distribution | File sizes | Approximate row sizes |
-| Snapshot epoch & size | `mainline/snapshot-<epoch>-<serverId>.json` | When compactions happen and how big the dataset is |
-| Compaction author | `manifest.writtenBy`, `serverId` in snapshot file name | Which device compacted |
-| Number of devices | `devices/` listing | Mesh size |
-| Recovery-wrapper record | `/.interocitor/recovery/` or Worker recovery route | Stable opaque locator plus wrapper crypto metadata, ciphertext, and timestamp; not recovery words or mesh ID |
+| Signal                  | Source                                                 | What it reveals                                                                                              |
+| ----------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Mesh ID                 | `manifest.meshId`                                      | Logical identity recorded by the mesh manifest                                                               |
+| Worker mesh address     | `/io/<address>`                                        | D1/R2 namespace selected by the host; it may be a stable name or checksummed ID                              |
+| Durable file path       | `files/<app path>`                                     | Application-supplied path; it reveals a real filename if the application puts one there                      |
+| Device IDs              | `devices/<id>.json`, change‑file names                 | One value per device joined to the mesh                                                                      |
+| Device metadata         | `devices/<id>.json`                                    | Plaintext device ID, optional `displayName`/type, last-seen time, and compaction acknowledgements            |
+| Schema version          | `manifest.schema`                                      | Optional logical compatibility marker when app code sets `schema.version`                                    |
+| Write timestamps        | `<HLC>-chg_<id>.json` names                            | Activity timeline per device                                                                                 |
+| Write rate              | File creation rate                                     | Bursts and idle periods                                                                                      |
+| Row size distribution   | File sizes                                             | Approximate row sizes                                                                                        |
+| Snapshot epoch & size   | `mainline/snapshot-<epoch>-<serverId>.json`            | When compactions happen and how big the dataset is                                                           |
+| Compaction author       | `manifest.writtenBy`, `serverId` in snapshot file name | Which device compacted                                                                                       |
+| Number of devices       | `devices/` listing                                     | Mesh size                                                                                                    |
+| Recovery-wrapper record | `/.interocitor/recovery/` or Worker recovery route     | Stable opaque locator plus wrapper crypto metadata, ciphertext, and timestamp; not recovery words or mesh ID |
 
 If any of these are sensitive in your threat model, encryption alone is
 not enough — you need a transport that hides metadata (e.g. a relay that
@@ -134,7 +139,7 @@ A malicious or compromised remote can:
   and `remote:poisoned`; sync stops until manually recovered.
 
 These are inherent to the "cloud is a mailbox" model. Mitigations live
-at the policy layer: pick a remote whose operator you trust to *not* do
+at the policy layer: pick a remote whose operator you trust to _not_ do
 these things (your own WebDAV, your own R2 bucket, your user's Google
 Drive).
 
@@ -159,15 +164,15 @@ Drive).
 
 ## Recommendations
 
-| Goal | Setting |
-| --- | --- |
-| Protect row contents from the storage operator | Configure a non-null `keySource` |
-| Generate strong portable key material | Use high-entropy generated base58 material |
-| Resist portable-key exfiltration on the device | Use `WebAuthnCredentialStore` or an enveloped credential store |
-| Limit which Worker namespaces may be created | Configure integrity gates; use checksummed IDs with a deployment `meshSecret` when the application provisions them |
-| Limit who can compact | `serverManaged: true` + dedicated `serverId` |
-| Detect remote poisoning early | Subscribe to `remote:poisoned` and `decode:error` |
-| Detect stale credential reuse | Subscribe to `credentials:meshMismatch` |
+| Goal                                           | Setting                                                                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Protect row contents from the storage operator | Configure a non-null `keySource`                                                                                   |
+| Generate strong portable key material          | Use high-entropy generated base58 material                                                                         |
+| Resist portable-key exfiltration on the device | Use `WebAuthnCredentialStore` or an enveloped credential store                                                     |
+| Limit which Worker namespaces may be created   | Configure integrity gates; use checksummed IDs with a deployment `meshSecret` when the application provisions them |
+| Limit who can compact                          | `serverManaged: true` + dedicated `serverId`                                                                       |
+| Detect remote poisoning early                  | Subscribe to `remote:poisoned` and `decode:error`                                                                  |
+| Detect stale credential reuse                  | Subscribe to `credentials:meshMismatch`                                                                            |
 
 ## Out of scope
 

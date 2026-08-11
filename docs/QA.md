@@ -101,6 +101,19 @@ Yes for rows. Changes wait on the device and synchronize when the connection
 returns. They survive an app restart only when the app uses durable local
 storage; files still need a connection because they are stored remotely.
 
+### Can I migrate application data?
+
+Yes, through application code. Interocitor does not provide a migration runner
+or decide what a data version means. An application can keep one global version,
+version individual tables or rows, or simply update recognizable old data
+without a version. Those updates use the normal row and file APIs.
+
+Interocitor transports and merges row changes; the application owns when the
+update runs, concurrent execution, old-client compatibility, partial completion,
+and file cleanup. See the
+[application-owned migration patterns](../packages/core/README.md#application-owned-data-migrations)
+for examples and the exact boundary.
+
 The exact choices are listed under
 [conflict resolution](../packages/core/README.md#conflict-resolution) and
 [deletion semantics](../packages/core/README.md#deletion-semantics).

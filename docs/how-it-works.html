@@ -1041,7 +1041,9 @@
             <p>
               The reason this works is the separation of responsibilities. Storage preserves
               artifacts but does not resolve intent. Devices hold keys, interpret schemas, merge
-              concurrent edits, and decide when history is safe to compact.
+              concurrent edits, and decide when history is safe to compact. Interocitor does not
+              distinguish a row migration from another application write: the application computes
+              the update; Core transports and merges it.
             </p>
           </div>
           <ul class="recap-list">

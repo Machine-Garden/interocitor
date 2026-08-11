@@ -177,6 +177,13 @@ merge policy. The version must equal the remote manifest version. Built-in
 policy resolution matches Core: a field override wins over its table policy,
 then the database policy; every schema defaults to `lww`.
 
+`DatabaseSchema.version` is a compatibility gate, not a migration runner or an
+application data version. Data migration is application-owned: keep a global,
+table, or row version, or update recognizable old data directly through normal
+row and file operations. The
+[Core migration patterns](../core/README.md#application-owned-data-migrations)
+show the available approaches and their concurrency boundary.
+
 This is an illustrative configuration to apply consistently in every runtime;
 only the built-in policies are portable, and Swift does not implement Core
 custom merge functions.

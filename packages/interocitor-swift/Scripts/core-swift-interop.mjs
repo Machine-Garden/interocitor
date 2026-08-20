@@ -33,15 +33,17 @@ if (!globalThis.crypto) {
   Object.defineProperty(globalThis, 'crypto', { value: webcrypto });
 }
 
+// eslint-disable-next-line unicorn/prefer-import-meta-properties -- Keep Node 18 compatibility; import.meta.dirname was added later.
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDir, '../../..');
 const coreEntry = new URL(`file://${join(repositoryRoot, 'packages/core/dist/index.js')}`).href;
+const webDavAdapterEntry = new URL(`file://${join(repositoryRoot, 'packages/core/dist/adapters/webdav.js')}`).href;
 
-const { Interocitor, MemoryLocalStore, PortablePassphraseKeySource, WebDAVAdapter } = await import(coreEntry);
+const { Interocitor, MemoryLocalStore, PortablePassphraseKeySource } = await import(coreEntry);
+const { WebDAVAdapter } = await import(webDavAdapterEntry);
 
 const TEST_PASSPHRASE = '1thX6LZfHDZZKUs92febYZhYRcXddmzfzF2NvTkPNE';
 const CORE_ROW_ID = 'core-created';
-const SWIFT_ROW_ID = 'swift-created';
 const SWIFT_BOOTSTRAP_ROW_ID = 'swift-bootstrap-nested';
 
 function requiredEnv(name) {
@@ -183,6 +185,8 @@ async function verify() {
     console.log(
       JSON.stringify({
         phase: 'verify:before-connect',
+        // map() returns a fresh array, and this script supports Node 18.
+        // eslint-disable-next-line unicorn/no-array-sort
         changeFiles: changeFiles.map((file) => file.name).sort(),
       }),
     );
@@ -294,14 +298,14 @@ const phases = {
 };
 const run = phases[phase];
 
-if (!run) {
-  console.error('Usage: node Scripts/core-swift-interop.mjs <bootstrap|verify|compact|verify-swift-bootstrap|verify-swift-compacted>');
-  process.exitCode = 2;
-} else {
+if (run) {
   try {
     await run();
   } catch (error) {
     console.error(`Core/Swift interop ${phase} failed:`, error);
     process.exitCode = 1;
   }
+} else {
+  console.error('Usage: node Scripts/core-swift-interop.mjs <bootstrap|verify|compact|verify-swift-bootstrap|verify-swift-compacted>');
+  process.exitCode = 2;
 }

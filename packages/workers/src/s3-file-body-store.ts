@@ -4,38 +4,97 @@ const encoder = new TextEncoder();
 const EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 export interface S3FileBodyStoreConfig {
-  /** AWS S3 bucket name. */
+  /** Provider bucket name. */
   bucket: string;
-  /** Exact AWS region used in both the endpoint and SigV4 credential scope. */
+  /** Provider region used in the SigV4 credential scope. */
   region: string;
-  /** IAM access key with object access limited to this bucket's durable-file prefix. */
+  /** Access key with object access limited to this bucket's durable-file prefix. */
   accessKeyId: string;
-  /** IAM secret access key. Supply it through a Worker secret binding. */
+  /** Secret access key. Supply it through a Worker secret binding. */
   secretAccessKey: string;
   /** Optional token when the credentials are temporary. */
   sessionToken?: string;
   /** Optional key prefix prepended to every Interocitor object key. */
   keyPrefix?: string;
-  /** Optional customer-managed KMS key used for every PUT. */
-  kmsKeyId?: string;
+  /**
+   * S3-compatible service endpoint. When omitted, the AWS regional endpoint
+   * for `region` is used.
+   */
+  endpoint?: string | URL;
+  /** URL addressing mode. Custom endpoints default to path style. */
+  addressingStyle?: S3AddressingStyle;
   /** Fetch implementation. Defaults to the Worker global `fetch`. */
   fetcher?: typeof fetch;
 }
 
-function assertConfig(config: S3FileBodyStoreConfig): void {
-  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(config.bucket) || config.bucket.includes("..")) {
-    throw new Error("S3 bucket must be a valid general-purpose bucket name");
+export type S3AddressingStyle = "path" | "virtual";
+
+export interface AwsS3FileBodyStoreConfig extends S3FileBodyStoreConfig {
+  /** Optional customer-managed AWS KMS key used for every PUT. */
+  kmsKeyId?: string;
+}
+
+function assertBucketName(bucket: string): void {
+  const hasControlCharacter = Array.from(bucket).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 0x1f || codePoint === 0x7f;
+  });
+  if (!bucket.trim() || bucket.includes("/") || hasControlCharacter) {
+    throw new Error("S3 bucket must be a non-empty name without path separators");
   }
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)+$/.test(config.region)) {
-    throw new Error("S3 region must be an explicit AWS region such as ap-southeast-2");
+}
+
+function assertRegion(region: string): void {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(region)) {
+    throw new Error("S3 region must be a non-empty provider region");
+  }
+}
+
+function assertEndpoint(endpoint: URL): void {
+  if (endpoint.protocol !== "https:") {
+    throw new Error("S3 endpoint must use HTTPS");
+  }
+  if (endpoint.username || endpoint.password) {
+    throw new Error("S3 endpoint must not include credentials");
+  }
+  if (endpoint.search || endpoint.hash) {
+    throw new Error("S3 endpoint must not include a query or fragment");
+  }
+}
+
+function assertConfig(config: S3FileBodyStoreConfig): void {
+  assertBucketName(config.bucket);
+  assertRegion(config.region);
+  if (!config.endpoint && config.region === "auto") {
+    throw new Error("S3 endpoint is required when region is auto");
   }
   if (!config.accessKeyId.trim() || !config.secretAccessKey) {
     throw new Error("S3 accessKeyId and secretAccessKey are required");
   }
+  const endpoint = new URL(config.endpoint || `https://s3.${config.region}.amazonaws.com`);
+  assertEndpoint(endpoint);
+}
+
+function assertAwsBucketName(bucket: string): void {
+  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket) || bucket.includes("..")) {
+    throw new Error("AWS S3 bucket must be a valid general-purpose bucket name");
+  }
+}
+
+function assertAwsRegion(region: string): void {
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)+$/.test(region)) {
+    throw new Error("AWS S3 region must be an explicit AWS region such as ap-southeast-2");
+  }
+}
+
+function normalizeAwsConfig(config: AwsS3FileBodyStoreConfig): S3FileBodyStoreConfig {
+  assertAwsBucketName(config.bucket);
+  assertAwsRegion(config.region);
   const kmsRegion = /^arn:[^:]+:kms:([^:]+):/.exec(config.kmsKeyId || "")?.[1];
   if (kmsRegion && kmsRegion !== config.region) {
-    throw new Error("S3 kmsKeyId must belong to the configured AWS region");
+    throw new Error("AWS S3 kmsKeyId must belong to the configured AWS region");
   }
+  return config;
 }
 
 function hex(bytes: ArrayBuffer | Uint8Array): string {
@@ -126,21 +185,25 @@ class S3ObjectBody implements FileBody {
 }
 
 /**
- * AWS S3 implementation of the durable file-body-store boundary.
+ * S3-compatible implementation of the durable file-body-store boundary.
  *
  * It deliberately implements only exact-key GET, PUT, and DELETE. CRDT sync
  * objects, recovery wrappers, quotas, and durable-file metadata remain in D1.
  */
 export class S3FileBodyStore implements FileBodyStore {
-  private readonly config: S3FileBodyStoreConfig;
+  protected readonly config: S3FileBodyStoreConfig;
   private readonly fetcher: typeof fetch;
   private readonly prefix: string;
+  private readonly endpoint: URL;
+  private readonly addressingStyle: S3AddressingStyle;
 
   constructor(config: S3FileBodyStoreConfig) {
     assertConfig(config);
     this.config = { ...config };
     this.fetcher = config.fetcher ?? fetch;
     this.prefix = normalizePrefix(config.keyPrefix);
+    this.endpoint = new URL(config.endpoint || `https://s3.${config.region}.amazonaws.com`);
+    this.addressingStyle = config.addressingStyle ?? (config.endpoint ? "path" : "virtual");
   }
 
   async get(key: string): Promise<FileBody | null> {
@@ -152,12 +215,7 @@ export class S3FileBodyStore implements FileBodyStore {
 
   async put(key: string, value: FileBodyValue, options: FileBodyWriteOptions = {}): Promise<void> {
     const bytes = await bytesFromValue(value);
-    const headers = new Headers();
-    headers.set("Content-Type", options.contentType || "application/octet-stream");
-    if (this.config.kmsKeyId) {
-      headers.set("x-amz-server-side-encryption", "aws:kms");
-      headers.set("x-amz-server-side-encryption-aws-kms-key-id", this.config.kmsKeyId);
-    }
+    const headers = this.createPutHeaders(options);
     const response = await this.request("PUT", key, bytes, headers);
     await this.assertOk(response, "PUT");
   }
@@ -167,16 +225,25 @@ export class S3FileBodyStore implements FileBodyStore {
     await this.assertOk(response, "DELETE");
   }
 
+  protected createPutHeaders(options: FileBodyWriteOptions): Headers {
+    const headers = new Headers();
+    headers.set("Content-Type", options.contentType || "application/octet-stream");
+    return headers;
+  }
+
   private objectUrl(key: string): URL {
     const fullKey = [this.prefix, key].filter(Boolean).join("/");
     const encoded = encodeKey(fullKey);
-    if (this.config.bucket.includes(".")) {
+    const endpointPath = this.endpoint.pathname.replace(/\/+$/, "");
+    const useVirtualAddressing =
+      this.addressingStyle === "virtual" && !this.config.bucket.includes(".");
+    if (useVirtualAddressing) {
       return new URL(
-        `https://s3.${this.config.region}.amazonaws.com/${encodePathPart(this.config.bucket)}/${encoded}`,
+        `${this.endpoint.protocol}//${this.config.bucket}.${this.endpoint.host}${endpointPath}/${encoded}`,
       );
     }
     return new URL(
-      `https://${this.config.bucket}.s3.${this.config.region}.amazonaws.com/${encoded}`,
+      `${this.endpoint.origin}${endpointPath}/${encodePathPart(this.config.bucket)}/${encoded}`,
     );
   }
 
@@ -243,5 +310,29 @@ export class S3FileBodyStore implements FileBodyStore {
     throw new Error(
       `S3 ${operation} failed: HTTP ${response.status}${requestId ? ` (request ${requestId})` : ""}`,
     );
+  }
+}
+
+/**
+ * AWS-oriented S3 store with AWS bucket/region validation and optional SSE-KMS.
+ *
+ * `S3FileBodyStore` remains the provider-neutral implementation and defaults
+ * to the same AWS regional endpoint when `endpoint` is omitted.
+ */
+export class AwsS3FileBodyStore extends S3FileBodyStore {
+  private readonly kmsKeyId?: string;
+
+  constructor(config: AwsS3FileBodyStoreConfig) {
+    super(normalizeAwsConfig(config));
+    this.kmsKeyId = config.kmsKeyId;
+  }
+
+  protected override createPutHeaders(options: FileBodyWriteOptions): Headers {
+    const headers = super.createPutHeaders(options);
+    if (this.kmsKeyId) {
+      headers.set("x-amz-server-side-encryption", "aws:kms");
+      headers.set("x-amz-server-side-encryption-aws-kms-key-id", this.kmsKeyId);
+    }
+    return headers;
   }
 }

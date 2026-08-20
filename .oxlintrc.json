@@ -5,7 +5,8 @@
     "**/.yarn/**",
     "**/.wrangler/**",
     "**/coverage/**",
-    "**/webdav-data/**"
+    "**/webdav-data/**",
+    "docs/examples/todomvc/app.js"
   ],
   "categories": {
     "correctness": "error",

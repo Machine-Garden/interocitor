@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 
 const port = Number(process.env.PLAYWRIGHT_TODOMVC_PORT || "4177");
-const serverEntry = fileURLToPath(new URL("../../../packages/webdav/server.mjs", import.meta.url));
+const serverEntry = fileURLToPath(new URL("../../../tools/webdav-server/server.mjs", import.meta.url));
 
 export default defineConfig({
   testDir: ".",

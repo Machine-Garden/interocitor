@@ -1,6 +1,6 @@
 <p align="center">
-  <a href="https://github.com/TheUiTeam/interocitor">
-    <img src="https://raw.githubusercontent.com/TheUiTeam/interocitor/main/docs/assets/hero.svg" alt="Interocitor" width="560"/>
+  <a href="https://github.com/Machine-Garden/interocitor">
+    <img src="https://raw.githubusercontent.com/Machine-Garden/interocitor/main/docs/assets/hero.svg" alt="Interocitor" width="560"/>
   </a>
 </p>
 
@@ -89,7 +89,7 @@ yarn --cwd examples/todo-cloudflare-do dev
 In another terminal from the repository root:
 
 ```bash
-PORT=4174 node packages/webdav/server.mjs --mode=memory
+PORT=4174 node tools/webdav-server/server.mjs --mode=memory
 ```
 
 The second command is only a loopback static-file server here; do not deploy or

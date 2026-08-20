@@ -1,27 +1,28 @@
 <p align="center">
-  <a href="https://github.com/TheUiTeam/interocitor">
-    <img src="https://raw.githubusercontent.com/TheUiTeam/interocitor/main/docs/assets/hero.svg" alt="Interocitor" width="560"/>
+  <a href="https://github.com/Machine-Garden/interocitor">
+    <img src="https://raw.githubusercontent.com/Machine-Garden/interocitor/main/docs/assets/hero.svg" alt="Interocitor" width="560"/>
   </a>
 </p>
 
-# @interocitor/webdav
+# @interocitor/webdav-server
 
-Disposable loopback WebDAV and static-file server for Interocitor development,
-demos, and integration tests.
+Private disposable loopback WebDAV and static-file server for this repository's
+demos and integration tests. It is not an end-user package or a production
+storage service; most local-only tests should use `MemoryAdapter` instead.
 
 > **Do not deploy this server.** It has no authentication, authorization, TLS,
 > request-size limit, or tenant isolation. It also serves files from the
 > repository root on non-WebDAV routes. The process binds to `127.0.0.1`, but
 > any local process or browser page that can reach the port can use it.
 
-Run the public package from the repository with the commands below.
+Run it from a repository checkout with the commands below.
 
 ## Start the server
 
 From the repository root, after `yarn install`:
 
 ```bash
-node packages/webdav/server.mjs --mode=memory
+node tools/webdav-server/server.mjs --mode=memory
 ```
 
 The WebDAV base URL is:
@@ -33,7 +34,7 @@ http://127.0.0.1:4173/__webdav__
 Set another loopback port with `PORT`:
 
 ```bash
-PORT=4174 node packages/webdav/server.mjs --mode=memory
+PORT=4174 node tools/webdav-server/server.mjs --mode=memory
 ```
 
 These are complete runnable commands. Node.js 18 or later is required.
@@ -50,7 +51,7 @@ disappear when the process exits.
 File mode makes remote objects inspectable on disk:
 
 ```bash
-node packages/webdav/server.mjs \
+node tools/webdav-server/server.mjs \
   --mode=file \
   --data-root=examples/todo-webdav/webdav-data
 ```
@@ -82,7 +83,7 @@ Point a WebDAV adapter at the route base. This partial configuration fragment
 assumes an initialized application and imports from the current source build:
 
 ```ts
-import { WebDAVAdapter } from '@interocitor/core';
+import { WebDAVAdapter } from '@interocitor/core/adapters/webdav';
 
 const adapter = new WebDAVAdapter({
   baseUrl: 'http://127.0.0.1:4173/__webdav__',
@@ -99,14 +100,14 @@ and browser-test setup, see
 From the repository root:
 
 ```bash
-yarn workspace @interocitor/webdav check
+yarn workspace @interocitor/webdav-server check
 ```
 
 This syntax-checks `server.mjs`. Integration coverage is owned by the root
 WebDAV and browser suites; see the repository `package.json` for the current
 targeted commands.
 
-## What this package is not
+## What this internal tool is not
 
 - a production or self-hosted sync service;
 - a database or query server;

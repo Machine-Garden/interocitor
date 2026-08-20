@@ -19,7 +19,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 MONOREPO_DIR="$(cd "$PACKAGE_DIR/../.." && pwd)"
-WEBDAV_SERVER="$MONOREPO_DIR/packages/webdav/server.mjs"
+WEBDAV_SERVER="$MONOREPO_DIR/tools/webdav-server/server.mjs"
 CORE_PHASES="$SCRIPT_DIR/core-swift-interop.mjs"
 PORT="${WEBDAV_PORT:-4175}"
 SERVER_PID=""

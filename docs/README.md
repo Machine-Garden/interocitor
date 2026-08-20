@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/Machine-Garden/interocitor">
+    <img src="assets/hero.svg" alt="Interocitor" width="560" />
+  </a>
+</p>
+
 # Interocitor public site
 
 Interocitor fits browser apps whose trusted endpoints may hold plaintext while

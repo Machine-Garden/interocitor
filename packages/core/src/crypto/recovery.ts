@@ -254,7 +254,7 @@ export async function unwrapRecoveryWrapper(
     };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('Recovery wrapper contains')) throw error;
-    throw new Error('Recovery phrase could not unlock this wrapper');
+    throw new Error('Recovery phrase could not unlock this wrapper', { cause: error });
   }
 }
 

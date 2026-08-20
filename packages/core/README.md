@@ -1,6 +1,6 @@
 <p align="center">
-  <a href="https://github.com/TheUiTeam/interocitor">
-    <img src="../../docs/assets/hero.svg" alt="Interocitor" width="640" />
+  <a href="https://github.com/Machine-Garden/interocitor">
+    <img src="https://raw.githubusercontent.com/Machine-Garden/interocitor/main/docs/assets/hero.svg" alt="Interocitor" width="560" />
   </a>
 </p>
 
@@ -55,10 +55,10 @@ handling.
 ```ts
 import {
   Interocitor,
-  MemoryAdapter,
   MemoryLocalStore,
   PortablePassphraseKeySource,
 } from '@interocitor/core';
+import { MemoryAdapter } from '@interocitor/core/adapters/memory';
 
 const portableKey = '...high-entropy-base58...';
 
@@ -100,7 +100,7 @@ Documented entrypoints in this package:
 | `db.putFile`, `db.getFile`, `db.openFile`, `db.deleteFile`, `db.getFileMetadata` | The app stores durable encrypted attachments or sealed files in the same mesh |
 | `PortablePassphraseKeySource`, `BoundSharedKeySource` | The app chooses how mesh key material is restored or derived |
 | `createRecoveryWrapper`, `publishRecoveryWrapper`, `recoverMeshCredentials` | The app offers a client-provided recovery phrase for a portable-key mesh |
-| `MemoryAdapter`, `WebDAVAdapter`, `GoogleDriveAdapter`, `CloudflareAdapter` | The app chooses a mailbox backend |
+| `@interocitor/core/adapters/memory`, `@interocitor/core/adapters/webdav`, `@interocitor/core/adapters/google-drive`, `@interocitor/core/adapters/cloudflare` | The app chooses a mailbox backend |
 | `generateShareQR`, `generateJoinQR`, `handleScannedQR` | The app wants the high-level QR pairing flow |
 | `createGeneratorSession`, `runScannerHandshake` | The app wants low-level control of the pairing handshake |
 
@@ -840,12 +840,15 @@ user messaging only. Do not make app correctness depend on the callback.
 
 ## Adapters
 
+Adapters are separate package entrypoints. Import only the backend the
+application chooses; they are not duplicated through the package barrel.
+
 | Adapter | Use when | Notes |
 | --- | --- | --- |
-| `MemoryAdapter` | Tests and demos | No remote persistence |
-| `GoogleDriveAdapter` | You want zero infrastructure | Runtime supplies OAuth token; the user owns the data |
-| `WebDAVAdapter` | Self‑hosted (Nextcloud, OwnCloud, custom WebDAV) | Easy to inspect remotely |
-| `CloudflareAdapter` | You operate a worker; want push invalidations | Optional realtime relay |
+| `@interocitor/core/adapters/memory` | Tests and demos | No remote persistence |
+| `@interocitor/core/adapters/google-drive` | You want zero infrastructure | Runtime supplies OAuth token; the user owns the data |
+| `@interocitor/core/adapters/webdav` | Self‑hosted (Nextcloud, OwnCloud, custom WebDAV) | Easy to inspect remotely |
+| `@interocitor/core/adapters/cloudflare` | You operate a worker; want push invalidations | Optional realtime relay |
 
 Implementing your own adapter: see [Adapter contract](docs/adapter-contract.md) for
 required semantics, consistency assumptions, and the contract test
@@ -941,9 +944,8 @@ await db.connectedStores.put({
   id: 'reviews',
   alias: 'family-reviews',
   remotePath: '/family/reviews',
-  keySource: new PortablePassphraseKeySource({
-    portableKey: 'review-pass',
-  }),
+  passphrase: 'review-pass',
+  encrypted: true,
   dbName: 'reviews-db',
   adapter: { kind: 'memory' },
   metadata: { icon: 'star' },
@@ -961,7 +963,7 @@ Notes:
   tables or rows.
 - `put(creds)` upserts by `id`, preserves `createdAt`, and refreshes
   `updatedAt` automatically.
-- The engine never reads `keySource`/`adapter`/`remotePath` from these
+- The engine never reads `passphrase`/`adapter`/`remotePath` from these
   records — apps construct their own `Interocitor` instances from them.
 
 ## Application-owned data migrations

@@ -54,7 +54,7 @@ test.describe('Resilient LocalStore', () => {
       const hangingPrimary = {
         open: () => new Promise<void>(() => { /* never resolves */ }),
         close: () => { /* noop */ },
-        getRow: async () => undefined,
+        getRow: async () => {},
         putRow: async () => {},
         putRows: async () => {},
         getTable: async () => [],
@@ -69,7 +69,7 @@ test.describe('Resilient LocalStore', () => {
         getCursor: async () => 0,
         setCursor: async () => {},
         getAllCursors: async () => ({}),
-        getMeta: async () => undefined,
+        getMeta: async () => {},
         setMeta: async () => {},
         clearAll: async () => {},
       };
@@ -78,7 +78,7 @@ test.describe('Resilient LocalStore', () => {
       const errors: string[] = [];
       const origError = console.error;
       console.error = (...args: unknown[]) => {
-        errors.push(args.map(a => String(a)).join(' '));
+        errors.push(args.map(String).join(' '));
       };
 
       const start = performance.now();
@@ -174,7 +174,7 @@ test.describe('Resilient LocalStore', () => {
           setTimeout(() => resolve(), 250);
         }),
         close: () => {},
-        getRow: async () => undefined,
+        getRow: async () => {},
         putRow: async () => {},
         putRows: async () => {},
         getTable: async () => [],
@@ -231,7 +231,7 @@ test.describe('Resilient LocalStore', () => {
       const throwingPrimary = {
         open: async () => { throw new Error('IndexedDB open blocked: another tab'); },
         close: () => {},
-        getRow: async () => undefined,
+        getRow: async () => {},
         putRow: async () => {},
         putRows: async () => {},
         getTable: async () => [],
@@ -246,7 +246,7 @@ test.describe('Resilient LocalStore', () => {
         getCursor: async () => 0,
         setCursor: async () => {},
         getAllCursors: async () => ({}),
-        getMeta: async () => undefined,
+        getMeta: async () => {},
         setMeta: async () => {},
         clearAll: async () => {},
       };
@@ -282,7 +282,7 @@ test.describe('Resilient LocalStore', () => {
       const closingPrimary = {
         open: async () => {},
         close: () => {},
-        getRow: async () => undefined,
+        getRow: async () => {},
         putRow: async () => {},
         putRows: async () => {},
         getTable: async () => [],

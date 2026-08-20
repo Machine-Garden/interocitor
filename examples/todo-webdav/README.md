@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/Machine-Garden/interocitor">
+    <img src="../../docs/assets/hero.svg" alt="Interocitor" width="560" />
+  </a>
+</p>
+
 # TODO over local WebDAV
 
 Runnable browser playground for `@interocitor/core` with `WebDAVAdapter`.
@@ -112,4 +118,4 @@ validation.
 
 - [Core engine](../../packages/core/README.md)
 - [Browser helpers](../../packages/web/README.md)
-- [Loopback WebDAV server](../../packages/webdav/README.md)
+- [Internal loopback WebDAV server](../../tools/webdav-server/README.md)

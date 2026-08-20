@@ -2,7 +2,7 @@
 
 The Cloudflare Worker backend stores sync state and durable-file metadata in D1
 and file bodies in its configured `FileBodyStore`. Built-in adapters support R2
-and regional AWS S3.
+and S3-compatible object storage, with AWS as the default S3 endpoint.
 Protected meshes reach both stores as client-encrypted payloads; routing and
 operational metadata remain visible. Applications keep mesh keys on clients and
 must supply request authentication and authorization.
@@ -14,7 +14,7 @@ This document applies to the Cloudflare Workers backend in `@interocitor/workers
 - row/change storage in **D1**;
 - durable file/image storage metadata in **D1**;
 - durable file/image bytes in the configured **`FileBodyStore`**, selected per
-  mesh; the built-in implementations target R2 and regional AWS S3;
+  mesh; the built-in implementations target R2 and S3-compatible object storage;
 - optional realtime relay via Durable Objects.
 
 It defines the package's storage, encryption, metadata, and access-control
@@ -24,7 +24,7 @@ boundaries.
 
 - **Interocitor encrypts application data on the client before upload** when the mesh is configured with a non-null `keySource`.
 - **Cloudflare D1** stores row/change payloads, routing metadata, and durable-file metadata. Interocitor's application confidentiality does not depend on the platform storage layer.
-- **The configured file-body store** holds durable file/image bodies. [R2 encrypts objects and object metadata at rest with Cloudflare-managed keys](https://developers.cloudflare.com/r2/reference/data-security/); AWS S3 encrypts new objects at rest and can use a configured customer-managed KMS key. Protected Interocitor files arrive at either built-in store as application ciphertext. A custom store owns its provider-level encryption contract.
+- **The configured file-body store** holds durable file/image bodies. [R2 encrypts objects and object metadata at rest with Cloudflare-managed keys](https://developers.cloudflare.com/r2/reference/data-security/); each S3-compatible provider applies its own at-rest encryption, and AWS can use a configured customer-managed KMS key through `AwsS3FileBodyStore`. Protected Interocitor files arrive at either built-in store as application ciphertext. A custom store owns its provider-level encryption contract.
 - **The server cannot read protected application payloads** without the mesh key. That includes encrypted row data in D1 and encrypted file bytes in the configured file-body store.
 - **Request access is application policy.** The host supplies AuthN/AuthZ through `meshMiddleware`, at the mesh-address level.
 - **Simple key protection exists, but it is not document-level or row-level ACL.** The main protection is that data is useless without the client-held mesh key (or bound key components in the bound-shared-key scenario).
@@ -56,16 +56,17 @@ The configured `FileBodyStore` stores durable file/image bytes. For protected
 meshes, those objects are Interocitor-encrypted application payloads. The
 built-in platforms also apply encryption at rest: R2 uses
 [platform-managed encryption](https://developers.cloudflare.com/r2/reference/data-security/),
-and S3 applies its bucket encryption configuration plus an optional
-customer-managed KMS key supplied by the Worker.
+and the selected S3-compatible provider applies its bucket encryption
+configuration. AWS can add a customer-managed KMS key through the AWS-specific
+adapter.
 
 The host constructs the store from trusted deployment configuration. Browser
 input, request headers, file metadata, and `taint` do not select an endpoint or
 supply shared provider credentials.
 
-S3 selection changes only the durable body location. File paths, sizes,
+S3-compatible selection changes only the durable body location. File paths, sizes,
 classification, uploader, timestamps, access counters, and object keys remain
-in D1. See [AWS S3 durable-file storage](s3-file-storage.md).
+in D1. See [S3-compatible file-body storage](s3-file-storage.md).
 
 ## Encryption layers
 
@@ -77,7 +78,7 @@ for transport. See [R2 data security](https://developers.cloudflare.com/r2/refer
 
 [AWS documents automatic encryption at rest for S3
 objects](https://docs.aws.amazon.com/AmazonS3/latest/userguide/serv-side-encryption.html).
-When the `S3FileBodyStore` `kmsKeyId` option is configured, every PUT
+When the `AwsS3FileBodyStore` `kmsKeyId` option is configured, every PUT
 explicitly requests SSE-KMS with that customer-managed key. The Worker sends S3
 requests over TLS and authenticates them with Signature Version 4.
 
@@ -279,4 +280,4 @@ For a Cloudflare backend deployment:
 - Cloudflare Workers runtime: [README.md](../README.md)
 - Cloudflare R2 platform encryption: [R2 data security](https://developers.cloudflare.com/r2/reference/data-security/)
 - AWS S3 server-side encryption: [Protecting data with server-side encryption](https://docs.aws.amazon.com/AmazonS3/latest/userguide/serv-side-encryption.html)
-- AWS S3 file-body setup: [Store durable file bodies in AWS S3](s3-file-storage.md)
+- S3-compatible file-body setup: [Store durable file bodies in S3-compatible object storage](s3-file-storage.md)

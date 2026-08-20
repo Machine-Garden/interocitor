@@ -237,7 +237,7 @@ async function autoCreateSession() {
 
 async function connect() {
   const { Interocitor } = await import('../../packages/core/dist/index.js');
-  const { CloudflareAdapter } = await import('../../packages/core/dist/index.js');
+  const { CloudflareAdapter } = await import('../../packages/core/dist/adapters/cloudflare.js');
   const { PortablePassphraseKeySource } = await import('../../packages/core/dist/index.js');
   const { IndexedDbLocalStore } = await import('../../packages/web/dist/index.js');
 
@@ -260,7 +260,7 @@ async function connect() {
     dbName,
     localStore: new IndexedDbLocalStore(dbName),
     keySource: new PortablePassphraseKeySource({
-      passphrase: session.key,
+      portableKey: session.key,
       credentialStore: await createTodoCredentialStore(dbName),
     }),
     deviceId: tabDeviceId,
@@ -516,5 +516,3 @@ window.addEventListener('beforeunload', () => {
 });
 
 void autoCreateSession().catch((e) => setStatus(`Init failed: ${e.message}`));
-
-``

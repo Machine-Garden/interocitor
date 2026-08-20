@@ -579,11 +579,11 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@interocitor/webdav@workspace:packages/webdav":
+"@interocitor/webdav-server@workspace:tools/webdav-server":
   version: 0.0.0-use.local
-  resolution: "@interocitor/webdav@workspace:packages/webdav"
+  resolution: "@interocitor/webdav-server@workspace:tools/webdav-server"
   bin:
-    webdav: ./server.mjs
+    webdav-server: ./server.mjs
   languageName: unknown
   linkType: soft
 

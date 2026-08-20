@@ -12,15 +12,15 @@
 /examples/todo-webdav/ /examples/todomvc/ 301
 /examples/todo-webdav/index.html /examples/todomvc/ 301
 
-/github              https://github.com/TheUiTeam/interocitor 302
-/core                https://github.com/TheUiTeam/interocitor/tree/main/packages/core#readme 302
-/web                 https://github.com/TheUiTeam/interocitor/tree/main/packages/web#readme 302
-/react               https://github.com/TheUiTeam/interocitor/tree/main/packages/react#readme 302
-/workers             https://github.com/TheUiTeam/interocitor/tree/main/packages/workers#readme 302
-/examples            https://github.com/TheUiTeam/interocitor/tree/main/examples 302
-/security            https://github.com/TheUiTeam/interocitor/blob/main/packages/core/docs/security-model.md 302
-/recovery            https://github.com/TheUiTeam/interocitor/blob/main/packages/core/docs/recovery.md 302
-/mesh-access         https://github.com/TheUiTeam/interocitor/blob/main/packages/workers/docs/mesh-access.md 302
-/worker-runtime      https://github.com/TheUiTeam/interocitor/blob/main/packages/workers/docs/runtime-options.md 302
-/worker-maintenance  https://github.com/TheUiTeam/interocitor/blob/main/packages/workers/docs/maintenance.md 302
-/worker-relay        https://github.com/TheUiTeam/interocitor/blob/main/packages/workers/docs/relay.md 302
+/github              https://github.com/Machine-Garden/interocitor 302
+/core                https://github.com/Machine-Garden/interocitor/tree/main/packages/core#readme 302
+/web                 https://github.com/Machine-Garden/interocitor/tree/main/packages/web#readme 302
+/react               https://github.com/Machine-Garden/interocitor/tree/main/packages/react#readme 302
+/workers             https://github.com/Machine-Garden/interocitor/tree/main/packages/workers#readme 302
+/examples            https://github.com/Machine-Garden/interocitor/tree/main/examples 302
+/security            https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/security-model.md 302
+/recovery            https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/recovery.md 302
+/mesh-access         https://github.com/Machine-Garden/interocitor/blob/main/packages/workers/docs/mesh-access.md 302
+/worker-runtime      https://github.com/Machine-Garden/interocitor/blob/main/packages/workers/docs/runtime-options.md 302
+/worker-maintenance  https://github.com/Machine-Garden/interocitor/blob/main/packages/workers/docs/maintenance.md 302
+/worker-relay        https://github.com/Machine-Garden/interocitor/blob/main/packages/workers/docs/relay.md 302

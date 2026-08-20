@@ -92,9 +92,14 @@ a {
 
 .brand {
   justify-self: start;
-  font-size: 0.95rem;
-  font-weight: 780;
-  letter-spacing: -0.03em;
+  display: inline-flex;
+  align-items: center;
+}
+
+.brand-logo {
+  display: block;
+  width: 160px;
+  height: auto;
 }
 
 .site-header p {

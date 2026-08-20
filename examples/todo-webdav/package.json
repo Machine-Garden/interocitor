@@ -5,7 +5,7 @@
   "description": "Local WebDAV TODO example for Interocitor",
   "type": "module",
   "scripts": {
-    "server:file": "node ../../packages/webdav/server.mjs --mode=file --data-root=examples/todo-webdav/webdav-data",
+    "server:file": "node ../../tools/webdav-server/server.mjs --mode=file --data-root=examples/todo-webdav/webdav-data",
     "check": "node --check app.js"
   },
   "license": "MIT"

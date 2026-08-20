@@ -1,3 +1,5 @@
+/* eslint-disable unicorn/consistent-function-scoping -- Browser-context helpers must be defined inside page.evaluate. */
+
 import { expect, test } from '@playwright/test';
 
 test.beforeEach(async ({ page }) => {

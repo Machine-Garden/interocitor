@@ -4,12 +4,12 @@
   "description": "React bindings for Interocitor live queries, rows, images, connected stores, and connection status.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TheUiTeam/interocitor.git",
+    "url": "git+https://github.com/Machine-Garden/interocitor.git",
     "directory": "packages/react"
   },
-  "homepage": "https://github.com/TheUiTeam/interocitor/tree/main/packages/react#readme",
+  "homepage": "https://github.com/Machine-Garden/interocitor/tree/main/packages/react#readme",
   "bugs": {
-    "url": "https://github.com/TheUiTeam/interocitor/issues"
+    "url": "https://github.com/Machine-Garden/interocitor/issues"
   },
   "publishConfig": {
     "access": "public"

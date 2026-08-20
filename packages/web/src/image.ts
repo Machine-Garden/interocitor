@@ -66,9 +66,9 @@ function parseImageDataUrl(dataUrl: string): { data: Uint8Array; contentType?: s
   const isBase64 = Boolean(match[2]);
   const payload = match[3] ?? '';
   if (isBase64) {
-    const binary = atob(payload.replace(/\s+/g, ''));
+    const binary = atob(payload.replaceAll(/\s+/g, ''));
     const data = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i += 1) data[i] = binary.charCodeAt(i);
+    for (let i = 0; i < binary.length; i += 1) data[i] = binary.codePointAt(i)!;
     return { data, contentType };
   }
   return { data: new TextEncoder().encode(decodeURIComponent(payload)), contentType };
@@ -147,4 +147,3 @@ export async function getImageBlobUrl<
     revoke: () => URL.revokeObjectURL(url),
   };
 }
-

@@ -2,7 +2,7 @@
  * WebDAV Integration Tests
  *
  * These tests run against the repository's live WebDAV Node server
- * (packages/webdav/server.mjs --mode=memory).
+ * (tools/webdav-server/server.mjs --mode=memory).
  *
  * Skip when the server is not available (CI without Node, offline, etc.)
  * by setting the env var:
@@ -492,8 +492,23 @@ final class SyncEngineWebDAVIntegrationTests: XCTestCase {
         ))
         try await engine.setRemoteStorage(webdavAdapter)
 
-        // The row should still be readable locally
-        let row = try await engine.get(table: "tasks", rowId: "t1")
-        XCTAssertEqual(row?.columns["v"]?.value, .string("original"))
+        // The row should still be readable locally after the swap.
+        let localRow = try await engine.get(table: "tasks", rowId: "t1")
+        XCTAssertEqual(localRow?.columns["v"]?.value, .string("original"))
+
+        // A fresh engine must read the row from the new WebDAV backend.
+        let remoteAdapter = WebDAVStorageAdapter(config: WebDAVConfig(
+            baseURL: serverBase + WEBDAV_PREFIX,
+            auth: .basic(username: "test", password: "test")
+        ))
+        let remoteEngine = Interocitor(
+            adapter: remoteAdapter,
+            config: cfg,
+            localStore: MemoryLocalStore()
+        )
+        try await remoteEngine.initialize()
+        try await remoteEngine.connect()
+        let remoteRow = try await remoteEngine.get(table: "tasks", rowId: "t1")
+        XCTAssertEqual(remoteRow?.columns["v"]?.value, .string("original"))
     }
 }

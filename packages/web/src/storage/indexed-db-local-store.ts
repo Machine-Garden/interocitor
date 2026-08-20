@@ -77,8 +77,12 @@ function domStringListToArray(list: DOMStringList): string[] {
 function expectedSchemaIndexes(schema?: DatabaseSchemaDefinition): Map<string, { keyPath: string[]; unique: boolean }> {
   const expected = new Map<string, { keyPath: string[]; unique: boolean }>();
   if (!schema) return expected;
+  // Object.keys() returns a fresh array, and the package targets ES2022.
+  // eslint-disable-next-line unicorn/no-array-sort
   for (const table of Object.keys(schema.tables).sort()) {
     const def = schema.tables[table]!;
+    // Object.entries() returns a fresh array, and the package targets ES2022.
+    // eslint-disable-next-line unicorn/no-array-sort
     const fieldEntries = Object.entries(def.fields ?? {}).sort(([a], [b]) => a.localeCompare(b));
     for (const [fieldName, input] of fieldEntries) {
       const fieldDef = normalizeFieldInput(input);
@@ -88,6 +92,8 @@ function expectedSchemaIndexes(schema?: DatabaseSchemaDefinition): Map<string, {
         unique: fieldDef.unique ?? false,
       });
     }
+    // The spread creates a fresh array, and the package targets ES2022.
+    // eslint-disable-next-line unicorn/no-array-sort
     const indexes = [...(def.indexes ?? [])].sort((a, b) => a.name.localeCompare(b.name) || a.field.localeCompare(b.field));
     for (const index of indexes) {
       expected.set(schemaIndexName(table, index.name), {
@@ -392,7 +398,7 @@ export class IndexedDbLocalStore implements LocalStore {
       // a beat to finalize the close. Onversionchange on the prior handle
       // is still our backstop if any other connection lingers.
       db.close();
-      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      await new Promise<void>(resolve => { setTimeout(resolve, 0); });
       // A reopen is itself "progress" — the deadline (if any) has already
       // been disarmed, but we keep the contract by signaling again on the
       // upcoming upgrade-needed.

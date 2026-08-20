@@ -128,7 +128,7 @@ async function createSession() {
 
 async function connect() {
   const { Interocitor } = await import('/packages/core/dist/index.js');
-  const { WebDAVAdapter } = await import('/packages/core/dist/index.js');
+  const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
   const { PortablePassphraseKeySource } = await import('/packages/core/dist/index.js');
   const { IndexedDbLocalStore } = await import('/packages/web/dist/index.js');
 

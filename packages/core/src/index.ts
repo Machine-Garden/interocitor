@@ -8,10 +8,10 @@
  * ```ts
  * import {
  *   Interocitor,
- *   MemoryAdapter,
  *   MemoryLocalStore,
  *   PortablePassphraseKeySource,
  * } from '@interocitor/core';
+ * import { MemoryAdapter } from '@interocitor/core/adapters/memory';
  *
  * const portableKey = '...high-entropy-base58...';
  *
@@ -69,10 +69,6 @@ export type {
 export { Interocitor, type InterocitorInitContext } from './core/sync-engine.ts';
 export type { LocalStore } from './storage/local-store.ts';
 export { MemoryLocalStore } from './storage/memory-store.ts';
-export { MemoryAdapter } from './adapters/memory.ts';
-export { GoogleDriveAdapter, type GoogleDriveConfig } from './adapters/google-drive.ts';
-export { WebDAVAdapter, type WebDAVConfig } from './adapters/webdav.ts';
-export { CloudflareAdapter, type CloudflareAdapterConfig, type CloudflareHandshakeConfig } from './adapters/cloudflare.ts';
 export { ConnectStageTimeoutError, DEFAULT_CONNECT_STAGE_TIMEOUT_MS, withDeadline } from './core/with-deadline.ts';
 export { DAY_MS, DEFAULT_COMPACT_AFTER_MS, DEFAULT_MAX_OFFLINE_DURATION_MS } from './core/retention.ts';
 export {

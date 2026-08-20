@@ -4,12 +4,12 @@
   "description": "Cloudflare Workers runtime for Interocitor sync with D1 plus configurable durable file-body storage.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TheUiTeam/interocitor.git",
+    "url": "git+https://github.com/Machine-Garden/interocitor.git",
     "directory": "packages/workers"
   },
-  "homepage": "https://github.com/TheUiTeam/interocitor/tree/main/packages/workers#readme",
+  "homepage": "https://github.com/Machine-Garden/interocitor/tree/main/packages/workers#readme",
   "bugs": {
-    "url": "https://github.com/TheUiTeam/interocitor/issues"
+    "url": "https://github.com/Machine-Garden/interocitor/issues"
   },
   "publishConfig": {
     "access": "public"
@@ -40,6 +40,7 @@
     "interocitor",
     "cloudflare-workers",
     "aws-s3",
+    "s3-compatible",
     "durable-objects",
     "d1"
   ],

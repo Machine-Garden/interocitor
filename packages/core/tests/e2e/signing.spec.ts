@@ -69,7 +69,7 @@ test.describe('asymmetric signing', () => {
       // Tamper the claims segment → verify returns null.
       const [head, sig] = token.split('.');
       const forgedClaims = btoa(JSON.stringify({ sub: 'admin', scope: 'write' }))
-        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        .replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
       const forged = `${forgedClaims}.${sig}`;
       const forgedResult = await verifyToken(pub, forged);
 

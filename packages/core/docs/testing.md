@@ -10,8 +10,8 @@ Use the level that matches the behavior under test:
 - **unit, component, and Storybook behavior:** create an engine with
   `MemoryLocalStore` and no remote adapter. This works in Jest, browser-based
   Playwright tests, and Storybook; it needs no Interocitor server.
-- **server-backed behavior:** run the `@interocitor/webdav` package's `webdav`
-  executable in memory mode and point
+- **server-backed behavior:** run the repository's private
+  `@interocitor/webdav-server` tool in memory mode and point
   the product's real `WebDAVAdapter` at it. Use this for connection, flush,
   pull, encrypted-file, and mailbox integration tests.
 - **browser persistence and custody:** use Playwright with the product's
@@ -195,16 +195,10 @@ local and deterministic; stories should not connect to a shared mesh.
 
 ## 4. Run the local mailbox for server-backed tests
 
-Install the local server as a development dependency of the product:
+From the repository root, start the private local server:
 
 ```bash
-yarn add -D @interocitor/webdav
-```
-
-Start a disposable in-memory mailbox on a dedicated port:
-
-```bash
-PORT=4174 yarn exec webdav --mode=memory
+PORT=4174 node tools/webdav-server/server.mjs --mode=memory
 ```
 
 The endpoint is `http://127.0.0.1:4174/__webdav__`. The local server accepts
@@ -220,10 +214,10 @@ parallel tests from sharing a mesh.
 import {
   Interocitor,
   MemoryLocalStore,
-  WebDAVAdapter,
   types,
   type DatabaseSchemaDefinition,
 } from '@interocitor/core';
+import { WebDAVAdapter } from '@interocitor/core/adapters/webdav';
 
 const schema = {
   tables: {
@@ -284,7 +278,7 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
     },
     {
-      command: 'PORT=4174 yarn exec webdav --mode=memory',
+      command: 'PORT=4174 node tools/webdav-server/server.mjs --mode=memory',
       url: 'http://127.0.0.1:4174',
       reuseExistingServer: !process.env.CI,
     },
@@ -348,4 +342,5 @@ IndexedDB recovery in a browser test, where the browser owns those APIs.
   isolation is simpler than unique remote paths.
 
 For the local server's modes and operational behavior, see
-[`@interocitor/webdav`](../../webdav/README.md).
+the private [`@interocitor/webdav-server`](../../../tools/webdav-server/README.md)
+tool.

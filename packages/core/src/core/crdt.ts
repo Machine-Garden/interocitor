@@ -71,7 +71,10 @@ function columnValuesEqual(left: unknown, right: unknown): boolean {
   if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
   const leftRecord = left as Record<string, unknown>;
   const rightRecord = right as Record<string, unknown>;
+  // Object.keys() returns fresh arrays, and the package targets ES2022.
+  // eslint-disable-next-line unicorn/no-array-sort
   const leftKeys = Object.keys(leftRecord).sort();
+  // eslint-disable-next-line unicorn/no-array-sort
   const rightKeys = Object.keys(rightRecord).sort();
   return leftKeys.length === rightKeys.length
     && leftKeys.every((key, index) => (

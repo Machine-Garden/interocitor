@@ -4,12 +4,12 @@
   "description": "Browser runtime stores, credential stores, and UI helpers for Interocitor.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TheUiTeam/interocitor.git",
+    "url": "git+https://github.com/Machine-Garden/interocitor.git",
     "directory": "packages/web"
   },
-  "homepage": "https://github.com/TheUiTeam/interocitor/tree/main/packages/web#readme",
+  "homepage": "https://github.com/Machine-Garden/interocitor/tree/main/packages/web#readme",
   "bugs": {
-    "url": "https://github.com/TheUiTeam/interocitor/issues"
+    "url": "https://github.com/Machine-Garden/interocitor/issues"
   },
   "publishConfig": {
     "access": "public"

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 const STATIC_PORT = Number(process.env.PLAYWRIGHT_CF_STATIC_PORT || '4174');
 const WORKER_PORT = Number(process.env.PLAYWRIGHT_CF_WORKER_PORT || '8788');
-const serverEntry = fileURLToPath(new URL('../../packages/webdav/server.mjs', import.meta.url));
+const serverEntry = fileURLToPath(new URL('../../tools/webdav-server/server.mjs', import.meta.url));
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -28,7 +28,7 @@ export default defineConfig({
       timeout: 10_000,
     },
     {
-      command: `sh -c 'yarn check && npx wrangler d1 migrations apply INTEROCITOR_DB --local --config wrangler.playwright.toml && npx wrangler dev --config wrangler.playwright.toml --port ${WORKER_PORT} --persist-to .wrangler/state'`,
+      command: `sh -c 'yarn workspace @interocitor/workers build && npx wrangler d1 migrations apply INTEROCITOR_DB --local --config wrangler.playwright.toml && npx wrangler dev --config wrangler.playwright.toml --port ${WORKER_PORT} --persist-to .wrangler/state'`,
       url: `http://127.0.0.1:${WORKER_PORT}/todo-interocitor/health`,
        reuseExistingServer: false,
       timeout: 60_000,

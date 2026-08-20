@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/Machine-Garden/interocitor">
+    <img src="../../docs/assets/hero.svg" alt="Interocitor" width="560" />
+  </a>
+</p>
+
 # Biometric-protected keys
 
 Runnable browser example for application-owned secret custody with
@@ -23,7 +29,7 @@ From the repository root:
 yarn install
 yarn build:int
 yarn build:web
-node packages/webdav/server.mjs --mode=memory
+node tools/webdav-server/server.mjs --mode=memory
 ```
 
 Open:

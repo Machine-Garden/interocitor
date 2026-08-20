@@ -122,14 +122,12 @@ a {
 .brand {
   display: inline-flex;
   align-items: center;
-  font-size: 0.94rem;
-  font-weight: 790;
-  letter-spacing: -0.035em;
 }
 
-.brand-word {
-  line-height: 1;
-  white-space: nowrap;
+.brand-logo {
+  display: block;
+  width: 172px;
+  height: auto;
 }
 
 .nav-links {
@@ -1627,7 +1625,11 @@ h1 em {
   }
 
   .site-header .brand {
-    font-size: 0.86rem;
+    width: 148px;
+  }
+
+  .site-header .brand-logo {
+    width: 148px;
   }
 
   .nav-cta {

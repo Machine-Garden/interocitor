@@ -57,39 +57,6 @@
  *     WHICH -- "examples/todo-webdav/index.html\n(todo-webdav.spec.ts)" --> REAL["real HTTP to this server\n/__webdav__ handled by makeMemoryBackend()\nstate shared across all pages in the test run"]
  * ```
  *
- * ─── Known seams ──────────────────────────────────────────────────────────────
- *
- * 1. FIXED remotePath in app.js
- *    makeRemotePath() always returns '/Interocitor/todo-app'.
- *    All sessions within a test run share the same WebDAV path.
- *    The "multiple remote paths" test only appears isolated because
- *    each session has a different encryption key — cross-reads fail to decrypt
- *    rather than being blocked by separate folders.
- *
- * 2. In-memory state is global within a server process.
- *    All pages opened against this server share one Map/Set.
- *    A MKCOL from tabA creates a folder that tabB also sees.
- *    A PUT from tabA writes a file that tabB can list via PROPFIND.
- *
- * 3. Memory backend vs file backend differences
- *    Memory: listFiles() does NOT require the folder to exist in the Set.
- *            A file can be written to a path whose parent was never MKCOL'd —
- *            putFile() stores it in the Map regardless.
- *    File:   putFile() calls mkdir(dirname, {recursive:true}) — also permissive.
- *    Both:   ensureFolder() requires parent to exist (returns 409 otherwise).
- *            The adapter walks path segments sequentially so connect() order matters:
- *            remotePath → devices → c1 → mainline → changes
- *
- * 4. PROPFIND Depth:1 response structure
- *    Response[0] = the folder itself (skipped by WebDAVAdapter.parsePropfindResponse)
- *    Response[1..n] = direct file children + direct subfolder children
- *    The adapter skips isCollection entries — any unexpected subfolder in
- *    c1/changes/ would be silently ignored during pull().
- *
- * 5. ensureFolder idempotency (201 vs 405)
- *    Both backends return HTTP 201 for already-existing folders (not 405).
- *    WebDAVAdapter.ensureFolder accepts both 201 and 405 as success.
- *    Any other 4xx/5xx would throw and abort connect().
  */
 
 import { createServer } from 'node:http';

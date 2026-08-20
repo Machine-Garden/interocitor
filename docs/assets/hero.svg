@@ -1,36 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" fill="none">
-  <title>Interocitor</title>
-  <style>
-    .title { font-family: 'Courier New', 'Courier', monospace; font-size: 42px; font-weight: bold; letter-spacing: 6px; fill: #1a1a1a; }
-    .tagline { font-family: 'Courier New', 'Courier', monospace; font-size: 13px; letter-spacing: 2px; fill: #666; }
-    .mark { stroke: #1a1a1a; fill: none; }
-    .mark-fill { fill: #1a1a1a; }
-    .mark-thin { stroke: #999; fill: none; }
-    @media (prefers-color-scheme: dark) {
-      .title { fill: #e0e0e0; }
-      .tagline { fill: #888; }
-      .mark { stroke: #e0e0e0; }
-      .mark-fill { fill: #e0e0e0; }
-      .mark-thin { stroke: #666; }
-    }
-  </style>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 190" role="img" aria-labelledby="logo-title">
+  <title id="logo-title">Interocitor</title>
+  <defs>
+    <linearGradient id="blue" x1="90" y1="0" x2="310" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2638e8" />
+      <stop offset="1" stop-color="#2f54ff" />
+    </linearGradient>
+  </defs>
 
-  <!-- Interocitor mark: abstracted triangular device with central lens -->
-  <g transform="translate(108, 100)">
-    <polygon points="0,-52 45,26 -45,26" class="mark" stroke-width="2.5" stroke-linejoin="round"/>
-    <polygon points="0,-30 26,15 -26,15" class="mark-thin" stroke-width="1" stroke-linejoin="round"/>
-    <circle cx="0" cy="2" r="10" class="mark" stroke-width="2"/>
-    <circle cx="0" cy="2" r="3" class="mark-fill"/>
-    <line x1="0" y1="-58" x2="0" y2="-68" class="mark" stroke-width="1.5"/>
-    <line x1="-6" y1="-56" x2="-10" y2="-65" class="mark-thin" stroke-width="1"/>
-    <line x1="6" y1="-56" x2="10" y2="-65" class="mark-thin" stroke-width="1"/>
-    <line x1="-50" y1="30" x2="50" y2="30" class="mark" stroke-width="2"/>
-    <line x1="-42" y1="36" x2="42" y2="36" class="mark-thin" stroke-width="1"/>
+  <g transform="translate(10 8)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 10 86 50v24M86 92v40l-66 30V10" stroke="#999b9d" stroke-width="8" />
+    <path d="M124 10 194 50v24M194 92v40l-70 30V10" stroke="url(#blue)" stroke-width="8" />
+    <path d="M230 10 300 50v24M300 92v40l-70 30V10" stroke="#10191f" stroke-width="8" />
+
+    <g fill="#999b9d" stroke="none">
+      <circle cx="2" cy="91" r="5" />
+      <circle cx="21" cy="91" r="5" />
+      <circle cx="40" cy="91" r="5" />
+      <rect x="58" y="86" width="23" height="10" rx="5" />
+    </g>
+    <g fill="url(#blue)" stroke="none">
+      <rect x="91" y="86" width="25" height="10" rx="5" />
+      <circle cx="133" cy="91" r="5" />
+      <circle cx="151" cy="91" r="5" />
+      <rect x="169" y="86" width="24" height="10" rx="5" />
+      <rect x="239" y="86" width="25" height="10" rx="5" />
+      <circle cx="281" cy="91" r="5" />
+      <circle cx="299" cy="91" r="5" />
+      <circle cx="317" cy="91" r="5" />
+    </g>
+    <rect x="147" y="62" width="78" height="60" rx="12" fill="url(#blue)" stroke="none" />
   </g>
 
-  <text x="178" y="108" class="title">INTEROCITOR</text>
-
-  <text x="178" y="138" class="tagline">LOCAL-FIRST ROWS + DURABLE REMOTE FILES</text>
-
-  <line x1="178" y1="148" x2="720" y2="148" stroke="#ccc" stroke-width="0.5"/>
+  <text x="372" y="125" font-family="Arial, Helvetica, sans-serif" font-size="67" font-weight="600" letter-spacing="14">
+    <tspan fill="#10191f">INTER</tspan><tspan fill="url(#blue)">OCITOR</tspan>
+  </text>
 </svg>

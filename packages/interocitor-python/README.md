@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/Machine-Garden/interocitor">
+    <img src="https://raw.githubusercontent.com/Machine-Garden/interocitor/main/docs/assets/hero.svg" alt="Interocitor" width="560" />
+  </a>
+</p>
+
 # Interocitor for Python
 
 interocitor is an async Python implementation of the Interocitor core protocol.
@@ -29,7 +35,7 @@ files for its encrypted artifacts.
 Python 3.11 or newer is required. Install from a repository revision:
 
 ~~~bash
-python -m pip install "git+https://github.com/TheUiTeam/interocitor.git#subdirectory=packages/interocitor-python"
+python -m pip install "git+https://github.com/Machine-Garden/interocitor.git#subdirectory=packages/interocitor-python"
 ~~~
 
 For a local checkout, use editable mode while developing:

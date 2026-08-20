@@ -41,16 +41,16 @@ const SIGN_ALGO = { name: 'ECDSA', hash: 'SHA-256' } as const;
 
 function uint8ToB64url(b: Uint8Array): string {
   let s = '';
-  for (const byte of b) s += String.fromCharCode(byte);
-  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  for (const byte of b) s += String.fromCodePoint(byte);
+  return btoa(s).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
 function b64urlToUint8(s: string): Uint8Array {
   const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4));
-  const b64 = s.replace(/-/g, '+').replace(/_/g, '/') + pad;
+  const b64 = s.replaceAll('-', '+').replaceAll('_', '/') + pad;
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+  for (let i = 0; i < bin.length; i += 1) out[i] = bin.codePointAt(i)!;
   return out;
 }
 

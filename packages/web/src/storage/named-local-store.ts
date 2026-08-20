@@ -96,7 +96,7 @@ function pointerKey(baseName: string): string {
  * failure is silently swallowed — cleanup is a luxury, not a requirement.
  */
 async function cleanupOlderVersions(baseName: string, currentVersion: number): Promise<void> {
-  const idb = (typeof indexedDB !== 'undefined' ? indexedDB : null) as IDBFactory | null;
+  const idb = (typeof indexedDB === 'undefined' ? null : indexedDB) as IDBFactory | null;
   if (!idb || typeof (idb as IDBFactory & { databases?: () => Promise<{ name?: string }[]> }).databases !== 'function') return;
   try {
     const dbs = await (idb as IDBFactory & { databases: () => Promise<{ name?: string }[]> }).databases();

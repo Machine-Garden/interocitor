@@ -1,10 +1,10 @@
 import {
   Interocitor,
-  MemoryAdapter,
   MemoryLocalStore,
   types,
   type DatabaseSchemaDefinition,
 } from "../../../packages/core/src/index.ts";
+import { MemoryAdapter } from "../../../packages/core/src/adapters/memory.ts";
 
 type Todo = {
   id: string;

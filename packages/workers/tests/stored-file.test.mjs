@@ -313,7 +313,7 @@ test('recovery wrappers live outside mesh-address IO and cannot be overwritten',
 });
 
 test('the mesh authorizer delegates every IO and relay pass check to the application', async () => {
-  const { env, mount, system } = createHarness();
+  const { env, system } = createHarness();
   const meshId = await issueMeshId(system, env);
   const authorizerCalls = [];
   const protectedMount = createInterocitorMount({
@@ -358,7 +358,7 @@ test('the mesh authorizer delegates every IO and relay pass check to the applica
 });
 
 test('the mesh authorizer can leave a mesh unprotected', async () => {
-  const { env, mount, system } = createHarness();
+  const { env, system } = createHarness();
   const meshId = await issueMeshId(system, env);
   let calls = 0;
   const protectedMount = createInterocitorMount({
@@ -379,7 +379,7 @@ test('the mesh authorizer can leave a mesh unprotected', async () => {
 });
 
 test('a readonly mesh authorization allows reads and rejects writes', async () => {
-  const { env, mount, system } = createHarness();
+  const { env, system } = createHarness();
   const meshId = await issueMeshId(system, env);
   const readonlyMount = createInterocitorMount({
     db: (e) => e.DB,
@@ -399,7 +399,7 @@ test('a readonly mesh authorization allows reads and rejects writes', async () =
 });
 
 test('a denied or unavailable mesh authorizer fails closed', async () => {
-  const { env, mount, system } = createHarness();
+  const { env, system } = createHarness();
   const meshId = await issueMeshId(system, env);
   const deniedAuthorizer = createInterocitorMount({
     db: (e) => e.DB,
@@ -511,7 +511,7 @@ test('named mesh integrity gates and middleware compose around authorization', a
 });
 
 test('mesh middleware cannot execute downstream more than once', async () => {
-  const { env, mount, system } = createHarness();
+  const { env, system } = createHarness();
   const meshId = await issueMeshId(system, env);
   let secondStatus = 0;
   const guardedMount = createInterocitorMount({
@@ -590,9 +590,9 @@ test('worker audit callback receives completed storage-operation events', async 
 test('durable-file stores enforce device id, file size, mesh quota, callback rejection, and delete quota recovery', async () => {
   const rejected = [];
   const { env, mount, system } = createHarness({
-    authorizeFileUpload: async (upload) => {
-      rejected.push({ path: upload.path, taint: upload.taint });
-      if (upload.path.includes('blocked')) return { allowed: false, status: 418, reason: 'blocked' };
+    authorizeFileUpload: async (uploadRequest) => {
+      rejected.push({ path: uploadRequest.path, taint: uploadRequest.taint });
+      if (uploadRequest.path.includes('blocked')) return { allowed: false, status: 418, reason: 'blocked' };
       return true;
     },
   });

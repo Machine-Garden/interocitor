@@ -130,7 +130,8 @@ routing, quotas, or durable-file application and operational metadata; the
 Worker and D1 retain those responsibilities. On reads, the store reports only
 representation facts needed to serve the body: its stored `size` and optional
 HTTP-formatted `etag`. `R2FileBodyStore` adapts a Cloudflare R2 binding, and
-`S3FileBodyStore` signs requests to a configured AWS regional endpoint.
+`S3FileBodyStore` signs requests to a configured S3-compatible endpoint and
+defaults to the AWS regional endpoint when no endpoint is supplied.
 
 | Method | Required behavior |
 | --- | --- |
@@ -153,8 +154,8 @@ Store construction, endpoint allowlisting, and provider credentials belong to
 trusted deployment configuration. Request data and browser-controlled metadata
 must not choose an arbitrary destination or supply a shared credential.
 
-See [AWS S3 durable-file storage](s3-file-storage.md) for the configuration
-contract and security boundary.
+See [S3-compatible durable-file storage](s3-file-storage.md) for the
+configuration contract and security boundary.
 
 ### Durable-file upload policy
 

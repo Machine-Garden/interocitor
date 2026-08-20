@@ -4,12 +4,12 @@
   "description": "Local-first CRDT rows and durable remote files with optional client-side encryption.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TheUiTeam/interocitor.git",
+    "url": "git+https://github.com/Machine-Garden/interocitor.git",
     "directory": "packages/core"
   },
-  "homepage": "https://github.com/TheUiTeam/interocitor/tree/main/packages/core#readme",
+  "homepage": "https://github.com/Machine-Garden/interocitor/tree/main/packages/core#readme",
   "bugs": {
-    "url": "https://github.com/TheUiTeam/interocitor/issues"
+    "url": "https://github.com/Machine-Garden/interocitor/issues"
   },
   "publishConfig": {
     "access": "public"

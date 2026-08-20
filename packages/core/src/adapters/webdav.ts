@@ -362,7 +362,7 @@ function encodeBase64(value: string): string {
   const browserEncode = (globalThis as { btoa?: (input: string) => string }).btoa;
   if (browserEncode) {
     let binary = '';
-    for (const byte of bytes) binary += String.fromCharCode(byte);
+    for (const byte of bytes) binary += String.fromCodePoint(byte);
     return browserEncode(binary);
   }
 

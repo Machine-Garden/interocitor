@@ -350,7 +350,7 @@ test.describe('LocalStore — row operations', () => {
         store.deleteIndex(indexName);
       }
       await new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve(undefined);
+        tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
         tx.onabort = () => reject(tx.error ?? new Error('deleteIndex aborted'));
       });

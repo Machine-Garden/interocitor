@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/Machine-Garden/interocitor">
+    <img src="https://raw.githubusercontent.com/Machine-Garden/interocitor/main/docs/assets/hero.svg" alt="Interocitor" width="560" />
+  </a>
+</p>
+
 # @interocitor/web
 
 Browser runtime helpers for Interocitor apps.
@@ -78,7 +84,8 @@ browser image helpers, and reset helpers. React hooks live in
 This partial fragment shows the browser-first composition point:
 
 ```ts
-import { Interocitor, PortablePassphraseKeySource, WebDAVAdapter } from '@interocitor/core';
+import { Interocitor, PortablePassphraseKeySource } from '@interocitor/core';
+import { WebDAVAdapter } from '@interocitor/core/adapters/webdav';
 import { IndexedDbLocalStore, createWebCredentialStore } from '@interocitor/web';
 
 const dbName = 'case-vault';

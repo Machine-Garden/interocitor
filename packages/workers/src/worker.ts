@@ -545,7 +545,7 @@ function storedFileMetadata(row: StoredFileRow): Record<string, unknown> {
     uploadedAt: String(row.uploaded_at || ''),
     lastAccessedAt: row.last_accessed_at || undefined,
     useCount: Number(row.use_count ?? 0),
-    plaintextSize: row.plaintext_size == null ? undefined : Number(row.plaintext_size),
+    plaintextSize: row.plaintext_size === null || row.plaintext_size === undefined ? undefined : Number(row.plaintext_size),
     storedSize: Number(row.size ?? 0),
     contentType: row.content_type || undefined,
     taint: row.taint || undefined,

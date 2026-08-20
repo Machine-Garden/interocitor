@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="mark-title">
+  <title id="mark-title">Interocitor mark</title>
+  <defs>
+    <linearGradient id="blue" x1="35" y1="0" x2="140" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2638e8" />
+      <stop offset="1" stop-color="#2f54ff" />
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(8 37) scale(.45)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 10 86 50v24M86 92v40l-66 30V10" stroke="#999b9d" stroke-width="8" />
+    <path d="M124 10 194 50v24M194 92v40l-70 30V10" stroke="url(#blue)" stroke-width="8" />
+    <path d="M230 10 300 50v24M300 92v40l-70 30V10" stroke="#10191f" stroke-width="8" />
+    <g fill="#999b9d" stroke="none">
+      <circle cx="2" cy="91" r="5" /><circle cx="21" cy="91" r="5" /><circle cx="40" cy="91" r="5" />
+      <rect x="58" y="86" width="23" height="10" rx="5" />
+    </g>
+    <g fill="url(#blue)" stroke="none">
+      <rect x="91" y="86" width="25" height="10" rx="5" /><circle cx="133" cy="91" r="5" />
+      <circle cx="151" cy="91" r="5" /><rect x="169" y="86" width="24" height="10" rx="5" />
+      <rect x="239" y="86" width="25" height="10" rx="5" /><circle cx="281" cy="91" r="5" />
+      <circle cx="299" cy="91" r="5" /><circle cx="317" cy="91" r="5" />
+    </g>
+    <rect x="147" y="62" width="78" height="60" rx="12" fill="url(#blue)" stroke="none" />
+  </g>
+</svg>

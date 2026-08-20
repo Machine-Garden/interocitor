@@ -46,14 +46,14 @@ let lastSignedToken = "";
 
 function encodeBase64(bytes) {
   let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
+  for (const byte of bytes) binary += String.fromCodePoint(byte);
   return btoa(binary);
 }
 
 function decodeBase64(value) {
   const binary = atob(value);
   const output = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) output[i] = binary.charCodeAt(i);
+  for (let i = 0; i < binary.length; i += 1) output[i] = binary.codePointAt(i);
   return output;
 }
 

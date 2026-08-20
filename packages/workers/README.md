@@ -1,12 +1,12 @@
 <p align="center">
-  <a href="https://github.com/TheUiTeam/interocitor">
-    <img src="https://raw.githubusercontent.com/TheUiTeam/interocitor/main/docs/assets/hero.svg" alt="interocitor" width="560"/>
+  <a href="https://github.com/Machine-Garden/interocitor">
+    <img src="https://raw.githubusercontent.com/Machine-Garden/interocitor/main/docs/assets/hero.svg" alt="Interocitor" width="560"/>
   </a>
 </p>
 
 # @interocitor/workers
 
-Cloudflare Workers runtime for [Interocitor](https://github.com/TheUiTeam/interocitor). Handles both app-data surfaces — CRDT row sync in D1 and durable file/image bodies in a configured file-body store — plus optional realtime relay, all behind a single URL prefix in your existing Worker. Built-in store adapters support Cloudflare R2 and regional AWS S3.
+Cloudflare Workers runtime for [Interocitor](https://github.com/Machine-Garden/interocitor). Handles both app-data surfaces — CRDT row sync in D1 and durable file/image bodies in a configured file-body store — plus optional realtime relay, all behind a single URL prefix in your existing Worker. Built-in store adapters support Cloudflare R2 and S3-compatible object storage, with AWS as the default S3 endpoint.
 
 > **Public release:** build the `0.1.0` API from the matching monorepo
 > workspaces.
@@ -116,7 +116,8 @@ Documented entrypoints in this package:
 | `FileUploadAuthorizationRequest`, `FileUploadAuthorizationResult` | You need app-owned policy before durable file uploads are accepted |
 | `FileBodyStore`, `FileBody`, `FileBodyValue`, `FileBodyWriteOptions`, `FileBodyStorageContext` | You implement or select a durable file-body destination without changing Worker authorization or D1 metadata |
 | `R2FileBodyStore`, `R2Bucket`, `R2ObjectBody` | You use a Cloudflare R2 binding as the file-body destination |
-| `S3FileBodyStore`, `S3FileBodyStoreConfig` | You keep the Worker and D1 control plane while placing durable file bodies in an explicit AWS region |
+| `S3FileBodyStore`, `S3FileBodyStoreConfig`, `S3AddressingStyle` | You keep the Worker and D1 control plane while placing durable file bodies in any S3-compatible bucket; omitted endpoint defaults to AWS |
+| `AwsS3FileBodyStore`, `AwsS3FileBodyStoreConfig` | You want AWS bucket/region validation and optional SSE-KMS headers |
 | `WorkerAuditEvent`, `WorkerAuditOutcome` | Completed storage-operation instrumentation contracts |
 | `BroadcastDiagnostics` | Optional logging controls for `broadcast` |
 | `D1Database`, `DurableObjectNamespace`, `ExecutionContextLike`, `WorkerLike` | Minimal runtime structural types used by the package API |
@@ -158,7 +159,7 @@ tag = "v1"
 new_classes = ["InterocitorRelayDurableObject"]
 ```
 
-Binding names are ultimately yours. Pass them to `withInterocitor(...)` or `createInterocitorMount(...)` via getters. D1 is required for sync. Durable file/image APIs require a `FileBodyStore`; wrap an R2 binding with `R2FileBodyStore` or configure `S3FileBodyStore`. Durable Objects are required only for realtime relay.
+Binding names are ultimately yours. Pass them to `withInterocitor(...)` or `createInterocitorMount(...)` via getters. D1 is required for sync. Durable file/image APIs require a `FileBodyStore`; wrap an R2 binding with `R2FileBodyStore` or configure `S3FileBodyStore` with an endpoint and signing region. Durable Objects are required only for realtime relay.
 
 Apply the canonical D1 schema from the public repository root:
 
@@ -218,7 +219,7 @@ export default {
 
 ## File and image storage
 
-Durable app file bodies are stored in the `FileBodyStore` returned by `files`, while paths, quotas, and operational metadata remain in D1. `R2FileBodyStore` adapts an R2 binding; `S3FileBodyStore` places bodies in an explicit AWS region. Other destinations can implement the same exact-key contract. This is separate from sync change files: files are uploaded, read, overwritten, and deleted directly; they are never compacted or merged.
+Durable app file bodies are stored in the `FileBodyStore` returned by `files`, while paths, quotas, and operational metadata remain in D1. `R2FileBodyStore` adapts an R2 binding; `S3FileBodyStore` signs exact-key requests to an S3-compatible endpoint and defaults to AWS when no endpoint is supplied. Other destinations can implement the same exact-key contract. This is separate from sync change files: files are uploaded, read, overwritten, and deleted directly; they are never compacted or merged.
 
 The resolver receives the accepted mesh address, so one deployment can keep
 ordinary meshes in R2 and route residency-sensitive meshes to S3. A mesh must
@@ -232,11 +233,12 @@ storage endpoint or credential.
 | Store | Choose it when |
 | --- | --- |
 | `R2FileBodyStore` | The Cloudflare deployment's normal placement meets the mesh's requirements |
-| `S3FileBodyStore` | Durable file bodies must be written through a named AWS regional endpoint |
+| `S3FileBodyStore` | Durable file bodies belong in an S3-compatible bucket; endpoint omission selects AWS |
+| `AwsS3FileBodyStore` | AWS validation or optional SSE-KMS headers are required |
 | Custom `FileBodyStore` | Another trusted destination can provide exact-key `get`, `put`, and `delete` |
 
-For the AWS bucket, IAM, Worker secrets, per-mesh resolver, and exact data
-boundary, follow [Store durable file bodies in AWS S3](docs/s3-file-storage.md).
+For provider endpoints, Worker secrets, per-mesh resolver, and the exact data
+boundary, follow [Store durable file bodies in S3-compatible object storage](docs/s3-file-storage.md).
 
 Worker metadata tracks:
 

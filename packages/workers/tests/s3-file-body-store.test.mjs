@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
 import test from "node:test";
-import { S3FileBodyStore } from "../dist/index.js";
+import { AwsS3FileBodyStore, S3FileBodyStore } from "../dist/index.js";
 
 function hmac(key, value) {
   return createHmac("sha256", key).update(value).digest();
@@ -51,7 +51,7 @@ function expectedAuthorization(
   return `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
 }
 
-test("S3 file-body store signs regional PUT, GET, and DELETE requests", async () => {
+test("AWS S3 file-body store signs regional PUT, GET, and DELETE requests", async () => {
   const calls = [];
   const fetcher = async (input, init) => {
     const url = new URL(input);
@@ -73,7 +73,7 @@ test("S3 file-body store signs regional PUT, GET, and DELETE requests", async ()
   };
   const accessKeyId = "AKIDEXAMPLE";
   const secretAccessKey = "example-secret-key";
-  const store = new S3FileBodyStore({
+  const store = new AwsS3FileBodyStore({
     bucket: "interocitor-sensitive-files",
     region: "ap-southeast-2",
     accessKeyId,
@@ -132,9 +132,9 @@ test("S3 file-body store signs regional PUT, GET, and DELETE requests", async ()
   assert.equal(calls[2].init.method, "DELETE");
 });
 
-test("S3 file-body store uses a regional path-style URL for dotted bucket names", async () => {
+test("AWS S3 file-body store uses a regional path-style URL for dotted bucket names", async () => {
   const calls = [];
-  const store = new S3FileBodyStore({
+  const store = new AwsS3FileBodyStore({
     bucket: "sensitive.files.example",
     region: "eu-central-1",
     accessKeyId: "access",
@@ -152,7 +152,86 @@ test("S3 file-body store uses a regional path-style URL for dotted bucket names"
   );
 });
 
-test("S3 file-body store reports regional storage failures without response bodies", async () => {
+test("provider-neutral S3 store defaults to the AWS regional endpoint", async () => {
+  const calls = [];
+  const store = new S3FileBodyStore({
+    bucket: "interocitor-files",
+    region: "ap-southeast-2",
+    accessKeyId: "access",
+    secretAccessKey: "secret",
+    fetcher: async (input, init) => {
+      calls.push({ url: String(input), init, headers: new Headers(init.headers) });
+      return new Response(null, { status: 200 });
+    },
+  });
+
+  await store.put("meshes/main/files/report.txt", "classified");
+
+  assert.equal(
+    calls[0].url,
+    "https://interocitor-files.s3.ap-southeast-2.amazonaws.com/meshes/main/files/report.txt",
+  );
+  assert.match(
+    calls[0].headers.get("Authorization"),
+    /Credential=access\/\d{8}\/ap-southeast-2\/s3\/aws4_request/,
+  );
+});
+
+test("provider-neutral S3 store uses a configured endpoint and signing region", async () => {
+  const calls = [];
+  const store = new S3FileBodyStore({
+    bucket: "interocitor-files",
+    region: "auto",
+    endpoint: "https://account.r2.cloudflarestorage.com",
+    accessKeyId: "r2-access",
+    secretAccessKey: "r2-secret",
+    fetcher: async (input, init) => {
+      calls.push({ url: new URL(input), init, headers: new Headers(init.headers) });
+      return new Response(null, { status: 200 });
+    },
+  });
+
+  await store.put("meshes/main/files/report.txt", "classified");
+
+  assert.equal(
+    calls[0].url.toString(),
+    "https://account.r2.cloudflarestorage.com/interocitor-files/meshes/main/files/report.txt",
+  );
+  assert.equal(calls[0].headers.get("x-amz-server-side-encryption"), null);
+  assert.match(
+    calls[0].headers.get("Authorization"),
+    /Credential=r2-access\/\d{8}\/auto\/s3\/aws4_request/,
+  );
+});
+
+test("provider-neutral S3 store supports virtual-host addressing", async () => {
+  const calls = [];
+  const store = new S3FileBodyStore({
+    bucket: "interocitor-files",
+    region: "fsn1",
+    endpoint: "https://fsn1.your-objectstorage.com",
+    addressingStyle: "virtual",
+    accessKeyId: "hetzner-access",
+    secretAccessKey: "hetzner-secret",
+    fetcher: async (input, init) => {
+      calls.push({ url: String(input), init });
+      return new Response(null, { status: 204 });
+    },
+  });
+
+  await store.delete("meshes/main/files/report.txt");
+
+  assert.equal(
+    calls[0].url,
+    "https://interocitor-files.fsn1.your-objectstorage.com/meshes/main/files/report.txt",
+  );
+  assert.match(
+    new Headers(calls[0].init.headers).get("Authorization"),
+    /Credential=hetzner-access\/\d{8}\/fsn1\/s3\/aws4_request/,
+  );
+});
+
+test("S3 file-body store reports storage failures without response bodies", async () => {
   const store = new S3FileBodyStore({
     bucket: "interocitor-sensitive-files",
     region: "eu-west-1",
@@ -171,10 +250,10 @@ test("S3 file-body store reports regional storage failures without response bodi
   );
 });
 
-test("S3 file-body store requires an explicit valid region", () => {
+test("AWS S3 file-body store requires an explicit AWS region", () => {
   assert.throws(
     () =>
-      new S3FileBodyStore({
+      new AwsS3FileBodyStore({
         bucket: "interocitor-sensitive-files",
         region: "auto",
         accessKeyId: "access",
@@ -184,10 +263,10 @@ test("S3 file-body store requires an explicit valid region", () => {
   );
 });
 
-test("S3 file-body store rejects a KMS key from another region", () => {
+test("AWS S3 file-body store rejects a KMS key from another region", () => {
   assert.throws(
     () =>
-      new S3FileBodyStore({
+      new AwsS3FileBodyStore({
         bucket: "interocitor-sensitive-files",
         region: "ap-southeast-2",
         accessKeyId: "access",

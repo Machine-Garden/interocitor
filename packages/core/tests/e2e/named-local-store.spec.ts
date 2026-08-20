@@ -7,7 +7,7 @@ test.beforeEach(async ({ page }) => {
 test.describe('createNamedLocalStore', () => {
   test('rotates to next versioned name when handle closes mid-flight', async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { createNamedLocalStore, getActiveLocalDatabaseName, MemoryLocalStore } = await import('/packages/core/dist/index.js');
+      const { createNamedLocalStore, getActiveLocalDatabaseName } = await import('/packages/core/dist/index.js');
 
       // In-memory pointer store so the test does not touch real localStorage.
       const pointerMemory = new Map<string, string>();
@@ -15,17 +15,6 @@ test.describe('createNamedLocalStore', () => {
         get: (key: string) => pointerMemory.get(key) ?? null,
         set: (key: string, value: string) => { pointerMemory.set(key, value); },
       };
-
-      class OneShotClosingStore extends MemoryLocalStore {
-        private failedOnce = false;
-        override async setMeta(key: string, value: unknown): Promise<void> {
-          if (!this.failedOnce) {
-            this.failedOnce = true;
-            throw new DOMException('The database connection is closing.', 'InvalidStateError');
-          }
-          await super.setMeta(key, value);
-        }
-      }
 
       // Hack: pass a factory through namedLocalStore by intercepting primaryFactory
       // via createResilientLocalStore. createNamedLocalStore does not expose it,

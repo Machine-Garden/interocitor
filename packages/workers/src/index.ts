@@ -49,5 +49,9 @@ export type {
 
 export { applySchema, ensureSchema, SCHEMA_STATEMENTS } from './schema.ts';
 export { R2FileBodyStore } from './r2-file-body-store.ts';
-export { S3FileBodyStore } from './s3-file-body-store.ts';
-export type { S3FileBodyStoreConfig } from './s3-file-body-store.ts';
+export { AwsS3FileBodyStore, S3FileBodyStore } from './s3-file-body-store.ts';
+export type {
+  AwsS3FileBodyStoreConfig,
+  S3AddressingStyle,
+  S3FileBodyStoreConfig,
+} from './s3-file-body-store.ts';

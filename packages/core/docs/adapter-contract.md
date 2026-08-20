@@ -5,8 +5,9 @@ A storage adapter is a thin wrapper over a remote byte store
 remote as **a mailbox**: it lists files, reads files, writes files,
 deletes files. There is no compute on the remote side.
 
-This document is what an adapter implementer must guarantee, and what
-the engine guarantees in return.
+Storage adapters guarantee exact remote-byte semantics. The engine reciprocates
+with serialized same-instance writes per path, bounded retries, exact-history
+deletion, and folder-cache invalidation.
 
 ## Interface
 
@@ -110,7 +111,8 @@ semantics.
 
 ### `writeFile(path, data)`
 
-- Overwrites unconditionally if the path exists.
+- Overwrites unconditionally if the path exists, except for an adapter's
+  documented protocol-aware rejection described below.
 - Creates the file if it does not.
 - Does not need to be atomic across paths, but a single `writeFile` call
   must either fully apply or fully fail. Partial writes are not
@@ -122,6 +124,19 @@ semantics.
 > conditional writes. If your backend supports If‑Match, you may use it
 > internally for retry safety, but the engine never depends on it. See
 > the compaction safety notes in [Compaction](compaction.md).
+
+#### Protocol-aware stale-write rejection
+
+The Cloudflare endpoint is an explicit stronger case. `@interocitor/workers`
+recognizes `manifest.json` and `changes/head.json`: it rejects a lower
+`currentGeneration` or `latestHlc` with HTTP `409` and leaves the existing
+object unchanged. `CloudflareAdapter.writeFile` surfaces that response as a
+failed write; Core does not interpret the retained remote value as a successful
+write. Equal or advancing values keep the ordinary overwrite result.
+
+This is a Worker guardrail, not a portable adapter guarantee and not a CAS
+lock. Generic backends are not required to understand either JSON shape. See
+the [protocol-aware backend comparison](../../../docs/how-it-works.html#adapter-title).
 
 ### `deleteFile(path)`
 

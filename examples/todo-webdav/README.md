@@ -87,7 +87,7 @@ separation when an app adds attachments; it assumes `db`, `task`, `taskId`, and
 ```js
 const path = `tasks/${taskId}/files/${Date.now()}_${file.name}`;
 await db.putFile(path, new Uint8Array(await file.arrayBuffer()), file.type);
-await db.table('tasks').patch(taskId, {
+await db.table("tasks").patch(taskId, {
   file_paths: [...(task.file_paths ?? []), path],
 });
 ```
@@ -109,10 +109,9 @@ From the repository root:
 yarn test:e2e:todo
 ```
 
-Despite its historical script name, this command currently builds core/web and
-syntax-checks `examples/todo-webdav/app.js`; it does not launch a browser or
-assert a live sync flow. The six-step exercise above is the current end-to-end
-validation.
+This command builds core and web, syntax-checks the app, starts the disposable
+loopback server, and verifies join-token sync plus remote-path isolation in a
+real browser.
 
 ## Related packages
 

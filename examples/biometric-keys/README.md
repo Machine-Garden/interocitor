@@ -4,7 +4,7 @@
   </a>
 </p>
 
-# Biometric-protected keys
+# Browser key custody
 
 Runnable browser example for application-owned secret custody with
 `@interocitor/web`.
@@ -64,8 +64,8 @@ unsupported `largeBlob`, and a failed blob write are expected error paths.
 2. Provision the platform-preferred seal key, seal the sample record, and
    unseal it through another ceremony.
 3. Provision the cross-platform signer and sign/verify sample claims.
-4. Choose **Add phone** to request another cross-platform authenticator for the
-   same signing bundle.
+4. Choose **Request another authenticator** to ask for another cross-platform
+   credential for the same signing bundle.
 
 ## Security boundary
 

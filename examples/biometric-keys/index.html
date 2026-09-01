@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Interocitor biometric key demo</title>
+    <title>Interocitor browser key custody demo</title>
     <style>
       :root {
         color-scheme: light;
@@ -147,10 +147,11 @@
     <main>
       <section class="hero">
         <span class="eyebrow">Interocitor / WebAuthn Blob Store</span>
-        <h1>Multiple biometric-protected keys, different attachment preferences</h1>
+        <h1>Multiple application keys, different custody preferences</h1>
         <p>
-          This page demonstrates the three browser security levels: stored security, protected
-          security, and enforced security with a phone/cross-device authenticator.
+          This page maps three application labels—stored, protected, and enforced—to browser storage
+          and WebAuthn custody primitives. They are demo labels, not browser security levels; the
+          browser decides the available authenticator and verification experience.
         </p>
         <p class="muted">
           Login / mesh credential custody still uses <code>createWebCredentialStore(...)</code>.
@@ -161,7 +162,7 @@
 
       <section class="grid">
         <article class="panel">
-          <span class="eyebrow">Stored Security</span>
+          <span class="eyebrow">Stored label</span>
           <h2>Default local storage</h2>
           <p>
             This key is stored in browser localStorage. It is durable and fast, but it does not ask
@@ -174,7 +175,7 @@
         </article>
 
         <article class="panel">
-          <span class="eyebrow">Protected Security</span>
+          <span class="eyebrow">Protected label</span>
           <h2>Seal a record locally</h2>
           <p>
             This store prefers a platform authenticator such as Touch ID, Face ID, or Windows Hello.
@@ -192,18 +193,18 @@
         </article>
 
         <article class="panel">
-          <span class="eyebrow">Enforced Security</span>
+          <span class="eyebrow">Enforced label</span>
           <h2>Sign a token through a different store</h2>
           <p>
-            This store requires a cross-platform credential. Adding the signer provisions a
-            phone/security-key WebAuthn credential when the browser supports it.
+            This store requests a cross-platform credential with hybrid hints. The browser may use a
+            phone, a roaming security key, another supported flow, or reject the request.
           </p>
           <textarea id="claimsInput">
 {"sub":"device-42","scope":"records:seal","recordId":"rec_42"}</textarea
           >
           <div class="row">
-            <button id="provisionSignerBtn">Provision phone signer</button>
-            <button id="addPhoneBtn" class="secondary">Add phone</button>
+            <button id="provisionSignerBtn">Request cross-platform signer</button>
+            <button id="addPhoneBtn" class="secondary">Request another authenticator</button>
             <button id="signTokenBtn" class="secondary">Sign token</button>
             <button id="verifyTokenBtn" class="secondary">Verify token</button>
           </div>
@@ -215,10 +216,9 @@
         <span class="eyebrow">Status</span>
         <pre id="statusOutput">Ready.</pre>
         <p class="muted" style="margin-top: 12px">
-          Enforced security uses WebAuthn cross-platform credentials. Phone behavior depends on what
-          the current browser and authenticator actually support for WebAuthn
-          <code>largeBlob</code>. The app can require that class of credential; the browser owns the
-          final ceremony UX.
+          “Enforced” is this example's label for a cross-platform WebAuthn preference with hybrid
+          hints. It does not guarantee a phone flow. The browser and authenticator decide the
+          available ceremony and <code>largeBlob</code> support.
         </p>
       </section>
     </main>

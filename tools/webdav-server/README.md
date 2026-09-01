@@ -66,11 +66,11 @@ source code, a home directory, or data you need to keep.
 
 ## Routes and behavior
 
-| Route | Behavior |
-| --- | --- |
+| Route           | Behavior                                                                          |
+| --------------- | --------------------------------------------------------------------------------- |
 | `/__webdav__/*` | Unauthenticated WebDAV `OPTIONS`, `PROPFIND`, `MKCOL`, `PUT`, `GET`, and `DELETE` |
-| `/` | Serves `examples/index.html` |
-| any other path | Serves the corresponding file below the repository root, or the test harness fallback |
+| `/`             | Serves `examples/index.html`                                                      |
+| any other path  | Serves the corresponding file below the repository root, or returns `404`         |
 
 The server is a byte transport. It does not query rows, merge CRDT changes, or
 perform encryption. Interocitor clients encrypt change and snapshot payloads
@@ -83,17 +83,17 @@ Point a WebDAV adapter at the route base. This partial configuration fragment
 assumes an initialized application and imports from the current source build:
 
 ```ts
-import { WebDAVAdapter } from '@interocitor/core/adapters/webdav';
+import { WebDAVAdapter } from "@interocitor/core/adapters/webdav";
 
 const adapter = new WebDAVAdapter({
-  baseUrl: 'http://127.0.0.1:4173/__webdav__',
+  baseUrl: "http://127.0.0.1:4173/__webdav__",
 });
 ```
 
 For an end-to-end runnable browser flow, use the
 [WebDAV TODO example](../../examples/todo-webdav/README.md). For test isolation
 and browser-test setup, see
-[Test an Interocitor product](../core/docs/testing.md).
+[Test an Interocitor product](../../packages/core/docs/testing.md).
 
 ## Validate the package
 

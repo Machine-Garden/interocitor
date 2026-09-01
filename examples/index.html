@@ -6,7 +6,7 @@
     <title>interocitor examples</title>
     <style>
       body {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         margin: 24px;
         max-width: 840px;
       }
@@ -23,11 +23,26 @@
   </head>
   <body>
     <h1>interocitor examples</h1>
-    <p>Run <code>yarn demo:todo</code> and open one of these links in two browsers.</p>
+    <p>Run <code>yarn demo:todo</code>, then choose the flow you want to explore.</p>
     <ul>
-      <li><a href="/examples/todo-webdav/index.html">TODO app over local WebDAV</a></li>
-      <li><a href="/examples/biometric-keys/index.html">Biometric-protected keys: platform seal key + phone-preferred signer</a></li>
-      <li><a href="/tests/e2e/fixtures/harness.html">e2e harness</a></li>
+      <li>
+        <a href="/examples/todo-webdav/index.html">TODO app over local WebDAV</a> — open it in two
+        tabs to create and join an encrypted row-sync session.
+      </li>
+      <li>
+        <a href="/examples/biometric-keys/index.html"
+          >Browser key custody: local storage + platform/cross-platform WebAuthn preferences</a
+        >
+        — open it once to compare the application's three key-custody labels.
+      </li>
     </ul>
+    <p>
+      The
+      <a
+        href="https://github.com/Machine-Garden/interocitor/tree/main/examples/todo-cloudflare-do#readme"
+        >Cloudflare D1/R2 TODO example</a
+      >
+      has its own Worker provisioning and local-run instructions.
+    </p>
   </body>
 </html>

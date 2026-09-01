@@ -6,7 +6,7 @@
     <title>interocitor TODO over local WebDAV</title>
     <style>
       body {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         margin: 24px;
         max-width: 900px;
       }
@@ -19,7 +19,8 @@
         flex-wrap: wrap;
       }
 
-      input[type='text'], textarea {
+      input[type="text"],
+      textarea {
         padding: 8px;
         min-width: 320px;
       }
@@ -45,7 +46,8 @@
   <body>
     <h1>TODO app (local WebDAV)</h1>
     <p class="muted">
-      Create a session in one tab, copy the join token, paste it in another tab, then connect both tabs.
+      Create a session in one tab, copy the join token, paste it in another tab, then connect both
+      tabs.
     </p>
 
     <section>
@@ -79,7 +81,11 @@
       <div class="row">
         <label for="joinTokenInput">Paste token</label>
       </div>
-      <textarea id="joinTokenInput" rows="3" placeholder="Paste join token from another tab"></textarea>
+      <textarea
+        id="joinTokenInput"
+        rows="3"
+        placeholder="Paste join token from another tab"
+      ></textarea>
       <div class="row">
         <button id="applyTokenBtn">Apply token</button>
       </div>
@@ -98,9 +104,9 @@
     <section>
       <h2>Mainline</h2>
       <p class="muted">
-        Compact collapses all current changes into a snapshot on the mainline.
-        New devices joining afterwards rehydrate from this snapshot instead of
-        replaying every individual change file. Only one device needs to do it.
+        Compact collapses all current changes into a snapshot on the mainline. New devices joining
+        afterwards rehydrate from this snapshot instead of replaying every individual change file.
+        Only one device needs to do it.
       </p>
       <div class="row">
         <button id="compactBtn">Compact (set mainline)</button>

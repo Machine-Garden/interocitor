@@ -77,7 +77,7 @@ async function provisionStoredKey() {
     null,
     2,
   );
-  setStatus("Stored security key saved in localStorage.");
+  setStatus("Browser-storage key saved in localStorage.");
 }
 
 async function loadOrCreateSealKey() {
@@ -134,7 +134,7 @@ async function addPhone() {
       null,
       2,
     );
-    setStatus("First phone/cross-platform authenticator enrolled for enforced security.");
+    setStatus("First cross-platform authenticator reference saved for the enforced label.");
     return;
   }
   const ref = await signerStore.enrollAuthenticator(stored, {
@@ -151,7 +151,7 @@ async function addPhone() {
     null,
     2,
   );
-  setStatus("Phone/cross-platform authenticator enrolled for enforced security.");
+  setStatus("Another cross-platform authenticator reference saved for the enforced label.");
 }
 
 async function provisionSealKey() {
@@ -243,7 +243,7 @@ els.provisionSealKeyBtn.addEventListener("click", () => {
 });
 els.provisionStoredKeyBtn.addEventListener("click", () => {
   provisionStoredKey().catch((error) =>
-    setStatus("Failed to provision stored security key.", error),
+    setStatus("Failed to save the browser-storage key.", error),
   );
 });
 els.sealRecordBtn.addEventListener("click", () => {
@@ -258,7 +258,7 @@ els.provisionSignerBtn.addEventListener("click", () => {
   );
 });
 els.addPhoneBtn.addEventListener("click", () => {
-  addPhone().catch((error) => setStatus("Failed to add phone.", error));
+  addPhone().catch((error) => setStatus("Failed to request another authenticator.", error));
 });
 els.signTokenBtn.addEventListener("click", () => {
   signClaims().catch((error) => setStatus("Failed to sign token.", error));

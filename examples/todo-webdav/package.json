@@ -1,12 +1,13 @@
 {
   "name": "todo-webdav-example",
-  "private": true,
   "version": "0.0.0",
+  "private": true,
   "description": "Local WebDAV TODO example for Interocitor",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "server:file": "node ../../tools/webdav-server/server.mjs --mode=file --data-root=examples/todo-webdav/webdav-data",
-    "check": "node --check app.js"
-  },
-  "license": "MIT"
+    "check": "node --check app.js && yarn test:e2e",
+    "test:e2e": "../../node_modules/.bin/playwright test -c ./playwright.config.ts"
+  }
 }

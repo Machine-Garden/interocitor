@@ -1,21 +1,21 @@
 const els = {
-  baseUrl: document.querySelector('#baseUrl'),
-  remotePath: document.querySelector('#remotePath'),
-  key: document.querySelector('#key'),
-  shareToken: document.querySelector('#shareToken'),
-  joinTokenInput: document.querySelector('#joinTokenInput'),
-  status: document.querySelector('#status'),
-  taskInput: document.querySelector('#taskInput'),
-  tasks: document.querySelector('#tasks'),
-  newSessionBtn: document.querySelector('#newSessionBtn'),
-  connectBtn: document.querySelector('#connectBtn'),
-  disconnectBtn: document.querySelector('#disconnectBtn'),
-  addTaskBtn: document.querySelector('#addTaskBtn'),
-  refreshBtn: document.querySelector('#refreshBtn'),
-  applyTokenBtn: document.querySelector('#applyTokenBtn'),
-  copyTokenBtn: document.querySelector('#copyTokenBtn'),
-  compactBtn: document.querySelector('#compactBtn'),
-  compactStatus: document.querySelector('#compactStatus'),
+  baseUrl: document.querySelector("#baseUrl"),
+  remotePath: document.querySelector("#remotePath"),
+  key: document.querySelector("#key"),
+  shareToken: document.querySelector("#shareToken"),
+  joinTokenInput: document.querySelector("#joinTokenInput"),
+  status: document.querySelector("#status"),
+  taskInput: document.querySelector("#taskInput"),
+  tasks: document.querySelector("#tasks"),
+  newSessionBtn: document.querySelector("#newSessionBtn"),
+  connectBtn: document.querySelector("#connectBtn"),
+  disconnectBtn: document.querySelector("#disconnectBtn"),
+  addTaskBtn: document.querySelector("#addTaskBtn"),
+  refreshBtn: document.querySelector("#refreshBtn"),
+  applyTokenBtn: document.querySelector("#applyTokenBtn"),
+  copyTokenBtn: document.querySelector("#copyTokenBtn"),
+  compactBtn: document.querySelector("#compactBtn"),
+  compactStatus: document.querySelector("#compactStatus"),
 };
 
 // Active page-session handles are installed together after connect and cleared
@@ -30,18 +30,22 @@ const DEFAULT_BASE_URL = `${location.origin}/__webdav__`;
 const credentialEnvelopeRecords = new Map();
 
 async function createTodoCredentialStore(dbName) {
-  const mode = new URLSearchParams(location.search).get('credentials') || 'session';
-  const {
-    MemoryCredentialEnvelopeStore,
-    StaticEnvelopeKeyProvider,
-    createWebCredentialStore,
-  } = await import('/packages/web/dist/index.js');
+  const mode = new URLSearchParams(location.search).get("credentials") || "session";
+  const { MemoryCredentialEnvelopeStore, StaticEnvelopeKeyProvider, createWebCredentialStore } =
+    await import("/packages/web/dist/index.js");
 
-  if (mode === 'memory') return createWebCredentialStore(dbName, { storage: 'memory' });
-  if (mode === 'local') return createWebCredentialStore(dbName, { storage: 'localStorage' });
-  if (mode === 'passkey') return createWebCredentialStore(dbName, { storage: 'passkey', displayName: 'Interocitor TODO WebDAV' });
-  if (mode === 'memory-envelope') {
-    const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  if (mode === "memory") return createWebCredentialStore(dbName, { storage: "memory" });
+  if (mode === "local") return createWebCredentialStore(dbName, { storage: "localStorage" });
+  if (mode === "passkey")
+    return createWebCredentialStore(dbName, {
+      storage: "passkey",
+      displayName: "Interocitor TODO WebDAV",
+    });
+  if (mode === "memory-envelope") {
+    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+      "encrypt",
+      "decrypt",
+    ]);
     return createWebCredentialStore(dbName, {
       envelope: {
         store: new MemoryCredentialEnvelopeStore(dbName, credentialEnvelopeRecords),
@@ -50,7 +54,7 @@ async function createTodoCredentialStore(dbName) {
     });
   }
 
-  return createWebCredentialStore(dbName, { storage: 'sessionStorage' });
+  return createWebCredentialStore(dbName, { storage: "sessionStorage" });
 }
 
 function randomSuffix() {
@@ -72,12 +76,12 @@ function makeJoinToken(baseUrl, remotePath, keyPassphrase) {
 
 function parseJoinToken(raw) {
   const data = JSON.parse(raw);
-  if (!data || typeof data !== 'object') throw new Error('Token must be a JSON object');
-  if (typeof data.baseUrl !== 'string' || !data.baseUrl) throw new Error('Token missing baseUrl');
-  if (typeof data.remotePath !== 'string' || !data.remotePath.startsWith('/')) {
-    throw new Error('Token remotePath must start with /');
+  if (!data || typeof data !== "object") throw new Error("Token must be a JSON object");
+  if (typeof data.baseUrl !== "string" || !data.baseUrl) throw new Error("Token missing baseUrl");
+  if (typeof data.remotePath !== "string" || !data.remotePath.startsWith("/")) {
+    throw new Error("Token remotePath must start with /");
   }
-  if (typeof data.key !== 'string' || !data.key) throw new Error('Token missing key');
+  if (typeof data.key !== "string" || !data.key) throw new Error("Token missing key");
   return { baseUrl: data.baseUrl, remotePath: data.remotePath, key: data.key };
 }
 
@@ -92,7 +96,7 @@ function applySessionToUi(session) {
   els.shareToken.value = makeJoinToken(session.baseUrl, session.remotePath, session.key);
 
   const encoded = encodeURIComponent(els.shareToken.value);
-  history.replaceState(null, '', `${location.pathname}#join=${encoded}`);
+  history.replaceState(null, "", `${location.pathname}#join=${encoded}`);
 }
 
 function readSessionFromUi() {
@@ -100,9 +104,9 @@ function readSessionFromUi() {
   const remotePath = els.remotePath.value.trim();
   const key = els.key.value.trim();
 
-  if (!baseUrl) throw new Error('WebDAV URL is required');
-  if (!remotePath.startsWith('/')) throw new Error('Remote path must start with /');
-  if (!key) throw new Error('Key passphrase is required');
+  if (!baseUrl) throw new Error("WebDAV URL is required");
+  if (!remotePath.startsWith("/")) throw new Error("Remote path must start with /");
+  if (!key) throw new Error("Key passphrase is required");
 
   return { baseUrl, remotePath, key };
 }
@@ -112,7 +116,7 @@ function taskRowId() {
 }
 
 async function createSession() {
-  const { generateKey, keyToPassphrase } = await import('/packages/core/dist/crypto/encryption.js');
+  const { generateKey, keyToPassphrase } = await import("/packages/core/dist/crypto/keys.js");
   const key = await generateKey();
   const passphrase = await keyToPassphrase(key);
 
@@ -122,26 +126,26 @@ async function createSession() {
     key: passphrase,
   };
   applySessionToUi(session);
-  setStatus('New session created. Copy token to another tab, then connect.');
+  setStatus("New session created. Copy token to another tab, then connect.");
   return session;
 }
 
 async function connect() {
-  const { Interocitor } = await import('/packages/core/dist/index.js');
-  const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
-  const { PortablePassphraseKeySource } = await import('/packages/core/dist/index.js');
-  const { IndexedDbLocalStore } = await import('/packages/web/dist/index.js');
+  const { Interocitor } = await import("/packages/core/dist/index.js");
+  const { WebDAVAdapter } = await import("/packages/core/dist/adapters/webdav.js");
+  const { PortablePassphraseKeySource } = await import("/packages/core/dist/index.js");
+  const { IndexedDbLocalStore } = await import("/packages/web/dist/index.js");
 
   const session = readSessionFromUi();
   await disconnect();
 
-  const tabDeviceId = sessionStorage.getItem('todo-device-id') || `tab-${randomSuffix()}`;
-  sessionStorage.setItem('todo-device-id', tabDeviceId);
+  const tabDeviceId = sessionStorage.getItem("todo-device-id") || `tab-${randomSuffix()}`;
+  sessionStorage.setItem("todo-device-id", tabDeviceId);
 
   const dbName = `interocitor-todo-${tabDeviceId}`;
   const adapter = new WebDAVAdapter({
     baseUrl: session.baseUrl,
-    auth: { username: 'demo', password: 'demo' },
+    auth: { username: "demo", password: "demo" },
   });
 
   const engine = new Interocitor(adapter, {
@@ -153,13 +157,13 @@ async function connect() {
       credentialStore: await createTodoCredentialStore(dbName),
     }),
     deviceId: tabDeviceId,
-    pollInterval: 5000,   // 5 s: reduces head.json 404 spam during idle periods
+    pollInterval: 5000, // 5 s: reduces head.json 404 spam during idle periods
     flushDebounce: 200,
     flushThreshold: 50,
   });
 
   const unsub = engine.on((event) => {
-    if (event.type === 'change' || event.type === 'delete' || event.type === 'sync:complete') {
+    if (event.type === "change" || event.type === "delete" || event.type === "sync:complete") {
       void refreshTasks();
     }
   });
@@ -169,7 +173,7 @@ async function connect() {
 
   runtime = {
     engine,
-    tasks: engine.table('tasks'),
+    tasks: engine.table("tasks"),
     disconnectListener: unsub,
   };
 
@@ -190,7 +194,7 @@ async function disconnect() {
 }
 
 async function addTask(title) {
-  if (!runtime.tasks) throw new Error('Connect first');
+  if (!runtime.tasks) throw new Error("Connect first");
 
   const cleanTitle = title.trim();
   if (!cleanTitle) return;
@@ -207,12 +211,12 @@ async function addTask(title) {
     await runtime.engine.flush();
   }
 
-  els.taskInput.value = '';
+  els.taskInput.value = "";
   await refreshTasks();
 }
 
 async function toggleTask(id, done) {
-  if (!runtime.tasks) throw new Error('Connect first');
+  if (!runtime.tasks) throw new Error("Connect first");
 
   await runtime.tasks.put(id, { done: !done });
   if (runtime.engine) {
@@ -222,7 +226,7 @@ async function toggleTask(id, done) {
 }
 
 async function removeTask(id) {
-  if (!runtime.tasks) throw new Error('Connect first');
+  if (!runtime.tasks) throw new Error("Connect first");
 
   await runtime.tasks.delete(id);
   if (runtime.engine) {
@@ -233,31 +237,31 @@ async function removeTask(id) {
 
 async function refreshTasks() {
   if (!runtime.tasks) {
-    els.tasks.innerHTML = '';
+    els.tasks.innerHTML = "";
     return [];
   }
 
   const all = await runtime.tasks.query();
   const sorted = [...all].toSorted((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
 
-  els.tasks.innerHTML = '';
+  els.tasks.innerHTML = "";
   for (const item of sorted) {
-    const li = document.createElement('li');
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
+    const li = document.createElement("li");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
     checkbox.checked = Boolean(item.done);
-    checkbox.addEventListener('change', () => {
-      void toggleTask(String(item.id || ''), Boolean(item.done));
+    checkbox.addEventListener("change", () => {
+      void toggleTask(String(item.id || ""), Boolean(item.done));
     });
 
-    const span = document.createElement('span');
-    span.textContent = ` ${String(item.title || '(untitled)')} `;
-    span.style.textDecoration = item.done ? 'line-through' : 'none';
+    const span = document.createElement("span");
+    span.textContent = ` ${String(item.title || "(untitled)")} `;
+    span.style.textDecoration = item.done ? "line-through" : "none";
 
-    const del = document.createElement('button');
-    del.textContent = 'Delete';
-    del.addEventListener('click', () => {
-      void removeTask(String(item.id || ''));
+    const del = document.createElement("button");
+    del.textContent = "Delete";
+    del.addEventListener("click", () => {
+      void removeTask(String(item.id || ""));
     });
 
     li.append(checkbox);
@@ -270,13 +274,13 @@ async function refreshTasks() {
 }
 
 async function compact() {
-  if (!runtime.engine) throw new Error('Connect first');
+  if (!runtime.engine) throw new Error("Connect first");
 
-  els.compactStatus.textContent = 'Compacting…';
+  els.compactStatus.textContent = "Compacting…";
   try {
     await runtime.engine.compact();
     const manifest = runtime.engine.getManifest();
-    const gen = manifest?.generation ?? '?';
+    const gen = manifest?.generation ?? "?";
     els.compactStatus.textContent = `Mainline set at generation ${gen}. New devices will rehydrate from this snapshot.`;
   } catch (err) {
     els.compactStatus.textContent = `Compact failed: ${err.message}`;
@@ -288,7 +292,7 @@ function applyTokenFromInput() {
   const raw = els.joinTokenInput.value.trim();
   const parsed = parseJoinToken(raw);
   applySessionToUi(parsed);
-  setStatus('Token applied. Click Connect.');
+  setStatus("Token applied. Click Connect.");
   return parsed;
 }
 
@@ -298,24 +302,24 @@ async function copyToken() {
 
   if (navigator.clipboard && navigator.clipboard.writeText) {
     await navigator.clipboard.writeText(token);
-    setStatus('Token copied to clipboard.');
+    setStatus("Token copied to clipboard.");
     return true;
   }
 
-  setStatus('Clipboard API unavailable. Copy token manually.');
+  setStatus("Clipboard API unavailable. Copy token manually.");
   return false;
 }
 
 function tryApplyTokenFromHash() {
-  const hash = location.hash.startsWith('#') ? location.hash.slice(1) : '';
+  const hash = location.hash.startsWith("#") ? location.hash.slice(1) : "";
   const params = new URLSearchParams(hash);
-  const joined = params.get('join');
+  const joined = params.get("join");
   if (!joined) return false;
 
   try {
     const parsed = parseJoinToken(joined);
     applySessionToUi(parsed);
-    setStatus('Session loaded from URL hash. Click Connect.');
+    setStatus("Session loaded from URL hash. Click Connect.");
     return true;
   } catch (error) {
     setStatus(`Invalid URL token: ${error.message}`);
@@ -325,32 +329,34 @@ function tryApplyTokenFromHash() {
 
 els.baseUrl.value = DEFAULT_BASE_URL;
 
-els.newSessionBtn.addEventListener('click', () => {
+els.newSessionBtn.addEventListener("click", () => {
   void createSession().catch((error) => setStatus(`New session failed: ${error.message}`));
 });
-els.connectBtn.addEventListener('click', () => {
+els.connectBtn.addEventListener("click", () => {
   void connect().catch((error) => setStatus(`Connect failed: ${error.message}`));
 });
-els.disconnectBtn.addEventListener('click', () => {
-  void disconnect().then(() => setStatus('Disconnected.')).catch((error) => setStatus(`Disconnect failed: ${error.message}`));
+els.disconnectBtn.addEventListener("click", () => {
+  void disconnect()
+    .then(() => setStatus("Disconnected."))
+    .catch((error) => setStatus(`Disconnect failed: ${error.message}`));
 });
-els.addTaskBtn.addEventListener('click', () => {
+els.addTaskBtn.addEventListener("click", () => {
   void addTask(els.taskInput.value).catch((error) => setStatus(`Add failed: ${error.message}`));
 });
-els.refreshBtn.addEventListener('click', () => {
+els.refreshBtn.addEventListener("click", () => {
   void refreshTasks().catch((error) => setStatus(`Refresh failed: ${error.message}`));
 });
-els.applyTokenBtn.addEventListener('click', () => {
+els.applyTokenBtn.addEventListener("click", () => {
   try {
     applyTokenFromInput();
   } catch (error) {
     setStatus(`Apply token failed: ${error.message}`);
   }
 });
-els.copyTokenBtn.addEventListener('click', () => {
+els.copyTokenBtn.addEventListener("click", () => {
   void copyToken().catch((error) => setStatus(`Copy failed: ${error.message}`));
 });
-els.compactBtn.addEventListener('click', () => {
+els.compactBtn.addEventListener("click", () => {
   void compact().catch((error) => setStatus(`Compact failed: ${error.message}`));
 });
 
@@ -378,6 +384,6 @@ if (!tryApplyTokenFromHash()) {
   void createSession().catch((error) => setStatus(`Init failed: ${error.message}`));
 }
 
-window.addEventListener('beforeunload', () => {
+window.addEventListener("beforeunload", () => {
   void disconnect();
 });

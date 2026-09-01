@@ -1,38 +1,38 @@
 {
   "name": "@interocitor/webdav-server",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
   "description": "Disposable loopback WebDAV server for Interocitor development and tests.",
+  "keywords": [
+    "interocitor",
+    "local-development",
+    "testing",
+    "webdav-server"
+  ],
+  "homepage": "https://github.com/Machine-Garden/interocitor/tree/main/tools/webdav-server#readme",
+  "bugs": {
+    "url": "https://github.com/Machine-Garden/interocitor/issues"
+  },
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Machine-Garden/interocitor.git",
     "directory": "tools/webdav-server"
   },
-  "homepage": "https://github.com/Machine-Garden/interocitor/tree/main/tools/webdav-server#readme",
-  "bugs": {
-    "url": "https://github.com/Machine-Garden/interocitor/issues"
-  },
-  "type": "module",
   "bin": "./server.mjs",
-  "exports": {
-    "./server": "./server.mjs"
-  },
   "files": [
     "server.mjs",
     "README.md",
     "LICENSE"
   ],
+  "type": "module",
+  "exports": {
+    "./server": "./server.mjs"
+  },
   "scripts": {
     "server": "node ./server.mjs",
     "check": "node --check ./server.mjs"
   },
-  "keywords": [
-    "interocitor",
-    "webdav-server",
-    "local-development",
-    "testing"
-  ],
-  "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
   }

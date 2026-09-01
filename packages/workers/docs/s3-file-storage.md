@@ -108,16 +108,16 @@ and S3 requires an explicit body migration before changing the resolver.
 
 ## S3-compatible adapter configuration
 
-| Option            | Required | Behavior                                                                                   |
-| ----------------- | -------- | ------------------------------------------------------------------------------------------ |
-| `bucket`          | Yes      | Provider bucket name                                                                       |
+| Option            | Required | Behavior                                                                                  |
+| ----------------- | -------- | ----------------------------------------------------------------------------------------- |
+| `bucket`          | Yes      | Provider bucket name                                                                      |
 | `region`          | Yes      | Provider region used in the SigV4 credential scope; values such as `auto` and `fsn1` work |
-| `accessKeyId`     | Yes      | Provider access key                                                                        |
-| `secretAccessKey` | Yes      | Provider secret access key                                                                 |
-| `endpoint`        | No       | HTTPS S3 endpoint; omitted means AWS's regional endpoint                                   |
+| `accessKeyId`     | Yes      | Provider access key                                                                       |
+| `secretAccessKey` | Yes      | Provider secret access key                                                                |
+| `endpoint`        | No       | HTTPS S3 endpoint; omitted means AWS's regional endpoint                                  |
 | `addressingStyle` | No       | `path` or `virtual`; custom endpoints default to `path`                                   |
-| `sessionToken`    | No       | Token for temporary credentials                                                            |
-| `keyPrefix`       | No       | Prefix prepended to every Interocitor object key                                           |
+| `sessionToken`    | No       | Token for temporary credentials                                                           |
+| `keyPrefix`       | No       | Prefix prepended to every Interocitor object key                                          |
 | `fetcher`         | No       | Fetch implementation; defaults to the Worker global `fetch`                               |
 
 `S3FileBodyStore` validates provider-neutral bucket, region, credential, and

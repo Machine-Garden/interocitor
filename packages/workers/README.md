@@ -38,7 +38,7 @@ import {
   withInterocitor,
   type D1Database,
   type R2Bucket,
-} from '@interocitor/workers';
+} from "@interocitor/workers";
 
 interface Env {
   MY_DB: D1Database;
@@ -47,26 +47,24 @@ interface Env {
 }
 
 const authorizeMain = createMeshAuthorizationMiddleware(({ request }, env: Env) =>
-  request.headers.get('Authorization') === `Bearer ${env.MAIN_MESH_TOKEN}`
-    ? 'full'
-    : 'deny',
+  request.headers.get("Authorization") === `Bearer ${env.MAIN_MESH_TOKEN}` ? "full" : "deny",
 );
 
 const appWorker = {
   async fetch(request: Request) {
     const url = new URL(request.url);
-    if (url.pathname === '/') return new Response('app root');
-    if (url.pathname === '/api/ping') return Response.json({ ok: true });
-    return new Response('not found', { status: 404 });
+    if (url.pathname === "/") return new Response("app root");
+    if (url.pathname === "/api/ping") return Response.json({ ok: true });
+    return new Response("not found", { status: 404 });
   },
 };
 
 export default withInterocitor<Env>(appWorker, {
-  mountPrefix: '/sync',
+  mountPrefix: "/sync",
   db: (env) => env.MY_DB,
   files: (env) => new R2FileBodyStore(env.MY_FILES),
   runtime: {
-    meshIntegrityGates: [({ address }) => address === 'main'],
+    meshIntegrityGates: [({ address }) => address === "main"],
     meshMiddleware: [authorizeMain],
   },
 });
@@ -100,27 +98,27 @@ Recovery wrappers are capability-addressed by their opaque locator. See
 
 Documented entrypoints in this package:
 
-| API | Use when |
-| --- | --- |
-| `withInterocitor` | You want Interocitor to wrap an existing Worker and own one URL prefix |
-| `createInterocitorMount` | You want explicit route matching and manual delegation inside a larger Worker |
-| `createInterocitorSystemHandler` | You choose to expose maintenance or mesh-ID operations from a host-owned route |
-| `createMeshAuthorizationMiddleware` | You want a four-state `none` / `readonly` / `full` / `deny` application access decision |
-| `checksummedMeshIntegrityGate` | You accept only addresses issued by your checksum authority |
-| `InterocitorRelayDurableObject` | You want realtime invalidation over WebSockets in addition to polling |
-| `broadcast` | You need to enqueue a custom relay invalidation outside the built-in write/delete paths |
-| `applySchema`, `ensureSchema`, `SCHEMA_STATEMENTS` | You need programmatic D1 schema setup instead of the packaged SQL file |
-| `InterocitorMountOptions`, `InterocitorRuntimeOptions`, `InterocitorSystemHandlerOptions`, `CorsOptions` | Configuration contracts; see the [reference](docs/runtime-options.md) |
-| `InterocitorMount`, `InterocitorSystemHandler`, `WithInterocitorOptions` | Returned handler and wrapper contracts |
-| `MeshIntegrityGate`, `MeshMiddleware`, `MeshAuthorizer`, `MeshAuthorization`, `MeshAuthorizationMiddlewareOptions`, `MeshRequestContext`, `MeshIntegrityContext`, `MeshAccess` | Mesh integrity and application-policy contracts |
-| `FileUploadAuthorizationRequest`, `FileUploadAuthorizationResult` | You need app-owned policy before durable file uploads are accepted |
-| `FileBodyStore`, `FileBody`, `FileBodyValue`, `FileBodyWriteOptions`, `FileBodyStorageContext` | You implement or select a durable file-body destination without changing Worker authorization or D1 metadata |
-| `R2FileBodyStore`, `R2Bucket`, `R2ObjectBody` | You use a Cloudflare R2 binding as the file-body destination |
-| `S3FileBodyStore`, `S3FileBodyStoreConfig`, `S3AddressingStyle` | You keep the Worker and D1 control plane while placing durable file bodies in any S3-compatible bucket; omitted endpoint defaults to AWS |
-| `AwsS3FileBodyStore`, `AwsS3FileBodyStoreConfig` | You want AWS bucket/region validation and optional SSE-KMS headers |
-| `WorkerAuditEvent`, `WorkerAuditOutcome` | Completed storage-operation instrumentation contracts |
-| `BroadcastDiagnostics` | Optional logging controls for `broadcast` |
-| `D1Database`, `DurableObjectNamespace`, `ExecutionContextLike`, `WorkerLike` | Minimal runtime structural types used by the package API |
+| API                                                                                                                                                                            | Use when                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `withInterocitor`                                                                                                                                                              | You want Interocitor to wrap an existing Worker and own one URL prefix                                                                   |
+| `createInterocitorMount`                                                                                                                                                       | You want explicit route matching and manual delegation inside a larger Worker                                                            |
+| `createInterocitorSystemHandler`                                                                                                                                               | You choose to expose maintenance or mesh-ID operations from a host-owned route                                                           |
+| `createMeshAuthorizationMiddleware`                                                                                                                                            | You want a four-state `none` / `readonly` / `full` / `deny` application access decision                                                  |
+| `checksummedMeshIntegrityGate`                                                                                                                                                 | You accept only addresses issued by your checksum authority                                                                              |
+| `InterocitorRelayDurableObject`                                                                                                                                                | You want realtime invalidation over WebSockets in addition to polling                                                                    |
+| `broadcast`                                                                                                                                                                    | You need to enqueue a custom relay invalidation outside the built-in write/delete paths                                                  |
+| `applySchema`, `ensureSchema`, `SCHEMA_STATEMENTS`                                                                                                                             | You need programmatic D1 schema setup instead of the packaged SQL file                                                                   |
+| `InterocitorMountOptions`, `InterocitorRuntimeOptions`, `InterocitorSystemHandlerOptions`, `CorsOptions`                                                                       | Configuration contracts; see the [reference](docs/runtime-options.md)                                                                    |
+| `InterocitorMount`, `InterocitorSystemHandler`, `WithInterocitorOptions`                                                                                                       | Returned handler and wrapper contracts                                                                                                   |
+| `MeshIntegrityGate`, `MeshMiddleware`, `MeshAuthorizer`, `MeshAuthorization`, `MeshAuthorizationMiddlewareOptions`, `MeshRequestContext`, `MeshIntegrityContext`, `MeshAccess` | Mesh integrity and application-policy contracts                                                                                          |
+| `FileUploadAuthorizationRequest`, `FileUploadAuthorizationResult`                                                                                                              | You need app-owned policy before durable file uploads are accepted                                                                       |
+| `FileBodyStore`, `FileBody`, `FileBodyValue`, `FileBodyWriteOptions`, `FileBodyStorageContext`                                                                                 | You implement or select a durable file-body destination without changing Worker authorization or D1 metadata                             |
+| `R2FileBodyStore`, `R2Bucket`, `R2ObjectBody`                                                                                                                                  | You use a Cloudflare R2 binding as the file-body destination                                                                             |
+| `S3FileBodyStore`, `S3FileBodyStoreConfig`, `S3AddressingStyle`                                                                                                                | You keep the Worker and D1 control plane while placing durable file bodies in any S3-compatible bucket; omitted endpoint defaults to AWS |
+| `AwsS3FileBodyStore`, `AwsS3FileBodyStoreConfig`                                                                                                                               | You want AWS bucket/region validation and optional SSE-KMS headers                                                                       |
+| `WorkerAuditEvent`, `WorkerAuditOutcome`                                                                                                                                       | Completed storage-operation instrumentation contracts                                                                                    |
+| `BroadcastDiagnostics`                                                                                                                                                         | Optional logging controls for `broadcast`                                                                                                |
+| `D1Database`, `DurableObjectNamespace`, `ExecutionContextLike`, `WorkerLike`                                                                                                   | Minimal runtime structural types used by the package API                                                                                 |
 
 ## Runtime
 
@@ -130,12 +128,12 @@ The conventional app wiring is:
 
 ```ts
 const mount = createInterocitorMount({
-  mountPrefix: '/sync',
+  mountPrefix: "/sync",
   db: (env) => env.INTEROCITOR_DB,
   files: (env) => new R2FileBodyStore(env.INTEROCITOR_FILES),
   relay: (env) => env.INTEROCITOR_RELAY,
   runtime: {
-    meshIntegrityGates: [({ address }) => address === 'main'],
+    meshIntegrityGates: [({ address }) => address === "main"],
     meshMiddleware: [authorizeMain],
   },
 });
@@ -190,23 +188,20 @@ See [Realtime invalidation relay](docs/relay.md) for wiring and verification.
 If you need manual routing instead of wrapping the whole worker:
 
 ```ts
-import {
-  createInterocitorMount,
-  R2FileBodyStore,
-} from '@interocitor/workers';
+import { createInterocitorMount, R2FileBodyStore } from "@interocitor/workers";
 
 const mount = createInterocitorMount<Env>({
-  mountPrefix: '/sync',
+  mountPrefix: "/sync",
   db: (env) => env.MY_DB,
   files: (env) => new R2FileBodyStore(env.MY_FILES),
   relay: (env) => env.MY_RELAY,
   runtime: {
-    meshIntegrityGates: [({ address }) => address === 'main'],
+    meshIntegrityGates: [({ address }) => address === "main"],
     meshMiddleware: [authorizeMain],
   },
 });
 
-export { InterocitorRelayDurableObject } from '@interocitor/workers';
+export { InterocitorRelayDurableObject } from "@interocitor/workers";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
@@ -230,12 +225,12 @@ The host deployment owns store construction, endpoint allowlisting, and
 provider credentials. The browser and request metadata cannot supply a shared
 storage endpoint or credential.
 
-| Store | Choose it when |
-| --- | --- |
-| `R2FileBodyStore` | The Cloudflare deployment's normal placement meets the mesh's requirements |
-| `S3FileBodyStore` | Durable file bodies belong in an S3-compatible bucket; endpoint omission selects AWS |
-| `AwsS3FileBodyStore` | AWS validation or optional SSE-KMS headers are required |
-| Custom `FileBodyStore` | Another trusted destination can provide exact-key `get`, `put`, and `delete` |
+| Store                  | Choose it when                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------ |
+| `R2FileBodyStore`      | The Cloudflare deployment's normal placement meets the mesh's requirements           |
+| `S3FileBodyStore`      | Durable file bodies belong in an S3-compatible bucket; endpoint omission selects AWS |
+| `AwsS3FileBodyStore`   | AWS validation or optional SSE-KMS headers are required                              |
+| Custom `FileBodyStore` | Another trusted destination can provide exact-key `get`, `put`, and `delete`         |
 
 For provider endpoints, Worker secrets, per-mesh resolver, and the exact data
 boundary, follow [Store durable file bodies in S3-compatible object storage](docs/s3-file-storage.md).
@@ -266,30 +261,32 @@ import {
   createInterocitorMount,
   createMeshAuthorizationMiddleware,
   R2FileBodyStore,
-} from '@interocitor/workers';
+} from "@interocitor/workers";
 
-const authorizeMesh = createMeshAuthorizationMiddleware(async ({ address, access, request }, env) => {
-  const subject = await verifyBearerWithYourIdentityProvider(request, env);
-  if (!subject) return 'deny';
-  const permission = await meshPermissionFor(subject, address, env);
-  if (permission === 'write') return 'full';
-  if (permission === 'read' && access === 'read') return 'readonly';
-  return 'deny';
-});
+const authorizeMesh = createMeshAuthorizationMiddleware(
+  async ({ address, access, request }, env) => {
+    const subject = await verifyBearerWithYourIdentityProvider(request, env);
+    if (!subject) return "deny";
+    const permission = await meshPermissionFor(subject, address, env);
+    if (permission === "write") return "full";
+    if (permission === "read" && access === "read") return "readonly";
+    return "deny";
+  },
+);
 
 const mount = createInterocitorMount<Env>({
-  mountPrefix: '/sync',
-  db: env => env.INTEROCITOR_DB,
-  files: env => new R2FileBodyStore(env.INTEROCITOR_FILES),
+  mountPrefix: "/sync",
+  db: (env) => env.INTEROCITOR_DB,
+  files: (env) => new R2FileBodyStore(env.INTEROCITOR_FILES),
   runtime: {
-    maxStoredFileBytes: env => env.INTEROCITOR_MAX_STORED_FILE_BYTES,
-    maxMeshStoredBytes: env => env.INTEROCITOR_MAX_MESH_STORED_BYTES,
+    maxStoredFileBytes: (env) => env.INTEROCITOR_MAX_STORED_FILE_BYTES,
+    maxMeshStoredBytes: (env) => env.INTEROCITOR_MAX_MESH_STORED_BYTES,
     meshIntegrityGates: [checksummedMeshIntegrityGate],
     meshMiddleware: [authorizeMesh],
-    meshSecret: env => env.INTEROCITOR_MESH_SECRET,
+    meshSecret: (env) => env.INTEROCITOR_MESH_SECRET,
     authorizeFileUpload: async ({ address, path, size, contentType, taint, request }) => {
-      if (contentType?.startsWith('image/') && size > 8 * 1024 * 1024) {
-        return { allowed: false, status: 413, reason: 'image too large' };
+      if (contentType?.startsWith("image/") && size > 8 * 1024 * 1024) {
+        return { allowed: false, status: 413, reason: "image too large" };
       }
       return true;
     },
@@ -301,36 +298,36 @@ const mount = createInterocitorMount<Env>({
 
 Start with the behavior your deployment needs:
 
-| Need | Options |
-| --- | --- |
-| Serve browser clients from named application origins | `cors.allowedOrigins` |
-| Define valid mesh addresses | `meshIntegrityGates` |
-| Apply application access or request policy | `meshMiddleware` |
-| Set D1/file-body-store request and quota limits | `maxControlBytes`, `maxChangeBytes`, `maxMainlineBytes`, `maxGenericFileBytes`, `maxStoredFileBytes`, `maxMeshStoredBytes` |
-| Add durable-file-specific policy | `authorizeFileUpload` |
-| Reclaim inactive D1 sync roots | `enableScheduledMaintenance`, `pathTtlHours` |
-| Instrument completed storage operations | `storageOperationAudit` |
-| Enable targeted diagnostics | `verbose` |
+| Need                                                 | Options                                                                                                                    |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Serve browser clients from named application origins | `cors.allowedOrigins`                                                                                                      |
+| Define valid mesh addresses                          | `meshIntegrityGates`                                                                                                       |
+| Apply application access or request policy           | `meshMiddleware`                                                                                                           |
+| Set D1/file-body-store request and quota limits      | `maxControlBytes`, `maxChangeBytes`, `maxMainlineBytes`, `maxGenericFileBytes`, `maxStoredFileBytes`, `maxMeshStoredBytes` |
+| Add durable-file-specific policy                     | `authorizeFileUpload`                                                                                                      |
+| Reclaim inactive D1 sync roots                       | `enableScheduledMaintenance`, `pathTtlHours`                                                                               |
+| Instrument completed storage operations              | `storageOperationAudit`                                                                                                    |
+| Enable targeted diagnostics                          | `verbose`                                                                                                                  |
 
 The [Worker configuration reference](docs/runtime-options.md) defines every
 type, default, route surface, ordering rule, and failure behavior.
 
 ### CORS allowlists
 
-The default preserves the package's original broad browser behavior:
-Interocitor responses include `Access-Control-Allow-Origin: *`. A deployment
-that owns an explicit origin allowlist should configure it on the mount rather
-than putting the mailbox on a separate Worker or origin:
+By default, Interocitor responses include
+`Access-Control-Allow-Origin: *`. A deployment that owns an explicit origin
+allowlist should configure it on the mount rather than putting the mailbox on a
+separate Worker or origin:
 
 ```ts
 const mount = createInterocitorMount<Env>({
-  mountPrefix: '/sync',
-  db: env => env.INTEROCITOR_DB,
+  mountPrefix: "/sync",
+  db: (env) => env.INTEROCITOR_DB,
   cors: {
-    allowedOrigins: env => [env.APP_ORIGIN],
+    allowedOrigins: (env) => [env.APP_ORIGIN],
   },
   runtime: {
-    meshIntegrityGates: [({ address }) => address === 'main'],
+    meshIntegrityGates: [({ address }) => address === "main"],
   },
 });
 ```

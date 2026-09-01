@@ -1,23 +1,23 @@
 const els = {
-  workerBaseUrl: document.querySelector('#workerBaseUrl'),
-  namespace: document.querySelector('#namespace'),
-  remotePath: document.querySelector('#remotePath'),
-  token: document.querySelector('#token'),
-  key: document.querySelector('#key'),
-  shareToken: document.querySelector('#shareToken'),
-  joinTokenInput: document.querySelector('#joinTokenInput'),
-  status: document.querySelector('#status'),
-  taskInput: document.querySelector('#taskInput'),
-  tasks: document.querySelector('#tasks'),
-  newSessionBtn: document.querySelector('#newSessionBtn'),
-  connectBtn: document.querySelector('#connectBtn'),
-  disconnectBtn: document.querySelector('#disconnectBtn'),
-  addTaskBtn: document.querySelector('#addTaskBtn'),
-  refreshBtn: document.querySelector('#refreshBtn'),
-  applyTokenBtn: document.querySelector('#applyTokenBtn'),
-  copyTokenBtn: document.querySelector('#copyTokenBtn'),
-  compactBtn: document.querySelector('#compactBtn'),
-  compactStatus: document.querySelector('#compactStatus'),
+  workerBaseUrl: document.querySelector("#workerBaseUrl"),
+  namespace: document.querySelector("#namespace"),
+  remotePath: document.querySelector("#remotePath"),
+  token: document.querySelector("#token"),
+  key: document.querySelector("#key"),
+  shareToken: document.querySelector("#shareToken"),
+  joinTokenInput: document.querySelector("#joinTokenInput"),
+  status: document.querySelector("#status"),
+  taskInput: document.querySelector("#taskInput"),
+  tasks: document.querySelector("#tasks"),
+  newSessionBtn: document.querySelector("#newSessionBtn"),
+  connectBtn: document.querySelector("#connectBtn"),
+  disconnectBtn: document.querySelector("#disconnectBtn"),
+  addTaskBtn: document.querySelector("#addTaskBtn"),
+  refreshBtn: document.querySelector("#refreshBtn"),
+  applyTokenBtn: document.querySelector("#applyTokenBtn"),
+  copyTokenBtn: document.querySelector("#copyTokenBtn"),
+  compactBtn: document.querySelector("#compactBtn"),
+  compactStatus: document.querySelector("#compactStatus"),
 };
 
 const requestStats = {
@@ -41,21 +41,21 @@ function normalizeRequestKey(method, urlString) {
   try {
     const url = new URL(urlString, window.location.href);
     const pathname = url.pathname;
-    if (pathname.includes('/todo-interocitor/io/')) {
-      if (pathname.endsWith('/list-files')) return `${method} list-files`;
-      if (pathname.endsWith('/list-folders')) return `${method} list-folders`;
-      if (pathname.endsWith('/metadata')) return `${method} metadata`;
-      if (pathname.endsWith('/ensure-folder')) return `${method} ensure-folder`;
-      if (pathname.endsWith('/file')) {
-        const rawPath = url.searchParams.get('path') || '/';
-        if (rawPath.includes('/devices/')) return `${method} file:device`;
-        if (rawPath.endsWith('/head.json')) return `${method} file:head`;
-        if (rawPath.includes('/mainline/')) return `${method} file:mainline`;
-        if (rawPath.includes('/changes/')) return `${method} file:change`;
+    if (pathname.includes("/todo-interocitor/io/")) {
+      if (pathname.endsWith("/list-files")) return `${method} list-files`;
+      if (pathname.endsWith("/list-folders")) return `${method} list-folders`;
+      if (pathname.endsWith("/metadata")) return `${method} metadata`;
+      if (pathname.endsWith("/ensure-folder")) return `${method} ensure-folder`;
+      if (pathname.endsWith("/file")) {
+        const rawPath = url.searchParams.get("path") || "/";
+        if (rawPath.includes("/devices/")) return `${method} file:device`;
+        if (rawPath.endsWith("/head.json")) return `${method} file:head`;
+        if (rawPath.includes("/mainline/")) return `${method} file:mainline`;
+        if (rawPath.includes("/changes/")) return `${method} file:change`;
         return `${method} file:other`;
       }
     }
-    if (pathname.includes('/todo-interocitor/notify/')) return `${method} notify`;
+    if (pathname.includes("/todo-interocitor/notify/")) return `${method} notify`;
     return `${method} ${pathname}`;
   } catch {
     return `${method} ${urlString}`;
@@ -69,7 +69,7 @@ function bumpFetchStat(method, urlString) {
 
 window.fetch = async (input, init = {}) => {
   const request = input instanceof Request ? input : new Request(input, init);
-  bumpFetchStat((request.method || 'GET').toUpperCase(), request.url);
+  bumpFetchStat((request.method || "GET").toUpperCase(), request.url);
   return await nativeFetch(input, init);
 };
 
@@ -77,13 +77,13 @@ window.WebSocket = class CountingWebSocket extends NativeWebSocket {
   constructor(url, protocols) {
     super(url, protocols);
     requestStats.websocket.opened += 1;
-    this.addEventListener('message', () => {
+    this.addEventListener("message", () => {
       requestStats.websocket.messages += 1;
     });
-    this.addEventListener('close', () => {
+    this.addEventListener("close", () => {
       requestStats.websocket.closed += 1;
     });
-    this.addEventListener('error', () => {
+    this.addEventListener("error", () => {
       requestStats.websocket.errors += 1;
     });
   }
@@ -107,18 +107,22 @@ let runtimeOptions = {
 const credentialEnvelopeRecords = new Map();
 
 async function createTodoCredentialStore(dbName) {
-  const mode = new URLSearchParams(location.search).get('credentials') || 'session';
-  const {
-    MemoryCredentialEnvelopeStore,
-    StaticEnvelopeKeyProvider,
-    createWebCredentialStore,
-  } = await import('../../packages/web/dist/index.js');
+  const mode = new URLSearchParams(location.search).get("credentials") || "session";
+  const { MemoryCredentialEnvelopeStore, StaticEnvelopeKeyProvider, createWebCredentialStore } =
+    await import("../../packages/web/dist/index.js");
 
-  if (mode === 'memory') return createWebCredentialStore(dbName, { storage: 'memory' });
-  if (mode === 'local') return createWebCredentialStore(dbName, { storage: 'localStorage' });
-  if (mode === 'passkey') return createWebCredentialStore(dbName, { storage: 'passkey', displayName: 'Interocitor TODO Cloudflare' });
-  if (mode === 'memory-envelope') {
-    const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  if (mode === "memory") return createWebCredentialStore(dbName, { storage: "memory" });
+  if (mode === "local") return createWebCredentialStore(dbName, { storage: "localStorage" });
+  if (mode === "passkey")
+    return createWebCredentialStore(dbName, {
+      storage: "passkey",
+      displayName: "Interocitor TODO Cloudflare",
+    });
+  if (mode === "memory-envelope") {
+    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, [
+      "encrypt",
+      "decrypt",
+    ]);
     return createWebCredentialStore(dbName, {
       envelope: {
         store: new MemoryCredentialEnvelopeStore(dbName, credentialEnvelopeRecords),
@@ -127,7 +131,7 @@ async function createTodoCredentialStore(dbName) {
     });
   }
 
-  return createWebCredentialStore(dbName, { storage: 'sessionStorage' });
+  return createWebCredentialStore(dbName, { storage: "sessionStorage" });
 }
 
 function setStatus(message) {
@@ -144,16 +148,21 @@ function makeJoinToken(session) {
 
 function parseJoinToken(raw) {
   const parsed = JSON.parse(raw);
-  if (!parsed || typeof parsed !== 'object') throw new Error('Token must be a JSON object');
-  if (typeof parsed.workerBaseUrl !== 'string' || !parsed.workerBaseUrl) throw new Error('Token missing workerBaseUrl');
-  if (typeof parsed.namespace !== 'string' || !parsed.namespace) throw new Error('Token missing namespace');
-  if (typeof parsed.remotePath !== 'string' || !parsed.remotePath.startsWith('/')) throw new Error('Token invalid remotePath');
-  if (typeof parsed.key !== 'string' || !parsed.key) throw new Error('Token missing key');
+  if (!parsed || typeof parsed !== "object") throw new Error("Token must be a JSON object");
+  if (typeof parsed.workerBaseUrl !== "string" || !parsed.workerBaseUrl)
+    throw new Error("Token missing workerBaseUrl");
+  if (typeof parsed.namespace !== "string" || !parsed.namespace)
+    throw new Error("Token missing namespace");
+  if (typeof parsed.remotePath !== "string" || !parsed.remotePath.startsWith("/"))
+    throw new Error("Token invalid remotePath");
+  if (typeof parsed.key !== "string" || !parsed.key) throw new Error("Token missing key");
+  if (typeof parsed.token !== "string" || !parsed.token)
+    throw new Error("Token missing access token");
   return {
     workerBaseUrl: parsed.workerBaseUrl,
     namespace: parsed.namespace,
     remotePath: parsed.remotePath,
-    token: typeof parsed.token === 'string' ? parsed.token : '',
+    token: parsed.token,
     key: parsed.key,
   };
 }
@@ -162,22 +171,23 @@ function applySessionToUi(session) {
   els.workerBaseUrl.value = session.workerBaseUrl;
   els.namespace.value = session.namespace;
   els.remotePath.value = session.remotePath;
-  els.token.value = session.token || '';
+  els.token.value = session.token || "";
   els.key.value = session.key;
   els.shareToken.value = makeJoinToken(session);
 }
 
 function readSessionFromUi() {
-  const workerBaseUrl = els.workerBaseUrl.value.trim().replace(/\/$/, '');
+  const workerBaseUrl = els.workerBaseUrl.value.trim().replace(/\/$/, "");
   const namespace = els.namespace.value.trim();
   const remotePath = els.remotePath.value.trim();
   const token = els.token.value.trim();
   const key = els.key.value.trim();
 
-  if (!workerBaseUrl) throw new Error('Worker URL is required');
-  if (!namespace) throw new Error('Namespace is required');
-  if (!remotePath.startsWith('/')) throw new Error('Remote path must start with /');
-  if (!key) throw new Error('Key passphrase is required');
+  if (!workerBaseUrl) throw new Error("Worker URL is required");
+  if (!namespace) throw new Error("Namespace is required");
+  if (!remotePath.startsWith("/")) throw new Error("Remote path must start with /");
+  if (!token) throw new Error("Access token is required by this example");
+  if (!key) throw new Error("Key passphrase is required");
 
   return { workerBaseUrl, namespace, remotePath, token, key };
 }
@@ -187,15 +197,28 @@ function taskRowId() {
 }
 
 async function buildSession(overrides = {}) {
-  const { generateKey, keyToPassphrase } = await import('../../packages/core/dist/crypto/keys.js');
+  const { generateKey, keyToPassphrase } = await import("../../packages/core/dist/crypto/keys.js");
   const key = await generateKey();
   const passphrase = await keyToPassphrase(key);
 
+  const workerBaseUrl = (overrides.workerBaseUrl || els.workerBaseUrl.value.trim()).replace(
+    /\/$/,
+    "",
+  );
+  const namespace = overrides.namespace || els.namespace.value.trim();
+  const remotePath = overrides.remotePath || els.remotePath.value.trim();
+  const token = overrides.token ?? els.token.value.trim();
+
+  if (!workerBaseUrl) throw new Error("Worker URL is required");
+  if (!namespace) throw new Error("Provisioned namespace is required");
+  if (!remotePath.startsWith("/")) throw new Error("Remote path must start with /");
+  if (!token) throw new Error("Access token is required by this example");
+
   return {
-    workerBaseUrl: overrides.workerBaseUrl || els.workerBaseUrl.value.trim() || 'http://127.0.0.1:8787',
-    namespace: overrides.namespace || els.namespace.value.trim() || 'team-a',
-    remotePath: overrides.remotePath || els.remotePath.value.trim() || '/todo-app',
-    token: overrides.token ?? els.token.value.trim(),
+    workerBaseUrl,
+    namespace,
+    remotePath,
+    token,
     key: passphrase,
   };
 }
@@ -203,43 +226,15 @@ async function buildSession(overrides = {}) {
 async function createSession(overrides = {}) {
   const session = await buildSession(overrides);
   applySessionToUi(session);
-  setStatus('New session created. Copy token to another tab, then connect.');
-  return session;
-}
-
-async function autoCreateSession() {
-  const snapshot = {
-    workerBaseUrl: els.workerBaseUrl.value,
-    namespace: els.namespace.value,
-    remotePath: els.remotePath.value,
-    token: els.token.value,
-    key: els.key.value,
-    shareToken: els.shareToken.value,
-    joinTokenInput: els.joinTokenInput.value,
-  };
-
-  const session = await buildSession();
-  const unchanged =
-    els.workerBaseUrl.value === snapshot.workerBaseUrl &&
-    els.namespace.value === snapshot.namespace &&
-    els.remotePath.value === snapshot.remotePath &&
-    els.token.value === snapshot.token &&
-    els.key.value === snapshot.key &&
-    els.shareToken.value === snapshot.shareToken &&
-    els.joinTokenInput.value === snapshot.joinTokenInput;
-
-  if (!unchanged) return null;
-
-  applySessionToUi(session);
-  setStatus('New session created. Copy token to another tab, then connect.');
+  setStatus("New session created. Copy token to another tab, then connect.");
   return session;
 }
 
 async function connect() {
-  const { Interocitor } = await import('../../packages/core/dist/index.js');
-  const { CloudflareAdapter } = await import('../../packages/core/dist/adapters/cloudflare.js');
-  const { PortablePassphraseKeySource } = await import('../../packages/core/dist/index.js');
-  const { IndexedDbLocalStore } = await import('../../packages/web/dist/index.js');
+  const { Interocitor } = await import("../../packages/core/dist/index.js");
+  const { CloudflareAdapter } = await import("../../packages/core/dist/adapters/cloudflare.js");
+  const { PortablePassphraseKeySource } = await import("../../packages/core/dist/index.js");
+  const { IndexedDbLocalStore } = await import("../../packages/web/dist/index.js");
 
   const session = readSessionFromUi();
   await disconnect();
@@ -250,9 +245,9 @@ async function connect() {
     relayEnabled: runtimeOptions.relayEnabled,
   });
 
-  const tabDeviceId = sessionStorage.getItem('todo-cf-device-id') || `tab-${randomSuffix()}`;
-  sessionStorage.setItem('todo-cf-device-id', tabDeviceId);
-  localStorage.setItem('interocitor-device-id', tabDeviceId);
+  const tabDeviceId = sessionStorage.getItem("todo-cf-device-id") || `tab-${randomSuffix()}`;
+  sessionStorage.setItem("todo-cf-device-id", tabDeviceId);
+  localStorage.setItem("interocitor-device-id", tabDeviceId);
 
   const dbName = `interocitor-cf-${tabDeviceId}`;
   const engine = new Interocitor(adapter, {
@@ -278,17 +273,17 @@ async function connect() {
   });
   const unsubEngine = engine.on((event) => {
     eventLog.push({ type: event.type, ts: Date.now() });
-    if (event.type === 'change' || event.type === 'delete' || event.type === 'sync:complete') {
+    if (event.type === "change" || event.type === "delete" || event.type === "sync:complete") {
       void refreshTasks();
     }
-    if (event.type === 'relay:ready') {
-      eventLog.push({ type: 'sse:ready', ts: Date.now() });
+    if (event.type === "relay:ready") {
+      eventLog.push({ type: "sse:ready", ts: Date.now() });
       sseReadyResolve?.(true);
     }
-    if (event.type === 'relay:error') {
-      eventLog.push({ type: 'sse:error', ts: Date.now() });
+    if (event.type === "relay:error") {
+      eventLog.push({ type: "sse:error", ts: Date.now() });
     }
-    if (event.type === 'relay:unavailable') {
+    if (event.type === "relay:unavailable") {
       sseReadyResolve?.(false);
     }
   });
@@ -299,7 +294,7 @@ async function connect() {
 
   runtime = {
     engine,
-    tasks: engine.table('tasks'),
+    tasks: engine.table("tasks"),
     unsubEngine,
     unsubSse,
     sseReady,
@@ -314,11 +309,18 @@ async function disconnect() {
   if (runtime.unsubEngine) runtime.unsubEngine();
   if (runtime.unsubSse) runtime.unsubSse();
   if (runtime.engine) await runtime.engine.disconnect();
-  runtime = { engine: null, tasks: null, unsubEngine: null, unsubSse: null, sseReady: Promise.resolve(false), eventLog: [] };
+  runtime = {
+    engine: null,
+    tasks: null,
+    unsubEngine: null,
+    unsubSse: null,
+    sseReady: Promise.resolve(false),
+    eventLog: [],
+  };
 }
 
 async function addTask(title) {
-  if (!runtime.tasks) throw new Error('Connect first');
+  if (!runtime.tasks) throw new Error("Connect first");
   const cleanTitle = title.trim();
   if (!cleanTitle) return;
 
@@ -331,19 +333,19 @@ async function addTask(title) {
   });
 
   if (runtime.engine) await runtime.engine.flush();
-  els.taskInput.value = '';
+  els.taskInput.value = "";
   await refreshTasks();
 }
 
 async function toggleTask(id, done) {
-  if (!runtime.tasks) throw new Error('Connect first');
+  if (!runtime.tasks) throw new Error("Connect first");
   await runtime.tasks.put(id, { done: !done });
   if (runtime.engine) await runtime.engine.flush();
   await refreshTasks();
 }
 
 async function removeTask(id) {
-  if (!runtime.tasks) throw new Error('Connect first');
+  if (!runtime.tasks) throw new Error("Connect first");
   await runtime.tasks.delete(id);
   if (runtime.engine) await runtime.engine.flush();
   await refreshTasks();
@@ -351,32 +353,32 @@ async function removeTask(id) {
 
 async function refreshTasks() {
   if (!runtime.tasks) {
-    els.tasks.innerHTML = '';
+    els.tasks.innerHTML = "";
     return [];
   }
 
   const all = await runtime.tasks.query();
   const sorted = [...all].toSorted((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0));
 
-  els.tasks.innerHTML = '';
+  els.tasks.innerHTML = "";
   for (const item of sorted) {
-    const li = document.createElement('li');
+    const li = document.createElement("li");
 
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
     checkbox.checked = Boolean(item.done);
-    checkbox.addEventListener('change', () => {
-      void toggleTask(String(item.id || ''), Boolean(item.done));
+    checkbox.addEventListener("change", () => {
+      void toggleTask(String(item.id || ""), Boolean(item.done));
     });
 
-    const span = document.createElement('span');
-    span.textContent = ` ${String(item.title || '(untitled)')} `;
-    span.style.textDecoration = item.done ? 'line-through' : 'none';
+    const span = document.createElement("span");
+    span.textContent = ` ${String(item.title || "(untitled)")} `;
+    span.style.textDecoration = item.done ? "line-through" : "none";
 
-    const del = document.createElement('button');
-    del.textContent = 'Delete';
-    del.addEventListener('click', () => {
-      void removeTask(String(item.id || ''));
+    const del = document.createElement("button");
+    del.textContent = "Delete";
+    del.addEventListener("click", () => {
+      void removeTask(String(item.id || ""));
     });
 
     li.append(checkbox);
@@ -389,18 +391,18 @@ async function refreshTasks() {
 }
 
 async function compact() {
-  if (!runtime.engine) throw new Error('Connect first');
-  els.compactStatus.textContent = 'Compacting...';
+  if (!runtime.engine) throw new Error("Connect first");
+  els.compactStatus.textContent = "Compacting...";
   await runtime.engine.compact();
   const manifest = runtime.engine.getManifest();
-  const gen = manifest?.generation ?? '?';
+  const gen = manifest?.generation ?? "?";
   els.compactStatus.textContent = `Mainline set at generation ${gen}.`;
 }
 
 function applyTokenFromInput() {
   const parsed = parseJoinToken(els.joinTokenInput.value.trim());
   applySessionToUi(parsed);
-  setStatus('Token applied. Click Connect.');
+  setStatus("Token applied. Click Connect.");
 }
 
 async function copyToken() {
@@ -408,38 +410,40 @@ async function copyToken() {
   if (!token) return;
   if (navigator.clipboard && navigator.clipboard.writeText) {
     await navigator.clipboard.writeText(token);
-    setStatus('Token copied to clipboard.');
+    setStatus("Token copied to clipboard.");
     return;
   }
-  setStatus('Clipboard API unavailable. Copy token manually.');
+  setStatus("Clipboard API unavailable. Copy token manually.");
 }
 
-els.newSessionBtn.addEventListener('click', () => {
+els.newSessionBtn.addEventListener("click", () => {
   void createSession().catch((e) => setStatus(`New session failed: ${e.message}`));
 });
-els.connectBtn.addEventListener('click', () => {
+els.connectBtn.addEventListener("click", () => {
   void connect().catch((e) => setStatus(`Connect failed: ${e.message}`));
 });
-els.disconnectBtn.addEventListener('click', () => {
-  void disconnect().then(() => setStatus('Disconnected.')).catch((e) => setStatus(`Disconnect failed: ${e.message}`));
+els.disconnectBtn.addEventListener("click", () => {
+  void disconnect()
+    .then(() => setStatus("Disconnected."))
+    .catch((e) => setStatus(`Disconnect failed: ${e.message}`));
 });
-els.addTaskBtn.addEventListener('click', () => {
+els.addTaskBtn.addEventListener("click", () => {
   void addTask(els.taskInput.value).catch((e) => setStatus(`Add failed: ${e.message}`));
 });
-els.refreshBtn.addEventListener('click', () => {
+els.refreshBtn.addEventListener("click", () => {
   void refreshTasks().catch((e) => setStatus(`Refresh failed: ${e.message}`));
 });
-els.applyTokenBtn.addEventListener('click', () => {
+els.applyTokenBtn.addEventListener("click", () => {
   try {
     applyTokenFromInput();
   } catch (e) {
     setStatus(`Apply token failed: ${e.message}`);
   }
 });
-els.copyTokenBtn.addEventListener('click', () => {
+els.copyTokenBtn.addEventListener("click", () => {
   void copyToken().catch((e) => setStatus(`Copy failed: ${e.message}`));
 });
-els.compactBtn.addEventListener('click', () => {
+els.compactBtn.addEventListener("click", () => {
   void compact().catch((e) => setStatus(`Compact failed: ${e.message}`));
 });
 
@@ -456,13 +460,21 @@ window.__todoDemo = {
   refreshTasks,
   compact,
   configure(options = {}) {
-    if (typeof options.pollInterval === 'number' && Number.isFinite(options.pollInterval) && options.pollInterval > 0) {
+    if (
+      typeof options.pollInterval === "number" &&
+      Number.isFinite(options.pollInterval) &&
+      options.pollInterval > 0
+    ) {
       runtimeOptions.pollInterval = options.pollInterval;
     }
-    if (typeof options.relayEnabled === 'boolean') {
+    if (typeof options.relayEnabled === "boolean") {
       runtimeOptions.relayEnabled = options.relayEnabled;
     }
-    if (typeof options.relayHealthyPollInterval === 'number' && Number.isFinite(options.relayHealthyPollInterval) && options.relayHealthyPollInterval > 0) {
+    if (
+      typeof options.relayHealthyPollInterval === "number" &&
+      Number.isFinite(options.relayHealthyPollInterval) &&
+      options.relayHealthyPollInterval > 0
+    ) {
       runtimeOptions.relayHealthyPollInterval = options.relayHealthyPollInterval;
     }
     return { ...runtimeOptions };
@@ -474,7 +486,7 @@ window.__todoDemo = {
     return readSessionFromUi();
   },
   getStatus() {
-    return els.status.textContent || '';
+    return els.status.textContent || "";
   },
   getRuntimeOptions() {
     return { ...runtimeOptions };
@@ -511,8 +523,6 @@ window.__todoDemo = {
   },
 };
 
-window.addEventListener('beforeunload', () => {
+window.addEventListener("beforeunload", () => {
   void disconnect();
 });
-
-void autoCreateSession().catch((e) => setStatus(`Init failed: ${e.message}`));

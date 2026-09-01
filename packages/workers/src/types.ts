@@ -127,11 +127,7 @@ export interface FileBodyStore {
   /** Return the exact body stored at `key`, or `null` when it is absent. */
   get(key: string): Promise<FileBody | null>;
   /** Fully replace the body at `key`; reject instead of exposing a partial write. */
-  put(
-    key: string,
-    value: FileBodyValue,
-    options?: FileBodyWriteOptions,
-  ): Promise<void>;
+  put(key: string, value: FileBodyValue, options?: FileBodyWriteOptions): Promise<void>;
   /** Remove `key`; an absent key is a successful no-op. */
   delete(key: string): Promise<void>;
 }
@@ -196,7 +192,9 @@ export interface FileUploadAuthorizationRequest {
  * Durable-file upload decision. `false` rejects with `403`; an object can
  * supply a rejection status and response reason.
  */
-export type FileUploadAuthorizationResult = boolean | { allowed: boolean; reason?: string; status?: number };
+export type FileUploadAuthorizationResult =
+  | boolean
+  | { allowed: boolean; reason?: string; status?: number };
 
 /** Information available while deciding whether a mesh address exists. */
 export interface MeshIntegrityContext {
@@ -215,10 +213,13 @@ export interface MeshIntegrityContext {
  * unchanged. If every gate returns `false`, the request receives `404`; a
  * thrown or rejected gate produces `503`.
  */
-export type MeshIntegrityGate<Env = unknown> = (context: MeshIntegrityContext, env: Env) => boolean | Promise<boolean>;
+export type MeshIntegrityGate<Env = unknown> = (
+  context: MeshIntegrityContext,
+  env: Env,
+) => boolean | Promise<boolean>;
 
 /** The access requested from a mesh route. */
-export type MeshAccess = 'read' | 'write';
+export type MeshAccess = "read" | "write";
 
 /** An accepted mesh request passed through application middleware. */
 export interface MeshRequestContext {
@@ -227,7 +228,7 @@ export interface MeshRequestContext {
   /** Clone of the incoming request. */
   request: Request;
   /** Route family handling the request. */
-  surface: 'io' | 'notify';
+  surface: "io" | "notify";
   /** Operation class determined before middleware runs. */
   access: MeshAccess;
 }
@@ -252,13 +253,16 @@ export type MeshMiddleware<Env = unknown> = (
  * - `full`: continue reads and writes.
  * - `deny`: reject the request with `403`.
  */
-export type MeshAuthorization = 'none' | 'readonly' | 'full' | 'deny';
+export type MeshAuthorization = "none" | "readonly" | "full" | "deny";
 
 /**
  * Return application access for one accepted mesh request.
  * A thrown/rejected authorizer or an invalid result produces `503`.
  */
-export type MeshAuthorizer<Env = unknown> = (request: MeshRequestContext, env: Env) => MeshAuthorization | Promise<MeshAuthorization>;
+export type MeshAuthorizer<Env = unknown> = (
+  request: MeshRequestContext,
+  env: Env,
+) => MeshAuthorization | Promise<MeshAuthorization>;
 
 /** Options for {@link createMeshAuthorizationMiddleware}. */
 export interface MeshAuthorizationMiddlewareOptions {
@@ -271,27 +275,27 @@ export interface MeshAuthorizationMiddlewareOptions {
 }
 
 /** Outcome recorded after a storage operation completes. */
-export type WorkerAuditOutcome = 'ok' | 'rejected' | 'not-found';
+export type WorkerAuditOutcome = "ok" | "rejected" | "not-found";
 
 /** Completed sync-storage, durable-file, or recovery operation. */
 export interface WorkerAuditEvent {
   /** Stable event discriminator. */
-  event: 'interocitor.audit';
+  event: "interocitor.audit";
   /** ISO timestamp recorded after the storage operation. */
   at: string;
   /** Storage operation observed by the Worker. */
   op:
-    | 'read'
-    | 'write'
-    | 'delete'
-    | 'list'
-    | 'metadata'
-    | 'recovery-read'
-    | 'recovery-write'
-    | 'stored-file-read'
-    | 'stored-file-write'
-    | 'stored-file-delete'
-    | 'stored-file-metadata';
+    | "read"
+    | "write"
+    | "delete"
+    | "list"
+    | "metadata"
+    | "recovery-read"
+    | "recovery-write"
+    | "stored-file-read"
+    | "stored-file-write"
+    | "stored-file-delete"
+    | "stored-file-metadata";
   /** Accepted mesh address, when the operation is mesh-scoped. */
   address?: string;
   /** Normalized object path, when applicable. */
@@ -316,7 +320,7 @@ export interface WorkerAuditEvent {
  */
 export interface DatabaseAdapter {
   /** The adapter kind — always `'d1'` for this implementation. */
-  kind: 'd1';
+  kind: "d1";
   /** The raw D1 binding. */
   raw: D1Database;
   /** Prepare a SQL statement. */
@@ -410,8 +414,8 @@ export interface InterocitorMountOptions<Env = unknown> {
   mountPrefix?: string | null;
   /**
    * Cross-origin policy for this deployment's Interocitor routes. Omit it to
-   * preserve the legacy `Access-Control-Allow-Origin: *` response. When set,
-   * only exact request origins in `allowedOrigins` receive that header.
+   * use the default `Access-Control-Allow-Origin: *` response. When set, only
+   * exact request origins in `allowedOrigins` receive that header.
    */
   cors?: CorsOptions<Env>;
   /**
@@ -479,7 +483,10 @@ export interface InterocitorSystemHandlerOptions<Env = unknown> {
   /** Resolve the D1 database used by system operations. */
   db: (env: Env) => D1Database;
   /** Integrity, TTL, checksum, and diagnostic settings used by system operations. */
-  runtime?: Pick<InterocitorRuntimeOptions<Env>, 'meshIntegrityGates' | 'pathTtlHours' | 'meshSecret' | 'verbose'>;
+  runtime?: Pick<
+    InterocitorRuntimeOptions<Env>,
+    "meshIntegrityGates" | "pathTtlHours" | "meshSecret" | "verbose"
+  >;
 }
 
 /** Separately routed mesh-ID, metrics, and maintenance handler. */
@@ -492,4 +499,4 @@ export interface InterocitorSystemHandler<Env = unknown> {
   fetch(request: Request, env: Env, ctx: ExecutionContextLike): Promise<Response>;
 }
 
-export type { PathType } from './paths.ts';
+export type { PathType } from "./paths.ts";

@@ -1,18 +1,22 @@
 {
   "name": "todo-cloudflare-do-example",
-  "private": true,
   "version": "0.0.0",
+  "private": true,
   "description": "Cloudflare Worker + D1 Interocitor TODO demo mounted under an app-owned prefix",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "sh -c 'wrangler dev --port ${PORT:-8787} --persist-to .wrangler/state'",
+    "dev:test": "sh -c 'wrangler dev --config wrangler.playwright.toml --port ${PORT:-8788} --persist-to .wrangler/state'",
     "deploy": "wrangler deploy",
     "check": "node --check ./todo-interocitor.js",
     "db:migrate:local": "wrangler d1 migrations apply INTEROCITOR_DB --local",
+    "db:migrate:local:test": "wrangler d1 migrations apply INTEROCITOR_DB --local --config wrangler.playwright.toml --persist-to .wrangler/state",
+    "db:schema:local:test": "wrangler d1 execute INTEROCITOR_DB --local --config wrangler.playwright.toml --persist-to .wrangler/state --file=../../packages/workers/schema.sql",
+    "db:prepare:local:test": "yarn db:migrate:local:test && yarn db:schema:local:test",
     "db:migrate:remote": "wrangler d1 migrations apply INTEROCITOR_DB --remote"
   },
-  "license": "MIT",
   "devDependencies": {
-    "wrangler": "^4.10.0"
+    "wrangler": "^4.127.1"
   }
 }

@@ -1,6 +1,6 @@
-import { classifyPath, meshRootForPath, cacheKeyFor, listingCacheKeyFor } from './paths.ts';
-import type { PathType } from './paths.ts';
-import type { D1Database, D1PreparedStatement, QueryRow } from './types.ts';
+import { classifyPath, meshRootForPath, cacheKeyFor, listingCacheKeyFor } from "./paths.ts";
+import type { PathType } from "./paths.ts";
+import type { D1Database, D1PreparedStatement, QueryRow } from "./types.ts";
 
 // ─── ops.ts ──────────────────────────────────────────────────────────────────
 //
@@ -65,14 +65,16 @@ declare const caches: GlobalCaches | undefined;
 function getDefaultCache(): CacheNamespace | undefined {
   // biome-ignore lint/suspicious/noExplicitAny: Cloudflare Workers cache API not in DOM lib
   // oxlint-disable-next-line unicorn/no-typeof-undefined -- `caches` may be undeclared outside the Workers runtime.
-  const gc = (typeof caches === 'undefined' ? (globalThis as any).caches : caches) as GlobalCaches | undefined;
+  const gc = (typeof caches === "undefined" ? (globalThis as any).caches : caches) as
+    | GlobalCaches
+    | undefined;
   return gc?.default;
 }
 
 function decodeJsonBuffer(value: ArrayBuffer | Uint8Array | string | null | undefined): string {
   if (value instanceof ArrayBuffer) return new TextDecoder().decode(value);
   if (value instanceof Uint8Array) return new TextDecoder().decode(value);
-  if (typeof value === 'string') return value;
+  if (typeof value === "string") return value;
   // biome-ignore lint/suspicious/noExplicitAny: runtime-typed D1 binary blob
   const v = value as any;
   return new TextDecoder().decode(new Uint8Array(v?.buffer ?? v ?? []));
@@ -82,7 +84,7 @@ function isCacheableImmutablePathType(pathType: PathType): boolean {
   // Change files and mainline snapshots are immutable but deletable after
   // compaction advances the authoritative manifest. Cache API entries are
   // per-colo and cannot be globally invalidated, so both must always read D1.
-  return pathType === 'manifest-snapshot';
+  return pathType === "manifest-snapshot";
 }
 
 async function cacheGet(prefix: string, path: string): Promise<CacheEntry | null> {
@@ -91,22 +93,28 @@ async function cacheGet(prefix: string, path: string): Promise<CacheEntry | null
   const resp = await cache.match(cacheKeyFor(prefix, path));
   if (!resp) return null;
   const bytes = new Uint8Array(await resp.arrayBuffer());
-  const etag = resp.headers.get('ETag') ?? '';
-  const modifiedTime = resp.headers.get('X-Modified-Time') ?? '';
+  const etag = resp.headers.get("ETag") ?? "";
+  const modifiedTime = resp.headers.get("X-Modified-Time") ?? "";
   return { bytes, etag, modifiedTime, size: bytes.byteLength };
 }
 
-async function cachePut(prefix: string, path: string, bytes: Uint8Array, etag: string, modifiedTime: string): Promise<void> {
+async function cachePut(
+  prefix: string,
+  path: string,
+  bytes: Uint8Array,
+  etag: string,
+  modifiedTime: string,
+): Promise<void> {
   const cache = getDefaultCache();
   if (!cache) return;
   await cache.put(
     cacheKeyFor(prefix, path),
     new Response(bytes as unknown as BodyInit, {
       headers: {
-        'Cache-Control': 'public, max-age=31536000, immutable',
-        'Content-Type': 'application/octet-stream',
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "Content-Type": "application/octet-stream",
         ETag: etag,
-        'X-Modified-Time': modifiedTime,
+        "X-Modified-Time": modifiedTime,
       },
     }),
   );
@@ -147,15 +155,19 @@ async function listingCacheGet(prefix: string, path: string): Promise<ListChildr
   }
 }
 
-async function listingCachePut(prefix: string, path: string, listing: ListChildrenResult): Promise<void> {
+async function listingCachePut(
+  prefix: string,
+  path: string,
+  listing: ListChildrenResult,
+): Promise<void> {
   const cache = getDefaultCache();
   if (!cache) return;
   await cache.put(
     listingCacheKeyFor(prefix, path),
     new Response(JSON.stringify(listing), {
       headers: {
-        'Cache-Control': `public, max-age=${LISTING_CACHE_TTL_SECONDS}`,
-        'Content-Type': 'application/json',
+        "Cache-Control": `public, max-age=${LISTING_CACHE_TTL_SECONDS}`,
+        "Content-Type": "application/json",
       },
     }),
   );
@@ -168,8 +180,8 @@ async function listingCacheDelete(prefix: string, path: string): Promise<void> {
 }
 
 function parentDirOf(path: string): string {
-  const idx = path.lastIndexOf('/');
-  return idx <= 0 ? '/' : path.slice(0, idx);
+  const idx = path.lastIndexOf("/");
+  return idx <= 0 ? "/" : path.slice(0, idx);
 }
 
 // ─── Shared helpers ──────────────────────────────────────────────────────────
@@ -183,14 +195,14 @@ function newEtag(): string {
 }
 
 export function normalizePath(raw: string): string {
-  const s = String(raw).startsWith('/') ? raw : `/${raw}`;
-  const c = s.replaceAll(/\/+/g, '/');
-  if (c === '/') return '/';
-  return c.endsWith('/') ? c.slice(0, -1) : c;
+  const s = String(raw).startsWith("/") ? raw : `/${raw}`;
+  const c = s.replaceAll(/\/+/g, "/");
+  if (c === "/") return "/";
+  return c.endsWith("/") ? c.slice(0, -1) : c;
 }
 
 export function fileNameFromPath(path: string): string {
-  return path.split('/').filter(Boolean).pop() ?? '';
+  return path.split("/").filter(Boolean).pop() ?? "";
 }
 
 function clampNonNeg(v: unknown): number {
@@ -199,15 +211,23 @@ function clampNonNeg(v: unknown): number {
 
 // ─── Folder tree (batched) ───────────────────────────────────────────────────
 
-function folderTreeStatements(db: D1Database, prefix: string, target: string): D1PreparedStatement[] {
+function folderTreeStatements(
+  db: D1Database,
+  prefix: string,
+  target: string,
+): D1PreparedStatement[] {
   const n = normalizePath(target);
-  if (!n || n === '/') return [];
+  if (!n || n === "/") return [];
   const stmts: D1PreparedStatement[] = [];
   const now = nowIso();
-  let cur = '';
-  for (const seg of n.split('/').filter(Boolean)) {
+  let cur = "";
+  for (const seg of n.split("/").filter(Boolean)) {
     cur += `/${seg}`;
-    stmts.push(db.prepare('INSERT OR IGNORE INTO folders (prefix,path,created_at) VALUES (?1,?2,?3)').bind(prefix, cur, now));
+    stmts.push(
+      db
+        .prepare("INSERT OR IGNORE INTO folders (prefix,path,created_at) VALUES (?1,?2,?3)")
+        .bind(prefix, cur, now),
+    );
   }
   return stmts;
 }
@@ -221,7 +241,11 @@ interface MetricsDelta {
   mainlineBytesDelta: number;
 }
 
-function metricsDelta(pathType: PathType, prevSize: number | null | undefined, nextSize: number | null | undefined): MetricsDelta {
+function metricsDelta(
+  pathType: PathType,
+  prevSize: number | null | undefined,
+  nextSize: number | null | undefined,
+): MetricsDelta {
   const prevMissing = prevSize === null || prevSize === undefined;
   const nextMissing = nextSize === null || nextSize === undefined;
   const prev = prevMissing ? 0 : clampNonNeg(prevSize);
@@ -231,8 +255,8 @@ function metricsDelta(pathType: PathType, prevSize: number | null | undefined, n
   return {
     fileCountDelta: fileDelta,
     totalBytesDelta: bytesDelta,
-    changeBytesDelta: pathType === 'change-file' ? bytesDelta : 0,
-    mainlineBytesDelta: pathType === 'mainline-snapshot' ? bytesDelta : 0,
+    changeBytesDelta: pathType === "change-file" ? bytesDelta : 0,
+    mainlineBytesDelta: pathType === "mainline-snapshot" ? bytesDelta : 0,
   };
 }
 
@@ -309,10 +333,15 @@ export interface GetFileResult {
   size?: number;
   etag?: string;
   modifiedTime?: string;
-  source?: 'cache' | 'd1';
+  source?: "cache" | "d1";
 }
 
-export async function opGetFile(db: D1Database, prefix: string, path: string, pathType: PathType): Promise<GetFileResult> {
+export async function opGetFile(
+  db: D1Database,
+  prefix: string,
+  path: string,
+  pathType: PathType,
+): Promise<GetFileResult> {
   const normalized = normalizePath(path);
   const remoteRoot = meshRootForPath(normalized, pathType);
 
@@ -325,13 +354,15 @@ export async function opGetFile(db: D1Database, prefix: string, path: string, pa
         size: cached.size,
         etag: cached.etag,
         modifiedTime: cached.modifiedTime,
-        source: 'cache',
+        source: "cache",
       };
     }
   }
 
   const row = await db
-    .prepare('SELECT content, size, modified_time, etag FROM files WHERE prefix=?1 AND path=?2 LIMIT 1')
+    .prepare(
+      "SELECT content, size, modified_time, etag FROM files WHERE prefix=?1 AND path=?2 LIMIT 1",
+    )
     .bind(prefix, normalized)
     .first<FileRow>();
 
@@ -345,8 +376,8 @@ export async function opGetFile(db: D1Database, prefix: string, path: string, pa
         ? raw
         : // biome-ignore lint/suspicious/noExplicitAny: runtime-typed D1 binary blob
           new Uint8Array((raw as any)?.buffer ?? raw ?? []);
-  const etag = String(row.etag ?? '');
-  const modifiedTime = String(row.modified_time ?? '');
+  const etag = String(row.etag ?? "");
+  const modifiedTime = String(row.modified_time ?? "");
 
   if (isCacheableImmutablePathType(pathType)) {
     await cachePut(prefix, normalized, bytes, etag, modifiedTime);
@@ -377,7 +408,7 @@ export async function opGetFile(db: D1Database, prefix: string, path: string, pa
     size: Number(row.size ?? bytes.byteLength),
     etag,
     modifiedTime,
-    source: 'd1',
+    source: "d1",
   };
 }
 
@@ -399,13 +430,15 @@ export async function opPutImmutable(
   const normalized = normalizePath(path);
   const now = nowIso();
   const etag = newEtag();
-  const parentDir = normalized.slice(0, normalized.lastIndexOf('/')) || '/';
+  const parentDir = normalized.slice(0, normalized.lastIndexOf("/")) || "/";
 
   const delta = metricsDelta(pathType, null, bytes.byteLength);
   const results = await db.batch([
     ...folderTreeStatements(db, prefix, parentDir),
     db
-      .prepare('INSERT OR IGNORE INTO files (prefix,path,content,size,modified_time,etag) VALUES (?1,?2,?3,?4,?5,?6)')
+      .prepare(
+        "INSERT OR IGNORE INTO files (prefix,path,content,size,modified_time,etag) VALUES (?1,?2,?3,?4,?5,?6)",
+      )
       .bind(prefix, normalized, bytes, bytes.byteLength, now, etag),
     ...meshDeltaStatements(db, prefix, remoteRoot, delta, now, { touchWrite: true }),
   ]);
@@ -438,10 +471,10 @@ export async function opPutSemantic(
   const normalized = normalizePath(path);
   const now = nowIso();
   const etag = newEtag();
-  const parentDir = normalized.slice(0, normalized.lastIndexOf('/')) || '/';
+  const parentDir = normalized.slice(0, normalized.lastIndexOf("/")) || "/";
 
   const existing = await db
-    .prepare('SELECT content, size FROM files WHERE prefix=?1 AND path=?2 LIMIT 1')
+    .prepare("SELECT content, size FROM files WHERE prefix=?1 AND path=?2 LIMIT 1")
     .bind(prefix, normalized)
     .first<FileRow>();
 
@@ -450,14 +483,14 @@ export async function opPutSemantic(
       const existingJson = JSON.parse(decodeJsonBuffer(existing.content));
       const incomingJson = JSON.parse(new TextDecoder().decode(bytes));
 
-      if (pathType === 'manifest-pointer') {
+      if (pathType === "manifest-pointer") {
         const oldGen = Number(existingJson?.currentGeneration ?? -1);
         const newGen = Number(incomingJson?.currentGeneration ?? -1);
         if (newGen < oldGen) return { wrote: false, status: 409 };
       }
-      if (pathType === 'head') {
-        const oldHlc = String(existingJson?.latestHlc ?? '');
-        const newHlc = String(incomingJson?.latestHlc ?? '');
+      if (pathType === "head") {
+        const oldHlc = String(existingJson?.latestHlc ?? "");
+        const newHlc = String(incomingJson?.latestHlc ?? "");
         if (newHlc < oldHlc) return { wrote: false, status: 409 };
       }
     } catch {
@@ -500,7 +533,7 @@ export async function opPutOverwrite(
   const normalized = normalizePath(path);
   const now = nowIso();
   const etag = newEtag();
-  const parentDir = normalized.slice(0, normalized.lastIndexOf('/')) || '/';
+  const parentDir = normalized.slice(0, normalized.lastIndexOf("/")) || "/";
 
   await db.batch([
     ...folderTreeStatements(db, prefix, parentDir),
@@ -534,7 +567,11 @@ export interface ListChildrenResult {
   folders: string[];
 }
 
-export async function opListChildren(db: D1Database, prefix: string, path: string): Promise<ListChildrenResult> {
+export async function opListChildren(
+  db: D1Database,
+  prefix: string,
+  path: string,
+): Promise<ListChildrenResult> {
   const normalized = normalizePath(path);
   const cacheableListing = !isAuthoritativeCompactionListing(normalized);
 
@@ -547,8 +584,8 @@ export async function opListChildren(db: D1Database, prefix: string, path: strin
     if (cached) return cached;
   }
 
-  const pattern = normalized === '/' ? '/%' : `${normalized}/%`;
-  const slashCount = normalized === '/' ? 1 : normalized.split('/').filter(Boolean).length + 1;
+  const pattern = normalized === "/" ? "/%" : `${normalized}/%`;
+  const slashCount = normalized === "/" ? 1 : normalized.split("/").filter(Boolean).length + 1;
   const depthTarget = slashCount;
 
   const [filesResult, foldersResult] = await db.batch([
@@ -576,15 +613,15 @@ export async function opListChildren(db: D1Database, prefix: string, path: strin
       name: fileNameFromPath(String(r.path)),
       path: String(r.path),
       size: Number(r.size ?? 0),
-      modifiedTime: String(r.modified_time ?? ''),
-      etag: String(r.etag ?? ''),
+      modifiedTime: String(r.modified_time ?? ""),
+      etag: String(r.etag ?? ""),
     };
   });
 
   const folders: string[] = (foldersResult.results ?? [])
     .map((row) => {
       const r = row as FolderListRow;
-      return String(r.path).split('/').filter(Boolean).pop() ?? '';
+      return String(r.path).split("/").filter(Boolean).pop() ?? "";
     })
     .filter(Boolean);
 
@@ -595,22 +632,32 @@ export async function opListChildren(db: D1Database, prefix: string, path: strin
 
 // ─── OP: Delete path ─────────────────────────────────────────────────────────
 
-export async function opDeletePath(db: D1Database, prefix: string, path: string, remoteRoot: string | null): Promise<boolean> {
+export async function opDeletePath(
+  db: D1Database,
+  prefix: string,
+  path: string,
+  remoteRoot: string | null,
+): Promise<boolean> {
   const normalized = normalizePath(path);
 
   const selected =
-    normalized === '/'
-      ? await db.prepare('SELECT path, size FROM files WHERE prefix = ?1').bind(prefix).all<FileSizeRow>()
+    normalized === "/"
+      ? await db
+          .prepare("SELECT path, size FROM files WHERE prefix = ?1")
+          .bind(prefix)
+          .all<FileSizeRow>()
       : await db
-          .prepare('SELECT path, size FROM files WHERE prefix = ?1 AND (path = ?2 OR (path >= ?3 AND path < ?4))')
+          .prepare(
+            "SELECT path, size FROM files WHERE prefix = ?1 AND (path = ?2 OR (path >= ?3 AND path < ?4))",
+          )
           .bind(prefix, normalized, `${normalized}/`, `${normalized}/\uFFFF`)
           .all<FileSizeRow>();
   const deletedFiles = selected.results ?? [];
 
-  if (normalized === '/') {
+  if (normalized === "/") {
     await db.batch([
-      db.prepare('DELETE FROM files WHERE prefix = ?1').bind(prefix),
-      db.prepare('DELETE FROM folders WHERE prefix = ?1').bind(prefix),
+      db.prepare("DELETE FROM files WHERE prefix = ?1").bind(prefix),
+      db.prepare("DELETE FROM folders WHERE prefix = ?1").bind(prefix),
     ]);
     await Promise.allSettled(deletedFiles.map((file) => cacheDelete(prefix, String(file.path))));
     await db
@@ -625,7 +672,7 @@ export async function opDeletePath(db: D1Database, prefix: string, path: string,
       .run();
     // Whole-prefix wipe: drop the root listing. Per-folder cache entries are
     // best-effort stale; the TTL bounds their lifetime.
-    await listingCacheDelete(prefix, '/');
+    await listingCacheDelete(prefix, "/");
     return true;
   }
 
@@ -636,10 +683,12 @@ export async function opDeletePath(db: D1Database, prefix: string, path: string,
   // Avoid LIKE/GLOB on long/special paths in D1/SQLite; do a lexical prefix range instead.
   const [filesDeleted] = await db.batch([
     db
-      .prepare('DELETE FROM files WHERE prefix = ?1 AND (path = ?2 OR (path >= ?3 AND path < ?4))')
+      .prepare("DELETE FROM files WHERE prefix = ?1 AND (path = ?2 OR (path >= ?3 AND path < ?4))")
       .bind(prefix, normalized, subtreeStart, subtreeEnd),
     db
-      .prepare('DELETE FROM folders WHERE prefix = ?1 AND (path = ?2 OR (path >= ?3 AND path < ?4))')
+      .prepare(
+        "DELETE FROM folders WHERE prefix = ?1 AND (path = ?2 OR (path >= ?3 AND path < ?4))",
+      )
       .bind(prefix, normalized, subtreeStart, subtreeEnd),
   ]);
 
@@ -652,8 +701,8 @@ export async function opDeletePath(db: D1Database, prefix: string, path: string,
         const size = Number(file.size ?? 0);
         const pathType = classifyPath(String(file.path));
         result.totalBytes += size;
-        if (pathType === 'change-file') result.changeBytes += size;
-        if (pathType === 'mainline-snapshot') result.mainlineBytes += size;
+        if (pathType === "change-file") result.changeBytes += size;
+        if (pathType === "mainline-snapshot") result.mainlineBytes += size;
         return result;
       },
       { totalBytes: 0, changeBytes: 0, mainlineBytes: 0 },
@@ -691,9 +740,13 @@ export interface ReconcileResult {
   totalBytes: number;
 }
 
-export async function opReconcileMetrics(db: D1Database, prefix: string, remoteRoot: string): Promise<ReconcileResult> {
+export async function opReconcileMetrics(
+  db: D1Database,
+  prefix: string,
+  remoteRoot: string,
+): Promise<ReconcileResult> {
   const normalized = normalizePath(remoteRoot);
-  const pattern = normalized === '/' ? '/%' : `${normalized}/%`;
+  const pattern = normalized === "/" ? "/%" : `${normalized}/%`;
 
   const row = await db
     .prepare(

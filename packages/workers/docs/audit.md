@@ -12,12 +12,12 @@ typing application code; the shape below is a human-readable reference.
 Configure it with `runtime.storageOperationAudit` when creating the worker mount:
 
 ```ts
-import { withInterocitor } from '@interocitor/workers';
+import { withInterocitor } from "@interocitor/workers";
 
 export default withInterocitor(app, {
   db: (env) => env.DB,
   runtime: {
-    meshIntegrityGates: [({ address }) => address === 'main'],
+    meshIntegrityGates: [({ address }) => address === "main"],
     storageOperationAudit: (event, env) => {
       console.log(JSON.stringify(event));
     },
@@ -29,25 +29,25 @@ The callback receives a well-known shape:
 
 ```ts
 interface WorkerAuditEvent {
-  event: 'interocitor.audit';
+  event: "interocitor.audit";
   at: string;
   op:
-    | 'read'
-    | 'write'
-    | 'delete'
-    | 'list'
-    | 'metadata'
-    | 'recovery-read'
-    | 'recovery-write'
-    | 'stored-file-read'
-    | 'stored-file-write'
-    | 'stored-file-delete'
-    | 'stored-file-metadata';
+    | "read"
+    | "write"
+    | "delete"
+    | "list"
+    | "metadata"
+    | "recovery-read"
+    | "recovery-write"
+    | "stored-file-read"
+    | "stored-file-write"
+    | "stored-file-delete"
+    | "stored-file-metadata";
   address?: string;
   path?: string;
   pathType?: string;
   status: number;
-  outcome: 'ok' | 'rejected' | 'not-found';
+  outcome: "ok" | "rejected" | "not-found";
   bytes?: number;
   taint?: string;
   requestId?: string;
@@ -65,13 +65,13 @@ status, and record rejected requests as well as accepted operations.
 
 The worker emits audit events for operations it observes:
 
-| Category | Examples |
-| --- | --- |
-| Mesh writes | change file write, `changes/head.json` update, `manifest.json` update, `manifest-<gen>.json` write |
-| Mesh reads | manifest read, folder list, change file read, snapshot read |
-| Mesh deletes | file/path delete requests |
-| Stored-file operations | stored-file upload, download, delete, metadata fetch |
-| Recovery wrappers | wrapper read and immutable write attempts |
+| Category               | Examples                                                                                           |
+| ---------------------- | -------------------------------------------------------------------------------------------------- |
+| Mesh writes            | change file write, `changes/head.json` update, `manifest.json` update, `manifest-<gen>.json` write |
+| Mesh reads             | manifest read, folder list, change file read, snapshot read                                        |
+| Mesh deletes           | file/path delete requests                                                                          |
+| Stored-file operations | stored-file upload, download, delete, metadata fetch                                               |
+| Recovery wrappers      | wrapper read and immutable write attempts                                                          |
 
 This callback runs after terminal storage operations. It does not observe
 integrity rejection, middleware rejection, notify connections, early request

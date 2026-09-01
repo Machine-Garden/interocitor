@@ -99,8 +99,8 @@ expose it. Open:
 
 ### 4. Provision a mesh address and bearer
 
-The Worker rejects the page's placeholder `team-a` address. Ask the
-host-protected system route for a valid checksummed address:
+The Worker requires a valid checksummed address. Ask the host-protected system
+route to issue one:
 
 ```bash
 curl --fail-with-body \
@@ -122,16 +122,16 @@ node -e "const {createHash}=require('node:crypto'); console.log(createHash('sha2
 
 In the page, enter:
 
-| Field | Local value |
-| --- | --- |
-| Worker URL | `http://127.0.0.1:8787/todo-interocitor` |
-| Namespace | returned `meshId` |
-| Remote path | `/todo-app` |
-| Access token | computed SHA-256 hex |
+| Field        | Local value                              |
+| ------------ | ---------------------------------------- |
+| Worker URL   | `http://127.0.0.1:8787/todo-interocitor` |
+| Namespace    | returned `meshId`                        |
+| Remote path  | `/todo-app`                              |
+| Access token | computed SHA-256 hex                     |
 
 Choose **New session**, copy the resulting join token to another tab, connect
-both, and add tasks. The Worker URL must include the mount prefix; the page's
-bare-origin placeholder is not sufficient.
+both, and add tasks. The pre-filled local Worker URL includes the required
+mount prefix; replace the origin when using a deployed Worker.
 
 ## Credential modes and join-token custody
 
@@ -163,14 +163,15 @@ partial fragment assumes `db`, `task`, `taskId`, and `file` exist:
 ```js
 const path = `tasks/${taskId}/files/${Date.now()}_${file.name}`;
 await db.putFile(path, new Uint8Array(await file.arrayBuffer()), file.type);
-await db.table('tasks').patch(taskId, {
+await db.table("tasks").patch(taskId, {
   file_paths: [...(task.file_paths ?? []), path],
 });
 ```
 
-The example currently relies on the package defaults for per-file and
-per-mesh stored-file quotas because `todo-interocitor.js` does not map the
-similarly named Wrangler variables into runtime options.
+The Wrangler `INTEROCITOR_MAX_STORED_FILE_BYTES` and
+`INTEROCITOR_MAX_MESH_STORED_BYTES` values set the per-file and per-mesh
+stored-file quotas. The checked-in configuration uses the package defaults of
+32 MiB per file and 512 MiB per mesh.
 
 ## Relay and maintenance behavior
 
@@ -182,12 +183,12 @@ paths. Scheduled TTL cleanup affects D1 sync roots, not R2 durable files.
 The opt-in Playwright suite is executable from the repository root:
 
 ```bash
-RUN_CF_EXAMPLE_TESTS=1 yarn test:e2e:cloudflare:run
+yarn test:e2e:cloudflare:run
 ```
 
 It provisions test mesh IDs/bearers and covers auth, relay, compaction,
-maintenance, and prefix integrity. It requires Chromium and a working local
-Wrangler runtime.
+maintenance, prefix integrity, and QR share/join cleanup and timeout behavior.
+It requires Chromium and a working local Wrangler runtime.
 
 ## Deploy your own copy
 

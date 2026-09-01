@@ -1,4 +1,4 @@
-import type { WorkerLike } from './types.ts';
+import type { WorkerLike } from "./types.ts";
 
 export type RuntimeGlobalsModuleMarker = WorkerLike;
 

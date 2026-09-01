@@ -14,19 +14,16 @@ Starting from the protected named-mesh policy in [Mesh addresses and
 access](mesh-access.md), add the relay binding and exported Durable Object:
 
 ```ts
-import {
-  InterocitorRelayDurableObject,
-  withInterocitor,
-} from '@interocitor/workers';
+import { InterocitorRelayDurableObject, withInterocitor } from "@interocitor/workers";
 
 export { InterocitorRelayDurableObject };
 
 export default withInterocitor(appWorker, {
-  mountPrefix: '/sync',
+  mountPrefix: "/sync",
   db: (env) => env.DB,
   relay: (env) => env.RELAY,
   runtime: {
-    meshIntegrityGates: [({ address }) => address === 'main'],
+    meshIntegrityGates: [({ address }) => address === "main"],
     meshMiddleware: [authorizeMesh],
   },
 });

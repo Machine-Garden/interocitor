@@ -59,10 +59,7 @@ Gates use OR semantics in array order. This deployment supports a stable
 `main` mesh and provisioned meshes:
 
 ```ts
-meshIntegrityGates: [
-  ({ address }) => address === 'main',
-  checksummedMeshIntegrityGate,
-]
+meshIntegrityGates: [({ address }) => address === "main", checksummedMeshIntegrityGate];
 ```
 
 If every gate returns `false`, the Worker returns `404` before middleware or
@@ -75,28 +72,23 @@ may do. The authorizer can call any bearer-token verifier, session service,
 identity provider, or policy engine:
 
 ```ts
-import {
-  createInterocitorMount,
-  createMeshAuthorizationMiddleware,
-} from '@interocitor/workers';
+import { createInterocitorMount, createMeshAuthorizationMiddleware } from "@interocitor/workers";
 
-const authorizeMesh = createMeshAuthorizationMiddleware(
-  async ({ address, request }, env) => {
-    const subject = await env.identity.verify(request);
-    if (!subject) return 'deny';
+const authorizeMesh = createMeshAuthorizationMiddleware(async ({ address, request }, env) => {
+  const subject = await env.identity.verify(request);
+  if (!subject) return "deny";
 
-    const permission = await env.permissions.forMesh(subject, address);
-    if (permission === 'write') return 'full';
-    if (permission === 'read') return 'readonly';
-    return 'deny';
-  },
-);
+  const permission = await env.permissions.forMesh(subject, address);
+  if (permission === "write") return "full";
+  if (permission === "read") return "readonly";
+  return "deny";
+});
 
 const mount = createInterocitorMount({
-  mountPrefix: '/sync',
+  mountPrefix: "/sync",
   db: (env) => env.DB,
   runtime: {
-    meshIntegrityGates: [({ address }) => address === 'main'],
+    meshIntegrityGates: [({ address }) => address === "main"],
     meshMiddleware: [authorizeMesh],
   },
 });
@@ -104,12 +96,12 @@ const mount = createInterocitorMount({
 
 The four results are:
 
-| Result | Read | Write | Meaning |
-| --- | --- | --- | --- |
-| `none` | allow | allow | This address requires no application authorization. |
+| Result     | Read  | Write | Meaning                                                                             |
+| ---------- | ----- | ----- | ----------------------------------------------------------------------------------- |
+| `none`     | allow | allow | This address requires no application authorization.                                 |
 | `readonly` | allow | `403` | The subject may consume the mesh. Notify is also allowed because it is read access. |
-| `full` | allow | allow | The subject may consume and modify the mesh. |
-| `deny` | `403` | `403` | The request has no mesh access. |
+| `full`     | allow | allow | The subject may consume and modify the mesh.                                        |
+| `deny`     | `403` | `403` | The request has no mesh access.                                                     |
 
 An authorizer exception or invalid result returns `503`.
 
@@ -124,7 +116,7 @@ can opt into matching `404` responses:
 const authorizeMesh = createMeshAuthorizationMiddleware(
   async ({ request }, env) => {
     const subject = await env.identity.verify(request);
-    return subject ? 'full' : 'deny';
+    return subject ? "full" : "deny";
   },
   { concealDenied: true },
 );
@@ -153,7 +145,7 @@ meshMiddleware: [
     return response;
   },
   authorizeMesh,
-]
+];
 ```
 
 Place audit middleware before authorization when denied requests must be

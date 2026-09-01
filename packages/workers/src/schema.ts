@@ -1,4 +1,4 @@
-import type { D1Database } from './types.ts';
+import type { D1Database } from "./types.ts";
 
 const SCHEMA_SQL = [
   `CREATE TABLE IF NOT EXISTS files (
@@ -77,10 +77,10 @@ export async function applySchema(db: D1Database): Promise<void> {
 }
 
 async function ensureStoredFilesTaintColumn(db: D1Database): Promise<void> {
-  const result = await db.prepare('PRAGMA table_info(stored_files)').all<{ name?: string }>();
+  const result = await db.prepare("PRAGMA table_info(stored_files)").all<{ name?: string }>();
   const columns = result.results ?? [];
-  if (!columns.some((column) => column.name === 'taint')) {
-    await db.prepare('ALTER TABLE stored_files ADD COLUMN taint TEXT').run();
+  if (!columns.some((column) => column.name === "taint")) {
+    await db.prepare("ALTER TABLE stored_files ADD COLUMN taint TEXT").run();
   }
 }
 

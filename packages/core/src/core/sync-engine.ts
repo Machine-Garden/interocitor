@@ -40,29 +40,43 @@ import type {
   SealedFile,
   RetentionPolicy,
   QuarantinedOfflineChanges,
-} from './types.ts';
+} from "./types.ts";
 
-import type { HLC } from './types.ts';
-import { hlcInit, hlcNow, hlcSerialize, hlcParse, hlcCompareStr } from './hlc.ts';
-import { Table, computeCacheKey } from './table.ts';
-import { readColumn } from './crdt.ts';
+import type { HLC } from "./types.ts";
+import { hlcInit, hlcNow, hlcSerialize, hlcParse, hlcCompareStr } from "./hlc.ts";
+import { Table, computeCacheKey } from "./table.ts";
+import { readColumn } from "./crdt.ts";
 
 // Extracted modules
-import { paths, logAtLevel, normalizeLogLevel, generateId } from './internals.ts';
-import type { CodecState } from './codec.ts';
-import { loadOrCreateManifest, upsertDeviceMetadata } from './manifest.ts';
-import { decryptBytes, encryptBytes, generateKey, keyToPassphrase, passphraseToKey } from '../crypto/encryption.ts';
-import type { MeshKeySource } from '../crypto/key-source.ts';
-import { MeshCredentialMismatchError } from './errors.ts';
-import { ConnectStageTimeoutError, DEFAULT_CONNECT_STAGE_TIMEOUT_MS, withDeadline } from './with-deadline.ts';
-import type { ManifestContext } from './manifest.ts';
-import { flushPrimary } from './flush.ts';
-import { LocalStoreConnectedStoresApi, type ConnectedStoresApi } from './connected-stores.ts';
-import { pull as doPull } from './pull.ts';
-import { ChangeObservationLedger } from './change-observation.ts';
-import { compact as doCompact, pruneSupersededSnapshots, rehydrate as doRehydrate } from './compaction.ts';
-import { createDeviceId } from './ids.ts';
-import { resolveRetentionPolicy } from './retention.ts';
+import { paths, logAtLevel, normalizeLogLevel, generateId } from "./internals.ts";
+import type { CodecState } from "./codec.ts";
+import { loadOrCreateManifest, upsertDeviceMetadata } from "./manifest.ts";
+import {
+  decryptBytes,
+  encryptBytes,
+  generateKey,
+  keyToPassphrase,
+  passphraseToKey,
+} from "../crypto/encryption.ts";
+import type { MeshKeySource } from "../crypto/key-source.ts";
+import { MeshCredentialMismatchError } from "./errors.ts";
+import {
+  ConnectStageTimeoutError,
+  DEFAULT_CONNECT_STAGE_TIMEOUT_MS,
+  withDeadline,
+} from "./with-deadline.ts";
+import type { ManifestContext } from "./manifest.ts";
+import { flushPrimary } from "./flush.ts";
+import { LocalStoreConnectedStoresApi, type ConnectedStoresApi } from "./connected-stores.ts";
+import { pull as doPull } from "./pull.ts";
+import { ChangeObservationLedger } from "./change-observation.ts";
+import {
+  compact as doCompact,
+  pruneSupersededSnapshots,
+  rehydrate as doRehydrate,
+} from "./compaction.ts";
+import { createDeviceId } from "./ids.ts";
+import { resolveRetentionPolicy } from "./retention.ts";
 
 // ─── Config ──────────────────────────────────────────────────────────
 
@@ -90,14 +104,14 @@ type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> = {
   localStore: LocalStore;
   schema?: DatabaseSchemaDefinition<S>;
   replicas: ReplicaConfig[];
-  onInit?: SyncConfig<S>['onInit'];
-  resolveInitialState?: SyncConfig<S>['resolveInitialState'];
+  onInit?: SyncConfig<S>["onInit"];
+  resolveInitialState?: SyncConfig<S>["resolveInitialState"];
   deviceName?: string;
-  deviceType?: import('./types.ts').DeviceType;
+  deviceType?: import("./types.ts").DeviceType;
   relayEnabled: boolean;
   relayHealthyPollInterval: number;
   connectStageTimeoutMs: number;
-  onConnectStalled?: SyncConfig<S>['onConnectStalled'];
+  onConnectStalled?: SyncConfig<S>["onConnectStalled"];
   joinExistingMeshPolicy: JoinExistingMeshPolicy;
 };
 
@@ -111,10 +125,10 @@ const DEFAULT_SECOND_COMPACT_DELAY_MS = 15 * 60_000;
 const DEFAULT_SECOND_COMPACT_DELAY_JITTER_MS = 5 * 60_000;
 const DEFAULT_COMPACT_REMOTE_CHANGE_THRESHOLD = 2;
 const DEFAULT_BATCH_WINDOW_MS = 1_000;
-const SYNC_STATE_LOCK = 'sync-state';
-const LAST_SUCCESSFUL_SYNC_AT_META = 'lastSuccessfulSyncAt';
-const OFFLINE_RETENTION_EXPIRED_AT_META = 'offlineRetentionExpiredAt';
-const QUARANTINED_OFFLINE_CHANGES_META = 'quarantinedOfflineChanges';
+const SYNC_STATE_LOCK = "sync-state";
+const LAST_SUCCESSFUL_SYNC_AT_META = "lastSuccessfulSyncAt";
+const OFFLINE_RETENTION_EXPIRED_AT_META = "offlineRetentionExpiredAt";
+const QUARANTINED_OFFLINE_CHANGES_META = "quarantinedOfflineChanges";
 const MAX_TIMER_DELAY_MS = 2_147_000_000;
 const RETENTION_RETRY_DELAY_MS = 60 * 60_000;
 
@@ -133,17 +147,33 @@ const RETENTION_RETRY_DELAY_MS = 60 * 60_000;
  * type DB = InferSchemaType<typeof schema>;
  *
  * // Local-only (no adapter):
- * const db = new Interocitor<DB>({ schema, localStore: new MemoryLocalStore() });
+ * const db = new Interocitor<DB>({
+ *   schema,
+ *   localStore: new MemoryLocalStore(),
+ *   keySource: null,
+ * });
  * const tasks = await db.table('tasks').query(); // ready immediately
  *
  * // With remote sync:
- * const db = new Interocitor<DB>(adapter, { schema, remotePath: '/App', localStore });
+ * const db = new Interocitor<DB>(adapter, {
+ *   schema,
+ *   remotePath: '/App',
+ *   localStore,
+ *   keySource,
+ * });
  * await db.connect(); // authenticate + sync
  *
  * db.table('other'); // TS error — 'other' is not keyof DB
  */
-export interface InterocitorInitContext<S extends Record<string, Record<string, unknown>>> extends ReadinessAwareQueryExecutor {
-  put<K extends keyof S & string>(table: K, rowId: string, columns: Partial<S[K]>, userId?: string): Promise<S[K]>;
+export interface InterocitorInitContext<
+  S extends Record<string, Record<string, unknown>>,
+> extends ReadinessAwareQueryExecutor {
+  put<K extends keyof S & string>(
+    table: K,
+    rowId: string,
+    columns: Partial<S[K]>,
+    userId?: string,
+  ): Promise<S[K]>;
   delete<K extends keyof S & string>(table: K, rowId: string, userId?: string): Promise<void>;
   query<K extends keyof S & string>(table: K): Promise<S[K][]>;
   queryWhere<K extends keyof S & string>(table: K, clause: WhereClause): Promise<S[K][]>;
@@ -172,7 +202,7 @@ export interface InterocitorInitContext<S extends Record<string, Record<string, 
  */
 type QueryCacheEntry = {
   descriptor: QueryDescriptor;
-  status: 'pending' | 'ready' | 'error';
+  status: "pending" | "ready" | "error";
   rows?: Row[];
   error?: Error;
   promise?: Promise<Row[]>;
@@ -180,14 +210,16 @@ type QueryCacheEntry = {
 
 type RowCacheEntry = {
   descriptor: RowDescriptor;
-  status: 'pending' | 'ready' | 'error';
+  status: "pending" | "ready" | "error";
   /** `null` means loaded-but-absent. `undefined` means never loaded. */
   row?: Row | null;
   error?: Error;
   promise?: Promise<Row | undefined>;
 };
 
-export class Interocitor<S extends Record<string, Record<string, unknown>>> implements ReadinessAwareQueryExecutor {
+export class Interocitor<
+  S extends Record<string, Record<string, unknown>>,
+> implements ReadinessAwareQueryExecutor {
   declare readonly InitContext: InterocitorInitContext<S>;
   private adapter: StorageAdapter | null;
   private config: ResolvedSyncConfig<S>;
@@ -235,7 +267,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   // Lifecycle state
   private initialized = false;
   private connected = false;
-  private connectionStatus: import('./types.ts').ConnectionStatus = 'offline';
+  private connectionStatus: import("./types.ts").ConnectionStatus = "offline";
   private initPromise: Promise<void> | null = null;
   // In-flight connect dedupe. Concurrent callers (React StrictMode double-
   // mount, dual auto-reconnect resolves) share the same execution instead of
@@ -273,7 +305,12 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
    * config — no manual type parameter needed:
    *
    * @example
-   * const engine = new Interocitor(adapter, { schema, remotePath: '/App', localStore });
+   * const engine = new Interocitor(adapter, {
+   *   schema,
+   *   remotePath: '/App',
+   *   localStore,
+   *   keySource,
+   * });
    * const tasks = engine.table('tasks'); // Table<{ title: string; status: 'open' | 'done' }>
    */
   constructor(config: SyncConfig<S>);
@@ -283,7 +320,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     const adapter = (maybeConfig ? adapterOrConfig : null) as StorageAdapter | null;
 
     if (!config.localStore) {
-      throw new Error('SyncConfig.localStore is required');
+      throw new Error("SyncConfig.localStore is required");
     }
 
     const retention = resolveRetentionPolicy(config.retention);
@@ -294,34 +331,42 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     this.config = {
       remotePath: config.remotePath,
       serverManaged: config.serverManaged ?? false,
-      serverId: config.serverId ?? 'server_relay_1',
+      serverId: config.serverId ?? "server_relay_1",
       pollInterval: config.pollInterval ?? 30_000,
       flushDebounce: config.flushDebounce ?? 2_000,
       flushThreshold: config.flushThreshold ?? 50,
       compactWarnThreshold: config.compactWarnThreshold ?? DEFAULT_COMPACT_WARNING_THRESHOLD,
       compactAutoThreshold: config.compactAutoThreshold ?? DEFAULT_COMPACT_AUTO_THRESHOLD,
-      compactAutoSampleNumerator: config.compactAutoSampleNumerator ?? DEFAULT_COMPACT_AUTO_SAMPLE_NUMERATOR,
-      compactAutoDeviceCount: Math.max(1, Math.floor(config.compactAutoDeviceCount ?? DEFAULT_COMPACT_AUTO_DEVICE_COUNT)),
+      compactAutoSampleNumerator:
+        config.compactAutoSampleNumerator ?? DEFAULT_COMPACT_AUTO_SAMPLE_NUMERATOR,
+      compactAutoDeviceCount: Math.max(
+        1,
+        Math.floor(config.compactAutoDeviceCount ?? DEFAULT_COMPACT_AUTO_DEVICE_COUNT),
+      ),
       autoCompact: config.autoCompact ?? true,
       retention,
       retentionConfigured: config.retention !== undefined,
       firstCompactDelayMs: config.firstCompactDelayMs ?? DEFAULT_FIRST_COMPACT_DELAY_MS,
-      firstCompactDelayJitterMs: config.firstCompactDelayJitterMs ?? DEFAULT_FIRST_COMPACT_DELAY_JITTER_MS,
+      firstCompactDelayJitterMs:
+        config.firstCompactDelayJitterMs ?? DEFAULT_FIRST_COMPACT_DELAY_JITTER_MS,
       secondCompactDelayMs: config.secondCompactDelayMs ?? DEFAULT_SECOND_COMPACT_DELAY_MS,
-      secondCompactDelayJitterMs: config.secondCompactDelayJitterMs ?? DEFAULT_SECOND_COMPACT_DELAY_JITTER_MS,
-      compactRemoteChangeThreshold: config.compactRemoteChangeThreshold ?? DEFAULT_COMPACT_REMOTE_CHANGE_THRESHOLD,
+      secondCompactDelayJitterMs:
+        config.secondCompactDelayJitterMs ?? DEFAULT_SECOND_COMPACT_DELAY_JITTER_MS,
+      compactRemoteChangeThreshold:
+        config.compactRemoteChangeThreshold ?? DEFAULT_COMPACT_REMOTE_CHANGE_THRESHOLD,
       batchWindowMs: config.batchWindowMs ?? DEFAULT_BATCH_WINDOW_MS,
-      dbName: config.dbName ?? 'interocitor',
+      dbName: config.dbName ?? "interocitor",
       localStore: config.localStore,
       schema: config.schema,
       replicas: config.replicas ?? [],
       onInit: config.onInit,
       resolveInitialState: config.resolveInitialState,
       relayEnabled: config.relayEnabled ?? true,
-      relayHealthyPollInterval: config.relayHealthyPollInterval ?? Math.max(config.pollInterval ?? 30_000, 300_000),
+      relayHealthyPollInterval:
+        config.relayHealthyPollInterval ?? Math.max(config.pollInterval ?? 30_000, 300_000),
       connectStageTimeoutMs: config.connectStageTimeoutMs ?? DEFAULT_CONNECT_STAGE_TIMEOUT_MS,
       onConnectStalled: config.onConnectStalled,
-      joinExistingMeshPolicy: config.joinExistingMeshPolicy ?? 'reset-to-remote',
+      joinExistingMeshPolicy: config.joinExistingMeshPolicy ?? "reset-to-remote",
     };
     this.serverId = this.config.serverId;
     this.dbName = this.config.dbName;
@@ -338,8 +383,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     logAtLevel(this.logLevel, level, ...args);
   }
 
-  private supportsRemoteInvalidations(adapter: StorageAdapter): adapter is StorageAdapter & RemoteInvalidationStorageAdapter {
-    return typeof (adapter as Partial<RemoteInvalidationStorageAdapter>).subscribeToInvalidations === 'function';
+  private supportsRemoteInvalidations(
+    adapter: StorageAdapter,
+  ): adapter is StorageAdapter & RemoteInvalidationStorageAdapter {
+    return (
+      typeof (adapter as Partial<RemoteInvalidationStorageAdapter>).subscribeToInvalidations ===
+      "function"
+    );
   }
 
   /** Await this before any storage operation. Returns the shared init promise. */
@@ -350,13 +400,18 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   }
 
   private async refreshHlcFromLocal(): Promise<void> {
-    const saved = await this.local.getMeta('hlc');
-    if (typeof saved !== 'string' || hlcCompareStr(saved, hlcSerialize(this.hlc)) <= 0) return;
+    const saved = await this.local.getMeta("hlc");
+    if (typeof saved !== "string" || hlcCompareStr(saved, hlcSerialize(this.hlc)) <= 0) return;
     this.hlc = hlcParse(saved);
     this.hlc.nodeId = this.deviceId;
   }
 
-  private async putNow<K extends keyof S & string>(table: K, rowId: string, columns: Partial<S[K]>, _userId?: string): Promise<S[K]> {
+  private async putNow<K extends keyof S & string>(
+    table: K,
+    rowId: string,
+    columns: Partial<S[K]>,
+    _userId?: string,
+  ): Promise<S[K]> {
     await this.refreshHlcFromLocal();
     const tableName = table as string;
     const current = await this.local.getRow(tableName, rowId);
@@ -396,11 +451,15 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     else await this.local.putRow(row);
     this.knownTables.add(tableName);
 
-    this.emit({ type: 'change', table: tableName, rowId, row });
+    this.emit({ type: "change", table: tableName, rowId, row });
     return row as unknown as S[K];
   }
 
-  private async deleteNow<K extends keyof S & string>(table: K, rowId: string, _userId?: string): Promise<void> {
+  private async deleteNow<K extends keyof S & string>(
+    table: K,
+    rowId: string,
+    _userId?: string,
+  ): Promise<void> {
     await this.refreshHlcFromLocal();
     const tableName = table as string;
     const current = await this.local.getRow(tableName, rowId);
@@ -418,7 +477,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     const hlc = this.getRowHlc(current);
     if (op && hlc) await this.commitLocalMutation(current, op, hlc);
     else await this.local.putRow(current);
-    this.emit({ type: 'delete', table: tableName, rowId });
+    this.emit({ type: "delete", table: tableName, rowId });
   }
 
   /**
@@ -429,7 +488,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
    */
   private async commitLocalMutation(row: Row, op: Op, hlc: string): Promise<void> {
     this.pendingBatch = await this.local.commitLocalMutation(row, {
-      id: generateId('chg'),
+      id: generateId("chg"),
       ts: Date.now(),
       device: this.deviceId,
       hlc,
@@ -447,7 +506,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     return this.local.getTable(table as string) as unknown as S[K][];
   }
 
-  private async queryWhereNow<K extends keyof S & string>(table: K, clause: WhereClause): Promise<S[K][]> {
+  private async queryWhereNow<K extends keyof S & string>(
+    table: K,
+    clause: WhereClause,
+  ): Promise<S[K][]> {
     return this.local.queryWhere(table as string, clause) as unknown as S[K][];
   }
 
@@ -460,7 +522,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   }
 
   /** Return the current transport state: `offline`, `connecting`, `syncing`, or `idle`. */
-  getConnectionStatus(): import('./types.ts').ConnectionStatus {
+  getConnectionStatus(): import("./types.ts").ConnectionStatus {
     return this.connectionStatus;
   }
 
@@ -470,7 +532,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
    * This extends `getConnectionStatus()` with local readiness, solo-mode, the
    * configured remote path, current mesh id, and current device id.
    */
-  getConnectionStatusDetails(): import('./types.ts').ConnectionStatusDetails {
+  getConnectionStatusDetails(): import("./types.ts").ConnectionStatusDetails {
     const solo = !this.config.remotePath;
     return {
       status: this.getConnectionStatus(),
@@ -483,13 +545,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     };
   }
 
-  private setConnectionStatus(status: import('./types.ts').ConnectionStatus): void {
+  private setConnectionStatus(status: import("./types.ts").ConnectionStatus): void {
     if (this.connectionStatus === status) {
-      this.emit({ type: 'connection:status', status: this.getConnectionStatus() });
+      this.emit({ type: "connection:status", status: this.getConnectionStatus() });
       return;
     }
     this.connectionStatus = status;
-    this.emit({ type: 'connection:status', status: this.getConnectionStatus() });
+    this.emit({ type: "connection:status", status: this.getConnectionStatus() });
   }
 
   /** Stable cache key for a descriptor. Owned by core. */
@@ -501,7 +563,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   readQueryCache(descriptor: QueryDescriptor): QueryCacheSnapshot {
     const key = this.getQueryCacheKey(descriptor);
     const entry = this.queryCache.get(key);
-    if (!entry) return { status: 'empty', promise: null };
+    if (!entry) return { status: "empty", promise: null };
     return {
       status: entry.status,
       promise: entry.promise ?? null,
@@ -523,10 +585,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     const key = this.getQueryCacheKey(descriptor);
     const existing = this.queryCache.get(key);
 
-    if (!options?.bypassCache && existing?.status === 'pending' && existing.promise) {
+    if (!options?.bypassCache && existing?.status === "pending" && existing.promise) {
       return existing.promise;
     }
-    if (!options?.bypassCache && existing?.status === 'ready' && existing.rows) {
+    if (!options?.bypassCache && existing?.status === "ready" && existing.rows) {
       // Fast-path: hand back resolved rows without re-fetch.
       // Callers that want freshness pass `bypassCache: true`.
       return Promise.resolve(existing.rows);
@@ -552,7 +614,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
         const bv = readColumn(b, field);
         if (av === bv) return 0;
         const lt = (av as any) < (bv as any) ? -1 : 1;
-        return dir === 'asc' ? lt : -lt;
+        return dir === "asc" ? lt : -lt;
       });
       return sorted;
     })();
@@ -560,7 +622,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     const previous = this.queryCache.get(key);
     const entry: QueryCacheEntry = {
       descriptor,
-      status: 'pending',
+      status: "pending",
       rows: previous?.rows, // keep stale rows visible while refreshing
       promise,
     };
@@ -571,14 +633,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       .then((rows) => {
         const current = this.queryCache.get(key);
         if (current?.promise !== promise) return; // superseded
-        this.queryCache.set(key, { descriptor, status: 'ready', rows });
+        this.queryCache.set(key, { descriptor, status: "ready", rows });
       })
       .catch((err) => {
         const current = this.queryCache.get(key);
         if (current?.promise !== promise) return;
         this.queryCache.set(key, {
           descriptor,
-          status: 'error',
+          status: "error",
           error: err instanceof Error ? err : new Error(String(err)),
           rows: current.rows,
         });
@@ -625,7 +687,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   readRowCache(descriptor: RowDescriptor): RowCacheSnapshot {
     const key = this.getRowCacheKey(descriptor);
     const entry = this.rowCache.get(key);
-    if (!entry) return { status: 'empty', promise: null };
+    if (!entry) return { status: "empty", promise: null };
     return {
       status: entry.status,
       promise: entry.promise ?? null,
@@ -642,10 +704,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     const key = this.getRowCacheKey(descriptor);
     const existing = this.rowCache.get(key);
 
-    if (!options?.bypassCache && existing?.status === 'pending' && existing.promise) {
+    if (!options?.bypassCache && existing?.status === "pending" && existing.promise) {
       return existing.promise;
     }
-    if (!options?.bypassCache && existing?.status === 'ready') {
+    if (!options?.bypassCache && existing?.status === "ready") {
       return Promise.resolve(existing.row ?? undefined);
     }
 
@@ -663,7 +725,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     const previous = this.rowCache.get(key);
     const entry: RowCacheEntry = {
       descriptor,
-      status: 'pending',
+      status: "pending",
       row: previous?.row, // keep stale row visible while refreshing
       promise,
     };
@@ -674,14 +736,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       .then((row) => {
         const current = this.rowCache.get(key);
         if (current?.promise !== promise) return;
-        this.rowCache.set(key, { descriptor, status: 'ready', row: row ?? null });
+        this.rowCache.set(key, { descriptor, status: "ready", row: row ?? null });
       })
       .catch((err) => {
         const current = this.rowCache.get(key);
         if (current?.promise !== promise) return;
         this.rowCache.set(key, {
           descriptor,
-          status: 'error',
+          status: "error",
           error: err instanceof Error ? err : new Error(String(err)),
           row: current.row,
         });
@@ -752,33 +814,39 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   private requireAdapter(operation: string): StorageAdapter {
     if (this.remotePoisonError) throw this.remotePoisonError;
     if (!this.adapter) {
-      throw new Error(`No remote storage adapter configured. Call setRemoteStorage() before ${operation}.`);
+      throw new Error(
+        `No remote storage adapter configured. Call setRemoteStorage() before ${operation}.`,
+      );
     }
     return this.adapter;
   }
 
   private requireRemotePath(operation: string): string {
-    if (!this.config.remotePath) throw new Error(`${operation} requires remotePath; configure mesh before connecting`);
+    if (!this.config.remotePath)
+      throw new Error(`${operation} requires remotePath; configure mesh before connecting`);
     return this.config.remotePath;
   }
 
   private storedFilePath(path: string): string {
-    const remotePath = this.requireRemotePath('file storage');
-    const clean = path.split('/').filter(Boolean).join('/');
-    if (!clean) throw new Error('Stored object path must not be empty');
-    return `${remotePath.replace(/\/$/, '')}/files/${clean}`;
+    const remotePath = this.requireRemotePath("file storage");
+    const clean = path.split("/").filter(Boolean).join("/");
+    if (!clean) throw new Error("Stored object path must not be empty");
+    return `${remotePath.replace(/\/$/, "")}/files/${clean}`;
   }
 
   private async resolveStoredFileKey(key?: CryptoKey): Promise<CryptoKey | null> {
     if (key) return key;
     if (!this.encrypted) return null;
     if (!this.encryptionKey) await this.resolveEncryption();
-    if (!this.encryptionKey) throw new Error('Object storage requires an encryption key');
+    if (!this.encryptionKey) throw new Error("Object storage requires an encryption key");
     return this.encryptionKey;
   }
 
-  private async encodeStoredFile(data: Uint8Array | string, key?: CryptoKey): Promise<{ stored: Uint8Array; plaintextSize: number }> {
-    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+  private async encodeStoredFile(
+    data: Uint8Array | string,
+    key?: CryptoKey,
+  ): Promise<{ stored: Uint8Array; plaintextSize: number }> {
+    const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
     const resolvedKey = await this.resolveStoredFileKey(key);
     if (!resolvedKey) return { stored: bytes, plaintextSize: bytes.byteLength };
     return { stored: await encryptBytes(resolvedKey, bytes), plaintextSize: bytes.byteLength };
@@ -798,7 +866,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       const hlc = this.getRowHlc(row);
       if (!op || !hlc) continue;
       entries.push({
-        id: generateId('chg'),
+        id: generateId("chg"),
         ts: Date.now(),
         device: this.deviceId,
         hlc,
@@ -820,8 +888,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
 
   private get manifestContext(): ManifestContext {
     return {
-      adapter: this.requireAdapter('manifest'),
-      remotePath: this.requireRemotePath('manifest'),
+      adapter: this.requireAdapter("manifest"),
+      remotePath: this.requireRemotePath("manifest"),
       serverId: this.serverId,
       serverManaged: this.config.serverManaged,
       deviceId: this.deviceId,
@@ -919,14 +987,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       // Activity — reset to base interval.
       if (this.pollCurrentIntervalMs !== this.pollBaseIntervalMs) {
         this.pollCurrentIntervalMs = this.pollBaseIntervalMs;
-        this.log('debug', '[interocitor:poll] activity detected, poll interval reset', {
+        this.log("debug", "[interocitor:poll] activity detected, poll interval reset", {
           intervalMs: this.pollCurrentIntervalMs,
         });
       }
     } else if (this.pollCurrentIntervalMs < MAX_POLL_INTERVAL_MS) {
       // Idle — back off toward max.
       this.pollCurrentIntervalMs = Math.min(this.pollCurrentIntervalMs * 2, MAX_POLL_INTERVAL_MS);
-      this.log('debug', '[interocitor:poll] idle, poll interval backed off', {
+      this.log("debug", "[interocitor:poll] idle, poll interval backed off", {
         intervalMs: this.pollCurrentIntervalMs,
       });
     }
@@ -952,14 +1020,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     this.stopRemoteInvalidations();
     if (!this.supportsRemoteInvalidations(adapter) || this.config.relayEnabled === false) {
       this.startPolling(this.config.pollInterval);
-      this.log('debug', '[interocitor:relay] adapter has no invalidation subscription', {
+      this.log("debug", "[interocitor:relay] adapter has no invalidation subscription", {
         adapter: adapter.name,
         relayEnabled: this.config.relayEnabled,
       });
       this.emit({
-        type: 'relay:unavailable',
+        type: "relay:unavailable",
         adapter: adapter.name,
-        reason: this.config.relayEnabled === false ? 'disabled' : 'adapter-unsupported',
+        reason: this.config.relayEnabled === false ? "disabled" : "adapter-unsupported",
       });
       return;
     }
@@ -970,7 +1038,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       if (!this.connected) return;
       if (this.remoteInvalidationPullPromise) {
         this.remoteInvalidationPullQueued = true;
-        this.log('debug', '[interocitor:relay] pull already in flight; queueing one replay', {
+        this.log("debug", "[interocitor:relay] pull already in flight; queueing one replay", {
           adapter: adapter.name,
         });
         return;
@@ -981,8 +1049,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
           await this.pull();
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
-          this.log('warn', '[interocitor:relay] pull after invalidation failed', err);
-          this.emit({ type: 'relay:error', adapter: adapter.name, error: err });
+          this.log("warn", "[interocitor:relay] pull after invalidation failed", err);
+          this.emit({ type: "relay:error", adapter: adapter.name, error: err });
         } finally {
           this.remoteInvalidationPullPromise = null;
           if (this.remoteInvalidationPullQueued && this.connected) {
@@ -999,9 +1067,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       if (!this.connected) return;
       if (this.remoteInvalidationCooldownTimer) {
         this.remoteInvalidationCooldownQueued = true;
-        this.log('debug', '[interocitor:relay] cooldown active; collapsing invalidation into queued replay', {
-          adapter: adapter.name,
-        });
+        this.log(
+          "debug",
+          "[interocitor:relay] cooldown active; collapsing invalidation into queued replay",
+          {
+            adapter: adapter.name,
+          },
+        );
         return;
       }
       this.remoteInvalidationCooldownQueued = false;
@@ -1016,22 +1088,22 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       }, INVALIDATION_PULL_COOLDOWN_MS);
     };
 
-    this.log('info', '[interocitor:relay] subscribing', {
+    this.log("info", "[interocitor:relay] subscribing", {
       adapter: adapter.name,
       remotePath: this.config.remotePath,
       deviceId: this.deviceId,
     });
     this.emit({
-      type: 'relay:subscribe',
+      type: "relay:subscribe",
       adapter: adapter.name,
       remotePath: this.config.remotePath,
       deviceId: this.deviceId,
     });
     this.unsubscribeRemoteInvalidations = adapter.subscribeToInvalidations(
       (payload: RemoteInvalidationPayload) => {
-        this.log('info', '[interocitor:relay] invalidation received', payload);
-        this.emit({ type: 'relay:message', adapter: adapter.name, payload });
-        if (payload.pathType === 'change' || payload.path.includes('/changes/')) {
+        this.log("info", "[interocitor:relay] invalidation received", payload);
+        this.emit({ type: "relay:message", adapter: adapter.name, payload });
+        if (payload.pathType === "change" || payload.path.includes("/changes/")) {
           this.scheduleRetentionCompactionCheck(0);
         }
         scheduleInvalidationPull();
@@ -1039,25 +1111,28 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       {
         onReady: () => {
           this.startPolling(this.config.relayHealthyPollInterval);
-          this.log('info', '[interocitor:relay] ready', {
+          this.log("info", "[interocitor:relay] ready", {
             adapter: adapter.name,
             pollInterval: this.config.relayHealthyPollInterval,
           });
-          this.emit({ type: 'relay:ready', adapter: adapter.name });
+          this.emit({ type: "relay:ready", adapter: adapter.name });
         },
         onError: (error?: unknown) => {
           this.startPolling(this.config.pollInterval);
-          const err = error instanceof Error ? error : new Error(error ? String(error) : 'Remote invalidation subscription error');
-          this.log('warn', '[interocitor:relay] subscription error', err);
-          this.emit({ type: 'relay:error', adapter: adapter.name, error: err });
+          const err =
+            error instanceof Error
+              ? error
+              : new Error(error ? String(error) : "Remote invalidation subscription error");
+          this.log("warn", "[interocitor:relay] subscription error", err);
+          this.emit({ type: "relay:error", adapter: adapter.name, error: err });
         },
         onClose: () => {
           this.startPolling(this.config.pollInterval);
-          this.log('warn', '[interocitor:relay] closed', {
+          this.log("warn", "[interocitor:relay] closed", {
             adapter: adapter.name,
             pollInterval: this.config.pollInterval,
           });
-          this.emit({ type: 'relay:closed', adapter: adapter.name });
+          this.emit({ type: "relay:closed", adapter: adapter.name });
         },
       },
     );
@@ -1066,7 +1141,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   // ── State helpers ──────────────────────────────────────────────────
 
   private getRowHlc(row: Row): string {
-    let latest = row._meta.deletedHlc ?? '';
+    let latest = row._meta.deletedHlc ?? "";
     for (const entry of Object.values(row.payload)) {
       if (!entry?.hlc) continue;
       if (!latest || hlcCompareStr(entry.hlc, latest) > 0) latest = entry.hlc;
@@ -1078,7 +1153,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     if (row._meta.deleted) {
       const hlc = row._meta.deletedHlc ?? this.getRowHlc(row);
       if (!hlc) return null;
-      return { type: 'delete', table: row._meta.table, rowId: row._meta.rowId, hlc };
+      return { type: "delete", table: row._meta.table, rowId: row._meta.rowId, hlc };
     }
     const columns: Record<string, ColumnEntry> = {};
     for (const [key, entry] of Object.entries(row.payload)) {
@@ -1086,18 +1161,18 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       columns[key] = entry;
     }
     if (Object.keys(columns).length === 0) return null;
-    return { type: 'upsert', table: row._meta.table, rowId: row._meta.rowId, columns };
+    return { type: "upsert", table: row._meta.table, rowId: row._meta.rowId, columns };
   }
 
   private async loadLocalState(): Promise<void> {
     this.tables = {};
     this.knownTables = new Set();
-    const pendingBatch = await this.local.getMeta('pendingBatch');
+    const pendingBatch = await this.local.getMeta("pendingBatch");
     this.pendingBatch =
-      pendingBatch && typeof pendingBatch === 'object'
+      pendingBatch && typeof pendingBatch === "object"
         ? { ...(pendingBatch as ChangeEntry), ops: [...(pendingBatch as ChangeEntry).ops] }
         : null;
-    const savedHlc = (await this.local.getMeta('hlc')) as string | undefined;
+    const savedHlc = (await this.local.getMeta("hlc")) as string | undefined;
     if (savedHlc) {
       this.hlc = hlcParse(savedHlc);
       this.hlc.nodeId = this.deviceId;
@@ -1118,10 +1193,11 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   }> {
     const { maxOfflineDurationMs } = this.activeRetentionPolicy();
     const stored = await this.local.getMeta(LAST_SUCCESSFUL_SYNC_AT_META);
-    if (typeof stored !== 'string' || !stored) return { expired: false, maxOfflineDurationMs };
+    if (typeof stored !== "string" || !stored) return { expired: false, maxOfflineDurationMs };
     const lastSuccessfulAtMs = Date.parse(stored);
     return {
-      expired: !Number.isFinite(lastSuccessfulAtMs) || now - lastSuccessfulAtMs > maxOfflineDurationMs,
+      expired:
+        !Number.isFinite(lastSuccessfulAtMs) || now - lastSuccessfulAtMs > maxOfflineDurationMs,
       lastSuccessfulSyncAt: stored,
       maxOfflineDurationMs,
     };
@@ -1135,7 +1211,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   async getQuarantinedOfflineChanges(): Promise<QuarantinedOfflineChanges | null> {
     await this.ensureReady();
     const value = await this.local.getMeta(QUARANTINED_OFFLINE_CHANGES_META);
-    return value && typeof value === 'object' ? (value as QuarantinedOfflineChanges) : null;
+    return value && typeof value === "object" ? (value as QuarantinedOfflineChanges) : null;
   }
 
   /** Remove the locally retained expired-write quarantine after user review. */
@@ -1144,7 +1220,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     await this.local.setMeta(QUARANTINED_OFFLINE_CHANGES_META, null);
   }
 
-  private async quarantineExpiredOfflineWrites(now = Date.now()): Promise<QuarantinedOfflineChanges | null> {
+  private async quarantineExpiredOfflineWrites(
+    now = Date.now(),
+  ): Promise<QuarantinedOfflineChanges | null> {
     const state = await this.offlineRetentionState(now);
     if (!state.expired || !state.lastSuccessfulSyncAt) return null;
 
@@ -1155,7 +1233,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     await this.flushPendingBatch();
     const queued = await this.local.peekOutbox();
     const existingValue = await this.local.getMeta(QUARANTINED_OFFLINE_CHANGES_META);
-    const existing = existingValue && typeof existingValue === 'object' ? (existingValue as QuarantinedOfflineChanges) : null;
+    const existing =
+      existingValue && typeof existingValue === "object"
+        ? (existingValue as QuarantinedOfflineChanges)
+        : null;
     const byId = new Map<string, ChangeEntry>();
     for (const entry of existing?.entries ?? []) byId.set(entry.id, entry);
     for (const entry of queued) byId.set(entry.id, entry);
@@ -1174,7 +1255,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     this.clearScheduledFlush();
     this.resetCompactWarning();
     this.emit({
-      type: 'offline:retention-expired',
+      type: "offline:retention-expired",
       expiredAt,
       lastSuccessfulSyncAt: state.lastSuccessfulSyncAt,
       maxOfflineDurationMs: state.maxOfflineDurationMs,
@@ -1187,10 +1268,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
 
   private async preservedRetentionMeta(): Promise<Record<string, unknown>> {
     return {
-      [QUARANTINED_OFFLINE_CHANGES_META]: await this.local.getMeta(QUARANTINED_OFFLINE_CHANGES_META),
-      [OFFLINE_RETENTION_EXPIRED_AT_META]: await this.local.getMeta(OFFLINE_RETENTION_EXPIRED_AT_META),
+      [QUARANTINED_OFFLINE_CHANGES_META]: await this.local.getMeta(
+        QUARANTINED_OFFLINE_CHANGES_META,
+      ),
+      [OFFLINE_RETENTION_EXPIRED_AT_META]: await this.local.getMeta(
+        OFFLINE_RETENTION_EXPIRED_AT_META,
+      ),
       [LAST_SUCCESSFUL_SYNC_AT_META]: await this.local.getMeta(LAST_SUCCESSFUL_SYNC_AT_META),
-      meshId: await this.local.getMeta('meshId'),
+      meshId: await this.local.getMeta("meshId"),
     };
   }
 
@@ -1221,24 +1306,24 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     // identity immediately. Otherwise its first reconnect looks like a join to
     // an unrelated mesh, and the default reset policy can erase queued work.
     if (bootstrapped) {
-      await this.local.setMeta('meshId', nextMeshId);
+      await this.local.setMeta("meshId", nextMeshId);
       return;
     }
 
-    const previousMeshIdRaw = await this.local.getMeta('meshId');
-    const previousMeshId = typeof previousMeshIdRaw === 'string' ? previousMeshIdRaw : '';
+    const previousMeshIdRaw = await this.local.getMeta("meshId");
+    const previousMeshId = typeof previousMeshIdRaw === "string" ? previousMeshIdRaw : "";
     if (previousMeshId === nextMeshId) return;
 
     const localRows = await this.local.getAllRows();
     const queuedChangeCount = (await this.local.outboxSize()) + (this.pendingBatch ? 1 : 0);
     if (localRows.length === 0 && queuedChangeCount === 0 && !previousMeshId) {
-      await this.local.setMeta('meshId', nextMeshId);
+      await this.local.setMeta("meshId", nextMeshId);
       return;
     }
 
     const policy = this.config.joinExistingMeshPolicy;
     this.emit({
-      type: 'join:existing-mesh',
+      type: "join:existing-mesh",
       dbName: this.dbName,
       remotePath: this.config.remotePath,
       deviceId: this.deviceId,
@@ -1249,27 +1334,31 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       queuedChangeCount,
     });
 
-    if (policy === 'merge-with-remote') {
-      await this.local.setMeta('meshId', nextMeshId);
+    if (policy === "merge-with-remote") {
+      await this.local.setMeta("meshId", nextMeshId);
       return;
     }
 
-    this.log('info', 'connect() — joining existing mesh, resetting local state to remote before sync', {
-      dbName: this.dbName,
-      remotePath: this.config.remotePath,
-      previousMeshId: previousMeshId || undefined,
-      nextMeshId,
-      localRowCount: localRows.length,
-      queuedChangeCount,
-    });
+    this.log(
+      "info",
+      "connect() — joining existing mesh, resetting local state to remote before sync",
+      {
+        dbName: this.dbName,
+        remotePath: this.config.remotePath,
+        previousMeshId: previousMeshId || undefined,
+        nextMeshId,
+        localRowCount: localRows.length,
+        queuedChangeCount,
+      },
+    );
     await this.local.withLock(SYNC_STATE_LOCK, async () => {
       this.clearBatchTimer();
       this.pendingBatch = null;
       await ChangeObservationLedger.clearAll(this.local);
       if (this.schema?.version !== undefined) {
-        await this.local.setMeta('schema:version', this.schema.version);
+        await this.local.setMeta("schema:version", this.schema.version);
       }
-      await this.local.setMeta('meshId', nextMeshId);
+      await this.local.setMeta("meshId", nextMeshId);
       await this.loadLocalState();
       this.pendingCount = 0;
     });
@@ -1300,7 +1389,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       // have been minted while folders were partially created), so the
       // next connect must re-validate every folder.
       this.adapter?.resetFolderCache?.();
-      this.log('error', 'remote:poisoned — sync halted', {
+      this.log("error", "remote:poisoned — sync halted", {
         dbName: this.dbName,
         remotePath: this.config.remotePath,
         deviceId: this.deviceId,
@@ -1309,7 +1398,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       });
     }
     this.emit({
-      type: 'remote:poisoned',
+      type: "remote:poisoned",
       error: poisoned,
       path,
       context: {
@@ -1335,11 +1424,11 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     // pull both flow through emit(); both invalidate query cache for the
     // affected table the same way. Local mutations also pre-invalidate so
     // synchronous reads after `put`/`delete` see fresh data.
-    if (event.type === 'change' || event.type === 'delete') {
+    if (event.type === "change" || event.type === "delete") {
       this.invalidateQueryCacheForTable(event.table);
       this.invalidateRowCacheForTable(event.table);
     }
-    if (event.type === 'sync:complete') {
+    if (event.type === "sync:complete") {
       this.adaptPollInterval(event.entriesMerged);
     }
     for (const listener of this.listeners) {
@@ -1378,20 +1467,20 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
           ...(meshId ? { meshId } : {}),
         },
       );
-      this.log('debug', 'persistCredentials() — saved', {
+      this.log("debug", "persistCredentials() — saved", {
         dbName: this.dbName,
         deviceId: this.deviceId,
         meshId,
       });
       this.emit({
-        type: 'credentials:persisted',
+        type: "credentials:persisted",
         dbName: this.dbName,
         remotePath: this.config.remotePath,
         deviceId: this.deviceId,
         encrypted: this.encrypted,
       });
     } catch (err) {
-      this.log('error', 'persistCredentials() — failed', err);
+      this.log("error", "persistCredentials() — failed", err);
     }
   }
 
@@ -1417,7 +1506,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     if (stored.meshId === activeMeshId) return;
 
     this.emit({
-      type: 'credentials:meshMismatch',
+      type: "credentials:meshMismatch",
       dbName: this.dbName,
       remotePath: this.config.remotePath,
       storedMeshId: stored.meshId,
@@ -1457,19 +1546,19 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
 
   private async restoreDeviceIdFromLocalStore(): Promise<void> {
     if (this.deviceIdConfigured) return;
-    const stored = await this.local.getMeta('deviceId');
-    if (typeof stored === 'string' && stored) {
+    const stored = await this.local.getMeta("deviceId");
+    if (typeof stored === "string" && stored) {
       this.setDeviceId(stored);
     }
   }
 
   private async persistDeviceIdToLocalStore(): Promise<void> {
-    await this.local.setMeta('deviceId', this.deviceId);
+    await this.local.setMeta("deviceId", this.deviceId);
   }
 
   private async resolveEncryption(): Promise<void> {
     if (!this.encrypted) {
-      this.log('debug', 'resolveEncryption() — encryption disabled');
+      this.log("debug", "resolveEncryption() — encryption disabled");
       return;
     }
 
@@ -1494,7 +1583,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       if (this.encrypted && this.encryptionKey) {
         await this.persistCredentials();
         this.emit({
-          type: 'encryption:resolved',
+          type: "encryption:resolved",
           strategy: this.keySource.constructor.name,
           dbName: this.dbName,
           remotePath: this.config.remotePath,
@@ -1504,7 +1593,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       return;
     }
 
-    throw new Error('Encrypted meshes require a keySource');
+    throw new Error("Encrypted meshes require a keySource");
   }
 
   private applyInitialState(state: SyncInitialState | null | undefined): void {
@@ -1538,11 +1627,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
    * Once initialized, create a new engine instead of reconfiguring in place.
    */
   configureMesh(state: SyncInitialState): void {
-    if (this.connected) throw new Error('Cannot configure mesh while connected');
-    if (this.initialized) throw new Error('Cannot configure mesh after init(); create a new engine or configure before connect');
+    if (this.connected) throw new Error("Cannot configure mesh while connected");
+    if (this.initialized)
+      throw new Error(
+        "Cannot configure mesh after init(); create a new engine or configure before connect",
+      );
     this.applyInitialState(state);
     this.emit({
-      type: 'mesh:configured',
+      type: "mesh:configured",
       dbName: this.dbName,
       remotePath: this.config.remotePath,
       deviceId: this.deviceId,
@@ -1572,7 +1664,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   }
 
   private async doInit(): Promise<void> {
-    this.log('debug', 'init() — opening local store', {
+    this.log("debug", "init() — opening local store", {
       dbName: this.config.dbName,
       encrypted: this.encrypted,
       remotePath: this.config.remotePath,
@@ -1580,7 +1672,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     try {
       await this.local.open();
       if (this.schema?.version !== undefined) {
-        await this.local.setMeta('schema:version', this.schema.version);
+        await this.local.setMeta("schema:version", this.schema.version);
       }
 
       const initialState = await this.config.resolveInitialState?.();
@@ -1595,16 +1687,16 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       // Resolve encryption: derive key from passphrase, load persisted, or generate.
       await this.resolveEncryption();
 
-      this.log('debug', 'init() — loading local state (table names, HLC)');
+      this.log("debug", "init() — loading local state (table names, HLC)");
       await this.loadLocalState();
-      this.log('debug', 'init() — complete', { knownTables: Array.from(this.knownTables) });
+      this.log("debug", "init() — complete", { knownTables: Array.from(this.knownTables) });
       this.initialized = true;
-      this.setConnectionStatus('offline');
+      this.setConnectionStatus("offline");
       if (this.config.onInit) {
         await this.config.onInit(this.initContext);
       }
     } catch (err) {
-      this.log('error', 'init() — failed', err);
+      this.log("error", "init() — failed", err);
       this.initPromise = null;
       throw err;
     }
@@ -1615,7 +1707,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
    * Used during normal init(). No biometric prompt.
    */
   private async restoreCredentials(): Promise<void> {
-    console.log('[interocitor:cred] restoreCredentials() — entry', {
+    console.log("[interocitor:cred] restoreCredentials() — entry", {
       dbName: this.dbName,
       activeDeviceId: this.deviceId,
       activePassphraseFingerprint: this.passphrase
@@ -1628,14 +1720,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     try {
       stored = await this.loadPersistedCredentials();
     } catch (err) {
-      console.log('[interocitor:cred] restoreCredentials() — store load failed', {
+      console.log("[interocitor:cred] restoreCredentials() — store load failed", {
         dbName: this.dbName,
         err: err instanceof Error ? err.message : String(err),
       });
-      this.log('warn', 'restoreCredentials() — silent load failed', err);
+      this.log("warn", "restoreCredentials() — silent load failed", err);
       return;
     }
-    console.log('[interocitor:cred] restoreCredentials() — store loaded', {
+    console.log("[interocitor:cred] restoreCredentials() — store loaded", {
       dbName: this.dbName,
       hasStored: !!stored,
       storedDeviceId: stored?.deviceId,
@@ -1645,7 +1737,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
         : null,
     });
     if (!stored) {
-      this.log('debug', 'restoreCredentials() — no persisted credentials', { dbName: this.dbName });
+      this.log("debug", "restoreCredentials() — no persisted credentials", { dbName: this.dbName });
       return;
     }
 
@@ -1661,16 +1753,20 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     // The connect-time post-manifest check below covers the case where
     // the local-store meshId is empty (fresh install + stale cred record).
     if (stored.meshId) {
-      const localMeshIdRaw = await this.local.getMeta('meshId');
-      const localMeshId = typeof localMeshIdRaw === 'string' ? localMeshIdRaw : '';
+      const localMeshIdRaw = await this.local.getMeta("meshId");
+      const localMeshId = typeof localMeshIdRaw === "string" ? localMeshIdRaw : "";
       if (localMeshId && localMeshId !== stored.meshId) {
-        this.log('error', 'restoreCredentials() — meshId mismatch, refusing to adopt stored credentials', {
-          dbName: this.dbName,
-          storedMeshId: stored.meshId,
-          activeMeshId: localMeshId,
-        });
+        this.log(
+          "error",
+          "restoreCredentials() — meshId mismatch, refusing to adopt stored credentials",
+          {
+            dbName: this.dbName,
+            storedMeshId: stored.meshId,
+            activeMeshId: localMeshId,
+          },
+        );
         this.emit({
-          type: 'credentials:meshMismatch',
+          type: "credentials:meshMismatch",
           dbName: this.dbName,
           remotePath: this.config.remotePath,
           storedMeshId: stored.meshId,
@@ -1687,13 +1783,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       // the global, the user is straddling two meshes and we are about to
       // self-poison their HLC. Surface it so the UI can intervene before
       // any writes happen.
-      this.log('warn', 'restoreCredentials() — device-id mismatch, restoring stored id', {
+      this.log("warn", "restoreCredentials() — device-id mismatch, restoring stored id", {
         dbName: this.dbName,
         storedDeviceId: stored.deviceId,
         activeDeviceId: this.deviceId,
       });
       this.emit({
-        type: 'credentials:conflict',
+        type: "credentials:conflict",
         storedDeviceId: stored.deviceId,
         activeDeviceId: this.deviceId,
         dbName: this.dbName,
@@ -1715,8 +1811,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
         // Local rows were written with one key; new flushes will use another;
         // every reload after this will start poisoning remote files.
         this.log(
-          'error',
-          'restoreCredentials() — passphrase conflict! Caller-provided passphrase differs from persisted. Refusing to silently swap.',
+          "error",
+          "restoreCredentials() — passphrase conflict! Caller-provided passphrase differs from persisted. Refusing to silently swap.",
           {
             dbName: this.dbName,
             remotePath: this.config.remotePath,
@@ -1725,7 +1821,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
         // Keep caller-provided portable key; the conflict event lets UI prompt
         // the user to either clearCredentials() or correct the portable key.
         this.emit({
-          type: 'credentials:conflict',
+          type: "credentials:conflict",
           storedDeviceId: stored.deviceId,
           activeDeviceId: this.deviceId,
           dbName: this.dbName,
@@ -1746,8 +1842,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     }
 
     this.emit({
-      type: 'credentials:restored',
-      source: 'silent-store',
+      type: "credentials:restored",
+      source: "silent-store",
       deviceIdChanged,
       hadPassphrase: restoredPortableKey,
     });
@@ -1761,7 +1857,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
    * invalidation. It auto-`init()`s if needed.
    */
   async connect(): Promise<void> {
-    console.log('[interocitor:connect] connect() — entry', {
+    console.log("[interocitor:connect] connect() — entry", {
       dbName: this.dbName,
       remotePath: this.config.remotePath,
       deviceId: this.deviceId,
@@ -1775,8 +1871,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     });
     await this.ensureReady();
     if (this.encrypted && !this.encryptionKey) await this.resolveEncryption();
-    if (!this.config.remotePath) throw new Error('connect() requires remotePath; configure mesh before connecting');
-    this.setConnectionStatus('connecting');
+    if (!this.config.remotePath)
+      throw new Error("connect() requires remotePath; configure mesh before connecting");
+    this.setConnectionStatus("connecting");
 
     // Idempotent. If we are already connected to a live mesh on this
     // adapter+remotePath, don't restart the session — restart was the root
@@ -1784,17 +1881,17 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     // adapter sessions stacked across UI reloads and started corrupting
     // the local cursor + remote files.
     if (this.connected && !this.remotePoisonError) {
-      this.log('debug', 'connect() — already connected, no-op', {
+      this.log("debug", "connect() — already connected, no-op", {
         dbName: this.dbName,
         remotePath: this.config.remotePath,
         deviceId: this.deviceId,
       });
       this.emit({
-        type: 'connect:noop',
+        type: "connect:noop",
         dbName: this.dbName,
         remotePath: this.config.remotePath,
         deviceId: this.deviceId,
-        reason: 'already-connected',
+        reason: "already-connected",
       });
       return;
     }
@@ -1804,17 +1901,17 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     // a second caller arriving before that would re-enter and double every
     // flushed change file. Share the in-flight promise instead.
     if (this.connectPromise) {
-      this.log('debug', 'connect() — join in-flight connect', {
+      this.log("debug", "connect() — join in-flight connect", {
         dbName: this.dbName,
         remotePath: this.config.remotePath,
         deviceId: this.deviceId,
       });
       this.emit({
-        type: 'connect:noop',
+        type: "connect:noop",
         dbName: this.dbName,
         remotePath: this.config.remotePath,
         deviceId: this.deviceId,
-        reason: 'already-connected',
+        reason: "already-connected",
       });
       return this.connectPromise;
     }
@@ -1830,7 +1927,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     // encryption mode matches the current engine config. If it does not match,
     // fall through to full connect so MeshEncryptionMismatchError is raised.
     if (!this.manifest) {
-      const cached = (await this.local.getMeta('manifestCache')) as Manifest | undefined;
+      const cached = (await this.local.getMeta("manifestCache")) as Manifest | undefined;
       if (!cached || cached.encrypted !== this.encrypted) return false;
       this.manifest = cached;
     }
@@ -1840,17 +1937,17 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     if (!observation.hasExactObservationHistory) return false;
     if ((await this.offlineRetentionState()).expired) return false;
     if ((await this.local.outboxSize()) > 0) return false;
-    if (await this.local.getMeta('pendingBatch')) return false;
+    if (await this.local.getMeta("pendingBatch")) return false;
 
-    const remotePath = this.requireRemotePath('connect() fast-path');
+    const remotePath = this.requireRemotePath("connect() fast-path");
     const p = paths(remotePath);
     try {
       const headRaw = await adapter.readFile(p.changesHead);
       const head = JSON.parse(new TextDecoder().decode(headRaw)) as { latestHlc?: string };
       this.emit({
-        type: 'trace:head',
-        op: 'read',
-        reason: 'connect-fast-path',
+        type: "trace:head",
+        op: "read",
+        reason: "connect-fast-path",
         path: p.changesHead,
         priorHlc: head.latestHlc ?? null,
       });
@@ -1864,28 +1961,28 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
           return false;
         }
         this.emit({
-          type: 'trace:head',
-          op: 'skip-no-change',
-          reason: 'connect-fast-path',
+          type: "trace:head",
+          op: "skip-no-change",
+          reason: "connect-fast-path",
           path: p.changesHead,
           priorHlc: head.latestHlc,
           nextHlc: cursor,
         });
         this.emit({
-          type: 'connect:state',
+          type: "connect:state",
           dbName: this.dbName,
           remotePath: this.config.remotePath,
           deviceId: this.deviceId,
           meshId: this.manifest?.meshId,
           encrypted: this.encrypted,
         });
-        this.emit({ type: 'sync:complete', entriesMerged: 0 });
+        this.emit({ type: "sync:complete", entriesMerged: 0 });
         this.startPolling(this.config.pollInterval);
         this.startRemoteInvalidations(adapter);
         this.connected = true;
         await this.markSuccessfulRemoteSync();
         this.scheduleRetentionCompactionCheck(0);
-        this.setConnectionStatus('idle');
+        this.setConnectionStatus("idle");
         return true;
       }
     } catch {
@@ -1902,15 +1999,18 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
    * itself connected, and does fire the optional onConnectStalled callback.
    * Returns `null` when the stage stalled; otherwise the stage's result.
    */
-  private async runConnectStage<T>(name: string, op: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> {
+  private async runConnectStage<T>(
+    name: string,
+    op: () => Promise<T>,
+  ): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> {
     try {
       const value = await withDeadline(name, op, this.config.connectStageTimeoutMs);
       return { ok: true, value };
     } catch (error) {
       if (error instanceof ConnectStageTimeoutError) {
-        this.log('warn', `connect() — stage stalled: ${name}`, { timeoutMs: error.timeoutMs });
+        this.log("warn", `connect() — stage stalled: ${name}`, { timeoutMs: error.timeoutMs });
         this.emit({
-          type: 'connect:error',
+          type: "connect:error",
           error,
           stage: name,
           dbName: this.dbName,
@@ -1924,7 +2024,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
             // Never let a consumer hook stop the engine.
           }
         }
-        this.setConnectionStatus('offline');
+        this.setConnectionStatus("offline");
         return { ok: false, error };
       }
       return { ok: false, error };
@@ -1932,8 +2032,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   }
 
   private async doConnect(): Promise<void> {
-    const adapter = this.requireAdapter('connect()');
-    console.log('[interocitor:connect] doConnect() — start', {
+    const adapter = this.requireAdapter("connect()");
+    console.log("[interocitor:connect] doConnect() — start", {
       dbName: this.dbName,
       remotePath: this.config.remotePath,
       deviceId: this.deviceId,
@@ -1942,14 +2042,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     });
     const stage = (s: string, err: unknown): Error => {
       const e = err instanceof Error ? err : new Error(String(err));
-      console.log('[interocitor:connect] doConnect() — STAGE FAIL', {
+      console.log("[interocitor:connect] doConnect() — STAGE FAIL", {
         stage: s,
         dbName: this.dbName,
         deviceId: this.deviceId,
         err: e.message,
       });
       this.emit({
-        type: 'connect:error',
+        type: "connect:error",
         error: e,
         stage: s,
         dbName: this.dbName,
@@ -1959,7 +2059,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       return e;
     };
     const stageOk = (s: string, extra?: Record<string, unknown>) => {
-      console.log('[interocitor:connect] doConnect() — stage ok', {
+      console.log("[interocitor:connect] doConnect() — stage ok", {
         stage: s,
         dbName: this.dbName,
         deviceId: this.deviceId,
@@ -1967,16 +2067,16 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       });
     };
 
-    this.log('debug', 'connect() — authenticating with adapter', { adapter: adapter.name });
+    this.log("debug", "connect() — authenticating with adapter", { adapter: adapter.name });
     if (!adapter.isAuthenticated()) {
-      this.emit({ type: 'auth:required' });
-      const authResult = await this.runConnectStage('authenticate', () => adapter.authenticate());
+      this.emit({ type: "auth:required" });
+      const authResult = await this.runConnectStage("authenticate", () => adapter.authenticate());
       if (!authResult.ok) {
         if (authResult.error instanceof ConnectStageTimeoutError) return; // offline-ready degrade
-        this.log('error', 'connect() — authentication failed', authResult.error);
-        throw stage('authenticate', authResult.error);
+        this.log("error", "connect() — authentication failed", authResult.error);
+        throw stage("authenticate", authResult.error);
       }
-      this.emit({ type: 'auth:complete' });
+      this.emit({ type: "auth:complete" });
     }
 
     // Reload steady-state fast path: local cache has exact change-file
@@ -1987,41 +2087,43 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     // recreate the adapter on reload before calling setRemoteStorage().
     if (await this.tryConnectFastPath(adapter)) return;
 
-    const remotePath = this.requireRemotePath('connect()');
+    const remotePath = this.requireRemotePath("connect()");
     const p = paths(remotePath);
-    this.log('debug', 'connect() — ensuring remote folders', {
+    this.log("debug", "connect() — ensuring remote folders", {
       remotePath,
       deviceId: this.deviceId,
     });
     for (const folder of [remotePath, p.devicesFolder, p.mainlineFolder, p.changesFolder]) {
-      const folderResult = await this.runConnectStage('ensureFolder', () => adapter.ensureFolder(folder));
+      const folderResult = await this.runConnectStage("ensureFolder", () =>
+        adapter.ensureFolder(folder),
+      );
       if (!folderResult.ok) {
         if (folderResult.error instanceof ConnectStageTimeoutError) return; // offline-ready degrade
-        this.log('error', 'connect() — ensureFolder failed', folder, folderResult.error);
-        throw stage('ensureFolder', folderResult.error);
+        this.log("error", "connect() — ensureFolder failed", folder, folderResult.error);
+        throw stage("ensureFolder", folderResult.error);
       }
-      this.log('debug', 'connect() — ensureFolder ok', folder);
+      this.log("debug", "connect() — ensureFolder ok", folder);
     }
 
-    this.log('debug', 'connect() — loading/creating manifest');
+    this.log("debug", "connect() — loading/creating manifest");
     let bootstrapped = false;
-    const manifestResult = await this.runConnectStage('loadOrCreateManifest', () =>
-      this.doLoadOrCreateManifest('connect', true, { assertLocalMeshId: false }),
+    const manifestResult = await this.runConnectStage("loadOrCreateManifest", () =>
+      this.doLoadOrCreateManifest("connect", true, { assertLocalMeshId: false }),
     );
     if (!manifestResult.ok) {
       if (manifestResult.error instanceof ConnectStageTimeoutError) return; // offline-ready degrade
-      this.log('error', 'connect() — loadOrCreateManifest failed', manifestResult.error);
-      throw stage('loadOrCreateManifest', manifestResult.error);
+      this.log("error", "connect() — loadOrCreateManifest failed", manifestResult.error);
+      throw stage("loadOrCreateManifest", manifestResult.error);
     }
     bootstrapped = manifestResult.value.bootstrapped;
-    stageOk('loadOrCreateManifest', {
+    stageOk("loadOrCreateManifest", {
       bootstrapped,
       meshId: this.manifest?.meshId,
       generation: this.manifest?.generation,
     });
 
     await this.applyJoinExistingMeshPolicy(bootstrapped);
-    stageOk('joinExistingMeshPolicy', {
+    stageOk("joinExistingMeshPolicy", {
       policy: this.config.joinExistingMeshPolicy,
       meshId: this.manifest?.meshId,
     });
@@ -2039,10 +2141,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     // first connect after a fresh install.
     try {
       await this.assertCredentialMeshParity();
-      stageOk('credentialMeshParity', { meshId: this.manifest?.meshId });
+      stageOk("credentialMeshParity", { meshId: this.manifest?.meshId });
     } catch (err) {
-      this.log('error', 'connect() — credential mesh parity failed', err);
-      throw stage('credentialMeshParity', err);
+      this.log("error", "connect() — credential mesh parity failed", err);
+      throw stage("credentialMeshParity", err);
     }
 
     // Anchor credentials to the live meshId now that parity is known
@@ -2050,16 +2152,18 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     // credential record yet; on reconnect this is a no-op write that
     // keeps the record fresh.
     await this.persistCredentials();
-    stageOk('persistCredentialsPostManifest');
+    stageOk("persistCredentialsPostManifest");
 
-    const expiredQuarantine = await this.local.withLock(SYNC_STATE_LOCK, () => this.quarantineExpiredOfflineWrites());
+    const expiredQuarantine = await this.local.withLock(SYNC_STATE_LOCK, () =>
+      this.quarantineExpiredOfflineWrites(),
+    );
     const offlineRetentionExpired = expiredQuarantine !== null;
-    stageOk('offlineRetention', {
+    stageOk("offlineRetention", {
       expired: offlineRetentionExpired,
       quarantinedChangeCount: expiredQuarantine?.entries.length ?? 0,
     });
 
-    const deviceMetadataResult = await this.runConnectStage('upsertDeviceMetadata', () =>
+    const deviceMetadataResult = await this.runConnectStage("upsertDeviceMetadata", () =>
       upsertDeviceMetadata(adapter, remotePath, this.deviceId, {
         displayName: this.config.deviceName,
         deviceType: this.config.deviceType,
@@ -2071,16 +2175,16 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     );
     if (!deviceMetadataResult.ok) {
       if (deviceMetadataResult.error instanceof ConnectStageTimeoutError) return;
-      throw stage('upsertDeviceMetadata', deviceMetadataResult.error);
+      throw stage("upsertDeviceMetadata", deviceMetadataResult.error);
     }
-    stageOk('upsertDeviceMetadata');
+    stageOk("upsertDeviceMetadata");
 
-    const localEpochRaw = await this.local.getMeta('epoch');
-    const localEpoch = typeof localEpochRaw === 'number' ? localEpochRaw : 0;
+    const localEpochRaw = await this.local.getMeta("epoch");
+    const localEpoch = typeof localEpochRaw === "number" ? localEpochRaw : 0;
     const remoteEpoch = this.manifest?.epoch ?? 0;
-    this.log('debug', 'connect() — epoch check', { localEpoch, remoteEpoch });
+    this.log("debug", "connect() — epoch check", { localEpoch, remoteEpoch });
     this.emit({
-      type: 'connect:state',
+      type: "connect:state",
       dbName: this.dbName,
       remotePath: this.config.remotePath,
       deviceId: this.deviceId,
@@ -2095,12 +2199,12 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       // An expired writer is fenced before this point. Replace its local sync
       // state without publishing the quarantine, even when the snapshot epoch
       // has not advanced since its last connection.
-      const resetResult = await this.runConnectStage('expired-client-rehydrate', () =>
+      const resetResult = await this.runConnectStage("expired-client-rehydrate", () =>
         this.local.withLock(SYNC_STATE_LOCK, () => this.resetExpiredClientFromRemote()),
       );
       if (!resetResult.ok) {
         if (resetResult.error instanceof ConnectStageTimeoutError) return;
-        throw stage('expired-client-rehydrate', resetResult.error);
+        throw stage("expired-client-rehydrate", resetResult.error);
       }
       flushedBeforeSnapshotRestore = true;
     } else if (localEpoch < remoteEpoch) {
@@ -2108,31 +2212,31 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       // writes that no remote snapshot contains. Publish those immutable
       // entries before clearAll() replaces local state, then rehydrate pulls
       // the just-published entries back on top of the snapshot.
-      this.log('debug', 'connect() — epoch advanced, rehydrating from snapshot');
-      const rehydrateResult = await this.runConnectStage('flush-and-rehydrate', () =>
+      this.log("debug", "connect() — epoch advanced, rehydrating from snapshot");
+      const rehydrateResult = await this.runConnectStage("flush-and-rehydrate", () =>
         this.local.withLock(SYNC_STATE_LOCK, () => this.flushAndRehydrateNow()),
       );
       if (!rehydrateResult.ok) {
         if (rehydrateResult.error instanceof ConnectStageTimeoutError) return;
-        throw stage('flush-and-rehydrate', rehydrateResult.error);
+        throw stage("flush-and-rehydrate", rehydrateResult.error);
       }
       flushedBeforeSnapshotRestore = true;
     } else {
-      this.log('debug', 'connect() — running initial pull');
-      const pullResult = await this.runConnectStage('pull', () => this.pull());
+      this.log("debug", "connect() — running initial pull");
+      const pullResult = await this.runConnectStage("pull", () => this.pull());
       if (!pullResult.ok) {
         if (pullResult.error instanceof ConnectStageTimeoutError) return;
-        throw stage('pull', pullResult.error);
+        throw stage("pull", pullResult.error);
       }
     }
     if (bootstrapped) {
       await this.rebuildOutboxFromLocalState();
     }
     if (!flushedBeforeSnapshotRestore || bootstrapped) {
-      const flushResult = await this.runConnectStage('flush', () => this.flushQueued(true));
+      const flushResult = await this.runConnectStage("flush", () => this.flushQueued(true));
       if (!flushResult.ok) {
         if (flushResult.error instanceof ConnectStageTimeoutError) return;
-        throw stage('flush', flushResult.error);
+        throw stage("flush", flushResult.error);
       }
     }
 
@@ -2141,8 +2245,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     this.connected = true;
     await this.markSuccessfulRemoteSync();
     this.scheduleRetentionCompactionCheck(0);
-    this.setConnectionStatus('idle');
-    this.log('info', 'connect() — connected', {
+    this.setConnectionStatus("idle");
+    this.log("info", "connect() — connected", {
       remotePath: this.config.remotePath,
       deviceId: this.deviceId,
       pollInterval: this.config.pollInterval,
@@ -2162,21 +2266,21 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       try {
         await this.flushQueued(true);
       } catch (err) {
-        this.log('warn', 'disconnect() — flush before close failed (continuing)', err);
+        this.log("warn", "disconnect() — flush before close failed (continuing)", err);
       }
     }
     this.emit({
-      type: 'transport:teardown',
+      type: "transport:teardown",
       dbName: this.dbName,
       remotePath: this.config.remotePath,
       deviceId: this.deviceId,
-      reason: 'disconnect',
+      reason: "disconnect",
     });
     this.local.close();
     this.connected = false;
     this.initialized = false;
-    this.connectionStatus = 'offline';
-    this.emit({ type: 'connection:status', status: this.getConnectionStatus() });
+    this.connectionStatus = "offline";
+    this.emit({ type: "connection:status", status: this.getConnectionStatus() });
     this.initPromise = null;
     this.connectPromise = null;
     this.remotePoisonError = null;
@@ -2190,7 +2294,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
    * the engine tears it down and reconnects on the new adapter as needed.
    */
   async setRemoteStorage(adapter: StorageAdapter | null): Promise<void> {
-    console.log('[interocitor:share] setRemoteStorage() — entry', {
+    console.log("[interocitor:share] setRemoteStorage() — entry", {
       dbName: this.dbName,
       newAdapter: adapter?.name ?? null,
       currentAdapter: this.adapter?.name ?? null,
@@ -2201,14 +2305,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       meshId: this.manifest?.meshId,
     });
     await this.ensureReady();
-    this.log('debug', 'setRemoteStorage()', {
+    this.log("debug", "setRemoteStorage()", {
       adapter: adapter?.name ?? null,
       remotePath: this.config.remotePath,
     });
     const wasConnected = this.connected;
     const hadAdapter = this.adapter !== null;
     const switching = adapter !== this.adapter;
-    console.log('[interocitor:share] setRemoteStorage() — decision', {
+    console.log("[interocitor:share] setRemoteStorage() — decision", {
       wasConnected,
       hadAdapter,
       switching,
@@ -2221,7 +2325,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     // then reconnect — which re-flushes the entire dataset as a fresh batch
     // of change files on every reload.
     if (!switching) {
-      this.log('debug', 'setRemoteStorage() — same adapter, no-op');
+      this.log("debug", "setRemoteStorage() — same adapter, no-op");
       return;
     }
 
@@ -2229,7 +2333,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       try {
         await this.pull();
       } catch (err) {
-        this.log('warn', 'setRemoteStorage() — final pull before swap failed (continuing)', err);
+        this.log("warn", "setRemoteStorage() — final pull before swap failed (continuing)", err);
       }
     }
 
@@ -2249,11 +2353,11 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       // different mesh layout.
       this.adapter?.resetFolderCache?.();
       this.emit({
-        type: 'transport:teardown',
+        type: "transport:teardown",
         dbName: this.dbName,
         remotePath: this.config.remotePath,
         deviceId: this.deviceId,
-        reason: adapter ? 'switch-adapter' : 'detach',
+        reason: adapter ? "switch-adapter" : "detach",
       });
     }
 
@@ -2320,14 +2424,14 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
    * we know no prior device record can exist.
    */
   private async doLoadOrCreateManifest(
-    reason: string = 'unknown',
+    reason: string = "unknown",
     force: boolean = false,
     options: { assertLocalMeshId?: boolean } = {},
   ): Promise<{ bootstrapped: boolean }> {
     if (!force && this.manifest && !this.remotePoisonError) {
       this.emit({
-        type: 'trace:manifest',
-        op: 'cache-hit',
+        type: "trace:manifest",
+        op: "cache-hit",
         reason,
         generation: this.manifest.generation,
         cached: true,
@@ -2344,19 +2448,28 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     );
     this.manifest = manifest;
     this.encrypted = manifest.encrypted || this.encrypted;
-    await this.local.setMeta('manifestCache', manifest);
+    await this.local.setMeta("manifestCache", manifest);
     return { bootstrapped };
   }
 
   // ── Local writes ───────────────────────────────────────────────────
 
-  async put<K extends keyof S & string>(table: K, rowId: string, columns: Partial<S[K]>, userId?: string): Promise<S[K]> {
+  async put<K extends keyof S & string>(
+    table: K,
+    rowId: string,
+    columns: Partial<S[K]>,
+    userId?: string,
+  ): Promise<S[K]> {
     await this.ensureReady();
     if (this.batchDepth > 0) return this.putNow(table, rowId, columns, userId);
     return this.local.withLock(SYNC_STATE_LOCK, () => this.putNow(table, rowId, columns, userId));
   }
 
-  async delete<K extends keyof S & string>(table: K, rowId: string, userId?: string): Promise<void> {
+  async delete<K extends keyof S & string>(
+    table: K,
+    rowId: string,
+    userId?: string,
+  ): Promise<void> {
     await this.ensureReady();
     if (this.batchDepth > 0) return this.deleteNow(table, rowId, userId);
     return this.local.withLock(SYNC_STATE_LOCK, () => this.deleteNow(table, rowId, userId));
@@ -2450,12 +2563,12 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     this.maybeEmitCompactWarning();
     this.armDelayedCompactAfterChange();
     if (this.pendingCount >= this.config.flushThreshold) {
-      this.flushQueued().catch((err) => this.emit({ type: 'flush:error', error: err }));
+      this.flushQueued().catch((err) => this.emit({ type: "flush:error", error: err }));
       return;
     }
     if (this.flushTimer) clearTimeout(this.flushTimer);
     this.flushTimer = setTimeout(() => {
-      this.flushQueued().catch((err) => this.emit({ type: 'flush:error', error: err }));
+      this.flushQueued().catch((err) => this.emit({ type: "flush:error", error: err }));
     }, this.config.flushDebounce);
   }
 
@@ -2464,7 +2577,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     if (this.pendingCount < this.config.compactWarnThreshold) return;
     this.compactWarningEmitted = true;
     this.emit({
-      type: 'compact:warning',
+      type: "compact:warning",
       queuedChangeCount: this.pendingCount,
       threshold: this.config.compactWarnThreshold,
       autoCompactThreshold: this.config.compactAutoThreshold,
@@ -2481,65 +2594,70 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   private async maybeAutoCompact(triggerQueuedChangeCount: number): Promise<void> {
     if (triggerQueuedChangeCount < this.config.compactAutoThreshold) return;
 
-    const sampleWindow = Math.max(1, Math.floor(this.config.compactAutoDeviceCount / Math.max(1, this.config.compactAutoSampleNumerator)));
+    const sampleWindow = Math.max(
+      1,
+      Math.floor(
+        this.config.compactAutoDeviceCount / Math.max(1, this.config.compactAutoSampleNumerator),
+      ),
+    );
     const sampleRoll = Math.floor(Math.random() * sampleWindow);
     const baseEvent = {
       queuedChangeCount: triggerQueuedChangeCount,
       threshold: this.config.compactAutoThreshold,
       sampleRoll,
       sampleWindow,
-      trigger: 'immediate' as const,
+      trigger: "immediate" as const,
       remotePath: this.config.remotePath,
       deviceId: this.deviceId,
     };
 
     if (!this.config.autoCompact) {
-      this.emit({ type: 'compact:auto:skip', ...baseEvent, reason: 'disabled' });
+      this.emit({ type: "compact:auto:skip", ...baseEvent, reason: "disabled" });
       return;
     }
     if (!this.adapter || !this.config.remotePath) {
-      this.emit({ type: 'compact:auto:skip', ...baseEvent, reason: 'missing-remote' });
+      this.emit({ type: "compact:auto:skip", ...baseEvent, reason: "missing-remote" });
       return;
     }
     if (!this.connected) {
-      this.emit({ type: 'compact:auto:skip', ...baseEvent, reason: 'not-connected' });
+      this.emit({ type: "compact:auto:skip", ...baseEvent, reason: "not-connected" });
       return;
     }
     if (!this.manifest?.server.managed) {
-      this.emit({ type: 'compact:auto:skip', ...baseEvent, reason: 'peer-mode' });
+      this.emit({ type: "compact:auto:skip", ...baseEvent, reason: "peer-mode" });
       return;
     }
     if (this.remotePoisonError) {
-      this.emit({ type: 'compact:auto:skip', ...baseEvent, reason: 'poisoned' });
+      this.emit({ type: "compact:auto:skip", ...baseEvent, reason: "poisoned" });
       return;
     }
     if (this.compactInFlight) {
-      this.emit({ type: 'compact:auto:skip', ...baseEvent, reason: 'already-running' });
+      this.emit({ type: "compact:auto:skip", ...baseEvent, reason: "already-running" });
       return;
     }
     if (sampleRoll !== 0) {
-      this.emit({ type: 'compact:auto:skip', ...baseEvent, reason: 'sampling' });
+      this.emit({ type: "compact:auto:skip", ...baseEvent, reason: "sampling" });
       return;
     }
 
-    this.emit({ type: 'compact:auto:start', ...baseEvent });
+    this.emit({ type: "compact:auto:start", ...baseEvent });
     const run = this.compact()
       .then(() => {
         this.emit({
-          type: 'compact:auto:complete',
+          type: "compact:auto:complete",
           queuedChangeCount: triggerQueuedChangeCount,
           threshold: this.config.compactAutoThreshold,
-          trigger: 'immediate',
+          trigger: "immediate",
           remotePath: this.config.remotePath,
           deviceId: this.deviceId,
         });
       })
       .catch((error: Error) => {
         this.emit({
-          type: 'compact:auto:error',
+          type: "compact:auto:error",
           queuedChangeCount: triggerQueuedChangeCount,
           threshold: this.config.compactAutoThreshold,
-          trigger: 'immediate',
+          trigger: "immediate",
           remotePath: this.config.remotePath,
           deviceId: this.deviceId,
           error,
@@ -2554,7 +2672,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
 
   // ── Finite change-retention deadline ─────────────────────────────
 
-  private scheduleRetentionCompactionCheck(delayMs = this.activeRetentionPolicy().compactAfterMs): void {
+  private scheduleRetentionCompactionCheck(
+    delayMs = this.activeRetentionPolicy().compactAfterMs,
+  ): void {
     if (!this.connected || !this.config.remotePath || !this.manifest?.server.managed) return;
     const dueAt = Date.now() + Math.max(0, delayMs);
     if (this.compactRetentionTimer && this.compactRetentionDueAt <= dueAt) return;
@@ -2562,7 +2682,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     this.compactRetentionDueAt = dueAt;
     const waitMs = Math.min(Math.max(0, dueAt - Date.now()), MAX_TIMER_DELAY_MS);
     this.emit({
-      type: 'compact:retention:scheduled',
+      type: "compact:retention:scheduled",
       dueAt: new Date(dueAt).toISOString(),
       remotePath: this.config.remotePath,
       deviceId: this.deviceId,
@@ -2580,7 +2700,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   }
 
   private async runRetentionCompactionCheck(): Promise<void> {
-    if (!this.connected || !this.adapter || !this.config.remotePath || !this.manifest?.server.managed) return;
+    if (
+      !this.connected ||
+      !this.adapter ||
+      !this.config.remotePath ||
+      !this.manifest?.server.managed
+    )
+      return;
     const adapter = this.adapter;
     const remotePath = this.config.remotePath;
     if (this.remotePoisonError) {
@@ -2594,7 +2720,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
         // Keep cleanup on the same local serialization boundary as snapshot
         // publication so it cannot mistake an in-progress candidate for a
         // superseded snapshot.
-        await this.doLoadOrCreateManifest('snapshot-retention-check', true);
+        await this.doLoadOrCreateManifest("snapshot-retention-check", true);
         const activeSnapshotPath = this.manifest?.snapshotPath;
         if (activeSnapshotPath) {
           const cleanup = await pruneSupersededSnapshots(
@@ -2609,7 +2735,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       });
     } catch (error) {
       this.emit({
-        type: 'compact:retention:error',
+        type: "compact:retention:error",
         error: error instanceof Error ? error : new Error(String(error)),
         remotePath: this.config.remotePath,
         deviceId: this.deviceId,
@@ -2627,11 +2753,12 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
         // An adapter that cannot provide a usable modification time cannot
         // prove the file is young, so compact conservatively.
         const candidate = Number.isFinite(modifiedAt) ? modifiedAt : 0;
-        oldestChangeAt = oldestChangeAt === undefined ? candidate : Math.min(oldestChangeAt, candidate);
+        oldestChangeAt =
+          oldestChangeAt === undefined ? candidate : Math.min(oldestChangeAt, candidate);
       }
     } catch (error) {
       this.emit({
-        type: 'compact:retention:error',
+        type: "compact:retention:error",
         error: error instanceof Error ? error : new Error(String(error)),
         remotePath: this.config.remotePath,
         deviceId: this.deviceId,
@@ -2642,13 +2769,17 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
 
     const compactAfterMs = this.activeRetentionPolicy().compactAfterMs;
     if (oldestChangeAt === undefined) {
-      this.scheduleRetentionCompactionCheck(snapshotCleanupNeedsRetry ? RETENTION_RETRY_DELAY_MS : compactAfterMs);
+      this.scheduleRetentionCompactionCheck(
+        snapshotCleanupNeedsRetry ? RETENTION_RETRY_DELAY_MS : compactAfterMs,
+      );
       return;
     }
     const ageMs = Math.max(0, Date.now() - oldestChangeAt);
     if (ageMs < compactAfterMs) {
       const delayMs = compactAfterMs - ageMs;
-      this.scheduleRetentionCompactionCheck(snapshotCleanupNeedsRetry ? Math.min(delayMs, RETENTION_RETRY_DELAY_MS) : delayMs);
+      this.scheduleRetentionCompactionCheck(
+        snapshotCleanupNeedsRetry ? Math.min(delayMs, RETENTION_RETRY_DELAY_MS) : delayMs,
+      );
       return;
     }
     if (this.compactInFlight) {
@@ -2658,7 +2789,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
 
     const oldestChangeAtIso = new Date(oldestChangeAt).toISOString();
     this.emit({
-      type: 'compact:retention:start',
+      type: "compact:retention:start",
       oldestChangeAt: oldestChangeAtIso,
       ageMs,
       remotePath: this.config.remotePath,
@@ -2667,7 +2798,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     try {
       await this.compact();
       this.emit({
-        type: 'compact:retention:complete',
+        type: "compact:retention:complete",
         oldestChangeAt: oldestChangeAtIso,
         ageMs,
         remotePath: this.config.remotePath,
@@ -2681,7 +2812,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       this.scheduleRetentionCompactionCheck(RETENTION_RETRY_DELAY_MS);
     } catch (error) {
       this.emit({
-        type: 'compact:retention:error',
+        type: "compact:retention:error",
         oldestChangeAt: oldestChangeAtIso,
         error: error instanceof Error ? error : new Error(String(error)),
         remotePath: this.config.remotePath,
@@ -2702,16 +2833,19 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     if (!this.config.remotePath) return;
     if (!this.manifest?.server.managed) return;
 
-    const delayMs = this.jitterDelay(this.config.firstCompactDelayMs, this.config.firstCompactDelayJitterMs);
+    const delayMs = this.jitterDelay(
+      this.config.firstCompactDelayMs,
+      this.config.firstCompactDelayJitterMs,
+    );
     this.compactScheduleVersion += 1;
     const version = this.compactScheduleVersion;
 
     if (this.compactCheckTimer) clearTimeout(this.compactCheckTimer);
     this.emit({
-      type: 'compact:delayed:scheduled',
+      type: "compact:delayed:scheduled",
       queuedChangeCount: this.pendingCount,
       delayMs,
-      phase: 'check',
+      phase: "check",
       remotePath: this.config.remotePath,
       deviceId: this.deviceId,
     });
@@ -2723,21 +2857,26 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
 
   private async runDelayedCompactCheck(version: number): Promise<void> {
     if (version !== this.compactScheduleVersion) return;
-    if (!this.config.autoCompact || !this.connected || !this.adapter || !this.config.remotePath) return;
+    if (!this.config.autoCompact || !this.connected || !this.adapter || !this.config.remotePath)
+      return;
     if (this.remotePoisonError) return;
 
     let remoteChangeFileCount = 0;
     try {
       const adapter = this.adapter;
       const remoteRoot = this.config.remotePath;
-      const list = await adapter.listFiles(`${remoteRoot}/changes`).catch(() => [] as { path: string }[]);
-      remoteChangeFileCount = list.filter((f) => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(f.path)).length;
+      const list = await adapter
+        .listFiles(`${remoteRoot}/changes`)
+        .catch(() => [] as { path: string }[]);
+      remoteChangeFileCount = list.filter((f) =>
+        /\/changes\/[^/]+-chg_[^/]+\.json$/.test(f.path),
+      ).length;
     } catch {
       /* best-effort */
     }
 
     this.emit({
-      type: 'compact:delayed:check',
+      type: "compact:delayed:check",
       queuedChangeCount: this.pendingCount,
       remoteChangeFileCount,
       threshold: this.config.compactRemoteChangeThreshold,
@@ -2747,89 +2886,102 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
 
     if (remoteChangeFileCount <= this.config.compactRemoteChangeThreshold) {
       this.emit({
-        type: 'compact:auto:skip',
+        type: "compact:auto:skip",
         queuedChangeCount: this.pendingCount,
         threshold: this.config.compactAutoThreshold,
-        trigger: 'delayed',
+        trigger: "delayed",
         remotePath: this.config.remotePath,
         deviceId: this.deviceId,
-        reason: 'below-remote-threshold',
+        reason: "below-remote-threshold",
       });
       return;
     }
 
-    const delayMs = this.jitterDelay(this.config.secondCompactDelayMs, this.config.secondCompactDelayJitterMs);
+    const delayMs = this.jitterDelay(
+      this.config.secondCompactDelayMs,
+      this.config.secondCompactDelayJitterMs,
+    );
     if (this.compactRunTimer) clearTimeout(this.compactRunTimer);
     this.emit({
-      type: 'compact:delayed:scheduled',
+      type: "compact:delayed:scheduled",
       queuedChangeCount: this.pendingCount,
       delayMs,
-      phase: 'compact',
+      phase: "compact",
       remotePath: this.config.remotePath,
       deviceId: this.deviceId,
     });
     const triggerQueuedChangeCount = this.pendingCount;
     this.compactRunTimer = setTimeout(() => {
       this.compactRunTimer = null;
-      this.runDelayedCompact(version, triggerQueuedChangeCount, remoteChangeFileCount).catch(() => {});
+      this.runDelayedCompact(version, triggerQueuedChangeCount, remoteChangeFileCount).catch(
+        () => {},
+      );
     }, delayMs);
   }
 
-  private async runDelayedCompact(version: number, queuedChangeCount: number, remoteChangeFileCount: number): Promise<void> {
+  private async runDelayedCompact(
+    version: number,
+    queuedChangeCount: number,
+    remoteChangeFileCount: number,
+  ): Promise<void> {
     if (version !== this.compactScheduleVersion) {
       this.emit({
-        type: 'compact:auto:skip',
+        type: "compact:auto:skip",
         queuedChangeCount,
         threshold: this.config.compactAutoThreshold,
-        trigger: 'delayed',
+        trigger: "delayed",
         remotePath: this.config.remotePath,
         deviceId: this.deviceId,
-        reason: 'superseded',
+        reason: "superseded",
       });
       return;
     }
     if (!this.config.autoCompact || !this.connected || !this.adapter || !this.config.remotePath) {
       this.emit({
-        type: 'compact:auto:skip',
+        type: "compact:auto:skip",
         queuedChangeCount,
         threshold: this.config.compactAutoThreshold,
-        trigger: 'delayed',
+        trigger: "delayed",
         remotePath: this.config.remotePath,
         deviceId: this.deviceId,
-        reason: this.connected ? (this.config.autoCompact ? 'missing-remote' : 'disabled') : 'not-connected',
+        reason: this.connected
+          ? this.config.autoCompact
+            ? "missing-remote"
+            : "disabled"
+          : "not-connected",
       });
       return;
     }
     if (this.remotePoisonError) {
       this.emit({
-        type: 'compact:auto:skip',
+        type: "compact:auto:skip",
         queuedChangeCount,
         threshold: this.config.compactAutoThreshold,
-        trigger: 'delayed',
+        trigger: "delayed",
         remotePath: this.config.remotePath,
         deviceId: this.deviceId,
-        reason: 'poisoned',
+        reason: "poisoned",
       });
       return;
     }
     if (this.compactInFlight) {
       this.emit({
-        type: 'compact:auto:skip',
+        type: "compact:auto:skip",
         queuedChangeCount,
         threshold: this.config.compactAutoThreshold,
-        trigger: 'delayed',
+        trigger: "delayed",
         remotePath: this.config.remotePath,
         deviceId: this.deviceId,
-        reason: 'already-running',
+        reason: "already-running",
       });
       return;
     }
 
     this.emit({
-      type: 'compact:auto:start',
+      type: "compact:auto:start",
       queuedChangeCount,
       threshold: this.config.compactAutoThreshold,
-      trigger: 'delayed',
+      trigger: "delayed",
       remoteChangeFileCount,
       remotePath: this.config.remotePath,
       deviceId: this.deviceId,
@@ -2838,10 +2990,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     const run = this.compact()
       .then(() => {
         this.emit({
-          type: 'compact:auto:complete',
+          type: "compact:auto:complete",
           queuedChangeCount,
           threshold: this.config.compactAutoThreshold,
-          trigger: 'delayed',
+          trigger: "delayed",
           remoteChangeFileCount,
           remotePath: this.config.remotePath,
           deviceId: this.deviceId,
@@ -2849,10 +3001,10 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       })
       .catch((error: Error) => {
         this.emit({
-          type: 'compact:auto:error',
+          type: "compact:auto:error",
           queuedChangeCount,
           threshold: this.config.compactAutoThreshold,
-          trigger: 'delayed',
+          trigger: "delayed",
           remoteChangeFileCount,
           remotePath: this.config.remotePath,
           deviceId: this.deviceId,
@@ -2895,12 +3047,12 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
     // The mesh policy may have been tightened while this device was offline.
     // Refresh it before deciding whether queued writes remain eligible; doing
     // this after the check would let direct flush() bypass the current policy.
-    await this.doLoadOrCreateManifest('flush-retention', true);
+    await this.doLoadOrCreateManifest("flush-retention", true);
     if (await this.quarantineExpiredOfflineWrites()) return 0;
 
-    this.log('debug', 'flush() — start', { entryCount: entries.length });
-    this.emit({ type: 'flush:start', entryCount: entries.length });
-    if (this.connected) this.setConnectionStatus('syncing');
+    this.log("debug", "flush() — start", { entryCount: entries.length });
+    this.emit({ type: "flush:start", entryCount: entries.length });
+    if (this.connected) this.setConnectionStatus("syncing");
     this.pendingCount = 0;
     this.resetCompactWarning();
     this.clearScheduledFlush();
@@ -2909,31 +3061,31 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       await flushPrimary(
         this.adapter,
         this.local,
-        this.requireRemotePath('flush()'),
+        this.requireRemotePath("flush()"),
         entries,
         this.codecState,
         this.deviceId,
         (e) => this.emit(e),
         this.config.replicas.map((replica) => ({
           adapter: replica.adapter,
-          remotePath: replica.remotePath ?? this.requireRemotePath('flush() replica'),
+          remotePath: replica.remotePath ?? this.requireRemotePath("flush() replica"),
         })),
         (adapterName, err) => {
-          this.log('warn', 'flush() — replica write failed', { adapter: adapterName }, err);
-          this.emit({ type: 'replica:error', adapter: adapterName, error: err as Error });
+          this.log("warn", "flush() — replica write failed", { adapter: adapterName }, err);
+          this.emit({ type: "replica:error", adapter: adapterName, error: err as Error });
         },
       );
       await this.local.acknowledgeOutbox(entries.map((entry) => entry.id));
       await this.markSuccessfulRemoteSync();
       this.scheduleRetentionCompactionCheck(0);
 
-      this.log('debug', 'flush() — complete', { entryCount: entries.length });
-      this.emit({ type: 'flush:complete' });
-      if (this.connected) this.setConnectionStatus('idle');
+      this.log("debug", "flush() — complete", { entryCount: entries.length });
+      this.emit({ type: "flush:complete" });
+      if (this.connected) this.setConnectionStatus("idle");
       return triggerQueuedChangeCount;
     } catch (err) {
-      if (this.connected) this.setConnectionStatus('idle');
-      this.log('error', 'flush() — failed, durable entries remain queued', err);
+      if (this.connected) this.setConnectionStatus("idle");
+      this.log("error", "flush() — failed, durable entries remain queued", err);
       this.pendingCount = entries.length;
       this.maybeEmitCompactWarning();
       throw err;
@@ -2948,13 +3100,13 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   }
 
   private async pullNow(): Promise<void> {
-    const adapter = this.requireAdapter('pull()');
-    if (this.connected) this.setConnectionStatus('syncing');
+    const adapter = this.requireAdapter("pull()");
+    if (this.connected) this.setConnectionStatus("syncing");
     try {
       this.hlc = await doPull({
         adapter,
         local: this.local,
-        remotePath: this.requireRemotePath('pull()'),
+        remotePath: this.requireRemotePath("pull()"),
         codecState: this.codecState,
         hlc: this.hlc,
         deviceId: this.deviceId,
@@ -2965,7 +3117,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
         ensureRowsCached: (ops) => this.ensureRowsCached(ops),
         poisonRemote: (err, path) => this.poisonRemote(err, path),
         loadOrCreateManifest: async () => {
-          await this.doLoadOrCreateManifest('pull');
+          await this.doLoadOrCreateManifest("pull");
         },
       });
       if (this.connected) {
@@ -2974,7 +3126,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       }
       await this.acknowledgeManifest();
     } finally {
-      if (this.connected) this.setConnectionStatus('idle');
+      if (this.connected) this.setConnectionStatus("idle");
     }
   }
 
@@ -2995,7 +3147,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   }
 
   private async rehydrateNow(preservedMeta?: Readonly<Record<string, unknown>>): Promise<void> {
-    const adapter = this.requireAdapter('rehydrate()');
+    const adapter = this.requireAdapter("rehydrate()");
     this.hlc = await doRehydrate({
       adapter,
       local: this.local,
@@ -3009,7 +3161,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       poisonRemote: (err, path) => this.poisonRemote(err, path),
       pull: () => this.pullNow(),
       reloadManifest: async () => {
-        await this.doLoadOrCreateManifest('rehydrate-stale-snapshot', true);
+        await this.doLoadOrCreateManifest("rehydrate-stale-snapshot", true);
         return this.manifest;
       },
       preservedMeta,
@@ -3030,7 +3182,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       .withLock(SYNC_STATE_LOCK, async () => {
         // Establish one local cut: completed batches are durable and all queued
         // changes are authoritative before pull/capture can publish a snapshot.
-        await this.doLoadOrCreateManifest('compact-retention', true);
+        await this.doLoadOrCreateManifest("compact-retention", true);
         const expiredQuarantine = await this.quarantineExpiredOfflineWrites();
         if (expiredQuarantine) {
           await this.resetExpiredClientFromRemote();
@@ -3038,18 +3190,20 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
         }
         await this.flushPendingBatch();
         await this.doFlush();
-        const adapter = this.requireAdapter('compact()');
-        if (!this.manifest) throw new Error('Engine is not connected');
+        const adapter = this.requireAdapter("compact()");
+        if (!this.manifest) throw new Error("Engine is not connected");
         this.manifest = await doCompact({
           adapter,
           local: this.local,
-          remotePath: this.requireRemotePath('compact()'),
+          remotePath: this.requireRemotePath("compact()"),
           manifest: this.manifest,
           codecState: this.codecState,
           hlc: this.hlc,
           deviceId: this.deviceId,
           serverId: this.serverId,
-          retention: this.config.retentionConfigured ? this.config.retention : this.activeRetentionPolicy(),
+          retention: this.config.retentionConfigured
+            ? this.config.retention
+            : this.activeRetentionPolicy(),
           emit: (e) => this.emit(e),
           pull: () => this.pullNow(),
         });
@@ -3071,11 +3225,16 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
    * not participate in CRDT merge or compaction. Writing the same path later
    * overwrites it.
    */
-  async putFile(path: string, data: Uint8Array | string, contentType?: string, seal?: FileSeal): Promise<StoredFileMetadata> {
+  async putFile(
+    path: string,
+    data: Uint8Array | string,
+    contentType?: string,
+    seal?: FileSeal,
+  ): Promise<StoredFileMetadata> {
     await this.ensureReady();
-    const adapter = this.requireAdapter('putFile()');
+    const adapter = this.requireAdapter("putFile()");
     const filePath = this.storedFilePath(path);
-    if (seal && !seal.taint.trim()) throw new Error('Object seal taint must not be empty');
+    if (seal && !seal.taint.trim()) throw new Error("Object seal taint must not be empty");
     const { stored, plaintextSize } = await this.encodeStoredFile(data, seal?.key);
     const options = {
       uploadedByDeviceId: this.deviceId,
@@ -3084,11 +3243,11 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       taint: seal?.taint,
     };
     if (adapter.putStoredFile) return adapter.putStoredFile(filePath, stored, options);
-    await adapter.ensureFolder(`${this.requireRemotePath('putFile()').replace(/\/$/, '')}/files`);
+    await adapter.ensureFolder(`${this.requireRemotePath("putFile()").replace(/\/$/, "")}/files`);
     await adapter.writeFile(filePath, stored);
     const meta = await adapter.getFileMetadata(filePath);
     return {
-      name: meta?.name ?? filePath.split('/').pop() ?? filePath,
+      name: meta?.name ?? filePath.split("/").pop() ?? filePath,
       path: filePath,
       size: meta?.size ?? stored.byteLength,
       modifiedTime: meta?.modifiedTime ?? new Date().toISOString(),
@@ -3110,7 +3269,9 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   async getFile(path: string): Promise<Uint8Array> {
     const sealed = await this.openFile(path);
     if (sealed.taint)
-      throw new Error(`Object ${path} is tainted with ${sealed.taint}; unlock the matching key and call openFile().open(key)`);
+      throw new Error(
+        `Object ${path} is tainted with ${sealed.taint}; unlock the matching key and call openFile().open(key)`,
+      );
     return sealed.open();
   }
 
@@ -3123,16 +3284,20 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
    */
   async openFile(path: string): Promise<SealedFile> {
     await this.ensureReady();
-    const adapter = this.requireAdapter('openFile()');
+    const adapter = this.requireAdapter("openFile()");
     const filePath = this.storedFilePath(path);
     const [stored, metadata] = await Promise.all([
       adapter.getStoredFile ? adapter.getStoredFile(filePath) : adapter.readFile(filePath),
       adapter.getStoredFileMetadata
         ? adapter.getStoredFileMetadata(filePath)
-        : adapter.getFileMetadata(filePath).then((meta): StoredFileMetadata | null => (meta ? { ...meta, storedSize: meta.size } : null)),
+        : adapter
+            .getFileMetadata(filePath)
+            .then((meta): StoredFileMetadata | null =>
+              meta ? { ...meta, storedSize: meta.size } : null,
+            ),
     ]);
     const fallbackMetadata: StoredFileMetadata = {
-      name: filePath.split('/').pop() ?? filePath,
+      name: filePath.split("/").pop() ?? filePath,
       path: filePath,
       size: stored.byteLength,
       modifiedTime: new Date().toISOString(),
@@ -3144,7 +3309,8 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
       metadata: fileMetadata,
       taint,
       open: async (key?: CryptoKey) => {
-        if (taint && !key) throw new Error(`Object ${path} is tainted with ${taint}; a matching key is required`);
+        if (taint && !key)
+          throw new Error(`Object ${path} is tainted with ${taint}; a matching key is required`);
         return this.decodeStoredFile(stored, key);
       },
     };
@@ -3153,7 +3319,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   /** Delete a durable application file. Missing files are treated as already deleted. */
   async deleteFile(path: string): Promise<void> {
     await this.ensureReady();
-    const adapter = this.requireAdapter('deleteFile()');
+    const adapter = this.requireAdapter("deleteFile()");
     const filePath = this.storedFilePath(path);
     if (adapter.deleteStoredFile) await adapter.deleteStoredFile(filePath);
     else await adapter.deleteFile(filePath);
@@ -3162,7 +3328,7 @@ export class Interocitor<S extends Record<string, Record<string, unknown>>> impl
   /** Return metadata for a durable application file without downloading content. */
   async getFileMetadata(path: string): Promise<StoredFileMetadata | null> {
     await this.ensureReady();
-    const adapter = this.requireAdapter('getFileMetadata()');
+    const adapter = this.requireAdapter("getFileMetadata()");
     const filePath = this.storedFilePath(path);
     if (adapter.getStoredFileMetadata) return adapter.getStoredFileMetadata(filePath);
     const meta = await adapter.getFileMetadata(filePath);

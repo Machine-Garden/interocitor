@@ -5,7 +5,12 @@
  * Also serves as a reference implementation for the StorageAdapter interface.
  */
 
-import type { StorageAdapter, FileEntry, StoredFileMetadata, StoredFileWriteOptions } from '../core/types.ts';
+import type {
+  StorageAdapter,
+  FileEntry,
+  StoredFileMetadata,
+  StoredFileWriteOptions,
+} from "../core/types.ts";
 
 /**
  * In-memory implementation of {@link StorageAdapter}.
@@ -16,11 +21,15 @@ import type { StorageAdapter, FileEntry, StoredFileMetadata, StoredFileWriteOpti
  * @example
  * ```ts
  * const adapter = new MemoryAdapter();
- * const engine = new Interocitor(adapter, { remotePath: '/Demo' });
+ * const engine = new Interocitor(adapter, {
+ *   remotePath: '/Demo',
+ *   localStore: new MemoryLocalStore(),
+ *   keySource: null,
+ * });
  * ```
  */
 export class MemoryAdapter implements StorageAdapter {
-  readonly name = 'memory';
+  readonly name = "memory";
 
   private files: Map<string, { data: Uint8Array; modifiedTime: string }> = new Map();
   private storedFileMetadata: Map<string, StoredFileMetadata> = new Map();
@@ -60,14 +69,14 @@ export class MemoryAdapter implements StorageAdapter {
   }
 
   async listFiles(folderPath: string): Promise<FileEntry[]> {
-    const prefix = folderPath.endsWith('/') ? folderPath : folderPath + '/';
+    const prefix = folderPath.endsWith("/") ? folderPath : folderPath + "/";
     const entries: FileEntry[] = [];
 
     for (const [path, file] of this.files) {
       if (path.startsWith(prefix)) {
         const remaining = path.slice(prefix.length);
         // Only direct children (no nested slashes)
-        if (!remaining.includes('/')) {
+        if (!remaining.includes("/")) {
           entries.push({
             name: remaining,
             path,
@@ -83,12 +92,12 @@ export class MemoryAdapter implements StorageAdapter {
 
   /** List immediate subfolder names under a path. */
   async listFolders(folderPath: string): Promise<string[]> {
-    const prefix = folderPath.endsWith('/') ? folderPath : folderPath + '/';
+    const prefix = folderPath.endsWith("/") ? folderPath : folderPath + "/";
     const names = new Set<string>();
     for (const path of this.files.keys()) {
       if (path.startsWith(prefix)) {
         const remaining = path.slice(prefix.length);
-        const slash = remaining.indexOf('/');
+        const slash = remaining.indexOf("/");
         if (slash > 0) {
           names.add(remaining.slice(0, slash));
         }
@@ -97,7 +106,7 @@ export class MemoryAdapter implements StorageAdapter {
     for (const folder of this.folders) {
       if (folder.startsWith(prefix)) {
         const remaining = folder.slice(prefix.length);
-        if (remaining && !remaining.includes('/')) {
+        if (remaining && !remaining.includes("/")) {
           names.add(remaining);
         }
       }
@@ -112,9 +121,7 @@ export class MemoryAdapter implements StorageAdapter {
   }
 
   async writeFile(path: string, data: Uint8Array | string): Promise<void> {
-    const bytes = typeof data === 'string'
-      ? new TextEncoder().encode(data)
-      : data;
+    const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
     this.files.set(path, {
       data: bytes,
       modifiedTime: new Date().toISOString(),
@@ -128,7 +135,7 @@ export class MemoryAdapter implements StorageAdapter {
   async getFileMetadata(path: string): Promise<FileEntry | null> {
     const file = this.files.get(path);
     if (!file) return null;
-    const name = path.split('/').pop() || path;
+    const name = path.split("/").pop() || path;
     return {
       name,
       path,
@@ -137,12 +144,16 @@ export class MemoryAdapter implements StorageAdapter {
     };
   }
 
-  async putStoredFile(path: string, data: Uint8Array | string, options: StoredFileWriteOptions = {}): Promise<StoredFileMetadata> {
-    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+  async putStoredFile(
+    path: string,
+    data: Uint8Array | string,
+    options: StoredFileWriteOptions = {},
+  ): Promise<StoredFileMetadata> {
+    const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
     await this.writeFile(path, bytes);
     const now = new Date().toISOString();
     const meta: StoredFileMetadata = {
-      name: path.split('/').pop() || path,
+      name: path.split("/").pop() || path,
       path,
       size: bytes.byteLength,
       modifiedTime: now,
@@ -163,7 +174,11 @@ export class MemoryAdapter implements StorageAdapter {
     const bytes = await this.readFile(path);
     const meta = this.storedFileMetadata.get(path);
     if (meta) {
-      const next = { ...meta, lastAccessedAt: new Date().toISOString(), useCount: (meta.useCount ?? 0) + 1 };
+      const next = {
+        ...meta,
+        lastAccessedAt: new Date().toISOString(),
+        useCount: (meta.useCount ?? 0) + 1,
+      };
       this.storedFileMetadata.set(path, next);
     }
     return bytes;

@@ -7,13 +7,8 @@
  * Useful for tests, local-only demos, and runtime fallbacks.
  */
 
-import type {
-  Row,
-  ChangeEntry,
-  WhereClause,
-  WherePrimitive,
-} from '../core/types.ts';
-import type { LocalStore } from './local-store.ts';
+import type { Row, ChangeEntry, WhereClause, WherePrimitive } from "../core/types.ts";
+import type { LocalStore } from "./local-store.ts";
 
 function compare(a: WherePrimitive, b: WherePrimitive): number {
   const av = a instanceof Date ? a.getTime() : a;
@@ -32,27 +27,27 @@ function readColumnValue(row: Row, field: string): unknown {
 function matchesClause(value: unknown, clause: WhereClause): boolean {
   if (value === undefined || value === null) return false;
   switch (clause.op) {
-    case 'equals':
+    case "equals":
       return compare(value as WherePrimitive, clause.value as WherePrimitive) === 0;
-    case 'above':
+    case "above":
       return compare(value as WherePrimitive, clause.value as WherePrimitive) > 0;
-    case 'aboveOrEqual':
+    case "aboveOrEqual":
       return compare(value as WherePrimitive, clause.value as WherePrimitive) >= 0;
-    case 'below':
+    case "below":
       return compare(value as WherePrimitive, clause.value as WherePrimitive) < 0;
-    case 'belowOrEqual':
+    case "belowOrEqual":
       return compare(value as WherePrimitive, clause.value as WherePrimitive) <= 0;
-    case 'between': {
+    case "between": {
       const lowerCmp = compare(value as WherePrimitive, clause.lower as WherePrimitive);
       const upperCmp = compare(value as WherePrimitive, clause.upper as WherePrimitive);
       const lowerOk = clause.lowerOpen ? lowerCmp > 0 : lowerCmp >= 0;
       const upperOk = clause.upperOpen ? upperCmp < 0 : upperCmp <= 0;
       return lowerOk && upperOk;
     }
-    case 'startsWith':
-      return typeof value === 'string' && value.startsWith(String(clause.value));
-    case 'anyOf':
-      return (clause.values ?? []).some(v => compare(value as WherePrimitive, v) === 0);
+    case "startsWith":
+      return typeof value === "string" && value.startsWith(String(clause.value));
+    case "anyOf":
+      return (clause.values ?? []).some((v) => compare(value as WherePrimitive, v) === 0);
     default:
       return false;
   }
@@ -78,7 +73,9 @@ export class MemoryLocalStore implements LocalStore {
   async withLock<T>(name: string, operation: () => Promise<T>): Promise<T> {
     const previous = this.lockTails.get(name) ?? Promise.resolve();
     let release!: () => void;
-    const current = new Promise<void>((resolve) => { release = resolve; });
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     this.lockTails.set(name, current);
     await previous.catch(() => {});
     try {
@@ -91,7 +88,9 @@ export class MemoryLocalStore implements LocalStore {
 
   // Opening cannot block or fail. Closing clears every volatile record so a
   // disconnected test/fallback engine cannot leak state into later reuse.
-  async open(): Promise<void> { /* noop */ }
+  async open(): Promise<void> {
+    /* noop */
+  }
   close(): void {
     this.rows.clear();
     this.outbox = [];
@@ -124,7 +123,7 @@ export class MemoryLocalStore implements LocalStore {
 
   async queryWhere(table: string, clause: WhereClause): Promise<Row[]> {
     const rows = await this.getTable(table);
-    return rows.filter(row => matchesClause(readColumnValue(row, clause.field), clause));
+    return rows.filter((row) => matchesClause(readColumnValue(row, clause.field), clause));
   }
 
   async getTableNames(): Promise<string[]> {
@@ -147,7 +146,7 @@ export class MemoryLocalStore implements LocalStore {
   // ── Outbox ───────────────────────────────────────────────────────
 
   async commitLocalMutation(row: Row, change: ChangeEntry): Promise<ChangeEntry> {
-    const current = this.meta.get('pendingBatch') as ChangeEntry | undefined;
+    const current = this.meta.get("pendingBatch") as ChangeEntry | undefined;
     const pendingBatch = current
       ? {
           ...current,
@@ -156,16 +155,16 @@ export class MemoryLocalStore implements LocalStore {
         }
       : { ...change, ops: [...change.ops] };
     this.rows.set(rowKey(row._meta.table, row._meta.rowId), row);
-    this.meta.set('pendingBatch', { ...pendingBatch, ops: [...pendingBatch.ops] });
-    this.meta.set('hlc', pendingBatch.hlc);
+    this.meta.set("pendingBatch", { ...pendingBatch, ops: [...pendingBatch.ops] });
+    this.meta.set("hlc", pendingBatch.hlc);
     return pendingBatch;
   }
 
   async promotePendingBatch(): Promise<ChangeEntry | null> {
-    const pending = this.meta.get('pendingBatch') as ChangeEntry | undefined;
+    const pending = this.meta.get("pendingBatch") as ChangeEntry | undefined;
     if (!pending) return null;
     this.outbox.push(pending);
-    this.meta.delete('pendingBatch');
+    this.meta.delete("pendingBatch");
     return pending;
   }
 

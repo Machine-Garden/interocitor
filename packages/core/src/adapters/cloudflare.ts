@@ -18,7 +18,7 @@ import type {
   RemoteInvalidationHooks,
   StoredFileMetadata,
   StoredFileWriteOptions,
-} from '../core/types.ts';
+} from "../core/types.ts";
 
 export interface CloudflareAdapterConfig {
   /** Worker IO base URL that includes a mesh address, e.g. https://worker/io/main */
@@ -70,7 +70,7 @@ export interface CloudflareHandshakeConfig {
 }
 
 export class CloudflareAdapter implements StorageAdapter {
-  readonly name = 'cloudflare';
+  readonly name = "cloudflare";
 
   private readonly config: CloudflareAdapterConfig;
   private authenticated = false;
@@ -82,7 +82,11 @@ export class CloudflareAdapter implements StorageAdapter {
   private ensuredFolders: Set<string> = new Set();
 
   constructor(config: CloudflareAdapterConfig) {
-    this.config = { ...config, baseUrl: config.baseUrl.replace(/\/$/, ''), relayEnabled: config.relayEnabled ?? true };
+    this.config = {
+      ...config,
+      baseUrl: config.baseUrl.replace(/\/$/, ""),
+      relayEnabled: config.relayEnabled ?? true,
+    };
   }
 
   private headers(extra?: Record<string, string>): Record<string, string> {
@@ -96,10 +100,10 @@ export class CloudflareAdapter implements StorageAdapter {
   private parseBaseUrl(): URL {
     const base = /^https?:\/\//i.test(this.config.baseUrl)
       ? this.config.baseUrl
-      : new URL(this.config.baseUrl, 'http://interocitor').toString();
+      : new URL(this.config.baseUrl, "http://interocitor").toString();
     const u = new URL(base);
-    if (!u.pathname.includes('/io/')) {
-      throw new Error('CloudflareAdapter baseUrl must include /io/<address>');
+    if (!u.pathname.includes("/io/")) {
+      throw new Error("CloudflareAdapter baseUrl must include /io/<address>");
     }
     return u;
   }
@@ -107,47 +111,49 @@ export class CloudflareAdapter implements StorageAdapter {
   private get ioBaseUrl(): string {
     const u = this.parseBaseUrl();
     if (!/^https?:\/\//i.test(this.config.baseUrl)) {
-      return `${u.pathname}${u.search}${u.hash}`.replace(/\/$/, '');
+      return `${u.pathname}${u.search}${u.hash}`.replace(/\/$/, "");
     }
-    return u.toString().replace(/\/$/, '');
+    return u.toString().replace(/\/$/, "");
   }
 
   private get notifyUrl(): string {
     const u = this.parseBaseUrl();
-    u.pathname = u.pathname.replace('/io/', '/notify/');
-    u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
+    u.pathname = u.pathname.replace("/io/", "/notify/");
+    u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
     if (this.config.token) {
-      u.searchParams.set('access_token', this.config.token);
+      u.searchParams.set("access_token", this.config.token);
     }
     if (!/^https?:\/\//i.test(this.config.baseUrl)) {
-      return `${u.pathname}${u.search}${u.hash}`.replace(/\/$/, '');
+      return `${u.pathname}${u.search}${u.hash}`.replace(/\/$/, "");
     }
-    return u.toString().replace(/\/$/, '');
+    return u.toString().replace(/\/$/, "");
   }
 
   private ioUrl(pathname: string): string {
-    const clean = pathname.startsWith('/') ? pathname : `/${pathname}`;
+    const clean = pathname.startsWith("/") ? pathname : `/${pathname}`;
     return `${this.ioBaseUrl}${clean}`;
   }
 
   private fileUrl(path: string): string {
-    const u = new URL(this.ioUrl('/file'));
-    u.searchParams.set('path', path);
+    const u = new URL(this.ioUrl("/file"));
+    u.searchParams.set("path", path);
     return u.toString();
   }
 
   private storedFileUrl(path: string): string {
-    const u = new URL(this.ioUrl('/stored-file'));
-    u.searchParams.set('path', path);
+    const u = new URL(this.ioUrl("/stored-file"));
+    u.searchParams.set("path", path);
     return u.toString();
   }
 
   private recoveryUrl(locator: string): string {
     if (!this.config.recoveryBaseUrl) {
-      throw new Error('Cloudflare recovery requires recoveryBaseUrl (for example https://worker.example/sync/recovery)');
+      throw new Error(
+        "Cloudflare recovery requires recoveryBaseUrl (for example https://worker.example/sync/recovery)",
+      );
     }
-    if (!/^[A-Za-z0-9_-]{43}$/.test(locator)) throw new Error('Invalid recovery locator');
-    return `${this.config.recoveryBaseUrl.replace(/\/$/, '')}/${locator}`;
+    if (!/^[A-Za-z0-9_-]{43}$/.test(locator)) throw new Error("Invalid recovery locator");
+    return `${this.config.recoveryBaseUrl.replace(/\/$/, "")}/${locator}`;
   }
 
   private recoveryHeaders(): Record<string, string> {
@@ -156,8 +162,8 @@ export class CloudflareAdapter implements StorageAdapter {
   }
 
   async authenticate(): Promise<void> {
-    const res = await fetch(this.ioUrl('/health'), {
-      method: 'GET',
+    const res = await fetch(this.ioUrl("/health"), {
+      method: "GET",
       headers: this.headers(),
     });
 
@@ -167,7 +173,7 @@ export class CloudflareAdapter implements StorageAdapter {
     }
 
     if (res.status === 401 || res.status === 403) {
-      throw new Error('Cloudflare Worker auth failed — check your access token');
+      throw new Error("Cloudflare Worker auth failed — check your access token");
     }
 
     throw new Error(`Cloudflare Worker unreachable: HTTP ${res.status}`);
@@ -194,8 +200,10 @@ export class CloudflareAdapter implements StorageAdapter {
       hooks?.onClose?.();
       return () => {};
     }
-    if (typeof WebSocket === 'undefined') {
-      hooks?.onError?.(new Error('Cloudflare relay invalidations require a WebSocket implementation'));
+    if (typeof WebSocket === "undefined") {
+      hooks?.onError?.(
+        new Error("Cloudflare relay invalidations require a WebSocket implementation"),
+      );
       hooks?.onClose?.();
       return () => {};
     }
@@ -233,11 +241,11 @@ export class CloudflareAdapter implements StorageAdapter {
       ws.onmessage = (e: MessageEvent) => {
         try {
           const msg = JSON.parse(e.data as string) as { type: string; path: string; ts: number };
-          if (msg.type === 'invalidation' || msg.type === 'invalidate' || msg.type === 'compact') {
+          if (msg.type === "invalidation" || msg.type === "invalidate" || msg.type === "compact") {
             onInvalidate(msg);
           }
         } catch {
-          onInvalidate({ type: 'unknown', path: '/', ts: Date.now() });
+          onInvalidate({ type: "unknown", path: "/", ts: Date.now() });
         }
       };
 
@@ -275,7 +283,9 @@ export class CloudflareAdapter implements StorageAdapter {
 
     return () => {
       cancelled = true;
-      try { ws?.close(1000, 'unsubscribed'); } catch {}
+      try {
+        ws?.close(1000, "unsubscribed");
+      } catch {}
       ws = null;
     };
   }
@@ -283,9 +293,9 @@ export class CloudflareAdapter implements StorageAdapter {
   async ensureFolder(path: string): Promise<void> {
     if (this.ensuredFolders.has(path)) return;
 
-    const res = await fetch(this.ioUrl('/ensure-folder'), {
-      method: 'POST',
-      headers: this.headers({ 'Content-Type': 'application/json; charset=utf-8' }),
+    const res = await fetch(this.ioUrl("/ensure-folder"), {
+      method: "POST",
+      headers: this.headers({ "Content-Type": "application/json; charset=utf-8" }),
       body: JSON.stringify({ path }),
     });
 
@@ -303,9 +313,9 @@ export class CloudflareAdapter implements StorageAdapter {
   }
 
   async listFiles(path: string): Promise<FileEntry[]> {
-    const res = await fetch(this.ioUrl('/list-files'), {
-      method: 'POST',
-      headers: this.headers({ 'Content-Type': 'application/json; charset=utf-8' }),
+    const res = await fetch(this.ioUrl("/list-files"), {
+      method: "POST",
+      headers: this.headers({ "Content-Type": "application/json; charset=utf-8" }),
       body: JSON.stringify({ path }),
     });
 
@@ -313,7 +323,7 @@ export class CloudflareAdapter implements StorageAdapter {
       throw new Error(`Failed to list files for ${path}: HTTP ${res.status}`);
     }
 
-    const payload = await res.json() as { files?: IoFileMeta[] };
+    const payload = (await res.json()) as { files?: IoFileMeta[] };
     return (payload.files ?? []).map((f) => ({
       name: f.name,
       path: f.path,
@@ -324,9 +334,9 @@ export class CloudflareAdapter implements StorageAdapter {
   }
 
   async listFolders(path: string): Promise<string[]> {
-    const res = await fetch(this.ioUrl('/list-folders'), {
-      method: 'POST',
-      headers: this.headers({ 'Content-Type': 'application/json; charset=utf-8' }),
+    const res = await fetch(this.ioUrl("/list-folders"), {
+      method: "POST",
+      headers: this.headers({ "Content-Type": "application/json; charset=utf-8" }),
       body: JSON.stringify({ path }),
     });
 
@@ -334,13 +344,13 @@ export class CloudflareAdapter implements StorageAdapter {
       throw new Error(`Failed to list folders for ${path}: HTTP ${res.status}`);
     }
 
-    const payload = await res.json() as { folders?: string[] };
+    const payload = (await res.json()) as { folders?: string[] };
     return payload.folders ?? [];
   }
 
   async readFile(path: string): Promise<Uint8Array> {
     const res = await fetch(this.fileUrl(path), {
-      method: 'GET',
+      method: "GET",
       headers: this.headers(),
     });
 
@@ -352,11 +362,11 @@ export class CloudflareAdapter implements StorageAdapter {
   }
 
   async writeFile(path: string, data: Uint8Array | string): Promise<void> {
-    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+    const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
 
     const res = await fetch(this.fileUrl(path), {
-      method: 'PUT',
-      headers: this.headers({ 'Content-Type': 'application/octet-stream' }),
+      method: "PUT",
+      headers: this.headers({ "Content-Type": "application/octet-stream" }),
       body: bytes as unknown as BodyInit,
     });
 
@@ -367,7 +377,7 @@ export class CloudflareAdapter implements StorageAdapter {
 
   async deleteFile(path: string): Promise<void> {
     const res = await fetch(this.fileUrl(path), {
-      method: 'DELETE',
+      method: "DELETE",
       headers: this.headers(),
     });
 
@@ -377,16 +387,16 @@ export class CloudflareAdapter implements StorageAdapter {
   }
 
   async getFileMetadata(path: string): Promise<FileEntry | null> {
-    const res = await fetch(this.ioUrl('/metadata'), {
-      method: 'POST',
-      headers: this.headers({ 'Content-Type': 'application/json; charset=utf-8' }),
+    const res = await fetch(this.ioUrl("/metadata"), {
+      method: "POST",
+      headers: this.headers({ "Content-Type": "application/json; charset=utf-8" }),
       body: JSON.stringify({ path }),
     });
 
     if (res.status === 404) return null;
     if (!res.ok) return null;
 
-    const payload = await res.json() as { file?: IoFileMeta | null };
+    const payload = (await res.json()) as { file?: IoFileMeta | null };
     const f = payload.file;
     if (!f) return null;
 
@@ -404,7 +414,10 @@ export class CloudflareAdapter implements StorageAdapter {
    * Rejects an invalid locator, missing recovery URL, or non-2xx response.
    */
   async readRecoveryWrapper(locator: string): Promise<Uint8Array> {
-    const res = await fetch(this.recoveryUrl(locator), { method: 'GET', headers: this.recoveryHeaders() });
+    const res = await fetch(this.recoveryUrl(locator), {
+      method: "GET",
+      headers: this.recoveryHeaders(),
+    });
     if (!res.ok) throw new Error(`Failed to read recovery wrapper: HTTP ${res.status}`);
     return new Uint8Array(await res.arrayBuffer());
   }
@@ -416,51 +429,58 @@ export class CloudflareAdapter implements StorageAdapter {
    */
   async writeRecoveryWrapper(locator: string, data: Uint8Array): Promise<void> {
     const res = await fetch(this.recoveryUrl(locator), {
-      method: 'PUT',
+      method: "PUT",
       headers: this.recoveryHeaders(),
       body: data as unknown as BodyInit,
     });
     if (!res.ok) throw new Error(`Failed to write recovery wrapper: HTTP ${res.status}`);
   }
 
-  async putStoredFile(path: string, data: Uint8Array | string, options: StoredFileWriteOptions = {}): Promise<StoredFileMetadata> {
-    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+  async putStoredFile(
+    path: string,
+    data: Uint8Array | string,
+    options: StoredFileWriteOptions = {},
+  ): Promise<StoredFileMetadata> {
+    const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
     const res = await fetch(this.storedFileUrl(path), {
-      method: 'PUT',
+      method: "PUT",
       headers: this.headers({
-        'Content-Type': options.contentType || 'application/octet-stream',
-        'X-Interocitor-Device-Id': options.uploadedByDeviceId || '',
-        'X-Interocitor-Plaintext-Size': String(options.plaintextSize ?? bytes.byteLength),
-        ...(options.taint ? { 'X-Interocitor-Taint': options.taint } : {}),
+        "Content-Type": options.contentType || "application/octet-stream",
+        "X-Interocitor-Device-Id": options.uploadedByDeviceId || "",
+        "X-Interocitor-Plaintext-Size": String(options.plaintextSize ?? bytes.byteLength),
+        ...(options.taint ? { "X-Interocitor-Taint": options.taint } : {}),
       }),
       body: bytes as unknown as BodyInit,
     });
     if (!res.ok) throw new Error(`Failed to upload stored file ${path}: HTTP ${res.status}`);
-    const payload = await res.json() as { file: StoredFileMetadata };
+    const payload = (await res.json()) as { file: StoredFileMetadata };
     return payload.file;
   }
 
   async getStoredFile(path: string): Promise<Uint8Array> {
-    const res = await fetch(this.storedFileUrl(path), { method: 'GET', headers: this.headers() });
+    const res = await fetch(this.storedFileUrl(path), { method: "GET", headers: this.headers() });
     if (!res.ok) throw new Error(`Failed to read stored file ${path}: HTTP ${res.status}`);
     return new Uint8Array(await res.arrayBuffer());
   }
 
   async deleteStoredFile(path: string): Promise<void> {
-    const res = await fetch(this.storedFileUrl(path), { method: 'DELETE', headers: this.headers() });
-    if (!res.ok && res.status !== 404) throw new Error(`Failed to delete stored file ${path}: HTTP ${res.status}`);
+    const res = await fetch(this.storedFileUrl(path), {
+      method: "DELETE",
+      headers: this.headers(),
+    });
+    if (!res.ok && res.status !== 404)
+      throw new Error(`Failed to delete stored file ${path}: HTTP ${res.status}`);
   }
 
   async getStoredFileMetadata(path: string): Promise<StoredFileMetadata | null> {
-    const res = await fetch(this.ioUrl('/stored-file-metadata'), {
-      method: 'POST',
-      headers: this.headers({ 'Content-Type': 'application/json; charset=utf-8' }),
+    const res = await fetch(this.ioUrl("/stored-file-metadata"), {
+      method: "POST",
+      headers: this.headers({ "Content-Type": "application/json; charset=utf-8" }),
       body: JSON.stringify({ path }),
     });
     if (res.status === 404) return null;
     if (!res.ok) return null;
-    const payload = await res.json() as { file?: StoredFileMetadata | null };
+    const payload = (await res.json()) as { file?: StoredFileMetadata | null };
     return payload.file ?? null;
   }
-
 }

@@ -1,9 +1,9 @@
-import assert from 'node:assert/strict';
-import { readdir, readFile } from 'node:fs/promises';
-import { join, relative } from 'node:path';
-import { test } from 'node:test';
+import assert from "node:assert/strict";
+import { readdir, readFile } from "node:fs/promises";
+import { join, relative } from "node:path";
+import { test } from "node:test";
 
-const CORE_SRC = new URL('../src/', import.meta.url);
+const CORE_SRC = new URL("../src/", import.meta.url);
 
 const bannedPatterns = [
   /\bindexedDB\b/,
@@ -25,16 +25,16 @@ async function* walk(dir) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
       yield* walk(path);
-    } else if (entry.isFile() && path.endsWith('.ts')) {
+    } else if (entry.isFile() && path.endsWith(".ts")) {
       yield path;
     }
   }
 }
 
-test('@interocitor/core source has no browser runtime globals', async () => {
+test("@interocitor/core source has no browser runtime globals", async () => {
   const failures = [];
   for await (const path of walk(CORE_SRC.pathname)) {
-    const source = await readFile(path, 'utf8');
+    const source = await readFile(path, "utf8");
     for (const pattern of bannedPatterns) {
       if (pattern.test(source)) {
         failures.push(`${relative(CORE_SRC.pathname, path)} matched ${pattern}`);
@@ -43,4 +43,3 @@ test('@interocitor/core source has no browser runtime globals', async () => {
   }
   assert.deepEqual(failures, []);
 });
-

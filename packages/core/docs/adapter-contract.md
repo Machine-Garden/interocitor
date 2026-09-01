@@ -31,7 +31,11 @@ interface StorageAdapter {
   // Optional durable app-file capability. Sync internals keep using the
   // primitives above; these methods are for user files/images that do not
   // compact or merge.
-  putStoredFile?(path: string, data: Uint8Array | string, options?: StoredFileWriteOptions): Promise<StoredFileMetadata>;
+  putStoredFile?(
+    path: string,
+    data: Uint8Array | string,
+    options?: StoredFileWriteOptions,
+  ): Promise<StoredFileMetadata>;
   getStoredFile?(path: string): Promise<Uint8Array>;
   deleteStoredFile?(path: string): Promise<void>;
   getStoredFileMetadata?(path: string): Promise<StoredFileMetadata | null>;
@@ -44,7 +48,7 @@ interface FileEntry {
   name: string;
   path: string;
   size: number;
-  modifiedTime: string;   // ISO 8601
+  modifiedTime: string; // ISO 8601
   etag?: string;
   revision?: string;
 }
@@ -224,14 +228,14 @@ Overwrite behavior belongs to the adapter. See the
 
 The engine is designed to tolerate weak consistency, but it does require:
 
-| Property | Required? | Notes |
-| --- | --- | --- |
-| Read‑after‑write for same path on same client | **Yes** | The engine reads back files it just wrote (e.g. in compaction). |
-| Read‑your‑own‑writes globally | No | Other devices may see the new file with a delay. |
-| Strong list consistency | No | The engine sorts and dedupes; missing entries are picked up on the next poll. |
-| Atomic multi‑file write | No | Engine never assumes two files are written together. |
-| Conditional writes (CAS / If‑Match) | No | Engine never sends one. Compaction safety notes spell out the trade‑off. |
-| Monotonic file listing | No | An adapter may return a file in one `listFiles` and omit it from the next; the engine retries. |
+| Property                                      | Required? | Notes                                                                                          |
+| --------------------------------------------- | --------- | ---------------------------------------------------------------------------------------------- |
+| Read‑after‑write for same path on same client | **Yes**   | The engine reads back files it just wrote (e.g. in compaction).                                |
+| Read‑your‑own‑writes globally                 | No        | Other devices may see the new file with a delay.                                               |
+| Strong list consistency                       | No        | The engine sorts and dedupes; missing entries are picked up on the next poll.                  |
+| Atomic multi‑file write                       | No        | Engine never assumes two files are written together.                                           |
+| Conditional writes (CAS / If‑Match)           | No        | Engine never sends one. Compaction safety notes spell out the trade‑off.                       |
+| Monotonic file listing                        | No        | An adapter may return a file in one `listFiles` and omit it from the next; the engine retries. |
 
 If your backend can lose writes silently, the adapter should surface
 that as a thrown error from `writeFile`, not a successful return. The
@@ -297,16 +301,16 @@ delete the old folder first.
 ## Implementing a custom adapter
 
 Minimum viable implementation: copy `MemoryAdapter` and replace the
-`Map<string, …>` with calls to your backend. The repository currently has a
-WebDAV-specific Playwright contract test:
+`Map<string, …>` with calls to your backend. Use the WebDAV-specific
+Playwright contract test as a behavior example:
 
 ```bash
 yarn workspace @interocitor/core test:e2e \
   webdav.adapter.contract.spec.ts
 ```
 
-Use that test as a behavior example, then add equivalent coverage for the new
-adapter. Passing the WebDAV test is not proof that another backend satisfies
+Then add equivalent coverage for the new adapter. Passing the WebDAV test is
+not proof that another backend satisfies
 authentication, consistency, timeout, metadata, or recovery semantics.
 
 ## Things adapters routinely get wrong

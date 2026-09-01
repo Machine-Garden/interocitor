@@ -59,6 +59,24 @@ The full connect pipeline applies `connectStageTimeoutMs` to its named stages.
 This is not a deadline around every adapter request: the reload head probe and
 normal sync/file calls still depend on adapter-level timeouts.
 
+When a named stage times out, `connect()` resolves without throwing, emits
+`connect:error`, calls `onConnectStalled`, and leaves the initialized engine
+offline-ready. Treat the callback as telemetry and user messaging only; retry
+the remote session explicitly rather than making correctness depend on it.
+
+Connection status separates local readiness from remote activity:
+
+| Status       | Meaning                                                      |
+| ------------ | ------------------------------------------------------------ |
+| `offline`    | Local work is available, but no remote session is connected. |
+| `connecting` | `connect()` is establishing or resuming the remote session.  |
+| `syncing`    | A connected engine is pulling or flushing.                   |
+| `idle`       | The engine is connected and has no active sync work.         |
+
+`getConnectionStatusDetails().solo` is a separate configuration flag: it is
+true when no remote mesh path is configured. It is not a communication status
+and should not be presented as a sync failure.
+
 ## Rows and tables
 
 `table(name)` is the recommended typed entry point:
@@ -67,7 +85,7 @@ normal sync/file calls still depend on adapter-level timeouts.
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `add(data, { prefix? }, userId?)` | Insert under a generated row ID and return that ID.                                                                     |
 | `patch(rowId, partial, userId?)`  | Update only supplied columns and return the merged row.                                                                 |
-| `put(rowId, partial, userId?)`    | Backward-compatible alias of `patch`.                                                                                   |
+| `put(rowId, partial, userId?)`    | Alias of `patch` with the same partial-update behavior.                                                                 |
 | `replace(rowId, value, userId?)`  | Write the full value and explicitly null existing fields omitted from it.                                               |
 | `delete(rowId, userId?)`          | Write a tombstone.                                                                                                      |
 | `row(rowId)`                      | Return a lazy, thenable `RowResult<T>`.                                                                                 |
@@ -77,12 +95,51 @@ normal sync/file calls still depend on adapter-level timeouts.
 
 The engine also exports lower-level `put`, `delete`, `query`, `queryWhere`, and
 `tableNames` methods. `batch(fn)` groups nested writes into one
-`ChangeEntry`; nested batches join the outer batch.
+`ChangeEntry`; nested batches join the outer batch. That entry is not a
+cross-device transaction: unrelated batches published by different peers
+remain independent.
+
+### Conflict resolution
 
 Conflict resolution is per column. Configured and schema-less databases both
 default to HLC-based `lww`. Custom merge functions must be deterministic,
 commutative, associative, and idempotent to preserve convergence. See
-[Conflict resolution](../README.md#conflict-resolution).
+[Sync completeness, convergence, and integrity](sync-completeness.md).
+
+### Deletion semantics
+
+`delete()` writes a tombstone rather than immediately unlinking a row. Public
+reads hide tombstoned rows, while snapshots retain tombstones so an older
+queued write cannot resurrect deleted data. Reusing the same row ID starts a
+new row incarnation; fields from the deleted incarnation do not carry over.
+
+### Schema typing
+
+The `types` helpers describe inferred row fields and local indexes in a
+`DatabaseSchemaDefinition`:
+
+```ts
+import { types, type DatabaseSchemaDefinition } from "@interocitor/core";
+
+const schema = {
+  tables: {
+    todos: {
+      fields: {
+        text: types.string,
+        done: types.boolean,
+        createdAt: types.index(types.date),
+        note: types.string.optional,
+      },
+    },
+  },
+} satisfies DatabaseSchemaDefinition;
+```
+
+`.optional` makes a field optional in the inferred row type.
+`types.index(...)` adds a local index used by `where` and `orderBy`; indexed
+and unique fields cannot be optional. `types.typed<T>("json")` describes a
+caller-owned structured value without making its runtime shape part of the
+manifest.
 
 ## Query and row caches
 
@@ -106,14 +163,14 @@ framework integrations; most applications should use the result handles.
 
 ## Sync and maintenance
 
-| API                                | Contract                                                                                                      |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `flush()`                          | Move queued local changes to the primary adapter, then attempt configured write-only replicas.                |
-| `pull()`                           | Read and merge remote changes from the primary adapter.                                                       |
-| `rehydrate()`                      | Publish durable local work, replace local state with the manifest snapshot, then catch up.                    |
+| API                                | Contract                                                                                                                        |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `flush()`                          | Move queued local changes to the primary adapter, then attempt configured write-only replicas.                                  |
+| `pull()`                           | Read and merge remote changes from the primary adapter.                                                                         |
+| `rehydrate()`                      | Publish durable local work, replace local state with the manifest snapshot, then catch up.                                      |
 | `compact()`                        | Publish a snapshot/manifest generation, then best-effort remove exactly covered changes and every superseded mainline snapshot. |
-| `getQuarantinedOfflineChanges()`   | Return local operations withheld after the device exceeded `retention.maxOfflineDurationMs`, or `null`.       |
-| `clearQuarantinedOfflineChanges()` | Remove the local quarantine after the application has exported, discarded, or deliberately reapplied it.      |
+| `getQuarantinedOfflineChanges()`   | Return local operations withheld after the device exceeded `retention.maxOfflineDurationMs`, or `null`.                         |
+| `clearQuarantinedOfflineChanges()` | Remove the local quarantine after the application has exported, discarded, or deliberately reapplied it.                        |
 
 Replica failures emit `replica:error` and do not fail a successful primary
 flush. Pull and rehydrate never read replicas. See [Compaction](compaction.md)
@@ -139,16 +196,18 @@ Use a row for offline-readable file references and policy labels. See
 
 ### Identity, storage, and schema
 
-| Option                      | Default             | Contract                                                                                      |
-| --------------------------- | ------------------- | --------------------------------------------------------------------------------------------- |
-| `localStore`                | Required            | Runtime-owned row, outbox, cursor, and metadata store. Core creates no default.               |
-| `keySource`                 | Required            | `MeshKeySource`; `null` selects an unencrypted mesh. The mode must match the remote manifest. |
-| `remotePath`                | None                | Mesh root inside the adapter. Required before remote operations.                              |
-| `dbName`                    | `'interocitor'`     | Local diagnostic and credential-store namespace; it does not create a store.                  |
+| Option                      | Default             | Contract                                                                                                                                                                                |
+| --------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `localStore`                | Required            | Runtime-owned row, outbox, cursor, and metadata store. Core creates no default.                                                                                                         |
+| `keySource`                 | Required            | `MeshKeySource`; `null` selects an unencrypted mesh. The mode must match the remote manifest.                                                                                           |
+| `remotePath`                | None                | Mesh root inside the adapter. Required before remote operations.                                                                                                                        |
+| `dbName`                    | `'interocitor'`     | Local diagnostic and credential-store namespace; it does not create a store.                                                                                                            |
 | `schema`                    | None                | Table fields, local indexes, merge policy, and an optional manifest compatibility marker. A version set at bootstrap must match on later clients; it does not migrate an existing mesh. |
-| `deviceId`                  | Generated           | Test/host override for the device identity.                                                   |
-| `deviceName` / `deviceType` | None                | Plaintext remote device metadata.                                                             |
-| `joinExistingMeshPolicy`    | `'reset-to-remote'` | On a different existing mesh, either clear local state or intentionally merge it.             |
+| `deviceId`                  | Generated           | Test/host override for the device identity.                                                                                                                                             |
+| `deviceName` / `deviceType` | None                | Plaintext remote device metadata.                                                                                                                                                       |
+| `joinExistingMeshPolicy`    | `'reset-to-remote'` | On a different existing mesh, either clear local state or intentionally merge it.                                                                                                       |
+
+### Joining an existing mesh with local state
 
 `reset-to-remote` clears rows, queued/pending writes, cursors, and stale mesh
 metadata before pull. `merge-with-remote` retains and can publish local work.
@@ -156,13 +215,13 @@ The engine emits `join:existing-mesh` before applying the selected policy.
 
 ### Initialization and diagnostics
 
-| Option                  | Default  | Contract                                                                                                                  |
-| ----------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `resolveInitialState`   | None     | Runs during `init()` before persisted credentials; returned fields override constructor defaults and may be asynchronous. |
+| Option                  | Default  | Contract                                                                                                                                                                                             |
+| ----------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resolveInitialState`   | None     | Runs during `init()` before persisted credentials; returned fields override constructor defaults and may be asynchronous.                                                                            |
 | `onInit`                | None     | Runs once per initialization after local open, credential/encryption resolution, and local-state load, before `connect()`. It sees the current local cache and is not a synchronized migration hook. |
-| `logLevel`              | `'info'` | Per-engine logging threshold.                                                                                             |
-| `connectStageTimeoutMs` | `15000`  | Deadline for each named full-pipeline connect stage, not every adapter call.                                              |
-| `onConnectStalled`      | None     | Notification for a timed-out connect stage; exceptions from the hook are swallowed.                                       |
+| `logLevel`              | `'info'` | Per-engine logging threshold.                                                                                                                                                                        |
+| `connectStageTimeoutMs` | `15000`  | Deadline for each named full-pipeline connect stage, not every adapter call.                                                                                                                         |
+| `onConnectStalled`      | None     | Notification for a timed-out connect stage; exceptions from the hook are swallowed.                                                                                                                  |
 
 ### Transport, batching, and replicas
 
@@ -185,8 +244,14 @@ in the [Compaction reference](compaction.md#auto-compaction-defaults).
 
 The retention policy is written into a new mesh manifest. On an existing mesh,
 an explicitly configured policy is published by the authorized writer's next
-`compact()`; otherwise the manifest policy remains authoritative. Legacy
-manifests resolve to the same finite defaults.
+`compact()`; otherwise the manifest policy remains authoritative. Manifests
+without retention fields resolve to the same finite defaults.
+
+`pollInterval` is the active session's base rather than a fixed cadence. A pull
+that merges no entries doubles the next interval up to 60 seconds; a pull that
+merges at least one entry resets it to the configured base. While an adapter's
+invalidation relay is healthy, `relayHealthyPollInterval` supplies the
+safety-net polling base instead.
 
 ## Local store contract
 
@@ -225,6 +290,19 @@ new implementations.
 Configure the key source before `init()`. Use a new engine to change mesh or
 encryption mode. See [Shared key scenarios](shared-key-scenarios.md) and
 [Credential store](credential-store.md).
+
+## Connected stores
+
+`db.connectedStores` persists application-defined credentials for related
+meshes in the parent engine's local metadata. It does not create, connect, or
+run child engines. The relationship is one-way: an application reads a record
+and constructs a separate `Interocitor` instance itself.
+
+`put(credentials)` upserts by `id`, preserves an existing `createdAt`, and sets
+`updatedAt` to the current time. `list()` and `get(id)` read records, and
+`remove(id)` deletes one. Anyone who can read the parent's local store inherits
+access to credentials saved there, so use a separate trust boundary when that
+inheritance is not intended.
 
 ## Important events
 

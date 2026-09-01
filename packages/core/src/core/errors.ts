@@ -22,7 +22,7 @@
  * a different `dbName` so the meshes have isolated credential stores.
  */
 export class MeshCredentialMismatchError extends Error {
-  readonly code = 'MESH_CREDENTIAL_MISMATCH' as const;
+  readonly code = "MESH_CREDENTIAL_MISMATCH" as const;
   readonly dbName: string;
   readonly storedMeshId: string;
   readonly activeMeshId: string;
@@ -36,7 +36,7 @@ export class MeshCredentialMismatchError extends Error {
         `and construct a new configured Interocitor instance; ` +
         `or use a different dbName for the new mesh.`,
     );
-    this.name = 'MeshCredentialMismatchError';
+    this.name = "MeshCredentialMismatchError";
     this.dbName = dbName;
     this.storedMeshId = storedMeshId;
     this.activeMeshId = activeMeshId;
@@ -56,7 +56,7 @@ export class MeshCredentialMismatchError extends Error {
  * matching portable key when `expectedMode === true`.
  */
 export class MeshEncryptionMismatchError extends Error {
-  readonly code = 'MESH_ENCRYPTION_MISMATCH' as const;
+  readonly code = "MESH_ENCRYPTION_MISMATCH" as const;
   readonly expectedMode: boolean;
   readonly actualMode: boolean;
 
@@ -65,10 +65,10 @@ export class MeshEncryptionMismatchError extends Error {
       `Mesh encryption mode mismatch: remote mesh was bootstrapped with ` +
         `encrypted=${expectedMode} but this engine was created with ` +
         `encrypted=${actualMode}. Recreate the Interocitor instance with ` +
-        (expectedMode ? 'a matching non-null keySource' : 'keySource=null') +
+        (expectedMode ? "a matching non-null keySource" : "keySource=null") +
         `, or join a fresh mesh. Remote was NOT poisoned.`,
     );
-    this.name = 'MeshEncryptionMismatchError';
+    this.name = "MeshEncryptionMismatchError";
     this.expectedMode = expectedMode;
     this.actualMode = actualMode;
   }

@@ -6,15 +6,15 @@
  * lookup locator and derives a KEK for encrypted mesh credentials.
  */
 
-import type { StorageAdapter } from '../core/types.ts';
+import type { StorageAdapter } from "../core/types.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const RECOVERY_ROOT_SALT = encoder.encode('interocitor.recovery.root.v1');
-const LOCATOR_INFO = encoder.encode('interocitor.recovery.locator.v1');
-const KEK_INFO = encoder.encode('interocitor.recovery.kek.v1');
+const RECOVERY_ROOT_SALT = encoder.encode("interocitor.recovery.root.v1");
+const LOCATOR_INFO = encoder.encode("interocitor.recovery.locator.v1");
+const KEK_INFO = encoder.encode("interocitor.recovery.kek.v1");
 const ROOT_ITERATIONS = 600_000;
-const RECOVERY_FOLDER = '/.interocitor/recovery';
+const RECOVERY_FOLDER = "/.interocitor/recovery";
 const LOCATOR_RE = /^[A-Za-z0-9_-]{43}$/;
 
 export interface RecoveredMeshCredentials {
@@ -31,16 +31,16 @@ export interface RecoveryWrapper {
   /** Recovery-wrapper format version. */
   v: 1;
   /** Authenticated-encryption algorithm used for `ciphertext`. */
-  alg: 'AES-GCM';
+  alg: "AES-GCM";
   /** Public derivation parameters required to reproduce the wrapping key. */
   kdf: {
     root: {
-      name: 'PBKDF2-HMAC-SHA-256';
+      name: "PBKDF2-HMAC-SHA-256";
       /** Fixed work factor accepted by this format version. */
       iterations: number;
     };
     kek: {
-      name: 'HKDF-SHA-256';
+      name: "HKDF-SHA-256";
       /** Per-wrapper random salt encoded as base64url. */
       salt: string;
     };
@@ -67,15 +67,16 @@ export interface RecoveryStorageAdapter {
 }
 
 function toBase64Url(bytes: Uint8Array): string {
-  let binary = '';
+  let binary = "";
   for (const byte of bytes) binary += String.fromCodePoint(byte);
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
 function fromBase64Url(value: string): Uint8Array {
-  const padded = value.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - (value.length % 4)) % 4);
+  const padded =
+    value.replaceAll("-", "+").replaceAll("_", "/") + "=".repeat((4 - (value.length % 4)) % 4);
   const binary = atob(padded);
-  return Uint8Array.from(binary, char => char.codePointAt(0)!);
+  return Uint8Array.from(binary, (char) => char.codePointAt(0)!);
 }
 
 function asBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -83,45 +84,45 @@ function asBuffer(bytes: Uint8Array): ArrayBuffer {
 }
 
 function normalizePhrase(phrase: string): string {
-  return phrase.normalize('NFKD').trim().replaceAll(/\s+/g, ' ');
+  return phrase.normalize("NFKD").trim().replaceAll(/\s+/g, " ");
 }
 
 function assertPhrase(phrase: string): string {
   const normalized = normalizePhrase(phrase);
-  if (!normalized) throw new Error('Recovery phrase must not be empty');
+  if (!normalized) throw new Error("Recovery phrase must not be empty");
   return normalized;
 }
 
 function assertWrapper(value: unknown): asserts value is RecoveryWrapper {
-  if (!value || typeof value !== 'object') throw new Error('Invalid recovery wrapper');
+  if (!value || typeof value !== "object") throw new Error("Invalid recovery wrapper");
   const wrapper = value as Partial<RecoveryWrapper>;
   if (
     wrapper.v !== 1 ||
-    wrapper.alg !== 'AES-GCM' ||
-    wrapper.kdf?.root?.name !== 'PBKDF2-HMAC-SHA-256' ||
+    wrapper.alg !== "AES-GCM" ||
+    wrapper.kdf?.root?.name !== "PBKDF2-HMAC-SHA-256" ||
     wrapper.kdf.root.iterations !== ROOT_ITERATIONS ||
-    wrapper.kdf.kek?.name !== 'HKDF-SHA-256' ||
-    typeof wrapper.kdf.kek.salt !== 'string' ||
-    !LOCATOR_RE.test(String(wrapper.locator || '')) ||
-    typeof wrapper.iv !== 'string' ||
-    typeof wrapper.ciphertext !== 'string' ||
-    typeof wrapper.createdAt !== 'string'
+    wrapper.kdf.kek?.name !== "HKDF-SHA-256" ||
+    typeof wrapper.kdf.kek.salt !== "string" ||
+    !LOCATOR_RE.test(String(wrapper.locator || "")) ||
+    typeof wrapper.iv !== "string" ||
+    typeof wrapper.ciphertext !== "string" ||
+    typeof wrapper.createdAt !== "string"
   ) {
-    throw new Error('Invalid recovery wrapper');
+    throw new Error("Invalid recovery wrapper");
   }
 }
 
 async function deriveRecoveryRoot(phrase: string): Promise<Uint8Array> {
   const phraseBytes = encoder.encode(assertPhrase(phrase));
   const source = await crypto.subtle.importKey(
-    'raw',
+    "raw",
     phraseBytes.buffer as ArrayBuffer,
-    'PBKDF2',
+    "PBKDF2",
     false,
-    ['deriveBits'],
+    ["deriveBits"],
   );
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', hash: 'SHA-256', salt: RECOVERY_ROOT_SALT, iterations: ROOT_ITERATIONS },
+    { name: "PBKDF2", hash: "SHA-256", salt: RECOVERY_ROOT_SALT, iterations: ROOT_ITERATIONS },
     source,
     256,
   );
@@ -130,19 +131,25 @@ async function deriveRecoveryRoot(phrase: string): Promise<Uint8Array> {
 
 async function deriveLocator(root: Uint8Array): Promise<string> {
   const key = await crypto.subtle.importKey(
-    'raw', root.buffer as ArrayBuffer, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+    "raw",
+    root.buffer as ArrayBuffer,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
   );
-  return toBase64Url(new Uint8Array(await crypto.subtle.sign('HMAC', key, LOCATOR_INFO)));
+  return toBase64Url(new Uint8Array(await crypto.subtle.sign("HMAC", key, LOCATOR_INFO)));
 }
 
 async function deriveKek(root: Uint8Array, salt: Uint8Array): Promise<CryptoKey> {
-  const source = await crypto.subtle.importKey('raw', root.buffer as ArrayBuffer, 'HKDF', false, ['deriveKey']);
+  const source = await crypto.subtle.importKey("raw", root.buffer as ArrayBuffer, "HKDF", false, [
+    "deriveKey",
+  ]);
   return crypto.subtle.deriveKey(
-    { name: 'HKDF', hash: 'SHA-256', salt: asBuffer(salt), info: asBuffer(KEK_INFO) },
+    { name: "HKDF", hash: "SHA-256", salt: asBuffer(salt), info: asBuffer(KEK_INFO) },
     source,
-    { name: 'AES-GCM', length: 256 },
+    { name: "AES-GCM", length: 256 },
     false,
-    ['encrypt', 'decrypt'],
+    ["encrypt", "decrypt"],
   );
 }
 
@@ -151,14 +158,15 @@ function wrapperAad(locator: string, salt: string): Uint8Array {
 }
 
 function recoveryPath(locator: string): string {
-  if (!LOCATOR_RE.test(locator)) throw new Error('Invalid recovery locator');
+  if (!LOCATOR_RE.test(locator)) throw new Error("Invalid recovery locator");
   return `${RECOVERY_FOLDER}/${locator}.json`;
 }
 
 function recoveryAdapter(adapter: StorageAdapter): RecoveryStorageAdapter | null {
   const candidate = adapter as StorageAdapter & Partial<RecoveryStorageAdapter>;
-  return typeof candidate.readRecoveryWrapper === 'function' && typeof candidate.writeRecoveryWrapper === 'function'
-    ? candidate as RecoveryStorageAdapter
+  return typeof candidate.readRecoveryWrapper === "function" &&
+    typeof candidate.writeRecoveryWrapper === "function"
+    ? (candidate as RecoveryStorageAdapter)
     : null;
 }
 
@@ -185,7 +193,7 @@ export async function createRecoveryWrapper(
   credentials: RecoveredMeshCredentials,
 ): Promise<RecoveryWrapper> {
   if (!credentials.remotePath || !credentials.portableKey) {
-    throw new Error('Recovery credentials require remotePath and portableKey');
+    throw new Error("Recovery credentials require remotePath and portableKey");
   }
   const root = await deriveRecoveryRoot(phrase);
   const [locator, salt] = await Promise.all([
@@ -201,16 +209,16 @@ export async function createRecoveryWrapper(
     ...(credentials.meshId ? { meshId: credentials.meshId } : {}),
   };
   const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: asBuffer(iv), additionalData: asBuffer(wrapperAad(locator, saltText)) },
+    { name: "AES-GCM", iv: asBuffer(iv), additionalData: asBuffer(wrapperAad(locator, saltText)) },
     kek,
     encoder.encode(JSON.stringify(plaintext)),
   );
   return {
     v: 1,
-    alg: 'AES-GCM',
+    alg: "AES-GCM",
     kdf: {
-      root: { name: 'PBKDF2-HMAC-SHA-256', iterations: ROOT_ITERATIONS },
-      kek: { name: 'HKDF-SHA-256', salt: saltText },
+      root: { name: "PBKDF2-HMAC-SHA-256", iterations: ROOT_ITERATIONS },
+      kek: { name: "HKDF-SHA-256", salt: saltText },
     },
     locator,
     iv: toBase64Url(iv),
@@ -232,11 +240,11 @@ export async function unwrapRecoveryWrapper(
   assertWrapper(wrapper);
   const root = await deriveRecoveryRoot(phrase);
   const locator = await deriveLocator(root);
-  if (locator !== wrapper.locator) throw new Error('Recovery phrase does not match this wrapper');
+  if (locator !== wrapper.locator) throw new Error("Recovery phrase does not match this wrapper");
   try {
     const plaintext = await crypto.subtle.decrypt(
       {
-        name: 'AES-GCM',
+        name: "AES-GCM",
         iv: asBuffer(fromBase64Url(wrapper.iv)),
         additionalData: asBuffer(wrapperAad(wrapper.locator, wrapper.kdf.kek.salt)),
       },
@@ -244,17 +252,18 @@ export async function unwrapRecoveryWrapper(
       asBuffer(fromBase64Url(wrapper.ciphertext)),
     );
     const value = JSON.parse(decoder.decode(plaintext)) as Partial<RecoveredMeshCredentials>;
-    if (!value || typeof value.remotePath !== 'string' || typeof value.portableKey !== 'string') {
-      throw new Error('Recovery wrapper contains invalid credentials');
+    if (!value || typeof value.remotePath !== "string" || typeof value.portableKey !== "string") {
+      throw new Error("Recovery wrapper contains invalid credentials");
     }
     return {
       remotePath: value.remotePath,
       portableKey: value.portableKey,
-      ...(typeof value.meshId === 'string' && value.meshId ? { meshId: value.meshId } : {}),
+      ...(typeof value.meshId === "string" && value.meshId ? { meshId: value.meshId } : {}),
     };
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Recovery wrapper contains')) throw error;
-    throw new Error('Recovery phrase could not unlock this wrapper', { cause: error });
+    if (error instanceof Error && error.message.startsWith("Recovery wrapper contains"))
+      throw error;
+    throw new Error("Recovery phrase could not unlock this wrapper", { cause: error });
   }
 }
 
@@ -265,7 +274,10 @@ export async function unwrapRecoveryWrapper(
  * endpoint. Generic adapters, including WebDAV, write beneath
  * `/.interocitor/recovery/`. Overwrite behavior belongs to that adapter.
  */
-export async function publishRecoveryWrapper(adapter: StorageAdapter, wrapper: RecoveryWrapper): Promise<void> {
+export async function publishRecoveryWrapper(
+  adapter: StorageAdapter,
+  wrapper: RecoveryWrapper,
+): Promise<void> {
   assertWrapper(wrapper);
   const data = encoder.encode(JSON.stringify(wrapper));
   const recovery = recoveryAdapter(adapter);
@@ -294,7 +306,7 @@ export async function recoverMeshCredentials(
   try {
     wrapper = JSON.parse(decoder.decode(data));
   } catch {
-    throw new Error('Invalid recovery wrapper');
+    throw new Error("Invalid recovery wrapper");
   }
   assertWrapper(wrapper);
   return unwrapRecoveryWrapper(phrase, wrapper);

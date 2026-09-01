@@ -12,13 +12,13 @@ per-file authorization.
 
 ## Terms
 
-| Term | Meaning |
-| --- | --- |
-| Database dump | Remote manifests, change objects, snapshots, durable files, recovery wrappers, and server-visible metadata. |
-| Mesh key | The AES-GCM key used to encrypt and decrypt mesh payloads. |
-| Portable key | Copyable, high-entropy base58 material stored or transferred between trusted clients. |
-| Bound secret | Application-owned material obtained from a passkey, keychain, backend session, native integration, or another provider. |
-| Credential store | Optional client store from which a key source loads and persists portable mesh credentials. |
+| Term             | Meaning                                                                                                                 |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Database dump    | Remote manifests, change objects, snapshots, durable files, recovery wrappers, and server-visible metadata.             |
+| Mesh key         | The AES-GCM key used to encrypt and decrypt mesh payloads.                                                              |
+| Portable key     | Copyable, high-entropy base58 material stored or transferred between trusted clients.                                   |
+| Bound secret     | Application-owned material obtained from a passkey, keychain, backend session, native integration, or another provider. |
+| Credential store | Optional client store from which a key source loads and persists portable mesh credentials.                             |
 
 ## Portable shared key
 
@@ -27,21 +27,21 @@ same portable key. The source accepts a supplied portable key, can load one
 from its credential store, and can generate one when the engine creates a new
 encrypted mesh.
 
-~~~text
+```text
 portable key -> mesh key -> AES-GCM payload encryption
-~~~
+```
 
 The portable key is the read capability. The engine maps its generated base58
 value to 32 bytes; it is not a human password and is not strengthened with a
 password KDF. Generate it with Interocitor or another cryptographically secure
 source.
 
-| Attacker has | Can decrypt a protected dump? | Reason |
-| --- | --- | --- |
-| Database dump only | No | Payloads are encrypted and the portable key is absent. |
-| Database dump plus portable key | Yes | The portable key supplies the mesh key in this contract. |
-| Credential-store contents | Depends | Browser storage may contain the portable key; an enveloped or WebAuthn store changes that custody boundary. |
-| Authorized client runtime | Yes | The client must be able to read plaintext to use the application. |
+| Attacker has                    | Can decrypt a protected dump? | Reason                                                                                                      |
+| ------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Database dump only              | No                            | Payloads are encrypted and the portable key is absent.                                                      |
+| Database dump plus portable key | Yes                           | The portable key supplies the mesh key in this contract.                                                    |
+| Credential-store contents       | Depends                       | Browser storage may contain the portable key; an enveloped or WebAuthn store changes that custody boundary. |
+| Authorized client runtime       | Yes                           | The client must be able to read plaintext to use the application.                                           |
 
 An application can publish a recovery wrapper containing an encrypted copy of
 the portable key and connection details. Recovery restores the same
@@ -66,7 +66,7 @@ This partial configuration illustrates the ownership boundary; the
 `appKeyProvider` and `deriveAesGcmKey` functions belong to the host
 application.
 
-~~~ts
+```ts
 const keySource = new BoundSharedKeySource({
   portableKey,
   credentialStore,
@@ -79,7 +79,7 @@ const keySource = new BoundSharedKeySource({
     };
   },
 });
-~~~
+```
 
 If the application derives the key from both a portable component and a bound
 secret, possession of only one input is insufficient. That isolation is a
@@ -87,13 +87,13 @@ property of the supplied `derive` implementation, not an automatic
 guarantee of `BoundSharedKeySource`: a callback that ignores the bound
 secret provides no additional protection.
 
-| Attacker has | Can decrypt a protected dump? | Condition |
-| --- | --- | --- |
-| Database dump only | No | The returned mesh key is absent. |
-| Dump plus portable component | Application-defined | No, only if `derive` requires unavailable bound material. |
-| Dump plus bound secret | Application-defined | No, only if `derive` also requires the portable component. |
-| Every input accepted by `derive` | Yes | The callback can reproduce the mesh key. |
-| Authorized client runtime | Yes | The callback has returned usable mesh key material. |
+| Attacker has                     | Can decrypt a protected dump? | Condition                                                  |
+| -------------------------------- | ----------------------------- | ---------------------------------------------------------- |
+| Database dump only               | No                            | The returned mesh key is absent.                           |
+| Dump plus portable component     | Application-defined           | No, only if `derive` requires unavailable bound material.  |
+| Dump plus bound secret           | Application-defined           | No, only if `derive` also requires the portable component. |
+| Every input accepted by `derive` | Yes                           | The callback can reproduce the mesh key.                   |
+| Authorized client runtime        | Yes                           | The callback has returned usable mesh key material.        |
 
 Failed or unavailable bound-secret retrieval rejects the application's
 `derive` callback. The host must decide whether that should block opening,
@@ -102,12 +102,12 @@ would change the mesh encryption contract.
 
 ## Choosing between them
 
-| Need | Key source | Important boundary |
-| --- | --- | --- |
-| Offline-capable sharing with one transferable secret | `PortablePassphraseKeySource` | Anyone who copies the portable key can decrypt the mesh. |
-| App-controlled derivation that requires another provider | `BoundSharedKeySource` | Security and availability depend on the application's `derive` implementation. |
-| Restore a lost portable key from a recorded phrase | Portable source plus recovery wrapper | The remote wrapper permits offline phrase guesses and does not revoke recovered keys. |
-| Per-user, per-row, or per-file access enforcement | Neither by itself | Use application policy and separate cryptographic/data models; one shared mesh key remains a shared read capability. |
+| Need                                                     | Key source                            | Important boundary                                                                                                   |
+| -------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Offline-capable sharing with one transferable secret     | `PortablePassphraseKeySource`         | Anyone who copies the portable key can decrypt the mesh.                                                             |
+| App-controlled derivation that requires another provider | `BoundSharedKeySource`                | Security and availability depend on the application's `derive` implementation.                                       |
+| Restore a lost portable key from a recorded phrase       | Portable source plus recovery wrapper | The remote wrapper permits offline phrase guesses and does not revoke recovered keys.                                |
+| Per-user, per-row, or per-file access enforcement        | Neither by itself                     | Use application policy and separate cryptographic/data models; one shared mesh key remains a shared read capability. |
 
 The credential-store choice is separate from the key-source choice. Browser
 memory, session storage, local storage, WebAuthn, and encrypted envelopes

@@ -15,13 +15,13 @@ Cloudflare Worker route address.
 
 ## Functions
 
-| API | Result | Rejection conditions |
-| --- | --- | --- |
-| `recoveryLocator(phrase)` | Stable 43-character base64url locator for the normalized phrase; mesh identity and wrapper salt are not inputs | Empty phrase or Web Crypto failure |
-| `createRecoveryWrapper(phrase, credentials)` | In-memory `RecoveryWrapper` with a random salt and IV | Empty phrase, missing `remotePath`/`portableKey`, or Web Crypto failure |
-| `unwrapRecoveryWrapper(phrase, wrapper)` | Authenticated `RecoveredMeshCredentials` | Unsupported/malformed wrapper, locator mismatch, failed AES-GCM authentication, or invalid decrypted fields |
-| `publishRecoveryWrapper(adapter, wrapper)` | Serialized wrapper written through the adapter | Invalid wrapper or adapter write failure |
-| `recoverMeshCredentials(adapter, phrase)` | Wrapper lookup, download, validation, and decryption in one call | Adapter read failure plus every `unwrapRecoveryWrapper` rejection |
+| API                                          | Result                                                                                                         | Rejection conditions                                                                                        |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `recoveryLocator(phrase)`                    | Stable 43-character base64url locator for the normalized phrase; mesh identity and wrapper salt are not inputs | Empty phrase or Web Crypto failure                                                                          |
+| `createRecoveryWrapper(phrase, credentials)` | In-memory `RecoveryWrapper` with a random salt and IV                                                          | Empty phrase, missing `remotePath`/`portableKey`, or Web Crypto failure                                     |
+| `unwrapRecoveryWrapper(phrase, wrapper)`     | Authenticated `RecoveredMeshCredentials`                                                                       | Unsupported/malformed wrapper, locator mismatch, failed AES-GCM authentication, or invalid decrypted fields |
+| `publishRecoveryWrapper(adapter, wrapper)`   | Serialized wrapper written through the adapter                                                                 | Invalid wrapper or adapter write failure                                                                    |
+| `recoverMeshCredentials(adapter, phrase)`    | Wrapper lookup, download, validation, and decryption in one call                                               | Adapter read failure plus every `unwrapRecoveryWrapper` rejection                                           |
 
 `publishRecoveryWrapper` does not define overwrite semantics. Generic
 adapters use their normal `writeFile` behavior; the Cloudflare Worker
@@ -36,11 +36,11 @@ generate a unique high-entropy phrase for each mesh and replacement wrapper.
 
 `RecoveredMeshCredentials` contains:
 
-| Field | Required | Meaning |
-| --- | --- | --- |
-| `remotePath` | Yes | Remote root supplied to `Interocitor` |
-| `portableKey` | Yes | High-entropy base58 input for `PortablePassphraseKeySource` |
-| `meshId` | No | Manifest mesh identity known when the wrapper was created |
+| Field         | Required | Meaning                                                     |
+| ------------- | -------- | ----------------------------------------------------------- |
+| `remotePath`  | Yes      | Remote root supplied to `Interocitor`                       |
+| `portableKey` | Yes      | High-entropy base58 input for `PortablePassphraseKeySource` |
+| `meshId`      | No       | Manifest mesh identity known when the wrapper was created   |
 
 `meshId` is not necessarily a Cloudflare Worker route address. A named
 deployment already knows an address such as `main`; a provisioned
@@ -51,16 +51,16 @@ account data.
 
 `RecoveryWrapper` is JSON with this public shape:
 
-| Field | Value |
-| --- | --- |
-| `v` | `1` |
-| `alg` | `AES-GCM` |
-| `kdf.root` | `PBKDF2-HMAC-SHA-256` and the accepted iteration count |
-| `kdf.kek` | `HKDF-SHA-256` and a per-wrapper base64url salt |
-| `locator` | Phrase-derived 43-character base64url lookup capability |
-| `iv` | Random 96-bit AES-GCM IV encoded as base64url |
-| `ciphertext` | Authenticated encrypted credential JSON encoded as base64url |
-| `createdAt` | Client-recorded ISO timestamp; informational and not authenticated |
+| Field        | Value                                                              |
+| ------------ | ------------------------------------------------------------------ |
+| `v`          | `1`                                                                |
+| `alg`        | `AES-GCM`                                                          |
+| `kdf.root`   | `PBKDF2-HMAC-SHA-256` and the accepted iteration count             |
+| `kdf.kek`    | `HKDF-SHA-256` and a per-wrapper base64url salt                    |
+| `locator`    | Phrase-derived 43-character base64url lookup capability            |
+| `iv`         | Random 96-bit AES-GCM IV encoded as base64url                      |
+| `ciphertext` | Authenticated encrypted credential JSON encoded as base64url       |
+| `createdAt`  | Client-recorded ISO timestamp; informational and not authenticated |
 
 Phrase normalization uses Unicode NFKD, trims leading/trailing whitespace, and
 collapses internal whitespace runs to one space. Version 1 derives a recovery
@@ -75,23 +75,23 @@ high-entropy phrase.
 
 Generic `StorageAdapter` implementations store the serialized wrapper at:
 
-~~~text
+```text
 /.interocitor/recovery/<locator>.json
-~~~
+```
 
 An adapter can implement `RecoveryStorageAdapter` instead:
 
-| Method | Contract |
-| --- | --- |
-| `readRecoveryWrapper(locator)` | Return serialized wrapper bytes for a validated locator |
-| `writeRecoveryWrapper(locator, data)` | Store serialized wrapper bytes for a validated locator |
+| Method                                | Contract                                                |
+| ------------------------------------- | ------------------------------------------------------- |
+| `readRecoveryWrapper(locator)`        | Return serialized wrapper bytes for a validated locator |
+| `writeRecoveryWrapper(locator, data)` | Store serialized wrapper bytes for a validated locator  |
 
 `CloudflareAdapter` implements that extension when configured with:
 
-| Option | Default | Behavior |
-| --- | --- | --- |
-| `recoveryBaseUrl` | None | Required by recovery reads/writes; identifies the Worker recovery route without a mesh address |
-| `recoveryToken` | `token` | Bearer used for recovery requests; when omitted, the adapter reuses its normal token |
+| Option            | Default | Behavior                                                                                       |
+| ----------------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `recoveryBaseUrl` | None    | Required by recovery reads/writes; identifies the Worker recovery route without a mesh address |
+| `recoveryToken`   | `token` | Bearer used for recovery requests; when omitted, the adapter reuses its normal token           |
 
 The Worker implementation, including immutable PUT behavior, request limits,
 statuses, middleware boundary, and audit events, is defined by the

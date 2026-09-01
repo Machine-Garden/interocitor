@@ -50,7 +50,7 @@
  *   https://yourapp.com/pair#hs=<base64url>
  */
 
-export type HandshakeIntent = 'share' | 'join';
+export type HandshakeIntent = "share" | "join";
 
 export interface HandshakeQRPayload {
   /**
@@ -93,18 +93,18 @@ export interface HandshakeQRPayload {
 export function encodeQRPayload(payload: HandshakeQRPayload): string {
   const json = JSON.stringify(payload);
   const bytes = new TextEncoder().encode(json);
-  let binary = '';
+  let binary = "";
   for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCodePoint(bytes[i]);
   }
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
 /** Decode a compact URL-safe base64 string back to HandshakeQRPayload. */
 export function decodeQRPayload(encoded: string): HandshakeQRPayload {
-  const padded = encoded.replaceAll('-', '+').replaceAll('_', '/');
+  const padded = encoded.replaceAll("-", "+").replaceAll("_", "/");
   const pad = (4 - (padded.length % 4)) % 4;
-  const b64 = padded + '='.repeat(pad);
+  const b64 = padded + "=".repeat(pad);
 
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
@@ -115,12 +115,12 @@ export function decodeQRPayload(encoded: string): HandshakeQRPayload {
   const payload = JSON.parse(json) as HandshakeQRPayload;
 
   if (
-    (payload.intent !== 'share' && payload.intent !== 'join') ||
-    typeof payload.handshakeId !== 'string' ||
-    typeof payload.generatorPub !== 'string' ||
-    (payload.adapterConfig !== undefined && typeof payload.adapterConfig !== 'string')
+    (payload.intent !== "share" && payload.intent !== "join") ||
+    typeof payload.handshakeId !== "string" ||
+    typeof payload.generatorPub !== "string" ||
+    (payload.adapterConfig !== undefined && typeof payload.adapterConfig !== "string")
   ) {
-    throw new Error('Invalid handshake QR payload');
+    throw new Error("Invalid handshake QR payload");
   }
 
   return payload;
@@ -132,7 +132,7 @@ export function decodeQRPayload(encoded: string): HandshakeQRPayload {
  */
 export function buildPairUrl(baseUrl: string, payload: HandshakeQRPayload): string {
   const encoded = encodeQRPayload(payload);
-  const base = baseUrl.replace(/#.*$/, '');
+  const base = baseUrl.replace(/#.*$/, "");
   return `${base}#hs=${encoded}`;
 }
 

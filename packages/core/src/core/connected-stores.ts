@@ -18,9 +18,9 @@
  * for derived sub-stores.
  */
 
-import type { LocalStore } from './types.ts';
+import type { LocalStore } from "./types.ts";
 
-const REGISTRY_META_KEY = 'interocitor:connected-stores';
+const REGISTRY_META_KEY = "interocitor:connected-stores";
 
 /** Adapter pointer. Opaque to the engine; apps interpret `kind` and `config`. */
 export interface ConnectedStoreAdapterRef {
@@ -78,7 +78,7 @@ export class LocalStoreConnectedStoresApi implements ConnectedStoresApi {
     const raw = await this.local.getMeta(REGISTRY_META_KEY);
     if (!raw) return [];
     if (Array.isArray(raw)) return raw as ConnectedStoreCredentials[];
-    if (typeof raw === 'string') {
+    if (typeof raw === "string") {
       try {
         const parsed = JSON.parse(raw);
         return Array.isArray(parsed) ? (parsed as ConnectedStoreCredentials[]) : [];
@@ -99,27 +99,27 @@ export class LocalStoreConnectedStoresApi implements ConnectedStoresApi {
 
   async get(id: string): Promise<ConnectedStoreCredentials | null> {
     const all = await this.readAll();
-    return all.find(c => c.id === id) ?? null;
+    return all.find((c) => c.id === id) ?? null;
   }
 
   async put(credentials: ConnectedStoreCredentials): Promise<ConnectedStoreCredentials> {
-    if (!credentials.id) throw new Error('ConnectedStoreCredentials.id is required');
+    if (!credentials.id) throw new Error("ConnectedStoreCredentials.id is required");
     const now = new Date().toISOString();
     const all = await this.readAll();
-    const existing = all.find(c => c.id === credentials.id);
+    const existing = all.find((c) => c.id === credentials.id);
     const stamped: ConnectedStoreCredentials = {
       ...credentials,
       createdAt: existing?.createdAt ?? credentials.createdAt ?? now,
       updatedAt: now,
     };
-    const next = [...all.filter(c => c.id !== credentials.id), stamped];
+    const next = [...all.filter((c) => c.id !== credentials.id), stamped];
     await this.writeAll(next);
     return stamped;
   }
 
   async remove(id: string): Promise<boolean> {
     const all = await this.readAll();
-    const next = all.filter(c => c.id !== id);
+    const next = all.filter((c) => c.id !== id);
     if (next.length === all.length) return false;
     await this.writeAll(next);
     return true;

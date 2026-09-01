@@ -14,7 +14,7 @@ A taint is a human-readable label for a non-default file key, such as `group1`.
 Applications should store the authoritative taint in the CRDT row that references the file:
 
 ```ts
-const fileRef = { path: 'docs/q4.pdf', taint: 'group1' };
+const fileRef = { path: "docs/q4.pdf", taint: "group1" };
 ```
 
 That row is the offline-legible access surface. Clients can list files, show lock badges, and decide which key to unlock without downloading the object.
@@ -26,8 +26,8 @@ Core echoes the same taint into durable file metadata when the file is sealed wi
 Writing a tainted file binds the label and key together:
 
 ```ts
-await db.putFile('docs/q4.pdf', bytes, 'application/pdf', {
-  taint: 'group1',
+await db.putFile("docs/q4.pdf", bytes, "application/pdf", {
+  taint: "group1",
   key: groupKey,
 });
 ```
@@ -41,7 +41,7 @@ Core does not interpret taints, resolve groups, wrap keys, or enforce ACL policy
 A tainted file can be downloaded before it is viewed. `openFile(path)` fetches object bytes and metadata, but does not decrypt tainted bytes. The app reads the taint, performs its unlock flow (biometry, passkey, keychain, or wrapped-key unwrap), then calls `open(key)`.
 
 ```ts
-const sealed = await db.openFile('docs/q4.pdf');
+const sealed = await db.openFile("docs/q4.pdf");
 console.log(sealed.taint); // "group1"
 const key = await unlockGroupKey(sealed.taint);
 const plaintext = await sealed.open(key);

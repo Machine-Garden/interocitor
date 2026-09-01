@@ -23,8 +23,8 @@ import type {
   DatabaseSchemaDefinition,
   MergeStrategy,
   TableMergeConfig,
-} from './types.ts';
-import { hlcCompareStr } from './hlc.ts';
+} from "./types.ts";
+import { hlcCompareStr } from "./hlc.ts";
 
 /**
  * Resolve the merge strategy for a specific column.
@@ -38,7 +38,7 @@ function resolveStrategy(
   field: string,
 ): MergeStrategy {
   const requireConvergentStrategy = (strategy: unknown): MergeStrategy => {
-    if (strategy === 'lww' || typeof strategy === 'function') return strategy as MergeStrategy;
+    if (strategy === "lww" || typeof strategy === "function") return strategy as MergeStrategy;
     throw new Error(
       `Unsupported replicated merge strategy ${JSON.stringify(strategy)} for ${table}.${field}; use "lww" or a convergent custom merge`,
     );
@@ -46,7 +46,7 @@ function resolveStrategy(
   const tableDef = schema?.tables[table];
   if (tableDef?.merge) {
     const m = tableDef.merge;
-    if (typeof m === 'object' && ('fields' in m || 'strategy' in m)) {
+    if (typeof m === "object" && ("fields" in m || "strategy" in m)) {
       const config = m as TableMergeConfig;
       if (config.fields?.[field]) return requireConvergentStrategy(config.fields[field]);
       if (config.strategy) return requireConvergentStrategy(config.strategy);
@@ -54,7 +54,7 @@ function resolveStrategy(
       return requireConvergentStrategy(m);
     }
   }
-  return schema?.mergeStrategy ? requireConvergentStrategy(schema.mergeStrategy) : 'lww';
+  return schema?.mergeStrategy ? requireConvergentStrategy(schema.mergeStrategy) : "lww";
 }
 
 function columnValuesEqual(left: unknown, right: unknown): boolean {
@@ -63,12 +63,14 @@ function columnValuesEqual(left: unknown, right: unknown): boolean {
     return left instanceof Date && right instanceof Date && left.getTime() === right.getTime();
   }
   if (Array.isArray(left) || Array.isArray(right)) {
-    return Array.isArray(left)
-      && Array.isArray(right)
-      && left.length === right.length
-      && left.every((value, index) => columnValuesEqual(value, right[index]));
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => columnValuesEqual(value, right[index]))
+    );
   }
-  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+  if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
   const leftRecord = left as Record<string, unknown>;
   const rightRecord = right as Record<string, unknown>;
   // Object.keys() returns fresh arrays, and the package targets ES2022.
@@ -76,10 +78,13 @@ function columnValuesEqual(left: unknown, right: unknown): boolean {
   const leftKeys = Object.keys(leftRecord).sort();
   // eslint-disable-next-line unicorn/no-array-sort
   const rightKeys = Object.keys(rightRecord).sort();
-  return leftKeys.length === rightKeys.length
-    && leftKeys.every((key, index) => (
-      key === rightKeys[index] && columnValuesEqual(leftRecord[key], rightRecord[key])
-    ));
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key, index) =>
+        key === rightKeys[index] && columnValuesEqual(leftRecord[key], rightRecord[key]),
+    )
+  );
 }
 
 /**
@@ -98,7 +103,7 @@ function mergeColumn(
 ): ColumnEntry | null {
   if (!existing || !existing.hlc) return incoming;
 
-  if (typeof strategy === 'function') {
+  if (typeof strategy === "function") {
     const result = strategy(existing, incoming, { table, rowId, field });
     return result.hlc !== existing.hlc || !columnValuesEqual(result.value, existing.value)
       ? result
@@ -115,7 +120,13 @@ function mergeColumn(
 }
 
 /** Build a fresh row stub. */
-function blankRow(table: string, rowId: string, schemaVersion: number, deleted = false, deletedHlc?: string): Row {
+function blankRow(
+  table: string,
+  rowId: string,
+  schemaVersion: number,
+  deleted = false,
+  deletedHlc?: string,
+): Row {
   return {
     _meta: { table, rowId, deleted, deletedHlc, schemaVersion },
     payload: {},
@@ -137,7 +148,7 @@ export function applyOp(
   }
   const table = tables[op.table];
 
-  if (op.type === 'delete') {
+  if (op.type === "delete") {
     const existing = table[op.rowId];
     if (existing) {
       // Stale delete (older than current tombstone)?
@@ -145,7 +156,7 @@ export function applyOp(
         return null;
       }
       // Any payload column newer than this delete? Then delete loses.
-      const hasNewerColumn = Object.values(existing.payload).some(entry => {
+      const hasNewerColumn = Object.values(existing.payload).some((entry) => {
         return entry?.hlc && hlcCompareStr(entry.hlc, op.hlc) > 0;
       });
       if (hasNewerColumn) return null;

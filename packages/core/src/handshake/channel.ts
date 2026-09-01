@@ -71,27 +71,27 @@
  *   short-lived capabilities.
  */
 
-import type { StorageAdapter } from '../core/types.ts';
+import type { StorageAdapter } from "../core/types.ts";
 
 // ─── ECDH / crypto helpers ───────────────────────────────────────────
 
-const ECDH_PARAMS = { name: 'ECDH', namedCurve: 'P-256' } as const;
-const HKDF_PARAMS = { name: 'HKDF', hash: 'SHA-256' } as const;
-const WRAP_ALGO  = { name: 'AES-GCM', length: 256 } as const;
-const IV_LEN     = 12;
-const HKDF_INFO  = 'interocitor-handshake-v1';
+const ECDH_PARAMS = { name: "ECDH", namedCurve: "P-256" } as const;
+const HKDF_PARAMS = { name: "HKDF", hash: "SHA-256" } as const;
+const WRAP_ALGO = { name: "AES-GCM", length: 256 } as const;
+const IV_LEN = 12;
+const HKDF_INFO = "interocitor-handshake-v1";
 
 function uint8ToB64url(b: Uint8Array): string {
-  let s = '';
+  let s = "";
   for (let i = 0; i < b.length; i++) s += String.fromCodePoint(b[i]!);
-  return btoa(s).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+  return btoa(s).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
 function b64urlToUint8(s: string): Uint8Array {
-  const p = s.replaceAll('-', '+').replaceAll('_', '/');
-  
+  const p = s.replaceAll("-", "+").replaceAll("_", "/");
+
   const pad = (4 - (p.length % 4)) % 4;
-  const bin = atob(p + '='.repeat(pad));
+  const bin = atob(p + "=".repeat(pad));
   const b = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) b[i] = bin.codePointAt(i)!;
   return b;
@@ -102,27 +102,27 @@ function toBuffer(b: Uint8Array): ArrayBuffer {
 }
 
 export async function generateECDHKeypair(): Promise<CryptoKeyPair> {
-  return crypto.subtle.generateKey(ECDH_PARAMS, true, ['deriveKey', 'deriveBits']);
+  return crypto.subtle.generateKey(ECDH_PARAMS, true, ["deriveKey", "deriveBits"]);
 }
 
 export async function exportECDHPublicKey(key: CryptoKey): Promise<string> {
-  return uint8ToB64url(new Uint8Array(await crypto.subtle.exportKey('spki', key)));
+  return uint8ToB64url(new Uint8Array(await crypto.subtle.exportKey("spki", key)));
 }
 
 export async function importECDHPublicKey(spki: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey('spki', toBuffer(b64urlToUint8(spki)), ECDH_PARAMS, true, []);
+  return crypto.subtle.importKey("spki", toBuffer(b64urlToUint8(spki)), ECDH_PARAMS, true, []);
 }
 
 async function deriveWrappingKey(myPriv: CryptoKey, peerPub: CryptoKey): Promise<CryptoKey> {
-  const bits = await crypto.subtle.deriveBits({ name: 'ECDH', public: peerPub }, myPriv, 256);
-  const ikm  = await crypto.subtle.importKey('raw', bits, 'HKDF', false, ['deriveKey']);
+  const bits = await crypto.subtle.deriveBits({ name: "ECDH", public: peerPub }, myPriv, 256);
+  const ikm = await crypto.subtle.importKey("raw", bits, "HKDF", false, ["deriveKey"]);
   const info = new TextEncoder().encode(HKDF_INFO);
   return crypto.subtle.deriveKey(
     { ...HKDF_PARAMS, salt: new ArrayBuffer(32), info: toBuffer(info) },
     ikm,
     WRAP_ALGO,
     false,
-    ['encrypt', 'decrypt'],
+    ["encrypt", "decrypt"],
   );
 }
 
@@ -130,13 +130,13 @@ async function deriveWrappingKey(myPriv: CryptoKey, peerPub: CryptoKey): Promise
 
 interface CredentialEnvelope {
   v: 1;
-  iv: string;   // base64url AES-GCM IV
-  ct: string;   // base64url ciphertext of JSON-encoded CredentialPayload
+  iv: string; // base64url AES-GCM IV
+  ct: string; // base64url ciphertext of JSON-encoded CredentialPayload
 }
 
 interface CredentialPayload {
   remotePath: string;
-  passphrase?: string;  // base58 passphrase, omitted for unencrypted meshes
+  passphrase?: string; // base58 passphrase, omitted for unencrypted meshes
 }
 
 async function encryptCredentials(
@@ -147,11 +147,15 @@ async function encryptCredentials(
   if (creds.passphrase !== null) {
     payload.passphrase = creds.passphrase;
   }
-  const pt   = new TextEncoder().encode(JSON.stringify(payload));
+  const pt = new TextEncoder().encode(JSON.stringify(payload));
   const ivRaw = crypto.getRandomValues(new Uint8Array(IV_LEN));
-  const iv    = toBuffer(ivRaw);
-  const ct    = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, wrappingKey, pt);
-  const env: CredentialEnvelope = { v: 1, iv: uint8ToB64url(ivRaw), ct: uint8ToB64url(new Uint8Array(ct)) };
+  const iv = toBuffer(ivRaw);
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, wrappingKey, pt);
+  const env: CredentialEnvelope = {
+    v: 1,
+    iv: uint8ToB64url(ivRaw),
+    ct: uint8ToB64url(new Uint8Array(ct)),
+  };
   return JSON.stringify(env);
 }
 
@@ -164,7 +168,7 @@ async function decryptCredentials(
   const ivBytes = b64urlToUint8(iv);
   const ctBytes = b64urlToUint8(ct);
   const pt = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: toBuffer(ivBytes) },
+    { name: "AES-GCM", iv: toBuffer(ivBytes) },
     wrappingKey,
     toBuffer(ctBytes),
   );
@@ -177,7 +181,7 @@ async function decryptCredentials(
 function relayPaths(handshakeId: string, relayBase: string) {
   const base = `${relayBase}/handshake/${handshakeId}`;
   return {
-    scannerPub:  `${base}/scanner-pub.json`,
+    scannerPub: `${base}/scanner-pub.json`,
     credentials: `${base}/credentials.json`,
   };
 }
@@ -215,7 +219,10 @@ async function relayWrite(adapter: StorageAdapter, path: string, data: string): 
   await adapter.writeFile(path, data);
 }
 
-async function relayCleanup(adapter: StorageAdapter, paths: { scannerPub: string; credentials: string }): Promise<void> {
+async function relayCleanup(
+  adapter: StorageAdapter,
+  paths: { scannerPub: string; credentials: string },
+): Promise<void> {
   await Promise.allSettled([
     adapter.deleteFile(paths.scannerPub),
     adapter.deleteFile(paths.credentials),
@@ -248,7 +255,7 @@ export interface GeneratorSession {
     adapter: StorageAdapter,
     handshakeId: string,
     relayBase: string,
-    intent: 'share' | 'join',
+    intent: "share" | "join",
     ownCredentials: HandshakeCredentials | null,
     options?: { pollIntervalMs?: number; timeoutMs?: number },
   ): Promise<HandshakeCredentials | null>;
@@ -278,25 +285,24 @@ export async function createGeneratorSession(): Promise<GeneratorSession> {
       const scannerPublicKey = await importECDHPublicKey(scannerPubSpki);
       const wrappingKey = await deriveWrappingKey(keypair.privateKey, scannerPublicKey);
 
-      if (intent === 'share') {
+      if (intent === "share") {
         // Generator has credentials → encrypt and push them for the scanner.
-        if (!ownCredentials) throw new Error('intent=share requires ownCredentials');
+        if (!ownCredentials) throw new Error("intent=share requires ownCredentials");
         const envelope = await encryptCredentials(wrappingKey, ownCredentials);
         await relayWrite(adapter, paths.credentials, envelope);
         // Generator does not clean up — scanner deletes after reading.
         return null; // Generator already has credentials; nothing new to return.
       }
-        // intent === 'join': scanner will push credentials to us.
-        const envelope = await pollFor(
-          () => relayRead(adapter, paths.credentials),
-          pollIntervalMs,
-          timeoutMs,
-        );
-        const credentials = await decryptCredentials(wrappingKey, envelope);
-        // Clean up relay files after reading.
-        relayCleanup(adapter, paths).catch(() => {});
-        return credentials;
-      
+      // intent === 'join': scanner will push credentials to us.
+      const envelope = await pollFor(
+        () => relayRead(adapter, paths.credentials),
+        pollIntervalMs,
+        timeoutMs,
+      );
+      const credentials = await decryptCredentials(wrappingKey, envelope);
+      // Clean up relay files after reading.
+      relayCleanup(adapter, paths).catch(() => {});
+      return credentials;
     },
   };
 }
@@ -317,7 +323,7 @@ export async function createGeneratorSession(): Promise<GeneratorSession> {
 export async function runScannerHandshake(
   adapter: StorageAdapter,
   payload: {
-    intent: 'share' | 'join';
+    intent: "share" | "join";
     handshakeId: string;
     generatorPub: string;
   },
@@ -339,7 +345,7 @@ export async function runScannerHandshake(
   const generatorPublicKey = await importECDHPublicKey(generatorPub);
   const wrappingKey = await deriveWrappingKey(keypair.privateKey, generatorPublicKey);
 
-  if (intent === 'share') {
+  if (intent === "share") {
     // Generator will push credentials → wait and decrypt.
     const envelope = await pollFor(
       () => relayRead(adapter, paths.credentials),
@@ -350,11 +356,10 @@ export async function runScannerHandshake(
     relayCleanup(adapter, paths).catch(() => {});
     return credentials;
   }
-    // intent === 'join': we push credentials to the generator.
-    if (!ownCredentials) throw new Error('intent=join requires scanner to have ownCredentials');
-    const envelope = await encryptCredentials(wrappingKey, ownCredentials);
-    await relayWrite(adapter, paths.credentials, envelope);
-    // Scanner already has credentials; nothing new to return.
-    return null;
-  
+  // intent === 'join': we push credentials to the generator.
+  if (!ownCredentials) throw new Error("intent=join requires scanner to have ownCredentials");
+  const envelope = await encryptCredentials(wrappingKey, ownCredentials);
+  await relayWrite(adapter, paths.credentials, envelope);
+  // Scanner already has credentials; nothing new to return.
+  return null;
 }

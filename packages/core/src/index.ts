@@ -1,7 +1,8 @@
 /**
  * interocitor
  *
- * Runtime-neutral encrypted local-first CRDT database and durable byte file store.
+ * Runtime-neutral local-first CRDT database and durable byte file store with
+ * optional client-side encryption.
  * Browser packages provide concrete local stores and credential stores.
  *
  * @example
@@ -50,7 +51,7 @@ export {
   parseQRFromUrl,
   decodeQRPayload,
   encodeQRPayload,
-} from './handshake/index.ts';
+} from "./handshake/index.ts";
 
 export type {
   HandshakeCredentials,
@@ -62,15 +63,23 @@ export type {
   GenerateJoinQRResult,
   HandleScannedQROptions,
   GeneratorSession,
-} from './handshake/index.ts';
+} from "./handshake/index.ts";
 
 // ─── Engine ───────────────────────────────────────────────────────────
 
-export { Interocitor, type InterocitorInitContext } from './core/sync-engine.ts';
-export type { LocalStore } from './storage/local-store.ts';
-export { MemoryLocalStore } from './storage/memory-store.ts';
-export { ConnectStageTimeoutError, DEFAULT_CONNECT_STAGE_TIMEOUT_MS, withDeadline } from './core/with-deadline.ts';
-export { DAY_MS, DEFAULT_COMPACT_AFTER_MS, DEFAULT_MAX_OFFLINE_DURATION_MS } from './core/retention.ts';
+export { Interocitor, type InterocitorInitContext } from "./core/sync-engine.ts";
+export type { LocalStore } from "./storage/local-store.ts";
+export { MemoryLocalStore } from "./storage/memory-store.ts";
+export {
+  ConnectStageTimeoutError,
+  DEFAULT_CONNECT_STAGE_TIMEOUT_MS,
+  withDeadline,
+} from "./core/with-deadline.ts";
+export {
+  DAY_MS,
+  DEFAULT_COMPACT_AFTER_MS,
+  DEFAULT_MAX_OFFLINE_DURATION_MS,
+} from "./core/retention.ts";
 export {
   BoundSharedKeySource,
   PortablePassphraseKeySource,
@@ -79,7 +88,7 @@ export {
   type MeshKeyMaterial,
   type MeshKeySource,
   type PortablePassphraseKeySourceOptions,
-} from './crypto/key-source.ts';
+} from "./crypto/key-source.ts";
 export {
   generateSigningKeypair,
   exportPublicKey,
@@ -93,7 +102,7 @@ export {
   type SignedClaims,
   type SignTokenOptions,
   type VerifyTokenOptions,
-} from './crypto/signing.ts';
+} from "./crypto/signing.ts";
 export {
   recoveryLocator,
   createRecoveryWrapper,
@@ -103,27 +112,35 @@ export {
   type RecoveredMeshCredentials,
   type RecoveryStorageAdapter,
   type RecoveryWrapper,
-} from './crypto/recovery.ts';
-export { type CredentialStore, type StoredCredentials } from './storage/credential-store.ts';
-export { Table, QueryResult, RowResult } from './core/table.ts';
-export { types } from './core/schema-types.ts';
+} from "./crypto/recovery.ts";
+export { type CredentialStore, type StoredCredentials } from "./storage/credential-store.ts";
+export { Table, QueryResult, RowResult } from "./core/table.ts";
+export { types } from "./core/schema-types.ts";
 export {
   LocalStoreConnectedStoresApi,
   type ConnectedStoresApi,
   type ConnectedStoreCredentials,
   type ConnectedStoreAdapterRef,
-} from './core/connected-stores.ts';
+} from "./core/connected-stores.ts";
 
 // ─── Typed errors ─────────────────────────────────────────────────────
 
-export { MeshEncryptionMismatchError, MeshCredentialMismatchError } from './core/errors.ts';
+export { MeshEncryptionMismatchError, MeshCredentialMismatchError } from "./core/errors.ts";
 
 // ─── Row utilities ────────────────────────────────────────────────────
 
-export { readColumn, rowToPlain } from './core/crdt.ts';
-export { createRowId } from './core/row-id.ts';
-export { uuidv7, createDeviceId, isValidDeviceId, issueMeshId, isValidMeshId, parseMeshId, createMeshSecret } from './core/ids.ts';
-export type { CreateRowIdOptions } from './core/row-id.ts';
+export { readColumn, rowToPlain } from "./core/crdt.ts";
+export { createRowId } from "./core/row-id.ts";
+export {
+  uuidv7,
+  createDeviceId,
+  isValidDeviceId,
+  issueMeshId,
+  isValidMeshId,
+  parseMeshId,
+  createMeshSecret,
+} from "./core/ids.ts";
+export type { CreateRowIdOptions } from "./core/row-id.ts";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -202,4 +219,4 @@ export type {
   RetentionPolicy,
   RetentionPolicyInput,
   QuarantinedOfflineChanges,
-} from './core/types.ts';
+} from "./core/types.ts";

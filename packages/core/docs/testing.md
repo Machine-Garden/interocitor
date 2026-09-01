@@ -40,7 +40,7 @@ import {
   MemoryLocalStore,
   types,
   type DatabaseSchemaDefinition,
-} from '@interocitor/core';
+} from "@interocitor/core";
 
 const schema = {
   tables: {
@@ -53,20 +53,20 @@ const schema = {
   },
 } satisfies DatabaseSchemaDefinition;
 
-test('marks a task complete locally', async () => {
+test("marks a task complete locally", async () => {
   const db = new Interocitor({
-    dbName: 'task-test',
+    dbName: "task-test",
     schema,
     localStore: new MemoryLocalStore(),
     keySource: null,
   });
 
   await db.init();
-  const id = await db.table('tasks').add({ title: 'Ship it', done: false });
-  await db.table('tasks').patch(id, { done: true });
+  const id = await db.table("tasks").add({ title: "Ship it", done: false });
+  await db.table("tasks").patch(id, { done: true });
 
-  await expect(db.table('tasks').row(id)).resolves.toMatchObject({
-    title: 'Ship it',
+  await expect(db.table("tasks").row(id)).resolves.toMatchObject({
+    title: "Ship it",
     done: true,
   });
 
@@ -84,12 +84,12 @@ test-only app mode that does not cover browser persistence or remote sync:
 
 ```ts
 // product/src/interocitor.test.ts
-import { Interocitor, MemoryLocalStore } from '@interocitor/core';
-import { schema } from './schema';
+import { Interocitor, MemoryLocalStore } from "@interocitor/core";
+import { schema } from "./schema";
 
 export function createLocalTestDb() {
   return new Interocitor({
-    dbName: 'product-test',
+    dbName: "product-test",
     schema,
     localStore: new MemoryLocalStore(),
     keySource: null,
@@ -109,14 +109,14 @@ only the product app, configured to use `createLocalTestDb()` above.
 
 ```ts
 // playwright.config.ts
-import { defineConfig } from '@playwright/test';
+import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   webServer: {
-    command: 'INTEROCITOR_MODE=local yarn dev --port 3000',
-    url: 'http://127.0.0.1:3000',
+    command: "INTEROCITOR_MODE=local yarn dev --port 3000",
+    url: "http://127.0.0.1:3000",
   },
-  use: { baseURL: 'http://127.0.0.1:3000' },
+  use: { baseURL: "http://127.0.0.1:3000" },
 });
 ```
 
@@ -125,13 +125,13 @@ factory rather than an `IndexedDbLocalStore` and remote adapter. The test is
 otherwise a normal user-facing Playwright test.
 
 ```ts
-import { expect, test } from '@playwright/test';
+import { expect, test } from "@playwright/test";
 
-test('creates a task without a mailbox server', async ({ page }) => {
-  await page.goto('/');
-  await page.getByLabel('Task title').fill('Ship it');
-  await page.getByRole('button', { name: 'Add task' }).click();
-  await expect(page.getByText('Ship it')).toBeVisible();
+test("creates a task without a mailbox server", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Task title").fill("Ship it");
+  await page.getByRole("button", { name: "Add task" }).click();
+  await expect(page.getByText("Ship it")).toBeVisible();
 });
 ```
 
@@ -147,18 +147,22 @@ Interocitor server, IndexedDB, or credential store is required.
 
 ```tsx
 // .storybook/InterocitorStoryProvider.tsx
-import { useEffect, useMemo, useState, type PropsWithChildren } from 'react';
-import { Interocitor, MemoryLocalStore } from '@interocitor/core';
-import { InterocitorProvider } from '../src/interocitor-context';
-import { schema } from '../src/schema';
+import { useEffect, useMemo, useState, type PropsWithChildren } from "react";
+import { Interocitor, MemoryLocalStore } from "@interocitor/core";
+import { InterocitorProvider } from "../src/interocitor-context";
+import { schema } from "../src/schema";
 
 export function InterocitorStoryProvider({ children }: PropsWithChildren) {
-  const db = useMemo(() => new Interocitor({
-    dbName: 'storybook',
-    schema,
-    localStore: new MemoryLocalStore(),
-    keySource: null,
-  }), []);
+  const db = useMemo(
+    () =>
+      new Interocitor({
+        dbName: "storybook",
+        schema,
+        localStore: new MemoryLocalStore(),
+        keySource: null,
+      }),
+    [],
+  );
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -180,13 +184,19 @@ Use it as a decorator:
 
 ```tsx
 // TaskList.stories.tsx
-import type { Meta } from '@storybook/react';
-import { InterocitorStoryProvider } from '../.storybook/InterocitorStoryProvider';
-import { TaskList } from './TaskList';
+import type { Meta } from "@storybook/react";
+import { InterocitorStoryProvider } from "../.storybook/InterocitorStoryProvider";
+import { TaskList } from "./TaskList";
 
 export default {
   component: TaskList,
-  decorators: [(Story) => <InterocitorStoryProvider><Story /></InterocitorStoryProvider>],
+  decorators: [
+    (Story) => (
+      <InterocitorStoryProvider>
+        <Story />
+      </InterocitorStoryProvider>
+    ),
+  ],
 } satisfies Meta<typeof TaskList>;
 ```
 
@@ -216,8 +226,8 @@ import {
   MemoryLocalStore,
   types,
   type DatabaseSchemaDefinition,
-} from '@interocitor/core';
-import { WebDAVAdapter } from '@interocitor/core/adapters/webdav';
+} from "@interocitor/core";
+import { WebDAVAdapter } from "@interocitor/core/adapters/webdav";
 
 const schema = {
   tables: {
@@ -226,31 +236,34 @@ const schema = {
 } satisfies DatabaseSchemaDefinition;
 
 function openServerBackedDb(testId: string) {
-  const db = new Interocitor(new WebDAVAdapter({
-    baseUrl: process.env.INTEROCITOR_WEBDAV_URL ?? 'http://127.0.0.1:4174/__webdav__',
-    auth: { username: 'test', password: 'test' },
-  }), {
-    dbName: `product-test-${testId}`,
-    remotePath: `/product-tests/${testId}`,
-    schema,
-    localStore: new MemoryLocalStore(),
-    keySource: null,
-    batchWindowMs: 0,
-    pollInterval: 60_000,
-  });
+  const db = new Interocitor(
+    new WebDAVAdapter({
+      baseUrl: process.env.INTEROCITOR_WEBDAV_URL ?? "http://127.0.0.1:4174/__webdav__",
+      auth: { username: "test", password: "test" },
+    }),
+    {
+      dbName: `product-test-${testId}`,
+      remotePath: `/product-tests/${testId}`,
+      schema,
+      localStore: new MemoryLocalStore(),
+      keySource: null,
+      batchWindowMs: 0,
+      pollInterval: 60_000,
+    },
+  );
 
   return db;
 }
 
-test('flushes a product write to the local mailbox', async () => {
-  const db = openServerBackedDb('create-task');
+test("flushes a product write to the local mailbox", async () => {
+  const db = openServerBackedDb("create-task");
   await db.init();
   await db.connect();
 
-  await db.table('tasks').add({ title: 'Use the real local server' });
+  await db.table("tasks").add({ title: "Use the real local server" });
   await db.flush();
 
-  await expect(db.table('tasks').query()).resolves.toHaveLength(1);
+  await expect(db.table("tasks").query()).resolves.toHaveLength(1);
   await db.disconnect();
 });
 ```
@@ -268,23 +281,23 @@ configuration supplies the local WebDAV endpoint and test credentials.
 
 ```ts
 // playwright.config.ts
-import { defineConfig } from '@playwright/test';
+import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   webServer: [
     {
-      command: 'yarn dev --port 3000',
-      url: 'http://127.0.0.1:3000',
+      command: "yarn dev --port 3000",
+      url: "http://127.0.0.1:3000",
       reuseExistingServer: !process.env.CI,
     },
     {
-      command: 'PORT=4174 node tools/webdav-server/server.mjs --mode=memory',
-      url: 'http://127.0.0.1:4174',
+      command: "PORT=4174 node tools/webdav-server/server.mjs --mode=memory",
+      url: "http://127.0.0.1:4174",
       reuseExistingServer: !process.env.CI,
     },
   ],
   use: {
-    baseURL: 'http://127.0.0.1:3000',
+    baseURL: "http://127.0.0.1:3000",
   },
 });
 ```
@@ -295,18 +308,18 @@ remote path if the product exposes one. Close the context in `finally` so
 IndexedDB handles and object URLs are released.
 
 ```ts
-import { expect, test } from '@playwright/test';
+import { expect, test } from "@playwright/test";
 
-test('creates a task while connected to local Interocitor', async ({ browser }) => {
+test("creates a task while connected to local Interocitor", async ({ browser }) => {
   const context = await browser.newContext();
   try {
     const page = await context.newPage();
-    await page.goto('/?testMesh=task-create');
+    await page.goto("/?testMesh=task-create");
 
-    await page.getByLabel('Task title').fill('Ship it');
-    await page.getByRole('button', { name: 'Add task' }).click();
+    await page.getByLabel("Task title").fill("Ship it");
+    await page.getByRole("button", { name: "Add task" }).click();
 
-    await expect(page.getByText('Ship it')).toBeVisible();
+    await expect(page.getByText("Ship it")).toBeVisible();
   } finally {
     await context.close();
   }

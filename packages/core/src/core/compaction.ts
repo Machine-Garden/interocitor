@@ -11,15 +11,24 @@
  * Extracted from Interocitor. Not part of the public API.
  */
 
-import type { StorageAdapter, LocalStore, Manifest, ManifestPointer, Snapshot, Row, SyncEvent, RetentionPolicy } from './types.ts';
-import type { HLC } from './types.ts';
-import { hlcSerialize } from './hlc.ts';
-import { paths, textEncoder, textDecoder, generateId, computeContentHash } from './internals.ts';
-import { encodeSnapshotPayload, decodeSnapshotPayload } from './codec.ts';
-import type { CodecState } from './codec.ts';
-import { writeJson } from './manifest.ts';
-import { hlcParse } from './hlc.ts';
-import { ChangeObservationLedger } from './change-observation.ts';
+import type {
+  StorageAdapter,
+  LocalStore,
+  Manifest,
+  ManifestPointer,
+  Snapshot,
+  Row,
+  SyncEvent,
+  RetentionPolicy,
+} from "./types.ts";
+import type { HLC } from "./types.ts";
+import { hlcSerialize } from "./hlc.ts";
+import { paths, textEncoder, textDecoder, generateId, computeContentHash } from "./internals.ts";
+import { encodeSnapshotPayload, decodeSnapshotPayload } from "./codec.ts";
+import type { CodecState } from "./codec.ts";
+import { writeJson } from "./manifest.ts";
+import { hlcParse } from "./hlc.ts";
+import { ChangeObservationLedger } from "./change-observation.ts";
 
 export interface CompactContext {
   adapter: StorageAdapter;
@@ -57,18 +66,20 @@ export async function pruneSupersededSnapshots(
   deviceId: string,
 ): Promise<SnapshotCleanupResult> {
   const p = paths(remotePath);
-  const activeSnapshotName = activeSnapshotPath.slice(activeSnapshotPath.lastIndexOf('/') + 1);
+  const activeSnapshotName = activeSnapshotPath.slice(activeSnapshotPath.lastIndexOf("/") + 1);
   let candidates: string[];
   try {
     const files = await adapter.listFiles(p.mainlineFolder);
     candidates = files
-      .filter((file) => /^snapshot-\d+-.+\.json$/.test(file.name) && file.name !== activeSnapshotName)
+      .filter(
+        (file) => /^snapshot-\d+-.+\.json$/.test(file.name) && file.name !== activeSnapshotName,
+      )
       .map((file) => file.path);
   } catch (cause) {
     const error = cause instanceof Error ? cause : new Error(String(cause));
     const result: SnapshotCleanupResult = { attempted: 0, deleted: 0, failedPaths: [], error };
     emit({
-      type: 'compact:snapshot-cleanup',
+      type: "compact:snapshot-cleanup",
       activeSnapshotPath,
       ...result,
       remotePath,
@@ -78,7 +89,7 @@ export async function pruneSupersededSnapshots(
   }
 
   const settled = await Promise.allSettled(candidates.map((path) => adapter.deleteFile(path)));
-  const failedPaths = candidates.filter((_, index) => settled[index]?.status === 'rejected');
+  const failedPaths = candidates.filter((_, index) => settled[index]?.status === "rejected");
   const result: SnapshotCleanupResult = {
     attempted: candidates.length,
     deleted: candidates.length - failedPaths.length,
@@ -86,7 +97,7 @@ export async function pruneSupersededSnapshots(
   };
   if (candidates.length > 0) {
     emit({
-      type: 'compact:snapshot-cleanup',
+      type: "compact:snapshot-cleanup",
       activeSnapshotPath,
       ...result,
       remotePath,
@@ -100,7 +111,7 @@ export async function compact(ctx: CompactContext): Promise<Manifest> {
   const { adapter, local, remotePath, manifest, codecState, deviceId, serverId } = ctx;
 
   if (manifest.server.managed && deviceId !== serverId) {
-    throw new Error('Compaction is allowed only for the authorized server writer');
+    throw new Error("Compaction is allowed only for the authorized server writer");
   }
 
   // Ensure the compactor has merged latest remote changes before snapshotting.
@@ -124,7 +135,7 @@ export async function compact(ctx: CompactContext): Promise<Manifest> {
   }
 
   const snapshot: Snapshot = {
-    snapshotId: generateId('snap'),
+    snapshotId: generateId("snap"),
     timestamp: now,
     hlc: hlcSerialize(ctx.hlc),
     epoch: nextEpoch,
@@ -166,12 +177,14 @@ export async function compact(ctx: CompactContext): Promise<Manifest> {
     file: manifestFile,
   } satisfies ManifestPointer);
 
-  await local.setMeta('epoch', nextEpoch);
+  await local.setMeta("epoch", nextEpoch);
 
   // Snapshot publication is authoritative even if cleanup is interrupted.
   // Delete only the exact files represented by this snapshot; a change that
   // appeared after capture remains available for the catch-up pull.
-  await Promise.allSettled(coveredChangeFiles.map((fileName) => adapter.deleteFile(`${p.changesFolder}/${fileName}`)));
+  await Promise.allSettled(
+    coveredChangeFiles.map((fileName) => adapter.deleteFile(`${p.changesFolder}/${fileName}`)),
+  );
   await pruneSupersededSnapshots(adapter, remotePath, snapshotPath, ctx.emit, deviceId);
   return nextManifest;
 }
@@ -198,36 +211,46 @@ export interface RehydrateContext {
 export async function rehydrate(ctx: RehydrateContext): Promise<HLC> {
   let hlc = ctx.hlc;
 
-  ctx.emit({ type: 'rehydrate:start' });
+  ctx.emit({ type: "rehydrate:start" });
 
   let snapshotPath = ctx.manifest?.snapshotPath;
   if (!snapshotPath) {
-    ctx.emit({ type: 'rehydrate:complete', rowCount: 0 });
+    ctx.emit({ type: "rehydrate:complete", rowCount: 0 });
     await ctx.pull();
     return hlc;
   }
 
   const restore = async (path: string): Promise<number> => {
     const data = await ctx.adapter.readFile(path);
-    const snapshot = await decodeSnapshotPayload(ctx.codecState, ctx.local, textDecoder.decode(data), path);
+    const snapshot = await decodeSnapshotPayload(
+      ctx.codecState,
+      ctx.local,
+      textDecoder.decode(data),
+      path,
+    );
 
     let rowCount = 0;
-    await ChangeObservationLedger.restoreSnapshot(ctx.local, snapshot.hlc, snapshot.coveredChangeFiles ?? [], async () => {
-      await ctx.local.clearAll();
-      for (const [key, value] of Object.entries(ctx.preservedMeta ?? {})) {
-        if (value !== undefined) await ctx.local.setMeta(key, value);
-      }
-      ctx.tables = {};
-      ctx.knownTables.clear();
-
-      for (const [tableName, rows] of Object.entries(snapshot.tables)) {
-        ctx.knownTables.add(tableName);
-        for (const row of Object.values(rows)) {
-          await ctx.local.putRow(row);
-          rowCount++;
+    await ChangeObservationLedger.restoreSnapshot(
+      ctx.local,
+      snapshot.hlc,
+      snapshot.coveredChangeFiles ?? [],
+      async () => {
+        await ctx.local.clearAll();
+        for (const [key, value] of Object.entries(ctx.preservedMeta ?? {})) {
+          if (value !== undefined) await ctx.local.setMeta(key, value);
         }
-      }
-    });
+        ctx.tables = {};
+        ctx.knownTables.clear();
+
+        for (const [tableName, rows] of Object.entries(snapshot.tables)) {
+          ctx.knownTables.add(tableName);
+          for (const row of Object.values(rows)) {
+            await ctx.local.putRow(row);
+            rowCount++;
+          }
+        }
+      },
+    );
 
     // Restore HLC
     if (snapshot.hlc) {
@@ -235,7 +258,7 @@ export async function rehydrate(ctx: RehydrateContext): Promise<HLC> {
       hlc.nodeId = ctx.deviceId;
     }
 
-    await ctx.local.setMeta('epoch', snapshot.epoch);
+    await ctx.local.setMeta("epoch", snapshot.epoch);
     return rowCount;
   };
 
@@ -250,16 +273,16 @@ export async function rehydrate(ctx: RehydrateContext): Promise<HLC> {
       snapshotPath = refreshedPath;
       rowCount = await restore(snapshotPath);
     }
-    ctx.emit({ type: 'rehydrate:complete', rowCount });
+    ctx.emit({ type: "rehydrate:complete", rowCount });
   } catch (err) {
     ctx.emit({
-      type: 'decode:error',
+      type: "decode:error",
       error: err instanceof Error ? err : new Error(String(err)),
       path: snapshotPath,
-      context: { stage: 'rehydrate' },
+      context: { stage: "rehydrate" },
     });
     const poisoned = await ctx.poisonRemote(err, snapshotPath);
-    ctx.emit({ type: 'sync:error', error: poisoned });
+    ctx.emit({ type: "sync:error", error: poisoned });
     throw poisoned;
   }
 

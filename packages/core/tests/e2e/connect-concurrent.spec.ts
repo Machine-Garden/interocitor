@@ -15,16 +15,16 @@
  * This test wraps MemoryAdapter with a counting proxy so we can assert
  * exact network-call multiplicities, not just "the file count looks ok".
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from "@playwright/test";
 
 /* eslint-disable unicorn/consistent-function-scoping -- Browser-context helpers must be defined inside page.evaluate. */
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/packages/core/tests/e2e/fixtures/harness.html');
+  await page.goto("/packages/core/tests/e2e/fixtures/harness.html");
   await page.evaluate(async () => {
     localStorage.clear();
     await new Promise<void>((resolve) => {
-      const req = indexedDB.deleteDatabase('connect-concurrent-test');
+      const req = indexedDB.deleteDatabase("connect-concurrent-test");
       req.onsuccess = () => resolve();
       req.onerror = () => resolve();
       req.onblocked = () => resolve();
@@ -32,10 +32,13 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('concurrent connect() calls run the pipeline once and produce one change file per put', async ({ page }) => {
+test("concurrent connect() calls run the pipeline once and produce one change file per put", async ({
+  page,
+}) => {
   const result = await page.evaluate(async () => {
-    const { Interocitor } = await import('/packages/core/dist/index.js');
-    const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+    const { BrowserTestInterocitor: Interocitor } =
+      await import("/packages/core/tests/e2e/fixtures/core-browser-api.js");
+    const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
 
     // Counting proxy. Records every adapter method call so the test can
     // assert exact multiplicities. We do NOT debounce — a single connect()
@@ -54,7 +57,7 @@ test('concurrent connect() calls run the pipeline once and produce one change fi
     const counting = new Proxy(inner, {
       get(target, prop, receiver) {
         const original = Reflect.get(target, prop, receiver);
-        if (typeof prop === 'string' && prop in calls && typeof original === 'function') {
+        if (typeof prop === "string" && prop in calls && typeof original === "function") {
           return (...args: unknown[]) => {
             calls[prop]++;
             return (original as (...a: unknown[]) => unknown).apply(target, args);
@@ -65,13 +68,13 @@ test('concurrent connect() calls run the pipeline once and produce one change fi
     });
 
     const engine = new Interocitor(counting as any, {
-      batchWindowMs: 0, remotePath: '/Concurrent',
-      dbName: 'connect-concurrent-test',
-      pollInterval: 600_000,    // disable polling so it can't skew counts
-      flushDebounce: 600_000,   // disable auto-flush; drive flushes explicitly
+      batchWindowMs: 0,
+      remotePath: "/Concurrent",
+      dbName: "connect-concurrent-test",
+      pollInterval: 600_000, // disable polling so it can't skew counts
+      flushDebounce: 600_000, // disable auto-flush; drive flushes explicitly
       flushThreshold: 999,
-      deviceId: 'dev_concurrent',
-      encrypted: false,
+      deviceId: "dev_concurrent",
     });
 
     await engine.init();
@@ -85,17 +88,17 @@ test('concurrent connect() calls run the pipeline once and produce one change fi
 
     // Two writes -> one explicit flush. Auto-flush is disabled so the
     // outbox drains exactly once and we can assert exact write counts.
-    await engine.put('tasks', 't1', { title: 'one' });
-    await engine.put('tasks', 't2', { title: 'two' });
+    await engine.put("tasks", "t1", { title: "one" });
+    await engine.put("tasks", "t2", { title: "two" });
     await engine.flush();
 
     const afterFlush = { ...calls };
 
     const dump = inner.dump();
     const allFiles = Object.keys(dump);
-    const changeFiles = allFiles.filter(p => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p));
-    const manifestFiles = allFiles.filter(p => /\/manifest-\d+\.json$/.test(p));
-    const manifestPointers = allFiles.filter(p => p.endsWith('/manifest.json'));
+    const changeFiles = allFiles.filter((p) => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p));
+    const manifestFiles = allFiles.filter((p) => /\/manifest-\d+\.json$/.test(p));
+    const manifestPointers = allFiles.filter((p) => p.endsWith("/manifest.json"));
 
     await engine.disconnect();
 
@@ -108,7 +111,7 @@ test('concurrent connect() calls run the pipeline once and produce one change fi
       allFiles,
       // delta = work done by the two puts + flush (excluding connect setup).
       delta: Object.fromEntries(
-        Object.keys(calls).map(k => [k, afterFlush[k] - afterConnect[k]]),
+        Object.keys(calls).map((k) => [k, afterFlush[k] - afterConnect[k]]),
       ),
     };
   });
@@ -145,12 +148,14 @@ test('concurrent connect() calls run the pipeline once and produce one change fi
   expect(result.delta.writeFile).toBeGreaterThanOrEqual(2);
 
   // ── On-disk shape ────────────────────────────────────────────────
-  expect(result.changeFileCount).toBe(2);          // exactly one file per put
-  expect(result.manifestFileCount).toBe(1);        // bootstrap only
-  expect(result.manifestPointerCount).toBe(1);     // single pointer
+  expect(result.changeFileCount).toBe(2); // exactly one file per put
+  expect(result.manifestFileCount).toBe(1); // bootstrap only
+  expect(result.manifestPointerCount).toBe(1); // single pointer
 });
 
-test('reload + fresh-client read budget: own writes not re-read on reload; fresh client reads files once; fresh-client reload reads manifest/head only', async ({ page }) => {
+test("reload + fresh-client read budget: own writes not re-read on reload; fresh client reads files once; fresh-client reload reads manifest/head only", async ({
+  page,
+}) => {
   // Load-regression: assert exact remote read shape across the
   // "single client writes, reloads, then a wiped peer connects, then
   // peer reloads" lifecycle. Three behavioural contracts:
@@ -167,8 +172,9 @@ test('reload + fresh-client read budget: own writes not re-read on reload; fresh
   //      MUST NOT GET the change files again — its cursor is already at
   //      head.
   const result = await page.evaluate(async () => {
-    const { Interocitor } = await import('/packages/core/dist/index.js');
-    const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+    const { BrowserTestInterocitor: Interocitor, MemoryLocalStore } =
+      await import("/packages/core/tests/e2e/fixtures/core-browser-api.js");
+    const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
 
     // One shared "remote" across all phases; two engines never share
     // local state because they use different dbNames or because we
@@ -182,7 +188,7 @@ test('reload + fresh-client read budget: own writes not re-read on reload; fresh
     const counting = new Proxy(inner, {
       get(target, prop, receiver) {
         const original = Reflect.get(target, prop, receiver);
-        if (prop === 'readFile' && typeof original === 'function') {
+        if (prop === "readFile" && typeof original === "function") {
           return (path: string) => {
             currentReads.push(path);
             return (original as (p: string) => Promise<Uint8Array>).apply(target, [path]);
@@ -193,34 +199,45 @@ test('reload + fresh-client read budget: own writes not re-read on reload; fresh
     });
 
     const baseConfig = {
-      remotePath: '/Reload',
+      remotePath: "/Reload",
       pollInterval: 600_000,
       flushDebounce: 600_000,
       flushThreshold: 999,
-      encrypted: false,
     } as const;
+
+    // Core deliberately ships no browser-persistent store. This focused test
+    // double keeps state across close() so new engine instances exercise the
+    // reload contract without coupling core's suite to @interocitor/web.
+    class PersistentMemoryLocalStore extends MemoryLocalStore {
+      close() {}
+    }
+    const originalLocal = new PersistentMemoryLocalStore();
+    const peerLocal = new PersistentMemoryLocalStore();
 
     // Helper: wipe a named IDB. Mirrors the per-test beforeEach but
     // scoped to whichever dbName we choose to "wipe".
-    const wipeIdb = (dbName: string) => new Promise<void>((resolve) => {
-      const req = indexedDB.deleteDatabase(dbName);
-      req.onsuccess = () => resolve();
-      req.onerror = () => resolve();
-      req.onblocked = () => resolve();
-    });
+    const wipeIdb = (dbName: string) =>
+      new Promise<void>((resolve) => {
+        const req = indexedDB.deleteDatabase(dbName);
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+        req.onblocked = () => resolve();
+      });
 
     // ── Phase 1: original client writes 2 entries and flushes. ──────
-    await wipeIdb('reload-orig');
+    await wipeIdb("reload-orig");
     currentReads = [];
     const e1 = new Interocitor(counting as any, {
-      batchWindowMs: 0, ...baseConfig,
-      dbName: 'reload-orig',
-      deviceId: 'dev_orig',
+      batchWindowMs: 0,
+      ...baseConfig,
+      dbName: "reload-orig",
+      deviceId: "dev_orig",
+      localStore: originalLocal,
     });
     await e1.init();
     await e1.connect();
-    await e1.put('tasks', 't1', { title: 'one' });
-    await e1.put('tasks', 't2', { title: 'two' });
+    await e1.put("tasks", "t1", { title: "one" });
+    await e1.put("tasks", "t2", { title: "two" });
     await e1.flush();
     await e1.disconnect();
     const phase1Reads = [...currentReads];
@@ -229,15 +246,17 @@ test('reload + fresh-client read budget: own writes not re-read on reload; fresh
     // paths in the assertions below.
     const dump = inner.dump();
     const allFiles = Object.keys(dump);
-    const changeFiles = allFiles.filter(p => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p));
+    const changeFiles = allFiles.filter((p) => /\/changes\/[^/]+-chg_[^/]+\.json$/.test(p));
 
     // ── Phase 2: original client RELOADS. Same dbName, same deviceId,
     //    same adapter. Must NOT GET its own change files. ────────────
     currentReads = [];
     const e1Reload = new Interocitor(counting as any, {
-      batchWindowMs: 0, ...baseConfig,
-      dbName: 'reload-orig',
-      deviceId: 'dev_orig',
+      batchWindowMs: 0,
+      ...baseConfig,
+      dbName: "reload-orig",
+      deviceId: "dev_orig",
+      localStore: originalLocal,
     });
     await e1Reload.init();
     await e1Reload.connect();
@@ -248,17 +267,19 @@ test('reload + fresh-client read budget: own writes not re-read on reload; fresh
     //    Different dbName + different deviceId. Same shared adapter
     //    so the remote is the one we just wrote to. Must read both
     //    change files exactly once. ──────────────────────────────────
-    await wipeIdb('reload-peer');
+    await wipeIdb("reload-peer");
     currentReads = [];
     const e2 = new Interocitor(counting as any, {
-      batchWindowMs: 0, ...baseConfig,
-      dbName: 'reload-peer',
-      deviceId: 'dev_peer',
+      batchWindowMs: 0,
+      ...baseConfig,
+      dbName: "reload-peer",
+      deviceId: "dev_peer",
+      localStore: peerLocal,
     });
     await e2.init();
     await e2.connect();
     const phase3Reads = [...currentReads];
-    const peerRowsAfterFirstConnect = await e2.query('tasks');
+    const peerRowsAfterFirstConnect = await e2.query("tasks");
     await e2.disconnect();
 
     // ── Phase 4: wiped peer RELOADS. Same dbName, same deviceId,
@@ -266,14 +287,16 @@ test('reload + fresh-client read budget: own writes not re-read on reload; fresh
     //    MUST NOT re-read the change files. ──────────────────────────
     currentReads = [];
     const e2Reload = new Interocitor(counting as any, {
-      batchWindowMs: 0, ...baseConfig,
-      dbName: 'reload-peer',
-      deviceId: 'dev_peer',
+      batchWindowMs: 0,
+      ...baseConfig,
+      dbName: "reload-peer",
+      deviceId: "dev_peer",
+      localStore: peerLocal,
     });
     await e2Reload.init();
     await e2Reload.connect();
     const phase4Reads = [...currentReads];
-    const peerRowsAfterReload = await e2Reload.query('tasks');
+    const peerRowsAfterReload = await e2Reload.query("tasks");
     await e2Reload.disconnect();
 
     return {
@@ -294,28 +317,21 @@ test('reload + fresh-client read budget: own writes not re-read on reload; fresh
   // The writer's IDB already holds its own rows; the remote head must
   // not advance past what it just wrote, so pull's fast-path
   // short-circuits before listing/reading any change file.
-  const phase2ChangeReads = result.phase2Reads.filter(p => result.changeFilePaths.includes(p));
-  expect(
-    phase2ChangeReads,
-    'reload of own client must not GET its own change files',
-  ).toEqual([]);
+  const phase2ChangeReads = result.phase2Reads.filter((p) => result.changeFilePaths.includes(p));
+  expect(phase2ChangeReads, "reload of own client must not GET its own change files").toEqual([]);
 
   // Phase 3: wiped peer first connect. MUST read both change files
   // exactly once. Anything else means we either over- or under-fetch.
-  const phase3ChangeReads = result.phase3Reads.filter(p => result.changeFilePaths.includes(p));
-  expect(
-    phase3ChangeReads.toSorted(),
-    'fresh peer must GET each change file exactly once',
-  ).toEqual(result.changeFilePaths);
+  const phase3ChangeReads = result.phase3Reads.filter((p) => result.changeFilePaths.includes(p));
+  expect(phase3ChangeReads.toSorted(), "fresh peer must GET each change file exactly once").toEqual(
+    result.changeFilePaths,
+  );
   expect(result.peerRowCountAfterFirstConnect).toBe(2);
 
   // Phase 4: wiped peer reload. MUST NOT re-read any change file. Pull still
   // lists immutable filenames; exact receipts suppress redundant downloads.
-  const phase4ChangeReads = result.phase4Reads.filter(p => result.changeFilePaths.includes(p));
-  expect(
-    phase4ChangeReads,
-    'wiped peer reload must not re-GET change files',
-  ).toEqual([]);
+  const phase4ChangeReads = result.phase4Reads.filter((p) => result.changeFilePaths.includes(p));
+  expect(phase4ChangeReads, "wiped peer reload must not re-GET change files").toEqual([]);
   // Local state must persist across the reload so the rows are still
   // queryable without touching the change files.
   expect(result.peerRowCountAfterReload).toBe(2);
@@ -323,31 +339,39 @@ test('reload + fresh-client read budget: own writes not re-read on reload; fresh
   // Phase 4 sanity: at least one of the manifest/head paths must have
   // been touched. Otherwise the engine isn't probing remote state at
   // all and the assertion above is vacuous.
-  const phase4ManifestOrHead = result.phase4Reads.filter(p =>
-    p.endsWith('/manifest.json')
-    || /\/manifest-\d+\.json$/.test(p)
-    || p.endsWith('/changes/head.json'),
+  const phase4ManifestOrHead = result.phase4Reads.filter(
+    (p) =>
+      p.endsWith("/manifest.json") ||
+      /\/manifest-\d+\.json$/.test(p) ||
+      p.endsWith("/changes/head.json"),
   );
   expect(
     phase4ManifestOrHead.length,
-    'wiped peer reload must still probe manifest/head',
+    "wiped peer reload must still probe manifest/head",
   ).toBeGreaterThan(0);
 });
 
-test('setRemoteStorage with the same adapter is a no-op (no rebuild, no reflush)', async ({ page }) => {
+test("setRemoteStorage with the same adapter is a no-op (no rebuild, no reflush)", async ({
+  page,
+}) => {
   const result = await page.evaluate(async () => {
-    const { Interocitor } = await import('/packages/core/dist/index.js');
-    const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+    const { BrowserTestInterocitor: Interocitor } =
+      await import("/packages/core/tests/e2e/fixtures/core-browser-api.js");
+    const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
 
     const calls: Record<string, number> = {
-      writeFile: 0, readFile: 0, listFiles: 0, ensureFolder: 0, deleteFile: 0,
+      writeFile: 0,
+      readFile: 0,
+      listFiles: 0,
+      ensureFolder: 0,
+      deleteFile: 0,
     };
 
     const inner = new MemoryAdapter();
     const counting = new Proxy(inner, {
       get(target, prop, receiver) {
         const original = Reflect.get(target, prop, receiver);
-        if (typeof prop === 'string' && prop in calls && typeof original === 'function') {
+        if (typeof prop === "string" && prop in calls && typeof original === "function") {
           return (...args: unknown[]) => {
             calls[prop]++;
             return (original as (...a: unknown[]) => unknown).apply(target, args);
@@ -358,18 +382,18 @@ test('setRemoteStorage with the same adapter is a no-op (no rebuild, no reflush)
     });
 
     const engine = new Interocitor(counting as any, {
-      batchWindowMs: 0, remotePath: '/SameAdapter',
-      dbName: 'connect-concurrent-test',
+      batchWindowMs: 0,
+      remotePath: "/SameAdapter",
+      dbName: "connect-concurrent-test",
       pollInterval: 600_000,
       flushDebounce: 5,
       flushThreshold: 1,
-      deviceId: 'dev_same',
-      encrypted: false,
+      deviceId: "dev_same",
     });
 
     await engine.init();
     await engine.connect();
-    await engine.put('tasks', 't1', { title: 'one' });
+    await engine.put("tasks", "t1", { title: "one" });
     await engine.flush();
 
     const before = { ...calls };
@@ -407,20 +431,28 @@ test('setRemoteStorage with the same adapter is a no-op (no rebuild, no reflush)
   expect(result.filesAdded).toBe(0);
 });
 
-test('disconnect+reconnect on same adapter: ensureFolder is cached, manifest cache invalidates', async ({ page }) => {
+test("disconnect+reconnect on same adapter: ensureFolder is cached, manifest cache invalidates", async ({
+  page,
+}) => {
   const result = await page.evaluate(async () => {
-    const { Interocitor } = await import('/packages/core/dist/index.js');
-    const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+    const { BrowserTestInterocitor: Interocitor } =
+      await import("/packages/core/tests/e2e/fixtures/core-browser-api.js");
+    const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
 
     const calls: Record<string, number> = {
-      authenticate: 0, ensureFolder: 0, listFiles: 0,
-      readFile: 0, writeFile: 0, deleteFile: 0, getFileMetadata: 0,
+      authenticate: 0,
+      ensureFolder: 0,
+      listFiles: 0,
+      readFile: 0,
+      writeFile: 0,
+      deleteFile: 0,
+      getFileMetadata: 0,
     };
     const inner = new MemoryAdapter();
     const counting = new Proxy(inner, {
       get(target, prop, receiver) {
         const original = Reflect.get(target, prop, receiver);
-        if (typeof prop === 'string' && prop in calls && typeof original === 'function') {
+        if (typeof prop === "string" && prop in calls && typeof original === "function") {
           return (...args: unknown[]) => {
             calls[prop]++;
             return (original as (...a: unknown[]) => unknown).apply(target, args);
@@ -431,13 +463,13 @@ test('disconnect+reconnect on same adapter: ensureFolder is cached, manifest cac
     });
 
     const engine = new Interocitor(counting as any, {
-      batchWindowMs: 0, remotePath: '/Reconnect',
-      dbName: 'connect-concurrent-test',
+      batchWindowMs: 0,
+      remotePath: "/Reconnect",
+      dbName: "connect-concurrent-test",
       pollInterval: 600_000,
       flushDebounce: 600_000,
       flushThreshold: 999,
-      deviceId: 'dev_reconnect',
-      encrypted: false,
+      deviceId: "dev_reconnect",
     });
 
     // Helper: snapshot adapter-internal folders Set size. The Memory
@@ -471,7 +503,7 @@ test('disconnect+reconnect on same adapter: ensureFolder is cached, manifest cac
       first: afterFirstConnect,
       second: afterSecondConnect,
       delta: Object.fromEntries(
-        Object.keys(calls).map(k => [k, afterSecondConnect[k] - afterFirstConnect[k]]),
+        Object.keys(calls).map((k) => [k, afterSecondConnect[k] - afterFirstConnect[k]]),
       ),
       foldersAfterFirst,
       foldersAfterSecond,
@@ -484,15 +516,13 @@ test('disconnect+reconnect on same adapter: ensureFolder is cached, manifest cac
   // so `delta.ensureFolder` is NOT a useful proxy for "did real work
   // happen". Instead inspect the adapter-internal folder set: on a hit
   // the set does not grow.
-  expect(result.cacheAfterFirst, 'first connect populated the cache').toBeGreaterThan(0);
-  expect(
-    result.foldersAfterSecond,
-    'reconnect MUST hit the cache (folders set unchanged)',
-  ).toBe(result.foldersAfterFirst);
-  expect(
-    result.cacheAfterSecond,
-    'cache size unchanged on reconnect (no new folders added)',
-  ).toBe(result.cacheAfterFirst);
+  expect(result.cacheAfterFirst, "first connect populated the cache").toBeGreaterThan(0);
+  expect(result.foldersAfterSecond, "reconnect MUST hit the cache (folders set unchanged)").toBe(
+    result.foldersAfterFirst,
+  );
+  expect(result.cacheAfterSecond, "cache size unchanged on reconnect (no new folders added)").toBe(
+    result.cacheAfterFirst,
+  );
 
   // Manifest re-validated on reconnect -> some reads expected. Bound at 5
   // to detect any future regression (would jump to >=8 if the bootstrap

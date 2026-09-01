@@ -27,7 +27,7 @@ Two reasons:
 interface StoredCredentials {
   portableKey: string;
   deviceId: string;
-  meshId?: string;          // anchor, written after manifest is known
+  meshId?: string; // anchor, written after manifest is known
 }
 
 interface CredentialStore {
@@ -43,14 +43,14 @@ Browser apps normally call `createWebCredentialStore(...)`. Construct one of
 the concrete classes directly only when the application needs to control that
 implementation rather than select a factory storage mode.
 
-| Class / factory option | Backing store | Auth gate | Reload scope |
-| --- | --- | --- | --- |
-| `LocalStorageCredentialStore` / `{ storage: 'localStorage' }` | `localStorage` plaintext JSON | None | Same origin until browser data is cleared |
-| `SessionStorageCredentialStore` / `{ storage: 'sessionStorage' }` | `sessionStorage` plaintext JSON | None | Same tab/session |
-| `MemoryCredentialStore` / `{ storage: 'memory' }` | JS memory | None | Current engine/process only |
-| `WebAuthnCredentialStore` / `{ storage: 'passkey' }` | WebAuthn `largeBlob` / OS keychain | Touch ID / Face ID / Windows Hello | Passkey/platform credential lifetime |
-| `EnvelopedCredentialStore` / `{ envelope: ... }` | AES-GCM encrypted record in memory, browser storage, backend, or custom `CredentialEnvelopeStore` | Depends on `CredentialEnvelopeKeyProvider` | Envelope-store lifetime plus envelope-key availability |
-| default `createWebCredentialStore(dbName)` | plaintext `localStorage` JSON | None | Same origin until browser data is cleared |
+| Class / factory option                                            | Backing store                                                                                     | Auth gate                                  | Reload scope                                           |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------ |
+| `LocalStorageCredentialStore` / `{ storage: 'localStorage' }`     | `localStorage` plaintext JSON                                                                     | None                                       | Same origin until browser data is cleared              |
+| `SessionStorageCredentialStore` / `{ storage: 'sessionStorage' }` | `sessionStorage` plaintext JSON                                                                   | None                                       | Same tab/session                                       |
+| `MemoryCredentialStore` / `{ storage: 'memory' }`                 | JS memory                                                                                         | None                                       | Current engine/process only                            |
+| `WebAuthnCredentialStore` / `{ storage: 'passkey' }`              | WebAuthn `largeBlob` / OS keychain                                                                | Touch ID / Face ID / Windows Hello         | Passkey/platform credential lifetime                   |
+| `EnvelopedCredentialStore` / `{ envelope: ... }`                  | AES-GCM encrypted record in memory, browser storage, backend, or custom `CredentialEnvelopeStore` | Depends on `CredentialEnvelopeKeyProvider` | Envelope-store lifetime plus envelope-key availability |
+| default `createWebCredentialStore(dbName)`                        | plaintext `localStorage` JSON                                                                     | None                                       | Same origin until browser data is cleared              |
 
 Core never wires a browser default automatically. Runtime code constructs a
 store explicitly when it builds a `MeshKeySource`, for example to:
@@ -65,7 +65,7 @@ store explicitly when it builds a `MeshKeySource`, for example to:
 ### Default browser persistence
 
 ```ts
-const credentialStore = createWebCredentialStore('case-vault');
+const credentialStore = createWebCredentialStore("case-vault");
 ```
 
 Stores the credential record in `localStorage`.
@@ -73,8 +73,8 @@ Stores the credential record in `localStorage`.
 ### Memory-only key material
 
 ```ts
-const credentialStore = createWebCredentialStore('case-vault', {
-  storage: 'memory',
+const credentialStore = createWebCredentialStore("case-vault", {
+  storage: "memory",
 });
 ```
 
@@ -84,8 +84,8 @@ component from somewhere else: a join token, backend session, native app integra
 ### Tab-session key material
 
 ```ts
-const credentialStore = createWebCredentialStore('case-vault', {
-  storage: 'sessionStorage',
+const credentialStore = createWebCredentialStore("case-vault", {
+  storage: "sessionStorage",
 });
 ```
 
@@ -95,9 +95,9 @@ new tabs after the session ends.
 ### Passkey/biometric-only credential
 
 ```ts
-const credentialStore = createWebCredentialStore('case-vault', {
-  storage: 'passkey',
-  displayName: 'Case Vault',
+const credentialStore = createWebCredentialStore("case-vault", {
+  storage: "passkey",
+  displayName: "Case Vault",
 });
 ```
 
@@ -107,24 +107,24 @@ credential-id hint, but not the credential payload itself.
 ### Encrypted envelope from backend or memory
 
 ```ts
-const credentialStore = createWebCredentialStore('case-vault', {
+const credentialStore = createWebCredentialStore("case-vault", {
   envelope: {
     store: {
       async save(envelope) {
-        await fetch('/api/interocitor/credential-envelope', {
-          method: 'PUT',
+        await fetch("/api/interocitor/credential-envelope", {
+          method: "PUT",
           body: JSON.stringify(envelope),
         });
       },
       async load() {
-        const res = await fetch('/api/interocitor/credential-envelope');
+        const res = await fetch("/api/interocitor/credential-envelope");
         return res.status === 404 ? null : await res.json();
       },
       async clear() {
-        await fetch('/api/interocitor/credential-envelope', { method: 'DELETE' });
+        await fetch("/api/interocitor/credential-envelope", { method: "DELETE" });
       },
     },
-    keyProvider: new WebAuthnEnvelopeKeyProvider('case-vault', location.hostname, 'Case Vault'),
+    keyProvider: new WebAuthnEnvelopeKeyProvider("case-vault", location.hostname, "Case Vault"),
   },
 });
 ```
@@ -205,13 +205,13 @@ construct engine ──► keySource.load()
 
 ## Events
 
-| Event | When | What to do |
-| --- | --- | --- |
-| `credentials:restored` | After silent or biometric load succeeds | Optional UI: "signed in as …" |
-| `credentials:persisted` | After `persistCredentials()` writes | Useful in tests |
-| `credentials:conflict` | Stored `deviceId` differs from active | Almost always a test artifact |
-| `credentials:meshMismatch` | Stored `meshId` differs from live mesh | Stop the connection and require an explicit re-pair/recovery choice; do not reconnect the same cleared engine |
-| `encryption:resolved` | Key material is now ready | Safe to call `connect()` |
+| Event                      | When                                    | What to do                                                                                                    |
+| -------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `credentials:restored`     | After silent or biometric load succeeds | Optional UI: "signed in as …"                                                                                 |
+| `credentials:persisted`    | After `persistCredentials()` writes     | Useful in tests                                                                                               |
+| `credentials:conflict`     | Stored `deviceId` differs from active   | Almost always a test artifact                                                                                 |
+| `credentials:meshMismatch` | Stored `meshId` differs from live mesh  | Stop the connection and require an explicit re-pair/recovery choice; do not reconnect the same cleared engine |
+| `encryption:resolved`      | Key material is now ready               | Safe to call `connect()`                                                                                      |
 
 ### Clearing credentials safely
 
@@ -234,13 +234,13 @@ unencrypted engine to an encrypted mesh and fail with
 `MeshEncryptionMismatchError`. If the replacement mesh differs from locally
 cached state, remember that the default join policy clears local rows and
 queued writes; see
-[Joining an existing mesh with local state](../README.md#joining-an-existing-mesh-with-local-state).
+[Joining an existing mesh with local state](api-reference.md#joining-an-existing-mesh-with-local-state).
 
 ## Disabling persistence
 
 ```ts
 const engine = new Interocitor(adapter, {
-  dbName: 'demo',
+  dbName: "demo",
   localStore,
   keySource: new PortablePassphraseKeySource({
     portableKey,
@@ -258,13 +258,19 @@ Useful for:
 
 ```ts
 class MyCustomStore implements CredentialStore {
-  async save(creds) { /* write to OS keychain via native app integration */ }
-  async load()      { /* read from OS keychain */ }
-  async clear()     { /* delete from OS keychain */ }
+  async save(creds) {
+    /* write to OS keychain via native app integration */
+  }
+  async load() {
+    /* read from OS keychain */
+  }
+  async clear() {
+    /* delete from OS keychain */
+  }
 }
 
 const engine = new Interocitor(adapter, {
-  dbName: 'case-vault',
+  dbName: "case-vault",
   localStore,
   keySource: new PortablePassphraseKeySource({
     portableKey,

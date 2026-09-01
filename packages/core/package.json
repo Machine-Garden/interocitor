@@ -2,18 +2,32 @@
   "name": "@interocitor/core",
   "version": "0.1.0",
   "description": "Local-first CRDT rows and durable remote files with optional client-side encryption.",
+  "keywords": [
+    "crdt",
+    "encrypted",
+    "google-drive",
+    "local-first",
+    "mesh",
+    "offline-first",
+    "sync",
+    "webdav"
+  ],
+  "homepage": "https://github.com/Machine-Garden/interocitor/tree/main/packages/core#readme",
+  "bugs": {
+    "url": "https://github.com/Machine-Garden/interocitor/issues"
+  },
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Machine-Garden/interocitor.git",
     "directory": "packages/core"
   },
-  "homepage": "https://github.com/Machine-Garden/interocitor/tree/main/packages/core#readme",
-  "bugs": {
-    "url": "https://github.com/Machine-Garden/interocitor/issues"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
+  "files": [
+    "dist",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -59,29 +73,15 @@
       "import": "./dist/crypto/signing.js"
     }
   },
-  "files": [
-    "dist",
-    "docs",
-    "README.md",
-    "LICENSE"
-  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "rm -rf ./dist && tsc -p tsconfig.json",
     "validate": "node ./dist/index.js",
     "test:unit": "yarn build && node --test tests/*.test.mjs",
     "test:e2e": "yarn build && ../../node_modules/.bin/playwright test -c ./playwright.config.ts"
   },
-  "keywords": [
-    "local-first",
-    "crdt",
-    "sync",
-    "offline-first",
-    "google-drive",
-    "webdav",
-    "encrypted",
-    "mesh"
-  ],
-  "license": "MIT",
   "devDependencies": {
     "@playwright/test": "^1.54.2",
     "typescript": "^6.0.0"

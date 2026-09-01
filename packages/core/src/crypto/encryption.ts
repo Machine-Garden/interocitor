@@ -15,7 +15,7 @@ const ENVELOPE_VERSION = 1;
 
 // ─── Base58 (Bitcoin alphabet) ───────────────────────────────────────
 
-const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 function base58Encode(bytes: Uint8Array): string {
   // Convert byte array to BigInt
@@ -24,7 +24,7 @@ function base58Encode(bytes: Uint8Array): string {
     num = num * 256n + BigInt(b);
   }
 
-  let result = '';
+  let result = "";
   while (num > 0n) {
     const mod = Number(num % 58n);
     result = BASE58_ALPHABET[mod] + result;
@@ -33,7 +33,7 @@ function base58Encode(bytes: Uint8Array): string {
 
   // Preserve leading zeros
   for (const b of bytes) {
-    if (b === 0) result = '1' + result;
+    if (b === 0) result = "1" + result;
     else break;
   }
 
@@ -49,7 +49,7 @@ function base58Decode(str: string): Uint8Array {
   }
 
   // Convert BigInt to byte array
-  const hex = num.toString(16).padStart(64, '0'); // 256 bits = 64 hex chars
+  const hex = num.toString(16).padStart(64, "0"); // 256 bits = 64 hex chars
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < bytes.length; i++) {
     bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16) ?? 0;
@@ -61,7 +61,7 @@ function base58Decode(str: string): Uint8Array {
 // ─── Uint8 ↔ Base64 ─────────────────────────────────────────────────
 
 function uint8ToBase64(bytes: Uint8Array): string {
-  let binary = '';
+  let binary = "";
   for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCodePoint(bytes[i]);
   }
@@ -82,27 +82,24 @@ function base64ToUint8(b64: string): Uint8Array {
 /** Generate a new 256-bit AES-GCM key. */
 export async function generateKey(): Promise<CryptoKey> {
   return crypto.subtle.generateKey(
-    { name: 'AES-GCM', length: 256 },
+    { name: "AES-GCM", length: 256 },
     true, // extractable for export/transfer
-    ['encrypt', 'decrypt']
+    ["encrypt", "decrypt"],
   );
 }
 
 /** Export key to raw bytes. */
 export async function exportKeyRaw(key: CryptoKey): Promise<Uint8Array> {
-  const buffer = await crypto.subtle.exportKey('raw', key);
+  const buffer = await crypto.subtle.exportKey("raw", key);
   return new Uint8Array(buffer);
 }
 
 /** Import key from raw bytes. */
 export async function importKeyRaw(raw: Uint8Array): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
-    'raw',
-    raw.buffer as ArrayBuffer,
-    { name: 'AES-GCM' },
-    true,
-    ['encrypt', 'decrypt']
-  );
+  return crypto.subtle.importKey("raw", raw.buffer as ArrayBuffer, { name: "AES-GCM" }, true, [
+    "encrypt",
+    "decrypt",
+  ]);
 }
 
 /** Export key as a base58 string (~43 chars, human-transferable). */
@@ -122,10 +119,7 @@ export async function passphraseToKey(passphrase: string): Promise<CryptoKey> {
  * @param baseUrl - e.g. "https://yourapp.com/join"
  */
 export function keyToShareUrl(raw: Uint8Array, baseUrl: string): string {
-  const b64url = uint8ToBase64(raw)
-    .replaceAll('+', '-')
-    .replaceAll('/', '_')
-    .replaceAll('=', '');
+  const b64url = uint8ToBase64(raw).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
   return `${baseUrl}#key=${b64url}`;
 }
 
@@ -133,9 +127,9 @@ export function keyToShareUrl(raw: Uint8Array, baseUrl: string): string {
 export function keyFromFragment(hash: string): Uint8Array | null {
   const match = hash.match(/key=([A-Za-z0-9_-]+)/);
   if (!match) return null;
-  const b64 = match[1].replaceAll('-', '+').replaceAll('_', '/');
+  const b64 = match[1].replaceAll("-", "+").replaceAll("_", "/");
   // Pad to multiple of 4
-  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+  const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
   return base64ToUint8(padded);
 }
 
@@ -143,23 +137,16 @@ export function keyFromFragment(hash: string): Uint8Array | null {
 
 export interface EncryptedEnvelope {
   v: number;
-  iv: string;  // base64
-  ct: string;  // base64 (includes GCM auth tag)
+  iv: string; // base64
+  ct: string; // base64 (includes GCM auth tag)
 }
 
 /** Encrypt a single plaintext string. */
-export async function encryptEntry(
-  key: CryptoKey,
-  plaintext: string
-): Promise<string> {
+export async function encryptEntry(key: CryptoKey, plaintext: string): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
   const encoded = new TextEncoder().encode(plaintext);
 
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    key,
-    encoded
-  );
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded);
 
   const envelope: EncryptedEnvelope = {
     v: ENVELOPE_VERSION,
@@ -171,10 +158,7 @@ export async function encryptEntry(
 }
 
 /** Decrypt a single encrypted envelope back to plaintext. */
-export async function decryptEntry(
-  key: CryptoKey,
-  envelopeStr: string
-): Promise<string> {
+export async function decryptEntry(key: CryptoKey, envelopeStr: string): Promise<string> {
   const bytes = await decryptBytes(key, new TextEncoder().encode(envelopeStr));
   return new TextDecoder().decode(bytes);
 }
@@ -183,9 +167,12 @@ export async function decryptEntry(
 export async function encryptBytes(key: CryptoKey, plaintext: Uint8Array): Promise<Uint8Array> {
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
   const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
+    { name: "AES-GCM", iv },
     key,
-    plaintext.buffer.slice(plaintext.byteOffset, plaintext.byteOffset + plaintext.byteLength) as ArrayBuffer,
+    plaintext.buffer.slice(
+      plaintext.byteOffset,
+      plaintext.byteOffset + plaintext.byteLength,
+    ) as ArrayBuffer,
   );
 
   const envelope: EncryptedEnvelope = {
@@ -208,7 +195,7 @@ export async function decryptBytes(key: CryptoKey, envelopeBytes: Uint8Array): P
   const ct = base64ToUint8(envelope.ct);
 
   const decrypted = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: iv.buffer as ArrayBuffer },
+    { name: "AES-GCM", iv: iv.buffer as ArrayBuffer },
     key,
     ct.buffer.slice(ct.byteOffset, ct.byteOffset + ct.byteLength) as ArrayBuffer,
   );
@@ -224,7 +211,7 @@ export async function decryptBytes(key: CryptoKey, envelopeBytes: Uint8Array): P
  */
 export async function encryptNdjson(key: CryptoKey, lines: string[]): Promise<string> {
   const encryptedLines = await Promise.all(lines.map((line) => encryptEntry(key, line)));
-  return encryptedLines.join('\n');
+  return encryptedLines.join("\n");
 }
 
 /**
@@ -233,19 +220,24 @@ export async function encryptNdjson(key: CryptoKey, lines: string[]): Promise<st
  * Invalid or corrupted lines are returned as `null` instead of throwing so the
  * caller can recover as much of the stream as possible.
  */
-export async function decryptNdjson(key: CryptoKey, content: string): Promise<Array<string | null>> {
+export async function decryptNdjson(
+  key: CryptoKey,
+  content: string,
+): Promise<Array<string | null>> {
   const lines = content
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 
-  return Promise.all(lines.map(async (line) => {
-    try {
-      return await decryptEntry(key, line);
-    } catch {
-      return null;
-    }
-  }));
+  return Promise.all(
+    lines.map(async (line) => {
+      try {
+        return await decryptEntry(key, line);
+      } catch {
+        return null;
+      }
+    }),
+  );
 }
 
 /** Quick verification: try decrypting a single line to confirm key is correct. */

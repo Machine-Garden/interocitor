@@ -38,14 +38,14 @@ export function uuidv7(): string {
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
 
   // Format as UUID string
-  const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   return [
     hex.slice(0, 8),
     hex.slice(8, 12),
     hex.slice(12, 16),
     hex.slice(16, 20),
     hex.slice(20, 32),
-  ].join('-');
+  ].join("-");
 }
 
 // ─── Device IDs ──────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 
 /** Validate a device ID (must be UUIDv7). */
 export function isValidDeviceId(id: unknown): id is string {
-  return typeof id === 'string' && UUID_RE.test(id);
+  return typeof id === "string" && UUID_RE.test(id);
 }
 
 // ─── Mesh / Team IDs ─────────────────────────────────────────────────
@@ -92,8 +92,8 @@ export async function issueMeshId(secret: CryptoKey): Promise<string> {
  * @param secret — same HMAC key used to issue
  */
 export async function isValidMeshId(id: unknown, secret: CryptoKey): Promise<boolean> {
-  if (typeof id !== 'string') return false;
-  const dot = id.lastIndexOf('.');
+  if (typeof id !== "string") return false;
+  const dot = id.lastIndexOf(".");
   if (dot === -1) return false;
   const uuid = id.slice(0, dot);
   const tag = id.slice(dot + 1);
@@ -106,7 +106,7 @@ export async function isValidMeshId(id: unknown, secret: CryptoKey): Promise<boo
  * Parse a mesh ID into its parts. Does NOT verify tag.
  */
 export function parseMeshId(id: string): { uuid: string; tag: string } | null {
-  const dot = id.lastIndexOf('.');
+  const dot = id.lastIndexOf(".");
   if (dot === -1) return null;
   const uuid = id.slice(0, dot);
   const tag = id.slice(dot + 1);
@@ -118,11 +118,7 @@ export function parseMeshId(id: string): { uuid: string; tag: string } | null {
  * Create a mesh HMAC secret key for use with issueMeshId / isValidMeshId.
  */
 export async function createMeshSecret(): Promise<CryptoKey> {
-  return crypto.subtle.generateKey(
-    { name: 'HMAC', hash: 'SHA-256' },
-    true,
-    ['sign', 'verify'],
-  );
+  return crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, true, ["sign", "verify"]);
 }
 
 // ─── Internal helpers ────────────────────────────────────────────────
@@ -130,16 +126,16 @@ export async function createMeshSecret(): Promise<CryptoKey> {
 const encoder = new TextEncoder();
 
 async function computeTag(data: string, secret: CryptoKey): Promise<string> {
-  const sig = await crypto.subtle.sign('HMAC', secret, encoder.encode(data));
+  const sig = await crypto.subtle.sign("HMAC", secret, encoder.encode(data));
   // Take first 8 bytes (64 bits) → base64url (11 chars)
   const bytes = new Uint8Array(sig, 0, 8);
   return base64url(bytes);
 }
 
 function base64url(bytes: Uint8Array): string {
-  let binary = '';
+  let binary = "";
   for (let i = 0; i < bytes.length; i++) binary += String.fromCodePoint(bytes[i]!);
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
 /** Constant-time string comparison to prevent timing attacks on tag. */

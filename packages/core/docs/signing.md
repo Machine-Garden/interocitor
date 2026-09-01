@@ -1,6 +1,6 @@
 # Signing (identity without identity)
 
-Signing proves *who* produced a record and that it was *not altered* — without
+Signing proves _who_ produced a record and that it was _not altered_ — without
 accounts, login, or a central authority. A private key signs; the matching
 public key verifies. Anyone can hold the public key and **check** a signature,
 but only the private-key holder can **make** one.
@@ -13,7 +13,7 @@ key, not a server, so the mesh stays peer-to-peer and offline-first.
 
 Signing is separate from the mesh key (symmetric AES-GCM, confidentiality) and
 from the pairing channel (ECDH key agreement). Signed payloads are **not
-secret** — they are *trustworthy*. Anyone holding the public key can read and
+secret** — they are _trustworthy_. Anyone holding the public key can read and
 verify them.
 
 - Algorithm: **ECDSA P-256 / SHA-256** (ES256), fixed. No algorithm
@@ -26,13 +26,15 @@ verify them.
 ```ts
 import {
   generateSigningKeypair,
-  exportPublicKey, importPublicKey,
-  exportPrivateKey, importPrivateKey,
-} from '@interocitor/core/crypto/signing';
+  exportPublicKey,
+  importPublicKey,
+  exportPrivateKey,
+  importPrivateKey,
+} from "@interocitor/core/crypto/signing";
 
 const { privateKey, publicKey } = await generateSigningKeypair();
 
-const pub = await exportPublicKey(publicKey);   // base64url SPKI — safe to publish
+const pub = await exportPublicKey(publicKey); // base64url SPKI — safe to publish
 const priv = await exportPrivateKey(privateKey); // base64url PKCS#8 — keep secret
 ```
 
@@ -47,10 +49,10 @@ biometric or passkey confirmation.
 ## Raw bytes
 
 ```ts
-import { sign, verify } from '@interocitor/core/crypto/signing';
+import { sign, verify } from "@interocitor/core/crypto/signing";
 
-const data = new TextEncoder().encode('chore-42:approved');
-const signature = await sign(privateKey, data);     // base64url, P-1363 r||s
+const data = new TextEncoder().encode("chore-42:approved");
+const signature = await sign(privateKey, data); // base64url, P-1363 r||s
 const ok = await verify(publicKey, data, signature); // boolean
 ```
 
@@ -63,10 +65,10 @@ are exactly the encoded-claims segment — there is no JOSE header to tamper
 with, and the algorithm is never read from the token.
 
 ```ts
-import { signToken, verifyToken } from '@interocitor/core/crypto/signing';
+import { signToken, verifyToken } from "@interocitor/core/crypto/signing";
 
 // Parent signs an approval record. Claims are any JSON your app controls.
-const token = await signToken(privateKey, { task: 'chore-42', status: 'approved' });
+const token = await signToken(privateKey, { task: "chore-42", status: "approved" });
 
 const record = await verifyToken(publicKey, token);
 // → { iat, task: 'chore-42', status: 'approved' }  or  null
@@ -85,7 +87,7 @@ const record = await verifyToken(publicKey, token);
 Use signing whenever some records must be **trusted to a specific author** even
 though every device can write to the mesh: a parent approving a chore, a
 moderator marking a post resolved, a device attesting "I produced this." The
-verifier trusts the *key*, not a login.
+verifier trusts the _key_, not a login.
 
 Pick the right tool for the goal:
 
@@ -97,6 +99,6 @@ Pick the right tool for the goal:
   with the pairing channel's ECDH primitives
   ([Shared key scenarios](shared-key-scenarios.md)).
 
-Signing and sealing compose: a parent can sign a record *and* seal an
+Signing and sealing compose: a parent can sign a record _and_ seal an
 attachment, so it is both forgery-proof and readable only by the intended
 group.

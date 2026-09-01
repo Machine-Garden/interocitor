@@ -1,8 +1,4 @@
-import type {
-  ChangeEntry,
-  Row,
-  WhereClause,
-} from '../core/types.ts';
+import type { ChangeEntry, Row, WhereClause } from "../core/types.ts";
 
 /**
  * Contract every local persistence implementation must satisfy.

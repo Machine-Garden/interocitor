@@ -12,12 +12,13 @@ export interface CreateRowIdOptions {
 function randomHex(bytes: number): string {
   const buf = new Uint8Array(bytes);
   crypto.getRandomValues(buf);
-  return Array.from(buf, b => b.toString(16).padStart(2, '0')).join('');
+  return Array.from(buf, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 export function createRowId(options: CreateRowIdOptions = {}): string {
-  const base = typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `${randomHex(8)}-${randomHex(4)}-${randomHex(4)}-${randomHex(4)}-${randomHex(12)}`;
+  const base =
+    typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${randomHex(8)}-${randomHex(4)}-${randomHex(4)}-${randomHex(4)}-${randomHex(12)}`;
   return options.prefix ? `${options.prefix}_${base}` : base;
 }

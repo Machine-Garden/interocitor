@@ -7,13 +7,13 @@
  * receipt interpretation and persistence here.
  */
 
-import type { ChangeEntry, LocalStore } from './types.ts';
-import { hlcCompareStr, hlcParse } from './hlc.ts';
+import type { ChangeEntry, LocalStore } from "./types.ts";
+import { hlcCompareStr, hlcParse } from "./hlc.ts";
 
-const OBSERVATION_META_KEY = 'changeObservation';
+const OBSERVATION_META_KEY = "changeObservation";
 
-type ObservationStore = Pick<LocalStore, 'getMeta' | 'setMeta' | 'withLock'>;
-type ClearableObservationStore = ObservationStore & Pick<LocalStore, 'clearAll'>;
+type ObservationStore = Pick<LocalStore, "getMeta" | "setMeta" | "withLock">;
+type ClearableObservationStore = ObservationStore & Pick<LocalStore, "clearAll">;
 type WriterFrontiers = Record<string, string>;
 interface StoredObservationState {
   generation: number;
@@ -23,19 +23,25 @@ interface StoredObservationState {
 }
 const fallbackObservationWriteTails = new WeakMap<object, Promise<void>>();
 
-async function withObservationWrite<T>(local: ObservationStore, operation: () => Promise<T>): Promise<T> {
-  if (typeof local.withLock === 'function') return local.withLock('change-observation', operation);
+async function withObservationWrite<T>(
+  local: ObservationStore,
+  operation: () => Promise<T>,
+): Promise<T> {
+  if (typeof local.withLock === "function") return local.withLock("change-observation", operation);
   const store = local as object;
   const previous = fallbackObservationWriteTails.get(store) ?? Promise.resolve();
   let release!: () => void;
-  const current = new Promise<void>((resolve) => { release = resolve; });
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   fallbackObservationWriteTails.set(store, current);
   await previous.catch(() => {});
   try {
     return await operation();
   } finally {
     release();
-    if (fallbackObservationWriteTails.get(store) === current) fallbackObservationWriteTails.delete(store);
+    if (fallbackObservationWriteTails.get(store) === current)
+      fallbackObservationWriteTails.delete(store);
   }
 }
 
@@ -43,43 +49,45 @@ export interface LateChangeObservation {
   writerId: string;
   changeHlc: string;
   fileName: string;
-  relation: 'behind-global-high-water' | 'behind-writer-frontier';
+  relation: "behind-global-high-water" | "behind-writer-frontier";
   writerFrontierHlc?: string;
   legacyGlobalHighWaterHlc?: string;
 }
 
 function parseSeenChangeFiles(value: unknown): Set<string> | null {
-  if (!Array.isArray(value) || value.some((name) => typeof name !== 'string')) return null;
+  if (!Array.isArray(value) || value.some((name) => typeof name !== "string")) return null;
   return new Set(value);
 }
 
 function parseWriterFrontiers(value: unknown): WriterFrontiers {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const frontiers: WriterFrontiers = {};
   for (const [writerId, hlc] of Object.entries(value)) {
-    if (typeof hlc === 'string' && hlc) frontiers[writerId] = hlc;
+    if (typeof hlc === "string" && hlc) frontiers[writerId] = hlc;
   }
   return frontiers;
 }
 
 function parseObservationState(value: unknown): StoredObservationState | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const candidate = value as Partial<StoredObservationState>;
   const seenChangeFiles = parseSeenChangeFiles(candidate.seenChangeFiles);
   if (!seenChangeFiles) return null;
   return {
-    generation: typeof candidate.generation === 'number' && Number.isFinite(candidate.generation)
-      ? candidate.generation
-      : 0,
-    globalHighWaterHlc: typeof candidate.globalHighWaterHlc === 'string'
-      ? candidate.globalHighWaterHlc
-      : '',
+    generation:
+      typeof candidate.generation === "number" && Number.isFinite(candidate.generation)
+        ? candidate.generation
+        : 0,
+    globalHighWaterHlc:
+      typeof candidate.globalHighWaterHlc === "string" ? candidate.globalHighWaterHlc : "",
     seenChangeFiles: [...seenChangeFiles],
     writerFrontiers: parseWriterFrontiers(candidate.writerFrontiers),
   };
 }
 
-async function readObservationState(local: ObservationStore): Promise<StoredObservationState | null> {
+async function readObservationState(
+  local: ObservationStore,
+): Promise<StoredObservationState | null> {
   return parseObservationState(await local.getMeta(OBSERVATION_META_KEY));
 }
 
@@ -87,12 +95,12 @@ async function observationGeneration(local: ObservationStore): Promise<number> {
   return (await readObservationState(local))?.generation ?? 0;
 }
 
-export function changeFileName(entry: Pick<ChangeEntry, 'hlc' | 'id'>): string {
+export function changeFileName(entry: Pick<ChangeEntry, "hlc" | "id">): string {
   return `${entry.hlc}-${entry.id}.json`;
 }
 
 export function changeFileHlc(name: string): string | null {
-  const marker = name.lastIndexOf('-chg_');
+  const marker = name.lastIndexOf("-chg_");
   return marker === -1 ? null : name.slice(0, marker);
 }
 
@@ -125,7 +133,7 @@ export class ChangeObservationLedger {
   private static async loadUnlocked(local: ObservationStore): Promise<ChangeObservationLedger> {
     const stored = await readObservationState(local);
     return new ChangeObservationLedger(
-      stored?.globalHighWaterHlc ?? '',
+      stored?.globalHighWaterHlc ?? "",
       new Set(stored?.seenChangeFiles ?? []),
       stored?.writerFrontiers ?? {},
       stored !== null,
@@ -139,10 +147,10 @@ export class ChangeObservationLedger {
 
   static async reset(local: ObservationStore): Promise<void> {
     await withObservationWrite(local, async () => {
-      const generation = await observationGeneration(local) + 1;
+      const generation = (await observationGeneration(local)) + 1;
       await local.setMeta(OBSERVATION_META_KEY, {
         generation,
-        globalHighWaterHlc: '',
+        globalHighWaterHlc: "",
         seenChangeFiles: [],
         writerFrontiers: {},
       } satisfies StoredObservationState);
@@ -151,11 +159,11 @@ export class ChangeObservationLedger {
 
   static async clearAll(local: ClearableObservationStore): Promise<void> {
     await withObservationWrite(local, async () => {
-      const generation = await observationGeneration(local) + 1;
+      const generation = (await observationGeneration(local)) + 1;
       await local.clearAll();
       await local.setMeta(OBSERVATION_META_KEY, {
         generation,
-        globalHighWaterHlc: '',
+        globalHighWaterHlc: "",
         seenChangeFiles: [],
         writerFrontiers: {},
       } satisfies StoredObservationState);
@@ -191,8 +199,12 @@ export class ChangeObservationLedger {
 
     const writerId = hlcParse(fileHlc).nodeId;
     const writerFrontierHlc = this.writerFrontiers[writerId];
-    const behindWriterFrontier = writerFrontierHlc ? hlcCompareStr(fileHlc, writerFrontierHlc) <= 0 : false;
-    const behindGlobalHighWater = this.globalHighWaterHlc ? hlcCompareStr(fileHlc, this.globalHighWaterHlc) <= 0 : false;
+    const behindWriterFrontier = writerFrontierHlc
+      ? hlcCompareStr(fileHlc, writerFrontierHlc) <= 0
+      : false;
+    const behindGlobalHighWater = this.globalHighWaterHlc
+      ? hlcCompareStr(fileHlc, this.globalHighWaterHlc) <= 0
+      : false;
 
     const lateChange =
       this.hasExactObservationHistory && (behindWriterFrontier || behindGlobalHighWater)
@@ -200,7 +212,9 @@ export class ChangeObservationLedger {
             writerId,
             changeHlc: fileHlc,
             fileName,
-            relation: behindWriterFrontier ? ('behind-writer-frontier' as const) : ('behind-global-high-water' as const),
+            relation: behindWriterFrontier
+              ? ("behind-writer-frontier" as const)
+              : ("behind-global-high-water" as const),
             writerFrontierHlc,
             legacyGlobalHighWaterHlc: this.globalHighWaterHlc || undefined,
           }
@@ -219,7 +233,7 @@ export class ChangeObservationLedger {
   async persist(local: ObservationStore): Promise<boolean> {
     return withObservationWrite(local, async () => {
       // A reset or snapshot restore supersedes ledgers loaded before it.
-      if (this.generation !== await observationGeneration(local)) return false;
+      if (this.generation !== (await observationGeneration(local))) return false;
       // Pull and flush may overlap. Merge the latest durable state while
       // holding the one per-store writer gate so neither can erase receipts
       // committed by the other.
@@ -231,7 +245,11 @@ export class ChangeObservationLedger {
           this.writerFrontiers[writerId] = frontier;
         }
       }
-      if (durable.globalHighWaterHlc && (!this.globalHighWaterHlc || hlcCompareStr(durable.globalHighWaterHlc, this.globalHighWaterHlc) > 0)) {
+      if (
+        durable.globalHighWaterHlc &&
+        (!this.globalHighWaterHlc ||
+          hlcCompareStr(durable.globalHighWaterHlc, this.globalHighWaterHlc) > 0)
+      ) {
         this.globalHighWaterHlc = durable.globalHighWaterHlc;
       }
 
@@ -245,9 +263,14 @@ export class ChangeObservationLedger {
     });
   }
 
-  static async restoreSnapshot(local: ObservationStore, snapshotHlc: string, coveredChangeFiles: readonly string[], replaceLocalState: () => Promise<void> = async () => {}): Promise<void> {
+  static async restoreSnapshot(
+    local: ObservationStore,
+    snapshotHlc: string,
+    coveredChangeFiles: readonly string[],
+    replaceLocalState: () => Promise<void> = async () => {},
+  ): Promise<void> {
     await withObservationWrite(local, async () => {
-      const generation = await observationGeneration(local) + 1;
+      const generation = (await observationGeneration(local)) + 1;
       await replaceLocalState();
       const ledger = new ChangeObservationLedger(snapshotHlc, new Set(), {}, true, generation);
       for (const fileName of coveredChangeFiles) {
@@ -268,13 +291,16 @@ export class ChangeObservationLedger {
   }
 }
 
-export async function recordFlushedChanges(local: ObservationStore, entries: readonly ChangeEntry[]): Promise<void> {
+export async function recordFlushedChanges(
+  local: ObservationStore,
+  entries: readonly ChangeEntry[],
+): Promise<void> {
   const ledger = await ChangeObservationLedger.load(local);
   for (const entry of entries) {
     if (!entry.hlc) continue;
     ledger.observe(changeFileName(entry), entry.hlc);
   }
   if (!(await ledger.persist(local))) {
-    throw new Error('Observation state changed before publication; retry the flush');
+    throw new Error("Observation state changed before publication; retry the flush");
   }
 }

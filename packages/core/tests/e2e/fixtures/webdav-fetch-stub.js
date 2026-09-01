@@ -1,4 +1,4 @@
-const PREFIX = '/__webdav__';
+const PREFIX = "/__webdav__";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -12,19 +12,19 @@ function toHttpDate(iso) {
 
 function encodePath(path) {
   return path
-    .split('/')
+    .split("/")
     .filter(Boolean)
-    .map(segment => encodeURIComponent(segment))
-    .join('/');
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
 }
 
 function escapeXml(value) {
   return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;');
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
 }
 
 function parseDavPath(input) {
@@ -33,11 +33,10 @@ function parseDavPath(input) {
     return null;
   }
 
-  const raw = url.pathname.slice(PREFIX.length) || '/';
-  const normalized = `/${raw}`.replaceAll(/\/+/g, '/');
-  const clean = normalized.length > 1 && normalized.endsWith('/')
-    ? normalized.slice(0, -1)
-    : normalized;
+  const raw = url.pathname.slice(PREFIX.length) || "/";
+  const normalized = `/${raw}`.replaceAll(/\/+/g, "/");
+  const clean =
+    normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
 
   return decodeURIComponent(clean);
 }
@@ -45,13 +44,13 @@ function parseDavPath(input) {
 function makePropfindResponse(entries) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <d:multistatus xmlns:d="DAV:">
-${entries.join('\n')}
+${entries.join("\n")}
 </d:multistatus>`;
 }
 
 function makeResponseNode({ href, size, modifiedIso, etag, isCollection }) {
-  const resourceType = isCollection ? '<d:collection/>' : '';
-  const contentLength = isCollection ? '' : `<d:getcontentlength>${size}</d:getcontentlength>`;
+  const resourceType = isCollection ? "<d:collection/>" : "";
+  const contentLength = isCollection ? "" : `<d:getcontentlength>${size}</d:getcontentlength>`;
   return `<d:response>
   <d:href>${escapeXml(href)}</d:href>
   <d:propstat>
@@ -59,7 +58,7 @@ function makeResponseNode({ href, size, modifiedIso, etag, isCollection }) {
       ${contentLength}
       <d:getlastmodified>${escapeXml(toHttpDate(modifiedIso))}</d:getlastmodified>
       <d:resourcetype>${resourceType}</d:resourcetype>
-      <d:getetag>${escapeXml(etag || '')}</d:getetag>
+      <d:getetag>${escapeXml(etag || "")}</d:getetag>
     </d:prop>
     <d:status>HTTP/1.1 200 OK</d:status>
   </d:propstat>
@@ -68,7 +67,7 @@ function makeResponseNode({ href, size, modifiedIso, etag, isCollection }) {
 
 function createStore() {
   const files = new Map();
-  const folders = new Set(['/']);
+  const folders = new Set(["/"]);
   let forceUnauthorized = false;
   const requestCounts = new Map();
 
@@ -91,7 +90,7 @@ function createStore() {
     resetCloud() {
       files.clear();
       folders.clear();
-      folders.add('/');
+      folders.add("/");
       forceUnauthorized = false;
       resetRequestCounts();
     },
@@ -100,10 +99,10 @@ function createStore() {
     },
     async resetIndexedDb() {
       await new Promise((resolve, reject) => {
-        const req = indexedDB.deleteDatabase('interocitor');
+        const req = indexedDB.deleteDatabase("interocitor");
         req.onsuccess = () => resolve();
         req.onerror = () => reject(req.error);
-        req.onblocked = () => reject(new Error('IndexedDB delete blocked'));
+        req.onblocked = () => reject(new Error("IndexedDB delete blocked"));
       });
     },
     dumpFiles() {
@@ -117,24 +116,25 @@ function createStore() {
       return files.has(path);
     },
     async fetch(input, init = {}) {
-      const method = (init.method || 'GET').toUpperCase();
-      const path = parseDavPath(typeof input === 'string' ? input : input.url);
+      const method = (init.method || "GET").toUpperCase();
+      const path = parseDavPath(typeof input === "string" ? input : input.url);
       if (!path) {
         return fetch(input, init);
       }
 
       if (forceUnauthorized) {
-        return new Response('', { status: 401 });
+        return new Response("", { status: 401 });
       }
 
       bump(method, path);
 
-      if (method === 'PROPFIND') {
-        const depth = init.headers && typeof init.headers === 'object'
-          ? (init.headers.Depth || init.headers.depth || '0')
-          : '0';
+      if (method === "PROPFIND") {
+        const depth =
+          init.headers && typeof init.headers === "object"
+            ? init.headers.Depth || init.headers.depth || "0"
+            : "0";
 
-        if (depth === '0') {
+        if (depth === "0") {
           if (folders.has(path)) {
             const href = `${PREFIX}/${encodePath(path)}/`;
             const body = makePropfindResponse([
@@ -142,7 +142,7 @@ function createStore() {
                 href,
                 size: 0,
                 modifiedIso: nowIso(),
-                etag: '',
+                etag: "",
                 isCollection: true,
               }),
             ]);
@@ -150,7 +150,7 @@ function createStore() {
           }
 
           const file = files.get(path);
-          if (!file) return new Response('', { status: 404 });
+          if (!file) return new Response("", { status: 404 });
 
           const href = `${PREFIX}/${encodePath(path)}`;
           const body = makePropfindResponse([
@@ -166,7 +166,7 @@ function createStore() {
         }
 
         if (!folders.has(path)) {
-          return new Response('', { status: 404 });
+          return new Response("", { status: 404 });
         }
 
         const baseHref = `${PREFIX}/${encodePath(path)}/`;
@@ -175,7 +175,7 @@ function createStore() {
             href: baseHref,
             size: 0,
             modifiedIso: nowIso(),
-            etag: '',
+            etag: "",
             isCollection: true,
           }),
         ];
@@ -183,52 +183,56 @@ function createStore() {
         for (const [filePath, file] of files) {
           if (!filePath.startsWith(`${path}/`)) continue;
           const remainder = filePath.slice(path.length + 1);
-          if (remainder.includes('/')) continue;
+          if (remainder.includes("/")) continue;
 
-          nodes.push(makeResponseNode({
-            href: `${PREFIX}/${encodePath(filePath)}`,
-            size: file.data.length,
-            modifiedIso: file.modifiedTime,
-            etag: file.etag,
-            isCollection: false,
-          }));
+          nodes.push(
+            makeResponseNode({
+              href: `${PREFIX}/${encodePath(filePath)}`,
+              size: file.data.length,
+              modifiedIso: file.modifiedTime,
+              etag: file.etag,
+              isCollection: false,
+            }),
+          );
         }
 
         // Include immediate child folders as collection entries
         for (const folder of folders) {
           if (!folder.startsWith(`${path}/`)) continue;
           const remainder = folder.slice(path.length + 1);
-          if (!remainder || remainder.includes('/')) continue;
+          if (!remainder || remainder.includes("/")) continue;
 
-          nodes.push(makeResponseNode({
-            href: `${PREFIX}/${encodePath(folder)}/`,
-            size: 0,
-            modifiedIso: nowIso(),
-            etag: '',
-            isCollection: true,
-          }));
+          nodes.push(
+            makeResponseNode({
+              href: `${PREFIX}/${encodePath(folder)}/`,
+              size: 0,
+              modifiedIso: nowIso(),
+              etag: "",
+              isCollection: true,
+            }),
+          );
         }
 
         return new Response(makePropfindResponse(nodes), { status: 207 });
       }
 
-      if (method === 'MKCOL') {
+      if (method === "MKCOL") {
         // Return 201 for already-existing folders (idempotent, not 405).
         // Avoids browser console errors when multiple devices create shared paths.
         if (folders.has(path)) {
-          return new Response('', { status: 201 });
+          return new Response("", { status: 201 });
         }
 
-        const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) || '/' : '/';
+        const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) || "/" : "/";
         if (!folders.has(parent)) {
-          return new Response('', { status: 409 });
+          return new Response("", { status: 409 });
         }
 
         folders.add(path);
-        return new Response('', { status: 201 });
+        return new Response("", { status: 201 });
       }
 
-      if (method === 'PUT') {
+      if (method === "PUT") {
         const body = init.body;
         let bytes;
 
@@ -236,10 +240,10 @@ function createStore() {
           bytes = body;
         } else if (body instanceof ArrayBuffer) {
           bytes = new Uint8Array(body);
-        } else if (typeof body === 'string') {
+        } else if (typeof body === "string") {
           bytes = encoder.encode(body);
         } else {
-          const text = body === null || body === undefined ? '' : String(body);
+          const text = body === null || body === undefined ? "" : String(body);
           bytes = encoder.encode(text);
         }
 
@@ -252,13 +256,13 @@ function createStore() {
         return new Response(null, { status: existed ? 204 : 201 });
       }
 
-      if (method === 'GET') {
+      if (method === "GET") {
         const file = files.get(path);
-        if (!file) return new Response('', { status: 404 });
+        if (!file) return new Response("", { status: 404 });
         return new Response(file.data, { status: 200 });
       }
 
-      if (method === 'DELETE') {
+      if (method === "DELETE") {
         // File deletion
         if (files.delete(path)) {
           return new Response(null, { status: 204 });
@@ -277,7 +281,7 @@ function createStore() {
         return new Response(null, { status: 404 });
       }
 
-      return new Response('', { status: 405 });
+      return new Response("", { status: 405 });
     },
   };
 }
@@ -289,12 +293,11 @@ window.__webdavMock = {
   resetCloud: () => store.resetCloud(),
   resetRequestCounts: () => store.resetRequestCounts(),
   dumpRequestCounts: () => store.dumpRequestCounts(),
-  setUnauthorized: enabled => store.setUnauthorized(enabled),
+  setUnauthorized: (enabled) => store.setUnauthorized(enabled),
   resetIndexedDb: () => store.resetIndexedDb(),
   dumpFiles: () => store.dumpFiles(),
-  hasFile: path => store.hasFile(path),
+  hasFile: (path) => store.hasFile(path),
   originalFetch,
 };
 
 window.fetch = (input, init) => store.fetch(input, init);
-

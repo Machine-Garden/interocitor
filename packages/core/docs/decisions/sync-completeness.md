@@ -55,7 +55,7 @@ lifecycle:
 | Exact receipts, frontiers, filename parsing, and late-change classification | `src/core/change-observation.ts` | pull, primary flush, connect fast path, compaction, rehydrate |
 | Conflict ordering and equal-HLC validation                                  | `src/core/crdt.ts`               | local and remote row application                              |
 | Authoritative publication and receipt recording                             | `src/core/flush.ts`              | sync-engine flush orchestration                               |
-| Snapshot coverage and restore                                              | `src/core/compaction.ts`         | sync-engine maintenance orchestration                         |
+| Snapshot coverage and restore                                               | `src/core/compaction.ts`         | sync-engine maintenance orchestration                         |
 | Remote decode and merge pipeline                                            | `src/core/pull.ts`               | sync-engine pull orchestration                                |
 
 `sync-engine.ts` does not parse observation metadata or construct change

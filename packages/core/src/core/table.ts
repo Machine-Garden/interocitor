@@ -7,12 +7,12 @@
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-import type { Interocitor } from './sync-engine.ts';
+import type { Interocitor } from "./sync-engine.ts";
 
 // Use a loose engine reference so Table<T> doesn't need to know S
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyEngine = Interocitor<any>;
-import type { Row, TableEventListener } from './types.ts';
+import type { Row, TableEventListener } from "./types.ts";
 import type {
   QueryDescriptor,
   QueryExecutionOptions,
@@ -21,8 +21,8 @@ import type {
   RowDescriptor,
   WhereClause,
   WherePrimitive,
-} from './types.ts';
-import { createRowId } from './row-id.ts';
+} from "./types.ts";
+import { createRowId } from "./row-id.ts";
 
 /**
  * Thenable result of an async query.
@@ -52,9 +52,7 @@ export class QueryResult<T extends Record<string, unknown>> implements PromiseLi
     private readonly _explicitPromise: Promise<T[]> | null = null,
   ) {
     this.descriptor = descriptor;
-    this.cacheKey = _engine
-      ? _engine.getQueryCacheKey(descriptor)
-      : computeCacheKey(descriptor);
+    this.cacheKey = _engine ? _engine.getQueryCacheKey(descriptor) : computeCacheKey(descriptor);
   }
 
   /** Public metadata. Mirrors `QueryMetadata` shape. */
@@ -67,7 +65,7 @@ export class QueryResult<T extends Record<string, unknown>> implements PromiseLi
    * Pass `{ bypassCache: true }` to ignore cached snapshot and refetch.
    */
   load(options?: QueryExecutionOptions): Promise<T[]> {
-    return this._loadRaw(options).then(rows => this._applySort(rows));
+    return this._loadRaw(options).then((rows) => this._applySort(rows));
   }
 
   /**
@@ -95,8 +93,8 @@ export class QueryResult<T extends Record<string, unknown>> implements PromiseLi
    * Sync status read for cache consumers (e.g. React bindings). Mirrors the
    * cache snapshot status without exposing engine internals.
    */
-  peekStatus(): { status: 'empty' | 'pending' | 'ready' | 'error'; error?: Error } {
-    if (!this._engine) return { status: 'empty' };
+  peekStatus(): { status: "empty" | "pending" | "ready" | "error"; error?: Error } {
+    if (!this._engine) return { status: "empty" };
     const snap = this._engine.readQueryCache(this.descriptor);
     return { status: snap.status, error: snap.error };
   }
@@ -109,8 +107,8 @@ export class QueryResult<T extends Record<string, unknown>> implements PromiseLi
    */
   readForRender(policy?: QueryExecutionPolicy): Promise<T[]> | T[] {
     const cached = this.peekCache();
-    if (cached && policy?.mode !== 'bypass-cache') return cached;
-    return this.load({ bypassCache: policy?.mode === 'bypass-cache' });
+    if (cached && policy?.mode !== "bypass-cache") return cached;
+    return this.load({ bypassCache: policy?.mode === "bypass-cache" });
   }
 
   // eslint-disable-next-line unicorn/no-thenable -- QueryResult intentionally supports await/db.table(...).where(...).
@@ -148,33 +146,28 @@ export class QueryResult<T extends Record<string, unknown>> implements PromiseLi
    * The sync `.sort(compareFn)` chain is preserved on top of orderBy for
    * post-load derivations.
    */
-  orderBy<K extends keyof T>(field: K, dir: 'asc' | 'desc' = 'asc'): QueryResult<T> {
+  orderBy<K extends keyof T>(field: K, dir: "asc" | "desc" = "asc"): QueryResult<T> {
     const nextDescriptor: QueryDescriptor = {
       ...this.descriptor,
       orderBy: { field: field as string, dir },
     };
-    return new QueryResult<T>(
-      nextDescriptor,
-      this._engine,
-      this._sortChain,
-      this._explicitPromise,
-    );
+    return new QueryResult<T>(nextDescriptor, this._engine, this._sortChain, this._explicitPromise);
   }
 
   /**
    * Subscribe to changes that affect this query's table.
-   * Returns an unsubscribe function. Currently table-wide; finer-grained
-   * invalidation can be added in core later without changing this contract.
+   * Returns an unsubscribe function. Subscriptions are table-wide; query
+   * filters do not narrow notification delivery.
    */
   subscribe(cb: TableEventListener<T>): () => void {
     if (!this._engine) return () => {};
     const engine = this._engine;
     const tableName = this.descriptor.table;
-    return engine.on(event => {
-      if (event.type === 'change' && event.table === tableName) {
-        cb({ type: 'change', rowId: event.rowId, row: rowToTyped<T>(event.row) });
-      } else if (event.type === 'delete' && event.table === tableName) {
-        cb({ type: 'delete', rowId: event.rowId });
+    return engine.on((event) => {
+      if (event.type === "change" && event.table === tableName) {
+        cb({ type: "change", rowId: event.rowId, row: rowToTyped<T>(event.row) });
+      } else if (event.type === "delete" && event.table === tableName) {
+        cb({ type: "delete", rowId: event.rowId });
       }
     });
   }
@@ -194,7 +187,7 @@ export class QueryResult<T extends Record<string, unknown>> implements PromiseLi
     if (this._projectionInputRef === rawRows && this._projectionOutput !== null) {
       return this._projectionOutput;
     }
-    const typed = rawRows.map(r => rowToTyped<T>(r));
+    const typed = rawRows.map((r) => rowToTyped<T>(r));
     const sorted = this._applySort(typed);
     this._projectionInputRef = rawRows;
     this._projectionOutput = sorted;
@@ -230,23 +223,23 @@ export function computeCacheKey(descriptor: QueryDescriptor): string {
     const c = descriptor.clause;
     parts.push(`w=${c.field}:${c.op}`);
     if (c.value !== undefined) parts.push(`v=${serializePrimitive(c.value)}`);
-    if (c.values !== undefined) parts.push(`vs=${c.values.map(serializePrimitive).join(',')}`);
+    if (c.values !== undefined) parts.push(`vs=${c.values.map(serializePrimitive).join(",")}`);
     if (c.lower !== undefined) parts.push(`l=${serializePrimitive(c.lower)}`);
     if (c.upper !== undefined) parts.push(`u=${serializePrimitive(c.upper)}`);
-    if (c.lowerOpen) parts.push('lo=1');
-    if (c.upperOpen) parts.push('uo=1');
+    if (c.lowerOpen) parts.push("lo=1");
+    if (c.upperOpen) parts.push("uo=1");
   }
   if (descriptor.orderBy) {
     parts.push(`o=${descriptor.orderBy.field}:${descriptor.orderBy.dir}`);
   }
-  return parts.join('|');
+  return parts.join("|");
 }
 
 function serializePrimitive(v: WherePrimitive): string {
   if (v instanceof Date) return `d:${v.getTime()}`;
-  if (typeof v === 'string') return `s:${v}`;
-  if (typeof v === 'number') return `n:${v}`;
-  if (typeof v === 'boolean') return `b:${v ? 1 : 0}`;
+  if (typeof v === "string") return `s:${v}`;
+  if (typeof v === "number") return `n:${v}`;
+  if (typeof v === "boolean") return `b:${v ? 1 : 0}`;
   return `x:${String(v)}`;
 }
 
@@ -300,7 +293,7 @@ export class RowResult<T extends Record<string, unknown>> implements PromiseLike
 
   load(options?: QueryExecutionOptions): Promise<T | undefined> {
     if (!this._engine) return Promise.resolve<T | undefined>(void 0);
-    return this._engine.loadRow(this.descriptor, options).then(r => this._project(r));
+    return this._engine.loadRow(this.descriptor, options).then((r) => this._project(r));
   }
 
   /**
@@ -313,16 +306,16 @@ export class RowResult<T extends Record<string, unknown>> implements PromiseLike
     return this._project(snap.row);
   }
 
-  peekStatus(): { status: 'empty' | 'pending' | 'ready' | 'error'; error?: Error } {
-    if (!this._engine) return { status: 'empty' };
+  peekStatus(): { status: "empty" | "pending" | "ready" | "error"; error?: Error } {
+    if (!this._engine) return { status: "empty" };
     const snap = this._engine.readRowCache(this.descriptor);
     return { status: snap.status, error: snap.error };
   }
 
   readForRender(policy?: QueryExecutionPolicy): Promise<T | undefined> | T | undefined {
     const cached = this.peekCache();
-    if (cached !== undefined && policy?.mode !== 'bypass-cache') return cached;
-    return this.load({ bypassCache: policy?.mode === 'bypass-cache' });
+    if (cached !== undefined && policy?.mode !== "bypass-cache") return cached;
+    return this.load({ bypassCache: policy?.mode === "bypass-cache" });
   }
 
   // eslint-disable-next-line unicorn/no-thenable -- RowResult intentionally supports await/db.table(...).row(...).
@@ -342,11 +335,11 @@ export class RowResult<T extends Record<string, unknown>> implements PromiseLike
     if (!this._engine) return () => {};
     const engine = this._engine;
     const { table, rowId } = this.descriptor;
-    return engine.on(event => {
-      if (event.type === 'change' && event.table === table && event.rowId === rowId) {
-        cb({ type: 'change', rowId: event.rowId, row: rowToTyped<T>(event.row) });
-      } else if (event.type === 'delete' && event.table === table && event.rowId === rowId) {
-        cb({ type: 'delete', rowId: event.rowId });
+    return engine.on((event) => {
+      if (event.type === "change" && event.table === table && event.rowId === rowId) {
+        cb({ type: "change", rowId: event.rowId, row: rowToTyped<T>(event.row) });
+      } else if (event.type === "delete" && event.table === table && event.rowId === rowId) {
+        cb({ type: "delete", rowId: event.rowId });
       }
     });
   }
@@ -412,7 +405,7 @@ export class Table<T extends Record<string, unknown>> {
     return rowToTyped<T>(row);
   }
 
-  /** Back-compat alias for older code paths. */
+  /** Alias of {@link patch}; updates only the supplied fields. */
   async put(rowId: string, data: Partial<T>, userId?: string): Promise<T> {
     return this.patch(rowId, data, userId);
   }
@@ -428,7 +421,7 @@ export class Table<T extends Record<string, unknown>> {
     const existing = await this.engine.loadRow({ table: this.name, rowId });
     const existingPayloadKeys = existing ? Object.keys(existing.payload) : [];
     const nulled = Object.fromEntries(
-      existingPayloadKeys.filter(k => !(k in data)).map(k => [k, null]),
+      existingPayloadKeys.filter((k) => !(k in data)).map((k) => [k, null]),
     );
     const row = await this.engine.put(
       this.name,
@@ -468,11 +461,11 @@ export class Table<T extends Record<string, unknown>> {
    * });
    */
   subscribe(cb: TableEventListener<T>): () => void {
-    return this.engine.on(event => {
-      if (event.type === 'change' && event.table === this.name) {
-        cb({ type: 'change', rowId: event.rowId, row: rowToTyped<T>(event.row) });
-      } else if (event.type === 'delete' && event.table === this.name) {
-        cb({ type: 'delete', rowId: event.rowId });
+    return this.engine.on((event) => {
+      if (event.type === "change" && event.table === this.name) {
+        cb({ type: "change", rowId: event.rowId, row: rowToTyped<T>(event.row) });
+      } else if (event.type === "delete" && event.table === this.name) {
+        cb({ type: "delete", rowId: event.rowId });
       }
     });
   }
@@ -485,29 +478,29 @@ class TableWhere<T extends Record<string, unknown>> {
     private readonly field: string,
   ) {}
 
-  private run(clause: Omit<WhereClause, 'field'>): QueryResult<T> {
+  private run(clause: Omit<WhereClause, "field">): QueryResult<T> {
     const fullClause = { field: this.field, ...clause } as WhereClause;
     return new QueryResult<T>({ table: this.table, clause: fullClause }, this.engine);
   }
 
   equals(value: WherePrimitive): QueryResult<T> {
-    return this.run({ op: 'equals', value });
+    return this.run({ op: "equals", value });
   }
 
   above(value: WherePrimitive): QueryResult<T> {
-    return this.run({ op: 'above', value });
+    return this.run({ op: "above", value });
   }
 
   aboveOrEqual(value: WherePrimitive): QueryResult<T> {
-    return this.run({ op: 'aboveOrEqual', value });
+    return this.run({ op: "aboveOrEqual", value });
   }
 
   below(value: WherePrimitive): QueryResult<T> {
-    return this.run({ op: 'below', value });
+    return this.run({ op: "below", value });
   }
 
   belowOrEqual(value: WherePrimitive): QueryResult<T> {
-    return this.run({ op: 'belowOrEqual', value });
+    return this.run({ op: "belowOrEqual", value });
   }
 
   between(
@@ -516,7 +509,7 @@ class TableWhere<T extends Record<string, unknown>> {
     options?: { lowerOpen?: boolean; upperOpen?: boolean },
   ): QueryResult<T> {
     return this.run({
-      op: 'between',
+      op: "between",
       lower,
       upper,
       lowerOpen: options?.lowerOpen,
@@ -525,10 +518,10 @@ class TableWhere<T extends Record<string, unknown>> {
   }
 
   startsWith(prefix: string): QueryResult<T> {
-    return this.run({ op: 'startsWith', value: prefix });
+    return this.run({ op: "startsWith", value: prefix });
   }
 
   anyOf(values: WherePrimitive[]): QueryResult<T> {
-    return this.run({ op: 'anyOf', values });
+    return this.run({ op: "anyOf", values });
   }
 }

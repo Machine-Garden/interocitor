@@ -34,20 +34,20 @@
  * ```
  */
 
-const ECDSA_PARAMS = { name: 'ECDSA', namedCurve: 'P-256' } as const;
-const SIGN_ALGO = { name: 'ECDSA', hash: 'SHA-256' } as const;
+const ECDSA_PARAMS = { name: "ECDSA", namedCurve: "P-256" } as const;
+const SIGN_ALGO = { name: "ECDSA", hash: "SHA-256" } as const;
 
 // ─── base64url helpers ───────────────────────────────────────────────
 
 function uint8ToB64url(b: Uint8Array): string {
-  let s = '';
+  let s = "";
   for (const byte of b) s += String.fromCodePoint(byte);
-  return btoa(s).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+  return btoa(s).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
 function b64urlToUint8(s: string): Uint8Array {
-  const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4));
-  const b64 = s.replaceAll('-', '+').replaceAll('_', '/') + pad;
+  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
+  const b64 = s.replaceAll("-", "+").replaceAll("_", "/") + pad;
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i += 1) out[i] = bin.codePointAt(i)!;
@@ -63,27 +63,31 @@ function toBuffer(b: Uint8Array): ArrayBuffer {
 /** Generate an ECDSA P-256 signing keypair. The private key is extractable
  *  so it can be exported for backup/custody; keep it secret. */
 export async function generateSigningKeypair(): Promise<CryptoKeyPair> {
-  return crypto.subtle.generateKey(ECDSA_PARAMS, true, ['sign', 'verify']);
+  return crypto.subtle.generateKey(ECDSA_PARAMS, true, ["sign", "verify"]);
 }
 
 /** Export the public key as a base64url SPKI string (safe to publish). */
 export async function exportPublicKey(key: CryptoKey): Promise<string> {
-  return uint8ToB64url(new Uint8Array(await crypto.subtle.exportKey('spki', key)));
+  return uint8ToB64url(new Uint8Array(await crypto.subtle.exportKey("spki", key)));
 }
 
 /** Import a public key from a base64url SPKI string produced by exportPublicKey. */
 export async function importPublicKey(spki: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey('spki', toBuffer(b64urlToUint8(spki)), ECDSA_PARAMS, true, ['verify']);
+  return crypto.subtle.importKey("spki", toBuffer(b64urlToUint8(spki)), ECDSA_PARAMS, true, [
+    "verify",
+  ]);
 }
 
 /** Export the private key as a base64url PKCS#8 string. Treat as a secret. */
 export async function exportPrivateKey(key: CryptoKey): Promise<string> {
-  return uint8ToB64url(new Uint8Array(await crypto.subtle.exportKey('pkcs8', key)));
+  return uint8ToB64url(new Uint8Array(await crypto.subtle.exportKey("pkcs8", key)));
 }
 
 /** Import a private key from a base64url PKCS#8 string produced by exportPrivateKey. */
 export async function importPrivateKey(pkcs8: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey('pkcs8', toBuffer(b64urlToUint8(pkcs8)), ECDSA_PARAMS, true, ['sign']);
+  return crypto.subtle.importKey("pkcs8", toBuffer(b64urlToUint8(pkcs8)), ECDSA_PARAMS, true, [
+    "sign",
+  ]);
 }
 
 // ─── Raw byte signing ────────────────────────────────────────────────
@@ -95,9 +99,18 @@ export async function sign(privateKey: CryptoKey, data: Uint8Array): Promise<str
 }
 
 /** Verify a base64url signature over raw bytes. */
-export async function verify(publicKey: CryptoKey, data: Uint8Array, signature: string): Promise<boolean> {
+export async function verify(
+  publicKey: CryptoKey,
+  data: Uint8Array,
+  signature: string,
+): Promise<boolean> {
   try {
-    return await crypto.subtle.verify(SIGN_ALGO, publicKey, toBuffer(b64urlToUint8(signature)), toBuffer(data));
+    return await crypto.subtle.verify(
+      SIGN_ALGO,
+      publicKey,
+      toBuffer(b64urlToUint8(signature)),
+      toBuffer(data),
+    );
   } catch {
     return false;
   }
@@ -153,7 +166,7 @@ export async function verifyToken(
   token: string,
   options: VerifyTokenOptions = {},
 ): Promise<SignedClaims | null> {
-  const dot = token.indexOf('.');
+  const dot = token.indexOf(".");
   if (dot <= 0 || dot === token.length - 1) return null;
   const encodedClaims = token.slice(0, dot);
   const signature = token.slice(dot + 1);
@@ -169,7 +182,7 @@ export async function verifyToken(
   }
 
   const checkExpiry = options.checkExpiry ?? true;
-  if (checkExpiry && typeof claims.exp === 'number') {
+  if (checkExpiry && typeof claims.exp === "number") {
     const now = Math.floor(Date.now() / 1000);
     if (now > claims.exp + (options.toleranceSeconds ?? 0)) return null;
   }

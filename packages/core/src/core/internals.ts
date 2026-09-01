@@ -33,8 +33,8 @@ export function paths(root: string): CloudPaths {
 
 // ─── Logger ──────────────────────────────────────────────────────────
 
-const LOG_PREFIX = '[interocitor]';
-const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
+const LOG_PREFIX = "[interocitor]";
+const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
 
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
@@ -49,17 +49,16 @@ export function logAtLevel(currentLevel: LogLevel, level: LogLevel, ...args: unk
 }
 
 export function log(level: LogLevel, ...args: unknown[]): void {
-  logAtLevel('debug', level, ...args);
+  logAtLevel("debug", level, ...args);
 }
 
 export function normalizeLogLevel(level: string | null | undefined): LogLevel {
-  return (LOG_LEVELS as readonly string[]).includes(level ?? '') ? (level as LogLevel) : 'info';
+  return (LOG_LEVELS as readonly string[]).includes(level ?? "") ? (level as LogLevel) : "info";
 }
-
 
 // ─── ID generation ───────────────────────────────────────────────────
 
-import { uuidv7 } from './ids.ts';
+import { uuidv7 } from "./ids.ts";
 
 /**
  * Generate a prefixed ID for internal use (change entries, snapshots, etc).
@@ -75,11 +74,13 @@ export const textEncoder: TextEncoder = new TextEncoder();
 export const textDecoder: TextDecoder = new TextDecoder();
 
 function hexFromBytes(bytes: Uint8Array): string {
-  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 export async function computeContentHash(payload: unknown): Promise<string> {
   const json = JSON.stringify(payload);
-  const digest = await crypto.subtle.digest('SHA-256', textEncoder.encode(json));
+  const digest = await crypto.subtle.digest("SHA-256", textEncoder.encode(json));
   return `sha256:${hexFromBytes(new Uint8Array(digest))}`;
 }

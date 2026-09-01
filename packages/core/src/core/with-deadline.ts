@@ -16,22 +16,32 @@ export class ConnectStageTimeoutError extends Error {
   readonly timeoutMs: number;
   constructor(stage: string, timeoutMs: number) {
     super(`Connect stage "${stage}" exceeded ${timeoutMs}ms deadline`);
-    this.name = 'ConnectStageTimeoutError';
+    this.name = "ConnectStageTimeoutError";
     this.stage = stage;
     this.timeoutMs = timeoutMs;
   }
 }
 
-export function withDeadline<T>(stage: string, op: Promise<T> | (() => Promise<T>), timeoutMs: number): Promise<T> {
-  const work = typeof op === 'function' ? (op as () => Promise<T>)() : op;
+export function withDeadline<T>(
+  stage: string,
+  op: Promise<T> | (() => Promise<T>),
+  timeoutMs: number,
+): Promise<T> {
+  const work = typeof op === "function" ? (op as () => Promise<T>)() : op;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return work;
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new ConnectStageTimeoutError(stage, timeoutMs));
     }, timeoutMs);
     work.then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (error) => { clearTimeout(timer); reject(error); },
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
     );
   });
 }

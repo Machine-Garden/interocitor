@@ -115,39 +115,30 @@
  * ```
  */
 
-import type { StorageAdapter } from '../core/types.ts';
-import {
-  encodeQRPayload,
-  buildPairUrl,
-  type HandshakeQRPayload,
-} from './qr.ts';
+import type { StorageAdapter } from "../core/types.ts";
+import { encodeQRPayload, buildPairUrl, type HandshakeQRPayload } from "./qr.ts";
 import {
   createGeneratorSession,
   runScannerHandshake,
   type HandshakeCredentials,
-} from './channel.ts';
+} from "./channel.ts";
 
-export {
-  encodeQRPayload,
-  decodeQRPayload,
-  buildPairUrl,
-  parseQRFromUrl,
-} from './qr.ts';
-export type { HandshakeQRPayload, HandshakeIntent } from './qr.ts';
+export { encodeQRPayload, decodeQRPayload, buildPairUrl, parseQRFromUrl } from "./qr.ts";
+export type { HandshakeQRPayload, HandshakeIntent } from "./qr.ts";
 export {
   generateECDHKeypair,
   exportECDHPublicKey,
   importECDHPublicKey,
   createGeneratorSession,
   runScannerHandshake,
-} from './channel.ts';
-export type { HandshakeCredentials, GeneratorSession } from './channel.ts';
+} from "./channel.ts";
+export type { HandshakeCredentials, GeneratorSession } from "./channel.ts";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
 function generateHandshakeId(): string {
   const b = crypto.getRandomValues(new Uint8Array(12));
-  return Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 }
 
 // ─── generateShareQR ─────────────────────────────────────────────────
@@ -191,15 +182,18 @@ export interface GenerateShareQRResult {
  * Generate a "share" QR code. Call this on a device that already belongs
  * to a mesh and wants to invite another device.
  */
-export async function generateShareQR(options: GenerateShareQROptions): Promise<GenerateShareQRResult> {
-  const { adapter, relayBase, remotePath, passphrase, pairBaseUrl, pollIntervalMs, timeoutMs } = options;
+export async function generateShareQR(
+  options: GenerateShareQROptions,
+): Promise<GenerateShareQRResult> {
+  const { adapter, relayBase, remotePath, passphrase, pairBaseUrl, pollIntervalMs, timeoutMs } =
+    options;
 
   const session = await createGeneratorSession();
   const handshakeId = generateHandshakeId();
 
   const adapterConfig = adapter.getHandshakeConfig?.();
   const qrPayload: HandshakeQRPayload = {
-    intent: 'share',
+    intent: "share",
     handshakeId,
     generatorPub: session.generatorPub,
     ...(adapterConfig !== undefined && { adapterConfig }),
@@ -211,7 +205,10 @@ export async function generateShareQR(options: GenerateShareQROptions): Promise<
     pairUrl: pairBaseUrl ? buildPairUrl(pairBaseUrl, qrPayload) : null,
     async complete() {
       await session.complete(
-        adapter, handshakeId, relayBase, 'share',
+        adapter,
+        handshakeId,
+        relayBase,
+        "share",
         { remotePath, passphrase },
         { pollIntervalMs, timeoutMs },
       );
@@ -256,7 +253,9 @@ export interface GenerateJoinQRResult {
  * but does not yet have credentials. Show this QR to a device that is already
  * in the mesh; that device scans it and pushes credentials.
  */
-export async function generateJoinQR(options: GenerateJoinQROptions): Promise<GenerateJoinQRResult> {
+export async function generateJoinQR(
+  options: GenerateJoinQROptions,
+): Promise<GenerateJoinQRResult> {
   const { adapter, relayBase, pairBaseUrl, pollIntervalMs, timeoutMs } = options;
 
   const session = await createGeneratorSession();
@@ -264,20 +263,25 @@ export async function generateJoinQR(options: GenerateJoinQROptions): Promise<Ge
 
   const adapterConfig = adapter.getHandshakeConfig?.();
   const qrPayload: HandshakeQRPayload = {
-    intent: 'join',
+    intent: "join",
     handshakeId,
     generatorPub: session.generatorPub,
     ...(adapterConfig !== undefined && { adapterConfig }),
   };
 
-  const credentialsPromise = session.complete(
-    adapter, handshakeId, relayBase, 'join',
-    null, // generator doesn't have credentials — it wants them
-    { pollIntervalMs, timeoutMs },
-  ).then(result => {
-    if (!result) throw new Error('join handshake produced no credentials');
-    return result;
-  });
+  const credentialsPromise = session
+    .complete(
+      adapter,
+      handshakeId,
+      relayBase,
+      "join",
+      null, // generator doesn't have credentials — it wants them
+      { pollIntervalMs, timeoutMs },
+    )
+    .then((result) => {
+      if (!result) throw new Error("join handshake produced no credentials");
+      return result;
+    });
 
   return {
     qrPayload,
@@ -299,7 +303,9 @@ export interface HandleScannedQROptions {
    * Runtime-owned adapter factory for QR payloads that include adapterConfig.
    * Core treats the string as opaque.
    */
-  adapterFromConfig?: (adapterConfig: string) => StorageAdapter | null | Promise<StorageAdapter | null>;
+  adapterFromConfig?: (
+    adapterConfig: string,
+  ) => StorageAdapter | null | Promise<StorageAdapter | null>;
   /**
    * Base path on the backend used for relay files.
    * Must match the relayBase used by the generating device.
@@ -325,26 +331,38 @@ export interface HandleScannedQROptions {
  * Returns the received credentials when intent === 'share' (null otherwise,
  * because the scanner already has credentials when intent === 'join').
  */
-export async function handleScannedQR(options: HandleScannedQROptions): Promise<HandshakeCredentials | null> {
-  const { adapter: explicitAdapter, adapterFromConfig, relayBase, payload, ownCredentials, pollIntervalMs, timeoutMs } = options;
-  const adapter = explicitAdapter
-    ?? (payload.adapterConfig && adapterFromConfig ? await adapterFromConfig(payload.adapterConfig) : null);
+export async function handleScannedQR(
+  options: HandleScannedQROptions,
+): Promise<HandshakeCredentials | null> {
+  const {
+    adapter: explicitAdapter,
+    adapterFromConfig,
+    relayBase,
+    payload,
+    ownCredentials,
+    pollIntervalMs,
+    timeoutMs,
+  } = options;
+  const adapter =
+    explicitAdapter ??
+    (payload.adapterConfig && adapterFromConfig
+      ? await adapterFromConfig(payload.adapterConfig)
+      : null);
   if (!adapter) {
-    throw new Error('handleScannedQR: adapter required when payload has no runtime adapter factory');
-  }
-
-  if (payload.intent === 'join' && !ownCredentials) {
     throw new Error(
-      'handleScannedQR: ownCredentials required when scanning a "join" QR ' +
-      '(the scanner must push credentials to the generator)',
+      "handleScannedQR: adapter required when payload has no runtime adapter factory",
     );
   }
 
-  return runScannerHandshake(
-    adapter,
-    payload,
-    ownCredentials ?? null,
-    relayBase,
-    { pollIntervalMs, timeoutMs },
-  );
+  if (payload.intent === "join" && !ownCredentials) {
+    throw new Error(
+      'handleScannedQR: ownCredentials required when scanning a "join" QR ' +
+        "(the scanner must push credentials to the generator)",
+    );
+  }
+
+  return runScannerHandshake(adapter, payload, ownCredentials ?? null, relayBase, {
+    pollIntervalMs,
+    timeoutMs,
+  });
 }

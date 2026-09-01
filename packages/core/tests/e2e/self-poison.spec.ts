@@ -17,14 +17,14 @@
  *      expected shape so observability tools can hook in.
  */
 
-import { expect, test } from '@playwright/test';
+import { expect, test } from "@playwright/test";
 import {
   attachWebDavRouteMock,
   createWebDavRouteState,
   type WebDavRouteState,
-} from './helpers/webdav-route-mock';
+} from "./helpers/webdav-route-mock";
 
-type Page = import('@playwright/test').Page;
+type Page = import("@playwright/test").Page;
 
 async function clearLocalDb(page: Page, dbName: string): Promise<void> {
   await page.evaluate(async (db) => {
@@ -40,45 +40,59 @@ async function clearLocalDb(page: Page, dbName: string): Promise<void> {
 async function clearAllLocalState(page: Page, dbNames: string[]): Promise<void> {
   for (const db of dbNames) await clearLocalDb(page, db);
   await page.evaluate((dbs) => {
-    localStorage.removeItem('interocitor-device-id');
+    localStorage.removeItem("interocitor-device-id");
     for (const db of dbs) localStorage.removeItem(`interocitor-key:${db}`);
   }, dbNames);
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────
 
-test.describe('Mesh self-poison + diagnostics', () => {
-  test('A. observer problem: original creator still decodes its own writes after a peer joins, peer reloads, creator reloads', async ({ browser, baseURL }) => {
+test.describe("Mesh self-poison + diagnostics", () => {
+  test("A. observer problem: original creator still decodes its own writes after a peer joins, peer reloads, creator reloads", async ({
+    browser,
+    baseURL,
+  }) => {
     const cloud: WebDavRouteState = createWebDavRouteState();
     const ctxA = await browser.newContext();
     const ctxB = await browser.newContext();
     try {
-      await attachWebDavRouteMock(ctxA, cloud, '/__dav_obs__');
-      await attachWebDavRouteMock(ctxB, cloud, '/__dav_obs__');
+      await attachWebDavRouteMock(ctxA, cloud, "/__dav_obs__");
+      await attachWebDavRouteMock(ctxB, cloud, "/__dav_obs__");
 
       const pageA = await ctxA.newPage();
       const pageB = await ctxB.newPage();
       const harness = `${baseURL}/packages/core/tests/e2e/fixtures/harness-plain.html`;
       await Promise.all([pageA.goto(harness), pageB.goto(harness)]);
       await Promise.all([
-        clearAllLocalState(pageA, ['observer-mesh']),
-        clearAllLocalState(pageB, ['observer-mesh']),
+        clearAllLocalState(pageA, ["observer-mesh"]),
+        clearAllLocalState(pageB, ["observer-mesh"]),
       ]);
 
       // 1. A creates encrypted mesh, writes, captures passphrase.
       const setup = await pageA.evaluate(async () => {
-        const { Interocitor } = await import('/packages/core/dist/index.js');
-        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
-        const adapter = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_obs__`, auth: { username: 'u', password: 'p' } });
+        const { Interocitor, MemoryLocalStore, PortablePassphraseKeySource } =
+          await import("/packages/core/dist/index.js");
+        const { WebDAVAdapter } = await import("/packages/core/dist/adapters/webdav.js");
+        const adapter = new WebDAVAdapter({
+          baseUrl: `${location.origin}/__dav_obs__`,
+          auth: { username: "u", password: "p" },
+        });
+        const keySource = new PortablePassphraseKeySource();
         const engine = new Interocitor(adapter, {
-          remotePath: '/Observer', dbName: 'observer-mesh', deviceId: 'device_A',
-          encrypted: true, pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+          remotePath: "/Observer",
+          dbName: "observer-mesh",
+          deviceId: "device_A",
+          keySource,
+          localStore: new MemoryLocalStore(),
+          pollInterval: 600_000,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         });
         await engine.init();
         await engine.connect();
-        await engine.put('notes', 'a1', { text: 'created by A' });
+        await engine.put("notes", "a1", { text: "created by A" });
         await engine.flush();
-        const passphrase = engine.getPassphrase();
+        const passphrase = keySource.getPortableKey();
         const meshId = engine.getMeshId();
         await engine.disconnect();
         return { passphrase, meshId };
@@ -86,108 +100,148 @@ test.describe('Mesh self-poison + diagnostics', () => {
 
       // 2. B joins with same passphrase, writes, reloads (disconnect/reconnect).
       const joinB = await pageB.evaluate(async (passArg: string) => {
-        const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
-        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
-        const adapter = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_obs__`, auth: { username: 'u', password: 'p' } });
+        const { Interocitor, MemoryLocalStore, PortablePassphraseKeySource, readColumn } =
+          await import("/packages/core/dist/index.js");
+        const { WebDAVAdapter } = await import("/packages/core/dist/adapters/webdav.js");
+        const adapter = new WebDAVAdapter({
+          baseUrl: `${location.origin}/__dav_obs__`,
+          auth: { username: "u", password: "p" },
+        });
         const engine = new Interocitor(adapter, {
-          remotePath: '/Observer', dbName: 'observer-mesh', deviceId: 'device_B',
-          passphrase: passArg, pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+          remotePath: "/Observer",
+          dbName: "observer-mesh",
+          deviceId: "device_B",
+          keySource: new PortablePassphraseKeySource({ portableKey: passArg }),
+          localStore: new MemoryLocalStore(),
+          pollInterval: 600_000,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         });
         await engine.init();
         await engine.connect();
-        await engine.put('notes', 'b1', { text: 'created by B' });
+        await engine.put("notes", "b1", { text: "created by B" });
         await engine.flush();
         const meshId = engine.getMeshId();
         await engine.disconnect();
 
-        // Simulate page reload — fresh engine, identical config (passphrase
-        // recovered from credential store).
+        // Simulate page reload with the explicit portable mesh key.
+        const reloadKeySource = new PortablePassphraseKeySource({ portableKey: passArg });
         const engine2 = new Interocitor(adapter, {
-          remotePath: '/Observer', dbName: 'observer-mesh', deviceId: 'device_B',
-          encrypted: true, pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+          remotePath: "/Observer",
+          dbName: "observer-mesh",
+          deviceId: "device_B",
+          keySource: reloadKeySource,
+          localStore: new MemoryLocalStore(),
+          pollInterval: 600_000,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         });
         await engine2.init();
         await engine2.connect();
-        const rows = await engine2.query('notes');
-        const titles = rows.map((r: any) => readColumn(r, 'text')).toSorted();
+        const rows = await engine2.query("notes");
+        const titles = rows.map((r: any) => readColumn(r, "text")).toSorted();
         await engine2.disconnect();
-        return { meshId, titles, restoredPassphrase: engine2.getPassphrase() };
+        return { meshId, titles, restoredPassphrase: reloadKeySource.getPortableKey() };
       }, setup.passphrase);
 
       expect(joinB.meshId).toBe(setup.meshId);
-      expect(joinB.titles).toEqual(['created by A', 'created by B']);
+      expect(joinB.titles).toEqual(["created by A", "created by B"]);
       // Critical: silent restore must hand back the same passphrase, not
       // a freshly-generated one.
       expect(joinB.restoredPassphrase).toBe(setup.passphrase);
 
-      // 3. A reloads — fresh engine, no passphrase in config (relies on
-      // credential store). Must decode B's writes AND its own original
-      // write. No remote:poisoned events.
-      const reloadA = await pageA.evaluate(async () => {
-        const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
-        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
-        const adapter = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_obs__`, auth: { username: 'u', password: 'p' } });
+      // 3. A reloads with its explicit portable mesh key. It must decode B's
+      // writes AND its own original write. No remote:poisoned events.
+      const reloadA = await pageA.evaluate(async (portableKey: string) => {
+        const { Interocitor, MemoryLocalStore, PortablePassphraseKeySource, readColumn } =
+          await import("/packages/core/dist/index.js");
+        const { WebDAVAdapter } = await import("/packages/core/dist/adapters/webdav.js");
+        const adapter = new WebDAVAdapter({
+          baseUrl: `${location.origin}/__dav_obs__`,
+          auth: { username: "u", password: "p" },
+        });
         const engine = new Interocitor(adapter, {
-          remotePath: '/Observer', dbName: 'observer-mesh', deviceId: 'device_A',
-          encrypted: true, pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+          remotePath: "/Observer",
+          dbName: "observer-mesh",
+          deviceId: "device_A",
+          keySource: new PortablePassphraseKeySource({ portableKey }),
+          localStore: new MemoryLocalStore(),
+          pollInterval: 600_000,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         });
         const events: string[] = [];
-        engine.on((e) => { events.push(e.type); });
+        engine.on((e) => {
+          events.push(e.type);
+        });
         await engine.init();
         await engine.connect();
-        const rows = await engine.query('notes');
-        const titles = rows.map((r: any) => readColumn(r, 'text')).toSorted();
+        const rows = await engine.query("notes");
+        const titles = rows.map((r: any) => readColumn(r, "text")).toSorted();
         // Make a new write — own writes must round-trip through the same key.
-        await engine.put('notes', 'a2', { text: 'A after reload' });
+        await engine.put("notes", "a2", { text: "A after reload" });
         await engine.flush();
-        const titlesAfter = (await engine.query('notes'))
-          .map((r: any) => readColumn(r, 'text')).toSorted();
+        const titlesAfter = (await engine.query("notes"))
+          .map((r: any) => readColumn(r, "text"))
+          .toSorted();
         await engine.disconnect();
         return {
-          titles, titlesAfter,
-          poisoned: events.filter((t) => t === 'remote:poisoned'),
-          decodeErrors: events.filter((t) => t === 'decode:error'),
-          restored: events.filter((t) => t === 'credentials:restored'),
+          titles,
+          titlesAfter,
+          poisoned: events.filter((t) => t === "remote:poisoned"),
+          decodeErrors: events.filter((t) => t === "decode:error"),
         };
-      });
+      }, setup.passphrase);
 
       expect(reloadA.poisoned).toEqual([]);
       expect(reloadA.decodeErrors).toEqual([]);
-      expect(reloadA.restored.length).toBeGreaterThan(0);
-      expect(reloadA.titles).toEqual(['created by A', 'created by B']);
-      expect(reloadA.titlesAfter).toEqual(['A after reload', 'created by A', 'created by B']);
+      expect(reloadA.titles).toEqual(["created by A", "created by B"]);
+      expect(reloadA.titlesAfter).toEqual(["A after reload", "created by A", "created by B"]);
     } finally {
       await ctxA.close();
       await ctxB.close();
     }
   });
 
-  test('B. same dbName + different passphrase emits credentials:conflict and does not silently swap key', async ({ browser, baseURL }) => {
+  test("B. same dbName + different explicit portable key refuses to silently swap encryption", async ({
+    browser,
+    baseURL,
+  }) => {
     const cloud: WebDavRouteState = createWebDavRouteState();
     const ctx = await browser.newContext();
     try {
-      await attachWebDavRouteMock(ctx, cloud, '/__dav_conflict__');
+      await attachWebDavRouteMock(ctx, cloud, "/__dav_conflict__");
       const page = await ctx.newPage();
       await page.goto(`${baseURL}/packages/core/tests/e2e/fixtures/harness-plain.html`);
-      await clearAllLocalState(page, ['conflict-mesh']);
+      await clearAllLocalState(page, ["conflict-mesh"]);
 
       const result = await page.evaluate(async () => {
-        const { Interocitor } = await import('/packages/core/dist/index.js');
-        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
-        const { generateKey, keyToPassphrase } = await import('/packages/core/dist/crypto/keys.js');
-        const adapter = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_conflict__`, auth: { username: 'u', password: 'p' } });
+        const { Interocitor, MemoryLocalStore, PortablePassphraseKeySource } =
+          await import("/packages/core/dist/index.js");
+        const { WebDAVAdapter } = await import("/packages/core/dist/adapters/webdav.js");
+        const { generateKey, keyToPassphrase } = await import("/packages/core/dist/crypto/keys.js");
+        const adapter = new WebDAVAdapter({
+          baseUrl: `${location.origin}/__dav_conflict__`,
+          auth: { username: "u", password: "p" },
+        });
 
         const k1 = await keyToPassphrase(await generateKey());
         const k2 = await keyToPassphrase(await generateKey());
 
         // First open — persist k1 under dbName.
         const e1 = new Interocitor(adapter, {
-          remotePath: '/Conflict', dbName: 'conflict-mesh', deviceId: 'dev_c',
-          passphrase: k1, pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+          remotePath: "/Conflict",
+          dbName: "conflict-mesh",
+          deviceId: "dev_c",
+          keySource: new PortablePassphraseKeySource({ portableKey: k1 }),
+          localStore: new MemoryLocalStore(),
+          pollInterval: 600_000,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         });
         await e1.init();
         await e1.connect();
-        await e1.put('items', 'i1', { text: 'first' });
+        await e1.put("items", "i1", { text: "first" });
         await e1.flush();
         await e1.disconnect();
 
@@ -196,59 +250,82 @@ test.describe('Mesh self-poison + diagnostics', () => {
         // rows or the remote with a key the user did not intend.
         const events: any[] = [];
         const e2 = new Interocitor(adapter, {
-          remotePath: '/Conflict', dbName: 'conflict-mesh', deviceId: 'dev_c',
-          passphrase: k2, pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+          remotePath: "/Conflict",
+          dbName: "conflict-mesh",
+          deviceId: "dev_c",
+          keySource: new PortablePassphraseKeySource({ portableKey: k2 }),
+          localStore: new MemoryLocalStore(),
+          pollInterval: 600_000,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         });
         e2.on((e) => events.push(e));
         await e2.init();
-        let connectError = '';
-        try { await e2.connect(); } catch (err: any) { connectError = String(err?.message ?? err); }
+        let connectError = "";
+        try {
+          await e2.connect();
+        } catch (err: any) {
+          connectError = String(err?.message ?? err);
+        }
         await e2.disconnect().catch(() => {});
 
-        const conflicts = events.filter((e) => e.type === 'credentials:conflict');
-        const poisoned = events.filter((e) => e.type === 'remote:poisoned');
-        return { connectError, conflicts: conflicts.length, poisoned: poisoned.length };
+        const poisoned = events.filter((e) => e.type === "remote:poisoned");
+        const decodeErrors = events.filter((e) => e.type === "decode:error");
+        return { connectError, poisoned: poisoned.length, decodeErrors: decodeErrors.length };
       });
 
-      expect(result.conflicts).toBeGreaterThan(0);
-      // Either decode poisons remote or mesh-id mismatch — engine must
-      // refuse to silently keep going.
-      expect(result.poisoned + (result.connectError ? 1 : 0)).toBeGreaterThan(0);
+      expect(result.poisoned + result.decodeErrors + (result.connectError ? 1 : 0)).toBeGreaterThan(
+        0,
+      );
     } finally {
       await ctx.close();
     }
   });
 
-  test('C. wrong passphrase on existing encrypted mesh emits decode:error + remote:poisoned with context, leaves local DB untouched', async ({ browser, baseURL }) => {
+  test("C. wrong passphrase on existing encrypted mesh emits decode:error + remote:poisoned with context, leaves local DB untouched", async ({
+    browser,
+    baseURL,
+  }) => {
     const cloud: WebDavRouteState = createWebDavRouteState();
     const ctxA = await browser.newContext();
     const ctxB = await browser.newContext();
     try {
-      await attachWebDavRouteMock(ctxA, cloud, '/__dav_wrong__');
-      await attachWebDavRouteMock(ctxB, cloud, '/__dav_wrong__');
+      await attachWebDavRouteMock(ctxA, cloud, "/__dav_wrong__");
+      await attachWebDavRouteMock(ctxB, cloud, "/__dav_wrong__");
       const pageA = await ctxA.newPage();
       const pageB = await ctxB.newPage();
       const harness = `${baseURL}/packages/core/tests/e2e/fixtures/harness-plain.html`;
       await Promise.all([pageA.goto(harness), pageB.goto(harness)]);
       await Promise.all([
-        clearAllLocalState(pageA, ['wrong-mesh']),
-        clearAllLocalState(pageB, ['wrong-mesh']),
+        clearAllLocalState(pageA, ["wrong-mesh"]),
+        clearAllLocalState(pageB, ["wrong-mesh"]),
       ]);
 
       // A creates the mesh and writes one row.
       const setup = await pageA.evaluate(async () => {
-        const { Interocitor } = await import('/packages/core/dist/index.js');
-        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
-        const adapter = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_wrong__`, auth: { username: 'u', password: 'p' } });
+        const { Interocitor, MemoryLocalStore, PortablePassphraseKeySource } =
+          await import("/packages/core/dist/index.js");
+        const { WebDAVAdapter } = await import("/packages/core/dist/adapters/webdav.js");
+        const adapter = new WebDAVAdapter({
+          baseUrl: `${location.origin}/__dav_wrong__`,
+          auth: { username: "u", password: "p" },
+        });
+        const keySource = new PortablePassphraseKeySource();
         const engine = new Interocitor(adapter, {
-          remotePath: '/Wrong', dbName: 'wrong-mesh', deviceId: 'A',
-          encrypted: true, pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+          remotePath: "/Wrong",
+          dbName: "wrong-mesh",
+          deviceId: "A",
+          keySource,
+          localStore: new MemoryLocalStore(),
+          pollInterval: 600_000,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         });
         await engine.init();
         await engine.connect();
-        await engine.put('rows', 'r1', { v: 1 });
+        await engine.put("rows", "r1", { v: 1 });
         await engine.flush();
-        const passphrase = engine.getPassphrase();
+        const passphrase = keySource.getPortableKey();
         await engine.disconnect();
         return { passphrase };
       });
@@ -256,33 +333,48 @@ test.describe('Mesh self-poison + diagnostics', () => {
       // B tries to join with the wrong passphrase. Local DB must remain
       // intact afterwards (nothing was written, nothing was clobbered).
       const result = await pageB.evaluate(async (correctPass: string) => {
-        const { Interocitor } = await import('/packages/core/dist/index.js');
-        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
-        const { generateKey, keyToPassphrase } = await import('/packages/core/dist/crypto/keys.js');
+        const { Interocitor, MemoryLocalStore, PortablePassphraseKeySource } =
+          await import("/packages/core/dist/index.js");
+        const { WebDAVAdapter } = await import("/packages/core/dist/adapters/webdav.js");
+        const { generateKey, keyToPassphrase } = await import("/packages/core/dist/crypto/keys.js");
         const wrongPass = await keyToPassphrase(await generateKey());
-        const adapter = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_wrong__`, auth: { username: 'u', password: 'p' } });
+        const adapter = new WebDAVAdapter({
+          baseUrl: `${location.origin}/__dav_wrong__`,
+          auth: { username: "u", password: "p" },
+        });
         const engine = new Interocitor(adapter, {
-          remotePath: '/Wrong', dbName: 'wrong-mesh', deviceId: 'B',
-          passphrase: wrongPass, pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+          remotePath: "/Wrong",
+          dbName: "wrong-mesh",
+          deviceId: "B",
+          keySource: new PortablePassphraseKeySource({ portableKey: wrongPass }),
+          localStore: new MemoryLocalStore(),
+          pollInterval: 600_000,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         });
         const events: any[] = [];
         engine.on((e) => events.push(e));
-        let connectError = '';
+        let connectError = "";
         await engine.init();
-        try { await engine.connect(); } catch (err: any) { connectError = String(err?.message ?? err); }
-        const localRows = await engine.query('rows').catch(() => []);
+        try {
+          await engine.connect();
+        } catch (err: any) {
+          connectError = String(err?.message ?? err);
+        }
+        const localRows = await engine.query("rows").catch(() => []);
         await engine.disconnect().catch(() => {});
 
-        const decodeErrors = events.filter((e) => e.type === 'decode:error');
-        const poisoned = events.filter((e) => e.type === 'remote:poisoned');
+        const decodeErrors = events.filter((e) => e.type === "decode:error");
+        const poisoned = events.filter((e) => e.type === "remote:poisoned");
         return {
           connectError,
           localRowCount: localRows.length,
           decodeErrorCount: decodeErrors.length,
           poisonedCount: poisoned.length,
-          poisonedHasContext: poisoned[0]?.context?.dbName === 'wrong-mesh',
-          poisonedHasMessage: typeof poisoned[0]?.error?.message === 'string'
-            && poisoned[0]?.error?.message.length > 0,
+          poisonedHasContext: poisoned[0]?.context?.dbName === "wrong-mesh",
+          poisonedHasMessage:
+            typeof poisoned[0]?.error?.message === "string" &&
+            poisoned[0]?.error?.message.length > 0,
           unused: correctPass.length > 0,
         };
       }, setup.passphrase);
@@ -301,54 +393,73 @@ test.describe('Mesh self-poison + diagnostics', () => {
     }
   });
 
-  test('E. joining an existing mesh defaults to resetting local data to remote before sync', async ({ browser, baseURL }) => {
+  test("E. joining an existing mesh defaults to resetting local data to remote before sync", async ({
+    browser,
+    baseURL,
+  }) => {
     const cloud: WebDavRouteState = createWebDavRouteState();
     const ctxRemote = await browser.newContext();
     const ctxJoiner = await browser.newContext();
     try {
-      await attachWebDavRouteMock(ctxRemote, cloud, '/__dav_join_default__');
-      await attachWebDavRouteMock(ctxJoiner, cloud, '/__dav_join_default__');
+      await attachWebDavRouteMock(ctxRemote, cloud, "/__dav_join_default__");
+      await attachWebDavRouteMock(ctxJoiner, cloud, "/__dav_join_default__");
       const pageRemote = await ctxRemote.newPage();
       const pageJoiner = await ctxJoiner.newPage();
       const harness = `${baseURL}/packages/core/tests/e2e/fixtures/harness-plain.html`;
       await Promise.all([pageRemote.goto(harness), pageJoiner.goto(harness)]);
       await Promise.all([
-        clearAllLocalState(pageRemote, ['join-default-remote']),
-        clearAllLocalState(pageJoiner, ['join-default-local']),
+        clearAllLocalState(pageRemote, ["join-default-remote"]),
+        clearAllLocalState(pageJoiner, ["join-default-local"]),
       ]);
 
       await pageRemote.evaluate(async () => {
-        const { Interocitor } = await import('/packages/core/dist/index.js');
-        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
-        const adapter = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_join_default__`, auth: { username: 'u', password: 'p' } });
+        const { BrowserTestInterocitor: Interocitor } =
+          await import("/packages/core/tests/e2e/fixtures/core-browser-api.js");
+        const { WebDAVAdapter } = await import("/packages/core/dist/adapters/webdav.js");
+        const adapter = new WebDAVAdapter({
+          baseUrl: `${location.origin}/__dav_join_default__`,
+          auth: { username: "u", password: "p" },
+        });
         const engine = new Interocitor(adapter, {
-          remotePath: '/JoinDefault', dbName: 'join-default-remote', deviceId: 'remote_default', encrypted: false,
-          pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+          remotePath: "/JoinDefault",
+          dbName: "join-default-remote",
+          deviceId: "remote_default",
+          pollInterval: 600_000,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         });
         await engine.init();
         await engine.connect();
-        await engine.put('settings', 'theme', { value: 'remote-theme' });
+        await engine.put("settings", "theme", { value: "remote-theme" });
         await engine.flush();
         await engine.disconnect();
       });
 
       const result = await pageJoiner.evaluate(async () => {
-        const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
-        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
-        const adapter = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_join_default__`, auth: { username: 'u', password: 'p' } });
+        const { BrowserTestInterocitor: Interocitor, readColumn } =
+          await import("/packages/core/tests/e2e/fixtures/core-browser-api.js");
+        const { WebDAVAdapter } = await import("/packages/core/dist/adapters/webdav.js");
+        const adapter = new WebDAVAdapter({
+          baseUrl: `${location.origin}/__dav_join_default__`,
+          auth: { username: "u", password: "p" },
+        });
         const engine = new Interocitor(adapter, {
-          remotePath: '/JoinDefault', dbName: 'join-default-local', deviceId: 'joiner_default', encrypted: false,
-          pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+          remotePath: "/JoinDefault",
+          dbName: "join-default-local",
+          deviceId: "joiner_default",
+          pollInterval: 600_000,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         });
         const events: any[] = [];
         engine.on((e) => events.push(e));
         await engine.init();
-        await engine.put('settings', 'local-only', { value: 'local-theme' });
+        await engine.put("settings", "local-only", { value: "local-theme" });
         await engine.connect();
-        const rows = await engine.query('settings');
-        const values = rows.map((r: any) => readColumn(r, 'value')).toSorted();
+        const rows = await engine.query("settings");
+        const values = rows.map((r: any) => readColumn(r, "value")).toSorted();
         await engine.disconnect();
-        const joins = events.filter((e) => e.type === 'join:existing-mesh');
+        const joins = events.filter((e) => e.type === "join:existing-mesh");
         return {
           values,
           joinCount: joins.length,
@@ -358,9 +469,9 @@ test.describe('Mesh self-poison + diagnostics', () => {
         };
       });
 
-      expect(result.values).toEqual(['remote-theme']);
+      expect(result.values).toEqual(["remote-theme"]);
       expect(result.joinCount).toBe(1);
-      expect(result.policy).toBe('reset-to-remote');
+      expect(result.policy).toBe("reset-to-remote");
       expect(result.localRowCount).toBe(1);
       expect(result.queuedChangeCount).toBe(1);
     } finally {
@@ -369,54 +480,74 @@ test.describe('Mesh self-poison + diagnostics', () => {
     }
   });
 
-  test('F. joining an existing mesh can merge local data with remote for explicit merge flows', async ({ browser, baseURL }) => {
+  test("F. joining an existing mesh can merge local data with remote for explicit merge flows", async ({
+    browser,
+    baseURL,
+  }) => {
     const cloud: WebDavRouteState = createWebDavRouteState();
     const ctxRemote = await browser.newContext();
     const ctxJoiner = await browser.newContext();
     try {
-      await attachWebDavRouteMock(ctxRemote, cloud, '/__dav_join_preserve__');
-      await attachWebDavRouteMock(ctxJoiner, cloud, '/__dav_join_preserve__');
+      await attachWebDavRouteMock(ctxRemote, cloud, "/__dav_join_preserve__");
+      await attachWebDavRouteMock(ctxJoiner, cloud, "/__dav_join_preserve__");
       const pageRemote = await ctxRemote.newPage();
       const pageJoiner = await ctxJoiner.newPage();
       const harness = `${baseURL}/packages/core/tests/e2e/fixtures/harness-plain.html`;
       await Promise.all([pageRemote.goto(harness), pageJoiner.goto(harness)]);
       await Promise.all([
-        clearAllLocalState(pageRemote, ['join-preserve-remote']),
-        clearAllLocalState(pageJoiner, ['join-preserve-local']),
+        clearAllLocalState(pageRemote, ["join-preserve-remote"]),
+        clearAllLocalState(pageJoiner, ["join-preserve-local"]),
       ]);
 
       await pageRemote.evaluate(async () => {
-        const { Interocitor } = await import('/packages/core/dist/index.js');
-        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
-        const adapter = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_join_preserve__`, auth: { username: 'u', password: 'p' } });
+        const { BrowserTestInterocitor: Interocitor } =
+          await import("/packages/core/tests/e2e/fixtures/core-browser-api.js");
+        const { WebDAVAdapter } = await import("/packages/core/dist/adapters/webdav.js");
+        const adapter = new WebDAVAdapter({
+          baseUrl: `${location.origin}/__dav_join_preserve__`,
+          auth: { username: "u", password: "p" },
+        });
         const engine = new Interocitor(adapter, {
-          remotePath: '/JoinPreserve', dbName: 'join-preserve-remote', deviceId: 'remote_preserve', encrypted: false,
-          pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+          remotePath: "/JoinPreserve",
+          dbName: "join-preserve-remote",
+          deviceId: "remote_preserve",
+          pollInterval: 600_000,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         });
         await engine.init();
         await engine.connect();
-        await engine.put('settings', 'remote', { value: 'remote-setting' });
+        await engine.put("settings", "remote", { value: "remote-setting" });
         await engine.flush();
         await engine.disconnect();
       });
 
       const result = await pageJoiner.evaluate(async () => {
-        const { Interocitor, readColumn } = await import('/packages/core/dist/index.js');
-        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
-        const adapter = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_join_preserve__`, auth: { username: 'u', password: 'p' } });
+        const { BrowserTestInterocitor: Interocitor, readColumn } =
+          await import("/packages/core/tests/e2e/fixtures/core-browser-api.js");
+        const { WebDAVAdapter } = await import("/packages/core/dist/adapters/webdav.js");
+        const adapter = new WebDAVAdapter({
+          baseUrl: `${location.origin}/__dav_join_preserve__`,
+          auth: { username: "u", password: "p" },
+        });
         const engine = new Interocitor(adapter, {
-          remotePath: '/JoinPreserve', dbName: 'join-preserve-local', deviceId: 'joiner_preserve', encrypted: false,
-          joinExistingMeshPolicy: 'merge-with-remote', pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+          remotePath: "/JoinPreserve",
+          dbName: "join-preserve-local",
+          deviceId: "joiner_preserve",
+          joinExistingMeshPolicy: "merge-with-remote",
+          pollInterval: 600_000,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         });
         const events: any[] = [];
         engine.on((e) => events.push(e));
         await engine.init();
-        await engine.put('settings', 'local', { value: 'local-setting' });
+        await engine.put("settings", "local", { value: "local-setting" });
         await engine.connect();
-        const rows = await engine.query('settings');
-        const values = rows.map((r: any) => readColumn(r, 'value')).toSorted();
+        const rows = await engine.query("settings");
+        const values = rows.map((r: any) => readColumn(r, "value")).toSorted();
         await engine.disconnect();
-        const joins = events.filter((e) => e.type === 'join:existing-mesh');
+        const joins = events.filter((e) => e.type === "join:existing-mesh");
         return {
           values,
           joinCount: joins.length,
@@ -426,9 +557,9 @@ test.describe('Mesh self-poison + diagnostics', () => {
         };
       });
 
-      expect(result.values).toEqual(['local-setting', 'remote-setting']);
+      expect(result.values).toEqual(["local-setting", "remote-setting"]);
       expect(result.joinCount).toBe(1);
-      expect(result.policy).toBe('merge-with-remote');
+      expect(result.policy).toBe("merge-with-remote");
       expect(result.localRowCount).toBe(1);
       expect(result.queuedChangeCount).toBe(1);
     } finally {
@@ -437,22 +568,33 @@ test.describe('Mesh self-poison + diagnostics', () => {
     }
   });
 
-  test('G. connect() is idempotent on already-connected mesh: no transport restart, emits connect:noop', async ({ browser, baseURL }) => {
+  test("G. connect() is idempotent on already-connected mesh: no transport restart, emits connect:noop", async ({
+    browser,
+    baseURL,
+  }) => {
     const cloud: WebDavRouteState = createWebDavRouteState();
     const ctx = await browser.newContext();
     try {
-      await attachWebDavRouteMock(ctx, cloud, '/__dav_idemp__');
+      await attachWebDavRouteMock(ctx, cloud, "/__dav_idemp__");
       const page = await ctx.newPage();
       await page.goto(`${baseURL}/packages/core/tests/e2e/fixtures/harness-plain.html`);
-      await clearAllLocalState(page, ['idemp-mesh']);
+      await clearAllLocalState(page, ["idemp-mesh"]);
 
       const result = await page.evaluate(async () => {
-        const { Interocitor } = await import('/packages/core/dist/index.js');
-        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
-        const adapter = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_idemp__`, auth: { username: 'u', password: 'p' } });
+        const { BrowserTestInterocitor: Interocitor } =
+          await import("/packages/core/tests/e2e/fixtures/core-browser-api.js");
+        const { WebDAVAdapter } = await import("/packages/core/dist/adapters/webdav.js");
+        const adapter = new WebDAVAdapter({
+          baseUrl: `${location.origin}/__dav_idemp__`,
+          auth: { username: "u", password: "p" },
+        });
         const engine = new Interocitor(adapter, {
-          remotePath: '/Idemp', dbName: 'idemp-mesh', deviceId: 'i1',
-          encrypted: true, pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+          remotePath: "/Idemp",
+          dbName: "idemp-mesh",
+          deviceId: "i1",
+          pollInterval: 600_000,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         });
         const events: any[] = [];
         engine.on((e) => events.push(e));
@@ -461,9 +603,9 @@ test.describe('Mesh self-poison + diagnostics', () => {
         await engine.connect(); // idempotent
         await engine.connect(); // still idempotent
         await engine.disconnect();
-        const noops = events.filter((e) => e.type === 'connect:noop');
-        const states = events.filter((e) => e.type === 'connect:state');
-        const teardowns = events.filter((e) => e.type === 'transport:teardown');
+        const noops = events.filter((e) => e.type === "connect:noop");
+        const states = events.filter((e) => e.type === "connect:state");
+        const teardowns = events.filter((e) => e.type === "transport:teardown");
         return {
           noopCount: noops.length,
           stateCount: states.length,
@@ -477,43 +619,57 @@ test.describe('Mesh self-poison + diagnostics', () => {
       expect(result.stateCount).toBe(1);
       // Disconnect must hard-teardown exactly once.
       expect(result.teardownCount).toBe(1);
-      expect(result.teardownReason).toBe('disconnect');
+      expect(result.teardownReason).toBe("disconnect");
     } finally {
       await ctx.close();
     }
   });
 
-  test('F. setRemoteStorage(newAdapter) hard-tears down the old transport before swapping', async ({ browser, baseURL }) => {
+  test("F. setRemoteStorage(newAdapter) hard-tears down the old transport before swapping", async ({
+    browser,
+    baseURL,
+  }) => {
     const cloudA: WebDavRouteState = createWebDavRouteState();
     const cloudB: WebDavRouteState = createWebDavRouteState();
     const ctx = await browser.newContext();
     try {
-      await attachWebDavRouteMock(ctx, cloudA, '/__dav_swapA__');
-      await attachWebDavRouteMock(ctx, cloudB, '/__dav_swapB__');
+      await attachWebDavRouteMock(ctx, cloudA, "/__dav_swapA__");
+      await attachWebDavRouteMock(ctx, cloudB, "/__dav_swapB__");
       const page = await ctx.newPage();
       await page.goto(`${baseURL}/packages/core/tests/e2e/fixtures/harness-plain.html`);
-      await clearAllLocalState(page, ['swap-mesh']);
+      await clearAllLocalState(page, ["swap-mesh"]);
 
       const result = await page.evaluate(async () => {
-        const { Interocitor } = await import('/packages/core/dist/index.js');
-        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
-        const a1 = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_swapA__`, auth: { username: 'u', password: 'p' } });
-        const a2 = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_swapB__`, auth: { username: 'u', password: 'p' } });
+        const { BrowserTestInterocitor: Interocitor } =
+          await import("/packages/core/tests/e2e/fixtures/core-browser-api.js");
+        const { WebDAVAdapter } = await import("/packages/core/dist/adapters/webdav.js");
+        const a1 = new WebDAVAdapter({
+          baseUrl: `${location.origin}/__dav_swapA__`,
+          auth: { username: "u", password: "p" },
+        });
+        const a2 = new WebDAVAdapter({
+          baseUrl: `${location.origin}/__dav_swapB__`,
+          auth: { username: "u", password: "p" },
+        });
         const engine = new Interocitor(a1, {
-          remotePath: '/Swap', dbName: 'swap-mesh', deviceId: 's1',
-          encrypted: false, pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+          remotePath: "/Swap",
+          dbName: "swap-mesh",
+          deviceId: "s1",
+          pollInterval: 600_000,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         });
         const events: any[] = [];
         engine.on((e) => events.push(e));
         await engine.init();
         await engine.connect();
-        await engine.put('items', 'i1', { v: 1 });
+        await engine.put("items", "i1", { v: 1 });
         await engine.flush();
         await engine.setRemoteStorage(a2);
-        await engine.put('items', 'i2', { v: 2 });
+        await engine.put("items", "i2", { v: 2 });
         await engine.flush();
         await engine.disconnect();
-        const teardowns = events.filter((e) => e.type === 'transport:teardown');
+        const teardowns = events.filter((e) => e.type === "transport:teardown");
         return {
           teardownCount: teardowns.length,
           teardownReasons: teardowns.map((t: any) => t.reason),
@@ -522,28 +678,39 @@ test.describe('Mesh self-poison + diagnostics', () => {
 
       // Exactly two teardowns: one for the swap, one for the final disconnect.
       expect(result.teardownCount).toBe(2);
-      expect(result.teardownReasons).toEqual(['switch-adapter', 'disconnect']);
+      expect(result.teardownReasons).toEqual(["switch-adapter", "disconnect"]);
     } finally {
       await ctx.close();
     }
   });
 
-  test('G. setRemoteStorage(null) marks engine local-only and tears down the previous transport', async ({ browser, baseURL }) => {
+  test("G. setRemoteStorage(null) marks engine local-only and tears down the previous transport", async ({
+    browser,
+    baseURL,
+  }) => {
     const cloud: WebDavRouteState = createWebDavRouteState();
     const ctx = await browser.newContext();
     try {
-      await attachWebDavRouteMock(ctx, cloud, '/__dav_detach__');
+      await attachWebDavRouteMock(ctx, cloud, "/__dav_detach__");
       const page = await ctx.newPage();
       await page.goto(`${baseURL}/packages/core/tests/e2e/fixtures/harness-plain.html`);
-      await clearAllLocalState(page, ['detach-mesh']);
+      await clearAllLocalState(page, ["detach-mesh"]);
 
       const result = await page.evaluate(async () => {
-        const { Interocitor } = await import('/packages/core/dist/index.js');
-        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
-        const adapter = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_detach__`, auth: { username: 'u', password: 'p' } });
+        const { BrowserTestInterocitor: Interocitor } =
+          await import("/packages/core/tests/e2e/fixtures/core-browser-api.js");
+        const { WebDAVAdapter } = await import("/packages/core/dist/adapters/webdav.js");
+        const adapter = new WebDAVAdapter({
+          baseUrl: `${location.origin}/__dav_detach__`,
+          auth: { username: "u", password: "p" },
+        });
         const engine = new Interocitor(adapter, {
-          remotePath: '/Detach', dbName: 'detach-mesh', deviceId: 'd1',
-          encrypted: false, pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+          remotePath: "/Detach",
+          dbName: "detach-mesh",
+          deviceId: "d1",
+          pollInterval: 600_000,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         });
         const events: any[] = [];
         engine.on((e) => events.push(e));
@@ -551,61 +718,81 @@ test.describe('Mesh self-poison + diagnostics', () => {
         await engine.connect();
         await engine.setRemoteStorage(null);
         // After detach, connecting should require a remote adapter.
-        let detachedConnectError = '';
-        try { await engine.connect(); } catch (err: any) { detachedConnectError = String(err?.message ?? err); }
+        let detachedConnectError = "";
+        try {
+          await engine.connect();
+        } catch (err: any) {
+          detachedConnectError = String(err?.message ?? err);
+        }
         return {
           detachedConnectError,
-          teardownReasons: events.filter((e) => e.type === 'transport:teardown').map((t: any) => t.reason),
+          teardownReasons: events
+            .filter((e) => e.type === "transport:teardown")
+            .map((t: any) => t.reason),
         };
       });
 
-      expect(result.teardownReasons).toContain('detach');
+      expect(result.teardownReasons).toContain("detach");
       expect(result.detachedConnectError).toMatch(/remote/i);
     } finally {
       await ctx.close();
     }
   });
 
-  test('D. diagnostic events fire with expected shape during normal init/connect', async ({ browser, baseURL }) => {
+  test("D. diagnostic events fire with expected shape during normal init/connect", async ({
+    browser,
+    baseURL,
+  }) => {
     const cloud: WebDavRouteState = createWebDavRouteState();
     const ctx = await browser.newContext();
     try {
-      await attachWebDavRouteMock(ctx, cloud, '/__dav_diag__');
+      await attachWebDavRouteMock(ctx, cloud, "/__dav_diag__");
       const page = await ctx.newPage();
       await page.goto(`${baseURL}/packages/core/tests/e2e/fixtures/harness-plain.html`);
-      await clearAllLocalState(page, ['diag-mesh']);
+      await clearAllLocalState(page, ["diag-mesh"]);
 
       const result = await page.evaluate(async () => {
-        const { Interocitor } = await import('/packages/core/dist/index.js');
-        const { WebDAVAdapter } = await import('/packages/core/dist/adapters/webdav.js');
-        const adapter = new WebDAVAdapter({ baseUrl: `${location.origin}/__dav_diag__`, auth: { username: 'u', password: 'p' } });
+        const { Interocitor, MemoryLocalStore, PortablePassphraseKeySource } =
+          await import("/packages/core/dist/index.js");
+        const { WebDAVAdapter } = await import("/packages/core/dist/adapters/webdav.js");
+        const adapter = new WebDAVAdapter({
+          baseUrl: `${location.origin}/__dav_diag__`,
+          auth: { username: "u", password: "p" },
+        });
+        const keySource = new PortablePassphraseKeySource();
         const engine = new Interocitor(adapter, {
-          remotePath: '/Diag', dbName: 'diag-mesh', deviceId: 'd1',
-          encrypted: true, pollInterval: 600_000, flushDebounce: 60_000, flushThreshold: 999,
+          remotePath: "/Diag",
+          dbName: "diag-mesh",
+          deviceId: "d1",
+          keySource,
+          localStore: new MemoryLocalStore(),
+          pollInterval: 600_000,
+          flushDebounce: 60_000,
+          flushThreshold: 999,
         });
         const collected: any[] = [];
         engine.on((e) => collected.push(e));
         await engine.init();
         await engine.connect();
-        await engine.put('x', '1', { v: 1 });
+        await engine.put("x", "1", { v: 1 });
         await engine.flush();
         await engine.disconnect();
         const byType = (t: string) => collected.filter((e) => e.type === t);
         return {
-          encryptionResolved: byType('encryption:resolved')[0],
-          credentialsPersisted: byType('credentials:persisted')[0],
-          connectState: byType('connect:state')[0],
-          credentialsRestored: byType('credentials:restored').length,
+          encryptionResolved: byType("encryption:resolved")[0],
+          credentialsPersisted: byType("credentials:persisted")[0],
+          connectState: byType("connect:state")[0],
+          credentialsRestored: byType("credentials:restored").length,
         };
       });
 
-      expect(result.encryptionResolved?.strategy).toBe('generated');
-      expect(result.encryptionResolved?.dbName).toBe('diag-mesh');
+      expect(result.encryptionResolved?.strategy).toBe("PortablePassphraseKeySource");
+      expect(result.encryptionResolved?.dbName).toBe("diag-mesh");
       expect(result.encryptionResolved?.encrypted).toBe(true);
-      expect(result.credentialsPersisted?.dbName).toBe('diag-mesh');
-      expect(result.credentialsPersisted?.deviceId).toBe('d1');
-      expect(result.connectState?.dbName).toBe('diag-mesh');
-      expect(result.connectState?.remotePath).toBe('/Diag');
+      expect(result.credentialsPersisted?.dbName).toBe("diag-mesh");
+      expect(result.credentialsPersisted?.deviceId).toBe("d1");
+      expect(result.connectState?.dbName).toBe("diag-mesh");
+      expect(result.connectState?.remotePath).toBe("/Diag");
       expect(result.connectState?.encrypted).toBe(true);
       // No persisted creds first time — restore emit is fine to be 0 here.
       expect(result.credentialsRestored).toBeGreaterThanOrEqual(0);

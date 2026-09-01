@@ -12,12 +12,12 @@ import type {
   DatabaseSchemaDefinition,
   SyncEvent,
   RetentionPolicy,
-} from './types.ts';
-import { paths, textEncoder, textDecoder, generateId, computeContentHash } from './internals.ts';
-import { assertExpectedMeshId } from './codec.ts';
-import type { CodecState } from './codec.ts';
-import { MeshEncryptionMismatchError } from './errors.ts';
-import { resolveRetentionPolicy } from './retention.ts';
+} from "./types.ts";
+import { paths, textEncoder, textDecoder, generateId, computeContentHash } from "./internals.ts";
+import { assertExpectedMeshId } from "./codec.ts";
+import type { CodecState } from "./codec.ts";
+import { MeshEncryptionMismatchError } from "./errors.ts";
+import { resolveRetentionPolicy } from "./retention.ts";
 
 export interface ManifestContext {
   adapter: StorageAdapter;
@@ -36,7 +36,10 @@ async function readJson<T>(adapter: StorageAdapter, path: string): Promise<T> {
   return JSON.parse(textDecoder.decode(data)) as T;
 }
 
-export async function readJsonIfExists<T>(adapter: StorageAdapter, path: string): Promise<T | null> {
+export async function readJsonIfExists<T>(
+  adapter: StorageAdapter,
+  path: string,
+): Promise<T | null> {
   try {
     return await readJson<T>(adapter, path);
   } catch {
@@ -50,31 +53,41 @@ function assertServerAuth(manifest: { writtenBy: string }, serverId: string): vo
   }
 }
 
-async function validateManifestHash(manifest: { contentHash: string; [key: string]: unknown }): Promise<void> {
+async function validateManifestHash(manifest: {
+  contentHash: string;
+  [key: string]: unknown;
+}): Promise<void> {
   const { contentHash, ...payload } = manifest;
   const expected = await computeContentHash(payload);
   if (contentHash !== expected) {
-    throw new Error('Manifest content hash mismatch');
+    throw new Error("Manifest content hash mismatch");
   }
 }
 
-export async function writeJson(adapter: StorageAdapter, path: string, value: unknown): Promise<void> {
-  console.log('[interocitor:write] manifest.writeJson', {
+export async function writeJson(
+  adapter: StorageAdapter,
+  path: string,
+  value: unknown,
+): Promise<void> {
+  console.log("[interocitor:write] manifest.writeJson", {
     path,
-    kind: path.endsWith('/manifest.json')
-      ? 'pointer'
-      : path.includes('/manifest-')
-        ? 'manifest'
-        : path.includes('/devices/')
-          ? 'device'
-          : path.includes('/changes/')
-            ? 'changes'
-            : 'other',
+    kind: path.endsWith("/manifest.json")
+      ? "pointer"
+      : path.includes("/manifest-")
+        ? "manifest"
+        : path.includes("/devices/")
+          ? "device"
+          : path.includes("/changes/")
+            ? "changes"
+            : "other",
   });
   await adapter.writeFile(path, textEncoder.encode(JSON.stringify(value, null, 2)));
 }
 
-async function createBootstrapManifest(ctx: ManifestContext, meshId?: string): Promise<{ pointer: ManifestPointer; manifest: Manifest }> {
+async function createBootstrapManifest(
+  ctx: ManifestContext,
+  meshId?: string,
+): Promise<{ pointer: ManifestPointer; manifest: Manifest }> {
   const p = paths(ctx.remotePath);
   const now = new Date().toISOString();
 
@@ -84,7 +97,7 @@ async function createBootstrapManifest(ctx: ManifestContext, meshId?: string): P
     writtenBy: ctx.serverId,
     writtenAt: now,
     version: 3,
-    meshId: meshId || generateId('mesh'),
+    meshId: meshId || generateId("mesh"),
     schema: ctx.schema?.version ?? 1,
     encrypted: ctx.encrypted,
     server: {
@@ -94,7 +107,7 @@ async function createBootstrapManifest(ctx: ManifestContext, meshId?: string): P
     },
     createdAt: now,
     epoch: 0,
-    watermarkHlc: '',
+    watermarkHlc: "",
     snapshotPath: null,
     deltaPath: null,
     retention: ctx.retention,
@@ -113,17 +126,17 @@ async function createBootstrapManifest(ctx: ManifestContext, meshId?: string): P
 
   await writeJson(ctx.adapter, p.manifestFile(manifest.generation), manifest);
   ctx.emit({
-    type: 'trace:manifest',
-    op: 'write',
-    reason: 'bootstrap',
+    type: "trace:manifest",
+    op: "write",
+    reason: "bootstrap",
     generation: manifest.generation,
     path: p.manifestFile(manifest.generation),
   });
   await writeJson(ctx.adapter, p.manifestPointer, pointer);
   ctx.emit({
-    type: 'trace:manifest',
-    op: 'write',
-    reason: 'bootstrap-pointer',
+    type: "trace:manifest",
+    op: "write",
+    reason: "bootstrap-pointer",
     generation: manifest.generation,
     path: p.manifestPointer,
   });
@@ -134,14 +147,14 @@ async function createBootstrapManifest(ctx: ManifestContext, meshId?: string): P
 export async function loadOrCreateManifest(
   ctx: ManifestContext,
   codecState: CodecState,
-  local: import('./types.ts').LocalStore,
+  local: import("./types.ts").LocalStore,
   poisonRemote: (error: unknown, path?: string) => Promise<Error>,
-  reason: string = 'unknown',
+  reason: string = "unknown",
   options: { assertLocalMeshId?: boolean } = {},
 ): Promise<{ manifest: Manifest; bootstrapped: boolean }> {
   const p = paths(ctx.remotePath);
 
-  ctx.emit({ type: 'trace:manifest', op: 'read', reason, path: p.manifestPointer });
+  ctx.emit({ type: "trace:manifest", op: "read", reason, path: p.manifestPointer });
   const globalPointer = await readJsonIfExists<ManifestPointer>(ctx.adapter, p.manifestPointer);
 
   let pointer: ManifestPointer;
@@ -151,8 +164,8 @@ export async function loadOrCreateManifest(
     pointer = globalPointer;
     const manifestPath = `${ctx.remotePath}/${pointer.file}`;
     ctx.emit({
-      type: 'trace:manifest',
-      op: 'read',
+      type: "trace:manifest",
+      op: "read",
       reason,
       path: manifestPath,
       generation: pointer.currentGeneration,
@@ -160,16 +173,21 @@ export async function loadOrCreateManifest(
     manifest = await readJson<Manifest>(ctx.adapter, manifestPath);
   } else {
     bootstrapped = true;
-    ctx.emit({ type: 'trace:manifest', op: 'bootstrap-create', reason, path: p.manifestPointer });
-    const existingMeshId = await local.getMeta('meshId');
-    const bootstrap = await createBootstrapManifest(ctx, typeof existingMeshId === 'string' ? existingMeshId : undefined);
+    ctx.emit({ type: "trace:manifest", op: "bootstrap-create", reason, path: p.manifestPointer });
+    const existingMeshId = await local.getMeta("meshId");
+    const bootstrap = await createBootstrapManifest(
+      ctx,
+      typeof existingMeshId === "string" ? existingMeshId : undefined,
+    );
     // Skip the read-after-write — we just minted both files in this process,
     // they are exactly what's on disk. No GETs needed.
     pointer = bootstrap.pointer;
     manifest = bootstrap.manifest;
   }
   const manifestPath = `${ctx.remotePath}/${pointer.file}`;
-  await validateManifestHash(manifest as unknown as { contentHash: string; [key: string]: unknown });
+  await validateManifestHash(
+    manifest as unknown as { contentHash: string; [key: string]: unknown },
+  );
   // Retention was added without invalidating existing version-3 manifests.
   // Resolve it only after validating the persisted hash; the next compaction
   // writes the defaults into the new generation.
@@ -186,8 +204,10 @@ export async function loadOrCreateManifest(
     throw new Error(`Unsupported manifest version ${manifest.version} (expected 3).`);
   }
   if (ctx.schema?.version !== undefined && manifest.schema !== ctx.schema.version) {
-    ctx.emit({ type: 'schema:mismatch', local: ctx.schema.version, remote: manifest.schema });
-    throw new Error(`Schema version mismatch: local=${ctx.schema.version}, remote=${manifest.schema}`);
+    ctx.emit({ type: "schema:mismatch", local: ctx.schema.version, remote: manifest.schema });
+    throw new Error(
+      `Schema version mismatch: local=${ctx.schema.version}, remote=${manifest.schema}`,
+    );
   }
   if (manifest.server.managed) {
     assertServerAuth(manifest, ctx.serverId);
@@ -204,7 +224,7 @@ export async function loadOrCreateManifest(
   // Surface this as an actionable error *before* any decode runs and
   // *without* poisoning. The remote is not corrupt — the local config
   // is wrong.
-  if (typeof manifest.encrypted === 'boolean' && manifest.encrypted !== ctx.encrypted) {
+  if (typeof manifest.encrypted === "boolean" && manifest.encrypted !== ctx.encrypted) {
     throw new MeshEncryptionMismatchError(manifest.encrypted, ctx.encrypted);
   }
 
@@ -217,7 +237,7 @@ export async function upsertDeviceMetadata(
   deviceId: string,
   opts?: {
     displayName?: string;
-    deviceType?: import('./types.ts').DeviceType;
+    deviceType?: import("./types.ts").DeviceType;
     observedManifestGeneration?: number;
     observedEpoch?: number;
     observedWatermarkHlc?: string;
@@ -243,9 +263,13 @@ export async function upsertDeviceMetadata(
   // user set on a different device — which would itself indicate the
   // bootstrap flag was misused. Sync engine only sets bootstrap=true
   // when it just minted the manifest in this same connect cycle.
-  const existing = opts?.bootstrap ? null : await readJsonIfExists<DeviceMetadata>(adapter, p.deviceFile(deviceId));
+  const existing = opts?.bootstrap
+    ? null
+    : await readJsonIfExists<DeviceMetadata>(adapter, p.deviceFile(deviceId));
   const touchedObserved =
-    opts?.observedManifestGeneration !== undefined || opts?.observedEpoch !== undefined || opts?.observedWatermarkHlc !== undefined;
+    opts?.observedManifestGeneration !== undefined ||
+    opts?.observedEpoch !== undefined ||
+    opts?.observedWatermarkHlc !== undefined;
   const next: DeviceMetadata = {
     deviceId,
     registeredAt: existing?.registeredAt ?? now,
@@ -255,14 +279,20 @@ export async function upsertDeviceMetadata(
     displayName: opts?.displayName ?? existing?.displayName,
     deviceType: opts?.deviceType ?? existing?.deviceType,
     retired: existing?.retired,
-    observedManifestGeneration: opts?.observedManifestGeneration ?? existing?.observedManifestGeneration,
+    observedManifestGeneration:
+      opts?.observedManifestGeneration ?? existing?.observedManifestGeneration,
     observedEpoch: opts?.observedEpoch ?? existing?.observedEpoch,
     observedWatermarkHlc: opts?.observedWatermarkHlc ?? existing?.observedWatermarkHlc,
-    observedAt: touchedObserved ? (opts?.skipTouchIfUnchanged ? (existing?.observedAt ?? now) : now) : existing?.observedAt,
+    observedAt: touchedObserved
+      ? opts?.skipTouchIfUnchanged
+        ? (existing?.observedAt ?? now)
+        : now
+      : existing?.observedAt,
     cutOffAt: existing?.cutOffAt,
     cutOffReason: existing?.cutOffReason,
   };
-  if (opts?.skipTouchIfUnchanged && existing && JSON.stringify(existing) === JSON.stringify(next)) return;
+  if (opts?.skipTouchIfUnchanged && existing && JSON.stringify(existing) === JSON.stringify(next))
+    return;
   if (opts?.skipTouchIfUnchanged && touchedObserved && existing) {
     const observedChanged =
       existing.observedManifestGeneration !== next.observedManifestGeneration ||

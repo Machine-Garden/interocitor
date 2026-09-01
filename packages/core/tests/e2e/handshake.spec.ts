@@ -1,94 +1,99 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from "@playwright/test";
 
 /* eslint-disable unicorn/consistent-function-scoping -- Browser-context helpers must be defined inside page.evaluate. */
 
-
 test.beforeEach(async ({ page }) => {
-  await page.goto('/packages/core/tests/e2e/fixtures/harness.html');
+  await page.goto("/packages/core/tests/e2e/fixtures/harness.html");
 });
 
 // ─── QR payload ──────────────────────────────────────────────────────
 
-test.describe('QR payload encoding', () => {
-  test('round-trip encodes share intent', async ({ page }) => {
+test.describe("QR payload encoding", () => {
+  test("round-trip encodes share intent", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { encodeQRPayload, decodeQRPayload } = await import('/packages/core/dist/handshake/index.js');
-      const payload = { intent: 'share', handshakeId: 'abc123', generatorPub: 'pubkey==' };
+      const { encodeQRPayload, decodeQRPayload } =
+        await import("/packages/core/dist/handshake/index.js");
+      const payload = { intent: "share", handshakeId: "abc123", generatorPub: "pubkey==" };
       const decoded = decodeQRPayload(encodeQRPayload(payload));
       return { match: JSON.stringify(payload) === JSON.stringify(decoded) };
     });
     expect(result.match).toBe(true);
   });
 
-  test('round-trip encodes join intent', async ({ page }) => {
+  test("round-trip encodes join intent", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { encodeQRPayload, decodeQRPayload } = await import('/packages/core/dist/handshake/index.js');
-      const payload = { intent: 'join', handshakeId: 'xyz', generatorPub: 'pk' };
+      const { encodeQRPayload, decodeQRPayload } =
+        await import("/packages/core/dist/handshake/index.js");
+      const payload = { intent: "join", handshakeId: "xyz", generatorPub: "pk" };
       const decoded = decodeQRPayload(encodeQRPayload(payload));
       return { intent: decoded.intent };
     });
-    expect(result.intent).toBe('join');
+    expect(result.intent).toBe("join");
   });
 
-  test('encoded string is URL-safe base64 (no +/= chars)', async ({ page }) => {
+  test("encoded string is URL-safe base64 (no +/= chars)", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { encodeQRPayload } = await import('/packages/core/dist/handshake/index.js');
-      return encodeQRPayload({ intent: 'share', handshakeId: 'abc', generatorPub: 'pk' });
+      const { encodeQRPayload } = await import("/packages/core/dist/handshake/index.js");
+      return encodeQRPayload({ intent: "share", handshakeId: "abc", generatorPub: "pk" });
     });
     expect(result).toMatch(/^[A-Za-z0-9_-]+$/);
   });
 
-  test('buildPairUrl embeds payload in URL fragment', async ({ page }) => {
+  test("buildPairUrl embeds payload in URL fragment", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { buildPairUrl, parseQRFromUrl } = await import('/packages/core/dist/index.js');
-      const payload = { intent: 'share', handshakeId: 'hs1', generatorPub: 'pk' };
-      const url = buildPairUrl('https://app.example.com/pair', payload);
-      const parsed = parseQRFromUrl(url.replace(/^[^#]*/, ''));
+      const { buildPairUrl, parseQRFromUrl } = await import("/packages/core/dist/index.js");
+      const payload = { intent: "share", handshakeId: "hs1", generatorPub: "pk" };
+      const url = buildPairUrl("https://app.example.com/pair", payload);
+      const parsed = parseQRFromUrl(url.replace(/^[^#]*/, ""));
       return { url, intent: parsed?.intent, handshakeId: parsed?.handshakeId };
     });
-    expect(result.url).toContain('#hs=');
-    expect(result.url).not.toContain('?');
-    expect(result.intent).toBe('share');
-    expect(result.handshakeId).toBe('hs1');
+    expect(result.url).toContain("#hs=");
+    expect(result.url).not.toContain("?");
+    expect(result.intent).toBe("share");
+    expect(result.handshakeId).toBe("hs1");
   });
 
-  test('parseQRFromUrl returns null for missing fragment', async ({ page }) => {
+  test("parseQRFromUrl returns null for missing fragment", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { parseQRFromUrl } = await import('/packages/core/dist/index.js');
-      return parseQRFromUrl('#unrelated=123');
+      const { parseQRFromUrl } = await import("/packages/core/dist/index.js");
+      return parseQRFromUrl("#unrelated=123");
     });
     expect(result).toBeNull();
   });
 
-  test('decodeQRPayload throws on invalid intent', async ({ page }) => {
+  test("decodeQRPayload throws on invalid intent", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { decodeQRPayload } = await import('/packages/core/dist/handshake/index.js');
+      const { decodeQRPayload } = await import("/packages/core/dist/handshake/index.js");
       try {
-        const bad = btoa(JSON.stringify({ intent: 'hack', handshakeId: 'x', generatorPub: 'y' }))
-          .replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+        const bad = btoa(JSON.stringify({ intent: "hack", handshakeId: "x", generatorPub: "y" }))
+          .replaceAll("+", "-")
+          .replaceAll("/", "_")
+          .replaceAll("=", "");
         decodeQRPayload(bad);
-        return 'no-error';
-      } catch (e) { return (e as Error).message; }
+        return "no-error";
+      } catch (e) {
+        return (e as Error).message;
+      }
     });
-    expect(result).toContain('Invalid');
+    expect(result).toContain("Invalid");
   });
 
-  test('QR payload does NOT contain remotePath or passphrase', async ({ page }) => {
+  test("QR payload does NOT contain remotePath or passphrase", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateShareQR } = await import('/packages/core/dist/index.js');
-      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
-      const { generateKey, keyToPassphrase } = await import('/packages/core/dist/crypto/keys.js');
+      const { generateShareQR } = await import("/packages/core/dist/index.js");
+      const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
+      const { generateKey, keyToPassphrase } = await import("/packages/core/dist/crypto/keys.js");
       const passphrase = await keyToPassphrase(await generateKey());
       const { qrPayload, qrEncoded } = await generateShareQR({
         adapter: new MemoryAdapter(),
-        relayBase: '/',
-        remotePath: '/secret-path',
+        relayBase: "/",
+        remotePath: "/secret-path",
         passphrase,
       });
       return {
-        hasRemotePath: 'remotePath' in qrPayload,
-        hasPassphrase: 'passphrase' in qrPayload,
-        encodedContainsPath: qrEncoded.includes('secret'),
+        hasRemotePath: "remotePath" in qrPayload,
+        hasPassphrase: "passphrase" in qrPayload,
+        encodedContainsPath: qrEncoded.includes("secret"),
         keys: Object.keys(qrPayload),
       };
     });
@@ -96,17 +101,21 @@ test.describe('QR payload encoding', () => {
     expect(result.hasPassphrase).toBe(false);
     expect(result.encodedContainsPath).toBe(false);
     // adapterConfig may also be present (from MemoryAdapter.getHandshakeConfig)
-    expect(result.keys).toEqual(expect.arrayContaining(['generatorPub', 'handshakeId', 'intent']));
-    expect(result.keys.every((k: string) => ['intent', 'handshakeId', 'generatorPub', 'adapterConfig'].includes(k))).toBe(true);
+    expect(result.keys).toEqual(expect.arrayContaining(["generatorPub", "handshakeId", "intent"]));
+    expect(
+      result.keys.every((k: string) =>
+        ["intent", "handshakeId", "generatorPub", "adapterConfig"].includes(k),
+      ),
+    ).toBe(true);
   });
 });
 
 // ─── ECDH helpers ────────────────────────────────────────────────────
 
-test.describe('ECDH keypair helpers', () => {
-  test('generateECDHKeypair produces extractable P-256 keypair', async ({ page }) => {
+test.describe("ECDH keypair helpers", () => {
+  test("generateECDHKeypair produces extractable P-256 keypair", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateECDHKeypair } = await import('/packages/core/dist/handshake/index.js');
+      const { generateECDHKeypair } = await import("/packages/core/dist/handshake/index.js");
       const { publicKey, privateKey } = await generateECDHKeypair();
       return {
         pubAlgo: publicKey.algorithm.name,
@@ -114,14 +123,15 @@ test.describe('ECDH keypair helpers', () => {
         privUsages: privateKey.usages,
       };
     });
-    expect(result.pubAlgo).toBe('ECDH');
-    expect(result.privAlgo).toBe('ECDH');
-    expect(result.privUsages).toContain('deriveKey');
+    expect(result.pubAlgo).toBe("ECDH");
+    expect(result.privAlgo).toBe("ECDH");
+    expect(result.privUsages).toContain("deriveKey");
   });
 
-  test('exportECDHPublicKey / importECDHPublicKey round-trip', async ({ page }) => {
+  test("exportECDHPublicKey / importECDHPublicKey round-trip", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateECDHKeypair, exportECDHPublicKey, importECDHPublicKey } = await import('/packages/core/dist/handshake/index.js');
+      const { generateECDHKeypair, exportECDHPublicKey, importECDHPublicKey } =
+        await import("/packages/core/dist/handshake/index.js");
       const { publicKey } = await generateECDHKeypair();
       const exported = await exportECDHPublicKey(publicKey);
       const reExported = await exportECDHPublicKey(await importECDHPublicKey(exported));
@@ -130,9 +140,10 @@ test.describe('ECDH keypair helpers', () => {
     expect(result.match).toBe(true);
   });
 
-  test('two keypairs produce different public keys', async ({ page }) => {
+  test("two keypairs produce different public keys", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateECDHKeypair, exportECDHPublicKey } = await import('/packages/core/dist/handshake/index.js');
+      const { generateECDHKeypair, exportECDHPublicKey } =
+        await import("/packages/core/dist/handshake/index.js");
       const a = await exportECDHPublicKey((await generateECDHKeypair()).publicKey);
       const b = await exportECDHPublicKey((await generateECDHKeypair()).publicKey);
       return a === b;
@@ -140,18 +151,29 @@ test.describe('ECDH keypair helpers', () => {
     expect(result).toBe(false);
   });
 
-  test('ECDH shared secret is symmetric', async ({ page }) => {
+  test("ECDH shared secret is symmetric", async ({ page }) => {
     const result = await page.evaluate(async () => {
       function hexFrom(b: ArrayBuffer): string {
-        return Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2, '0')).join('');
+        return Array.from(new Uint8Array(b))
+          .map((x) => x.toString(16).padStart(2, "0"))
+          .join("");
       }
-      const { generateECDHKeypair, exportECDHPublicKey, importECDHPublicKey } = await import('/packages/core/dist/handshake/index.js');
+      const { generateECDHKeypair, exportECDHPublicKey, importECDHPublicKey } =
+        await import("/packages/core/dist/handshake/index.js");
       const kpA = await generateECDHKeypair();
       const kpB = await generateECDHKeypair();
       const pubA = await importECDHPublicKey(await exportECDHPublicKey(kpA.publicKey));
       const pubB = await importECDHPublicKey(await exportECDHPublicKey(kpB.publicKey));
-      const bitsAB = await crypto.subtle.deriveBits({ name: 'ECDH', public: pubB }, kpA.privateKey, 256);
-      const bitsBA = await crypto.subtle.deriveBits({ name: 'ECDH', public: pubA }, kpB.privateKey, 256);
+      const bitsAB = await crypto.subtle.deriveBits(
+        { name: "ECDH", public: pubB },
+        kpA.privateKey,
+        256,
+      );
+      const bitsBA = await crypto.subtle.deriveBits(
+        { name: "ECDH", public: pubA },
+        kpB.privateKey,
+        256,
+      );
       return hexFrom(bitsAB) === hexFrom(bitsBA);
     });
     expect(result).toBe(true);
@@ -160,20 +182,20 @@ test.describe('ECDH keypair helpers', () => {
 
 // ─── Share flow: generator has credentials, scanner joins ────────────
 
-test.describe('generateShareQR + handleScannedQR (share flow)', () => {
-  test('scanner receives correct remotePath and passphrase', async ({ page }) => {
+test.describe("generateShareQR + handleScannedQR (share flow)", () => {
+  test("scanner receives correct remotePath and passphrase", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateShareQR, handleScannedQR } = await import('/packages/core/dist/index.js');
-      const { generateKey, keyToPassphrase } = await import('/packages/core/dist/crypto/keys.js');
-      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+      const { generateShareQR, handleScannedQR } = await import("/packages/core/dist/index.js");
+      const { generateKey, keyToPassphrase } = await import("/packages/core/dist/crypto/keys.js");
+      const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
 
       const adapter = new MemoryAdapter();
       const passphrase = await keyToPassphrase(await generateKey());
 
       const share = await generateShareQR({
         adapter,
-        relayBase: '/',
-        remotePath: '/team-alpha',
+        relayBase: "/",
+        remotePath: "/team-alpha",
         passphrase,
         pollIntervalMs: 50,
         timeoutMs: 10_000,
@@ -183,7 +205,7 @@ test.describe('generateShareQR + handleScannedQR (share flow)', () => {
         share.complete(),
         handleScannedQR({
           adapter,
-          relayBase: '/',
+          relayBase: "/",
           payload: share.qrPayload,
           pollIntervalMs: 50,
           timeoutMs: 10_000,
@@ -197,106 +219,135 @@ test.describe('generateShareQR + handleScannedQR (share flow)', () => {
       };
     });
 
-    expect(result.remotePath).toBe('/team-alpha');
+    expect(result.remotePath).toBe("/team-alpha");
     expect(result.passphraseMatch).toBe(true);
-    expect(result.intent).toBe('share');
+    expect(result.intent).toBe("share");
   });
 
-  test('unencrypted mesh — scanner receives remotePath, passphrase is null', async ({ page }) => {
+  test("unencrypted mesh — scanner receives remotePath, passphrase is null", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateShareQR, handleScannedQR } = await import('/packages/core/dist/index.js');
-      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+      const { generateShareQR, handleScannedQR } = await import("/packages/core/dist/index.js");
+      const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
 
       const adapter = new MemoryAdapter();
       const share = await generateShareQR({
-        adapter, relayBase: '/', remotePath: '/plain-team',
-        passphrase: null, pollIntervalMs: 50, timeoutMs: 10_000,
+        adapter,
+        relayBase: "/",
+        remotePath: "/plain-team",
+        passphrase: null,
+        pollIntervalMs: 50,
+        timeoutMs: 10_000,
       });
 
       const [, received] = await Promise.all([
         share.complete(),
-        handleScannedQR({ adapter, relayBase: '/', payload: share.qrPayload, pollIntervalMs: 50, timeoutMs: 10_000 }),
+        handleScannedQR({
+          adapter,
+          relayBase: "/",
+          payload: share.qrPayload,
+          pollIntervalMs: 50,
+          timeoutMs: 10_000,
+        }),
       ]);
 
       return { remotePath: received!.remotePath, hasPassphrase: received!.passphrase !== null };
     });
 
-    expect(result.remotePath).toBe('/plain-team');
+    expect(result.remotePath).toBe("/plain-team");
     expect(result.hasPassphrase).toBe(false);
   });
 
-  test('relay files are cleaned up after share handshake', async ({ page }) => {
+  test("relay files are cleaned up after share handshake", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateShareQR, handleScannedQR } = await import('/packages/core/dist/index.js');
-      const { generateKey, keyToPassphrase } = await import('/packages/core/dist/crypto/keys.js');
-      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+      const { generateShareQR, handleScannedQR } = await import("/packages/core/dist/index.js");
+      const { generateKey, keyToPassphrase } = await import("/packages/core/dist/crypto/keys.js");
+      const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
 
       const adapter = new MemoryAdapter();
       const passphrase = await keyToPassphrase(await generateKey());
       const share = await generateShareQR({
-        adapter, relayBase: '/', remotePath: '/cleanup-test',
-        passphrase, pollIntervalMs: 50, timeoutMs: 10_000,
+        adapter,
+        relayBase: "/",
+        remotePath: "/cleanup-test",
+        passphrase,
+        pollIntervalMs: 50,
+        timeoutMs: 10_000,
       });
       const { handshakeId } = share.qrPayload;
 
       await Promise.all([
         share.complete(),
-        handleScannedQR({ adapter, relayBase: '/', payload: share.qrPayload, pollIntervalMs: 50, timeoutMs: 10_000 }),
+        handleScannedQR({
+          adapter,
+          relayBase: "/",
+          payload: share.qrPayload,
+          pollIntervalMs: 50,
+          timeoutMs: 10_000,
+        }),
       ]);
 
       await new Promise((resolve) => {
         setTimeout(resolve, 100);
       });
-      
+
       const files = adapter.dump();
-      const relayFiles = Object.keys(files).filter(k => k.includes(`handshake/${handshakeId}`));
+      const relayFiles = Object.keys(files).filter((k) => k.includes(`handshake/${handshakeId}`));
       return { relayFiles };
     });
 
     expect(result.relayFiles).toHaveLength(0);
   });
 
-  test('share times out if scanner never appears', async ({ page }) => {
+  test("share times out if scanner never appears", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateShareQR } = await import('/packages/core/dist/index.js');
-      const { generateKey, keyToPassphrase } = await import('/packages/core/dist/crypto/keys.js');
-      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+      const { generateShareQR } = await import("/packages/core/dist/index.js");
+      const { generateKey, keyToPassphrase } = await import("/packages/core/dist/crypto/keys.js");
+      const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
 
       const share = await generateShareQR({
-        adapter: new MemoryAdapter(), relayBase: '/',
-        remotePath: '/timeout', passphrase: await keyToPassphrase(await generateKey()),
-        pollIntervalMs: 50, timeoutMs: 200,
+        adapter: new MemoryAdapter(),
+        relayBase: "/",
+        remotePath: "/timeout",
+        passphrase: await keyToPassphrase(await generateKey()),
+        pollIntervalMs: 50,
+        timeoutMs: 200,
       });
-      try { await share.complete(); return 'no-error'; }
-      catch (e) { return (e as Error).message; }
+      try {
+        await share.complete();
+        return "no-error";
+      } catch (e) {
+        return (e as Error).message;
+      }
     });
-    expect(result).toContain('timed out');
+    expect(result).toContain("timed out");
   });
 });
 
 // ─── Join flow: generator wants credentials, scanner pushes them ─────
 
-test.describe('generateJoinQR + handleScannedQR (join flow)', () => {
-  test('generator receives correct credentials pushed by scanner', async ({ page }) => {
+test.describe("generateJoinQR + handleScannedQR (join flow)", () => {
+  test("generator receives correct credentials pushed by scanner", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateJoinQR, handleScannedQR } = await import('/packages/core/dist/index.js');
-      const { generateKey, keyToPassphrase } = await import('/packages/core/dist/crypto/keys.js');
-      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+      const { generateJoinQR, handleScannedQR } = await import("/packages/core/dist/index.js");
+      const { generateKey, keyToPassphrase } = await import("/packages/core/dist/crypto/keys.js");
+      const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
 
       const adapter = new MemoryAdapter();
       const passphrase = await keyToPassphrase(await generateKey());
 
       const join = await generateJoinQR({
-        adapter, relayBase: '/',
-        pollIntervalMs: 50, timeoutMs: 10_000,
+        adapter,
+        relayBase: "/",
+        pollIntervalMs: 50,
+        timeoutMs: 10_000,
       });
 
       // Scanner (has credentials) scans the join QR and pushes credentials
       await handleScannedQR({
         adapter,
-        relayBase: '/',
+        relayBase: "/",
         payload: join.qrPayload,
-        ownCredentials: { remotePath: '/team-bravo', passphrase },
+        ownCredentials: { remotePath: "/team-bravo", passphrase },
         pollIntervalMs: 50,
         timeoutMs: 10_000,
       });
@@ -311,89 +362,123 @@ test.describe('generateJoinQR + handleScannedQR (join flow)', () => {
       };
     });
 
-    expect(result.remotePath).toBe('/team-bravo');
+    expect(result.remotePath).toBe("/team-bravo");
     expect(result.passphraseMatch).toBe(true);
-    expect(result.intent).toBe('join');
+    expect(result.intent).toBe("join");
   });
 
-  test('join flow unencrypted mesh — generator receives remotePath, null passphrase', async ({ page }) => {
+  test("join flow unencrypted mesh — generator receives remotePath, null passphrase", async ({
+    page,
+  }) => {
     const result = await page.evaluate(async () => {
-      const { generateJoinQR, handleScannedQR } = await import('/packages/core/dist/index.js');
-      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+      const { generateJoinQR, handleScannedQR } = await import("/packages/core/dist/index.js");
+      const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
 
       const adapter = new MemoryAdapter();
-      const join = await generateJoinQR({ adapter, relayBase: '/', pollIntervalMs: 50, timeoutMs: 10_000 });
+      const join = await generateJoinQR({
+        adapter,
+        relayBase: "/",
+        pollIntervalMs: 50,
+        timeoutMs: 10_000,
+      });
 
       await handleScannedQR({
-        adapter, relayBase: '/', payload: join.qrPayload,
-        ownCredentials: { remotePath: '/open-team', passphrase: null },
-        pollIntervalMs: 50, timeoutMs: 10_000,
+        adapter,
+        relayBase: "/",
+        payload: join.qrPayload,
+        ownCredentials: { remotePath: "/open-team", passphrase: null },
+        pollIntervalMs: 50,
+        timeoutMs: 10_000,
       });
 
       const received = await join.credentials;
       return { remotePath: received.remotePath, hasPassphrase: received.passphrase !== null };
     });
 
-    expect(result.remotePath).toBe('/open-team');
+    expect(result.remotePath).toBe("/open-team");
     expect(result.hasPassphrase).toBe(false);
   });
 
-  test('join times out if scanner never appears', async ({ page }) => {
+  test("join times out if scanner never appears", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateJoinQR } = await import('/packages/core/dist/index.js');
-      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+      const { generateJoinQR } = await import("/packages/core/dist/index.js");
+      const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
 
       const join = await generateJoinQR({
-        adapter: new MemoryAdapter(), relayBase: '/',
-        pollIntervalMs: 50, timeoutMs: 200,
+        adapter: new MemoryAdapter(),
+        relayBase: "/",
+        pollIntervalMs: 50,
+        timeoutMs: 200,
       });
-      try { await join.credentials; return 'no-error'; }
-      catch (e) { return (e as Error).message; }
+      try {
+        await join.credentials;
+        return "no-error";
+      } catch (e) {
+        return (e as Error).message;
+      }
     });
-    expect(result).toContain('timed out');
+    expect(result).toContain("timed out");
   });
 
-  test('handleScannedQR throws if ownCredentials missing for join QR', async ({ page }) => {
+  test("handleScannedQR throws if ownCredentials missing for join QR", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateJoinQR, handleScannedQR } = await import('/packages/core/dist/index.js');
-      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+      const { generateJoinQR, handleScannedQR } = await import("/packages/core/dist/index.js");
+      const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
 
-      const join = await generateJoinQR({ adapter: new MemoryAdapter(), relayBase: '/' });
+      const join = await generateJoinQR({ adapter: new MemoryAdapter(), relayBase: "/" });
       try {
-        await handleScannedQR({ adapter: new MemoryAdapter(), relayBase: '/', payload: join.qrPayload });
-        return 'no-error';
-      } catch (e) { return (e as Error).message; }
+        await handleScannedQR({
+          adapter: new MemoryAdapter(),
+          relayBase: "/",
+          payload: join.qrPayload,
+        });
+        return "no-error";
+      } catch (e) {
+        return (e as Error).message;
+      }
     });
-    expect(result).toContain('ownCredentials required');
+    expect(result).toContain("ownCredentials required");
   });
 });
 
 // ─── Security: wrong private key cannot decrypt ───────────────────────
 
-test.describe('Security', () => {
-  test('attacker without generatorPriv cannot derive wrapping key', async ({ page }) => {
+test.describe("Security", () => {
+  test("attacker without generatorPriv cannot derive wrapping key", async ({ page }) => {
     const result = await page.evaluate(async () => {
       function hex(b: ArrayBuffer): string {
-        return Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2, '0')).join('');
+        return Array.from(new Uint8Array(b))
+          .map((x) => x.toString(16).padStart(2, "0"))
+          .join("");
       }
-      const { generateECDHKeypair, exportECDHPublicKey, importECDHPublicKey } = await import('/packages/core/dist/handshake/index.js');
+      const { generateECDHKeypair, exportECDHPublicKey, importECDHPublicKey } =
+        await import("/packages/core/dist/handshake/index.js");
 
       const generator = await generateECDHKeypair();
-      const scanner   = await generateECDHKeypair();
-      const attacker  = await generateECDHKeypair();
+      const scanner = await generateECDHKeypair();
+      const attacker = await generateECDHKeypair();
 
-      const generatorPub = await importECDHPublicKey(await exportECDHPublicKey(generator.publicKey));
-      const scannerPub   = await importECDHPublicKey(await exportECDHPublicKey(scanner.publicKey));
-
+      const generatorPub = await importECDHPublicKey(
+        await exportECDHPublicKey(generator.publicKey),
+      );
+      const scannerPub = await importECDHPublicKey(await exportECDHPublicKey(scanner.publicKey));
 
       // Legitimate shared secret
-      const legitBits = await crypto.subtle.deriveBits({ name: 'ECDH', public: scannerPub }, generator.privateKey, 256);
+      const legitBits = await crypto.subtle.deriveBits(
+        { name: "ECDH", public: scannerPub },
+        generator.privateKey,
+        256,
+      );
       // Attacker tries with their own private key against scannerPub
-      const attackBits = await crypto.subtle.deriveBits({ name: 'ECDH', public: generatorPub }, attacker.privateKey, 256);
+      const attackBits = await crypto.subtle.deriveBits(
+        { name: "ECDH", public: generatorPub },
+        attacker.privateKey,
+        256,
+      );
 
       return {
         legitimateHex: hex(legitBits).slice(0, 8),
-        attackHex:     hex(attackBits).slice(0, 8),
+        attackHex: hex(attackBits).slice(0, 8),
         differ: hex(legitBits) !== hex(attackBits),
       };
     });
@@ -401,12 +486,12 @@ test.describe('Security', () => {
     expect(result.differ).toBe(true);
   });
 
-  test('each handshake gets a unique handshakeId', async ({ page }) => {
+  test("each handshake gets a unique handshakeId", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateShareQR } = await import('/packages/core/dist/index.js');
-      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+      const { generateShareQR } = await import("/packages/core/dist/index.js");
+      const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
       const adapter = new MemoryAdapter();
-      const base = { adapter, relayBase: '/', remotePath: '/m', passphrase: null };
+      const base = { adapter, relayBase: "/", remotePath: "/m", passphrase: null };
       const a = await generateShareQR(base);
       const b = await generateShareQR(base);
       return { same: a.qrPayload.handshakeId === b.qrPayload.handshakeId };
@@ -417,44 +502,65 @@ test.describe('Security', () => {
 
 // ─── QR output shape ─────────────────────────────────────────────────
 
-test.describe('QR output shape', () => {
-  test('generateShareQR — payload contains required keys, no credentials', async ({ page }) => {
+test.describe("QR output shape", () => {
+  test("generateShareQR — payload contains required keys, no credentials", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateShareQR } = await import('/packages/core/dist/index.js');
-      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
+      const { generateShareQR } = await import("/packages/core/dist/index.js");
+      const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
       const { qrPayload } = await generateShareQR({
-        adapter: new MemoryAdapter(), relayBase: '/', remotePath: '/m', passphrase: null,
+        adapter: new MemoryAdapter(),
+        relayBase: "/",
+        remotePath: "/m",
+        passphrase: null,
       });
       return Object.keys(qrPayload);
     });
-    expect(result).toEqual(expect.arrayContaining(['intent', 'handshakeId', 'generatorPub']));
+    expect(result).toEqual(expect.arrayContaining(["intent", "handshakeId", "generatorPub"]));
     // No credentials, no passphrase
-    expect(result).not.toContain('remotePath');
-    expect(result).not.toContain('passphrase');
+    expect(result).not.toContain("remotePath");
+    expect(result).not.toContain("passphrase");
     // Only known keys present
-    const allowed = ['intent', 'handshakeId', 'generatorPub', 'adapterConfig'];
+    const allowed = ["intent", "handshakeId", "generatorPub", "adapterConfig"];
     expect(result.every((k: string) => allowed.includes(k))).toBe(true);
   });
 
-  test('generateJoinQR — pairUrl null without pairBaseUrl', async ({ page }) => {
+  test("generateJoinQR — pairUrl null without pairBaseUrl", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { generateJoinQR } = await import('/packages/core/dist/index.js');
-      const { MemoryAdapter } = await import('/packages/core/dist/adapters/memory.js');
-      const { pairUrl, qrEncoded, qrPayload } = await generateJoinQR({ adapter: new MemoryAdapter(), relayBase: '/' });
-      return { pairUrl, intent: qrPayload.intent, encodedIsB64: /^[A-Za-z0-9_-]+$/.test(qrEncoded) };
+      const { generateJoinQR } = await import("/packages/core/dist/index.js");
+      const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
+      const { pairUrl, qrEncoded, qrPayload } = await generateJoinQR({
+        adapter: new MemoryAdapter(),
+        relayBase: "/",
+      });
+      return {
+        pairUrl,
+        intent: qrPayload.intent,
+        encodedIsB64: /^[A-Za-z0-9_-]+$/.test(qrEncoded),
+      };
     });
     expect(result.pairUrl).toBeNull();
-    expect(result.intent).toBe('join');
+    expect(result.intent).toBe("join");
     expect(result.encodedIsB64).toBe(true);
   });
 
-  test('QR decoder is available through the public handshake subpath', async ({ page }) => {
+  test("QR decoder is available through the public handshake subpath", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { encodeQRPayload, decodeQRPayload } = await import('/packages/core/dist/handshake/qr-public.js');
-      const payload = { intent: 'share' as const, handshakeId: 'hs_1', generatorPub: 'pub_1', adapterConfig: 'adapter' };
+      const { encodeQRPayload, decodeQRPayload } =
+        await import("/packages/core/dist/handshake/qr-public.js");
+      const payload = {
+        intent: "share" as const,
+        handshakeId: "hs_1",
+        generatorPub: "pub_1",
+        adapterConfig: "adapter",
+      };
       return decodeQRPayload(encodeQRPayload(payload));
     });
 
-    expect(result).toEqual({ intent: 'share', handshakeId: 'hs_1', generatorPub: 'pub_1', adapterConfig: 'adapter' });
+    expect(result).toEqual({
+      intent: "share",
+      handshakeId: "hs_1",
+      generatorPub: "pub_1",
+      adapterConfig: "adapter",
+    });
   });
 });

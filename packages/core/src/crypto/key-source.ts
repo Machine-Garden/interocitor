@@ -1,4 +1,4 @@
-import type { CredentialStore, StoredCredentials } from '../storage/credential-store.ts';
+import type { CredentialStore, StoredCredentials } from "../storage/credential-store.ts";
 
 export interface MeshKeyContext {
   dbName: string;
@@ -75,7 +75,7 @@ export class PortablePassphraseKeySource implements MeshKeySource {
 export class BoundSharedKeySource implements MeshKeySource {
   private portableKey: string | null;
   private readonly credentialStore: CredentialStore | null;
-  private readonly deriveKey: BoundSharedKeySourceOptions['derive'];
+  private readonly deriveKey: BoundSharedKeySourceOptions["derive"];
 
   constructor(options: BoundSharedKeySourceOptions) {
     this.portableKey = options.portableKey ?? null;

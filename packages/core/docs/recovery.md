@@ -21,16 +21,13 @@ a password manager or on paper. Do not log it or upload it. Generate a new
 phrase for every mesh and every replacement wrapper.
 
 ```ts
-import {
-  createRecoveryWrapper,
-  publishRecoveryWrapper,
-} from '@interocitor/core';
+import { createRecoveryWrapper, publishRecoveryWrapper } from "@interocitor/core";
 
 // Generate and show this in application code.
 const phrase = phraseGeneratedByYourApp;
 const portableKey = keySource.getPortableKey();
 const meshId = db.getMeshId();
-if (!portableKey || !meshId) throw new Error('Connect the mesh before enabling recovery');
+if (!portableKey || !meshId) throw new Error("Connect the mesh before enabling recovery");
 
 const wrapper = await createRecoveryWrapper(phrase, {
   remotePath,
@@ -74,12 +71,12 @@ import {
   Interocitor,
   PortablePassphraseKeySource,
   recoverMeshCredentials,
-} from '@interocitor/core';
+} from "@interocitor/core";
 
 const recovered = await recoverMeshCredentials(adapter, phraseFromUser);
 
 const db = new Interocitor(adapter, {
-  dbName: 'case-vault',
+  dbName: "case-vault",
   remotePath: recovered.remotePath,
   localStore,
   keySource: new PortablePassphraseKeySource({
@@ -130,8 +127,8 @@ known recovery endpoint when recovering a forgotten mesh ID:
 ```ts
 const recoveryAdapter = new CloudflareAdapter({
   // A placeholder is sufficient for recovery; no /io request is made yet.
-  baseUrl: 'https://worker.example/sync/io/recovery',
-  recoveryBaseUrl: 'https://worker.example/sync/recovery',
+  baseUrl: "https://worker.example/sync/io/recovery",
+  recoveryBaseUrl: "https://worker.example/sync/recovery",
   recoveryToken: tokenIssuedForRecoveryNamespace,
 });
 

@@ -4,13 +4,13 @@
  * Extracted from Interocitor. Not part of the public API.
  */
 
-import type { StorageAdapter, LocalStore, ChangeEntry, ChangesHead, SyncEvent } from './types.ts';
-import { hlcCompareStr } from './hlc.ts';
-import { paths, textEncoder, textDecoder } from './internals.ts';
-import { encodeChangePayload } from './codec.ts';
-import type { CodecState } from './codec.ts';
-import { upsertDeviceMetadata } from './manifest.ts';
-import { changeFileName, recordFlushedChanges } from './change-observation.ts';
+import type { StorageAdapter, LocalStore, ChangeEntry, ChangesHead, SyncEvent } from "./types.ts";
+import { hlcCompareStr } from "./hlc.ts";
+import { paths, textEncoder, textDecoder } from "./internals.ts";
+import { encodeChangePayload } from "./codec.ts";
+import type { CodecState } from "./codec.ts";
+import { upsertDeviceMetadata } from "./manifest.ts";
+import { changeFileName, recordFlushedChanges } from "./change-observation.ts";
 
 export interface FlushReplicaTarget {
   adapter: StorageAdapter;
@@ -29,12 +29,18 @@ async function flushToAdapter(
   const p = paths(remotePath);
   await adapter.ensureFolder(p.changesFolder);
 
-  let lastWrittenHlc = '';
+  let lastWrittenHlc = "";
 
   for (const entry of entries) {
     const fileName = changeFileName(entry);
     const payload = await encodeChangePayload(codecState, entry);
-    console.log('[interocitor:write] flush.changeFile', { path: p.changeFile(fileName), deviceId, isPrimary, entryId: entry.id, hlc: entry.hlc });
+    console.log("[interocitor:write] flush.changeFile", {
+      path: p.changeFile(fileName),
+      deviceId,
+      isPrimary,
+      entryId: entry.id,
+      hlc: entry.hlc,
+    });
     await adapter.writeFile(p.changeFile(fileName), textEncoder.encode(payload));
 
     if (!lastWrittenHlc || hlcCompareStr(entry.hlc, lastWrittenHlc) > 0) {
@@ -52,9 +58,9 @@ async function flushToAdapter(
   //  - no entries to flush → emit { op: 'skip-no-change' } and don't touch head.
   if (!lastWrittenHlc) {
     emit({
-      type: 'trace:head',
-      op: 'skip-no-change',
-      reason: 'flush',
+      type: "trace:head",
+      op: "skip-no-change",
+      reason: "flush",
       path: p.changesHead,
       nextHlc: null,
     });
@@ -76,9 +82,9 @@ async function flushToAdapter(
   const priorHead = await readHeadIfExists();
   const priorHlc = priorHead?.latestHlc ?? null;
   emit({
-    type: 'trace:head',
-    op: 'read',
-    reason: 'flush',
+    type: "trace:head",
+    op: "read",
+    reason: "flush",
     path: p.changesHead,
     priorHlc,
   });
@@ -87,9 +93,9 @@ async function flushToAdapter(
   // beyond what we just wrote (replica catching up, retried flush, etc.).
   if (priorHlc && hlcCompareStr(priorHlc, lastWrittenHlc) >= 0) {
     emit({
-      type: 'trace:head',
-      op: 'skip-no-change',
-      reason: 'flush',
+      type: "trace:head",
+      op: "skip-no-change",
+      reason: "flush",
       path: p.changesHead,
       priorHlc,
       nextHlc: lastWrittenHlc,
@@ -106,9 +112,9 @@ async function flushToAdapter(
   const bestHlc = regressed ? priorHlc : lastWrittenHlc;
 
   emit({
-    type: 'trace:head',
-    op: 'write',
-    reason: 'flush',
+    type: "trace:head",
+    op: "write",
+    reason: "flush",
     path: p.changesHead,
     priorHlc,
     nextHlc: bestHlc,
@@ -116,7 +122,13 @@ async function flushToAdapter(
   });
 
   if (!regressed) {
-    console.log('[interocitor:write] flush.head', { path: p.changesHead, deviceId, isPrimary, priorHlc, nextHlc: bestHlc });
+    console.log("[interocitor:write] flush.head", {
+      path: p.changesHead,
+      deviceId,
+      isPrimary,
+      priorHlc,
+      nextHlc: bestHlc,
+    });
     await adapter.writeFile(
       p.changesHead,
       textEncoder.encode(JSON.stringify({ latestHlc: bestHlc } satisfies ChangesHead, null, 2)),
@@ -156,6 +168,12 @@ export async function flushPrimary(
 }
 
 /** Replicas mirror bytes but never advance authoritative local observation. */
-async function flushReplica(adapter: StorageAdapter, remotePath: string, entries: ChangeEntry[], codecState: CodecState, deviceId: string): Promise<void> {
+async function flushReplica(
+  adapter: StorageAdapter,
+  remotePath: string,
+  entries: ChangeEntry[],
+  codecState: CodecState,
+  deviceId: string,
+): Promise<void> {
   await flushToAdapter(adapter, remotePath, entries, false, codecState, deviceId);
 }

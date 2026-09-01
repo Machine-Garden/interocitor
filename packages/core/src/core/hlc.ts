@@ -8,7 +8,7 @@
  * Example: "1711785600000-0000-dev_x1"
  */
 
-import type { HLC } from './types.ts';
+import type { HLC } from "./types.ts";
 
 // Guard against poisoned/misconfigured peers that report far-future clocks.
 export const HLC_MAX_FUTURE_SKEW_MS: number = 5 * 60 * 1000;
@@ -63,15 +63,15 @@ export function hlcCompareStr(a: string, b: string): number {
 /** Serialize HLC to a string that sorts lexicographically. */
 export function hlcSerialize(hlc: HLC): string {
   // Zero-pad ts to 15 digits (covers until year 2286)
-  const ts = hlc.ts.toString().padStart(15, '0');
-  const counter = hlc.counter.toString(16).padStart(4, '0');
+  const ts = hlc.ts.toString().padStart(15, "0");
+  const counter = hlc.counter.toString(16).padStart(4, "0");
   return `${ts}-${counter}-${hlc.nodeId}`;
 }
 
 /** Parse a serialized HLC string back to an HLC object. */
 export function hlcParse(s: string): HLC {
-  const firstDash = s.indexOf('-');
-  const secondDash = s.indexOf('-', firstDash + 1);
+  const firstDash = s.indexOf("-");
+  const secondDash = s.indexOf("-", firstDash + 1);
   return {
     ts: parseInt(s.slice(0, firstDash), 10),
     counter: parseInt(s.slice(firstDash + 1, secondDash), 16),

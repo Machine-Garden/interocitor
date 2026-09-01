@@ -9,9 +9,9 @@ storage failures can delay physical deletion. Tombstones remain in the
 snapshot. Because storage adapters provide no CAS or distributed lease,
 deployments must ensure that only one compactor publishes at a time.
 
-This document covers the protocol details. The README has a one‑page
-summary; everything below is for operators, debugging, or anyone tuning
-auto‑compaction in production.
+Use the protocol details below when operating, debugging, or tuning
+auto-compaction in production. For first setup and the package's API map, see
+the [Core package overview](../README.md).
 
 ## Mental model
 
@@ -56,11 +56,11 @@ manual calls; automatic compaction does not run without eligible changes.
 
 ## Snapshot lifecycle and storage bounds
 
-| State | Meaning | Retention rule |
-| --- | --- | --- |
-| Candidate | Snapshot payload was written, but the manifest pointer does not name it yet. | Keep during publication; a later retention check, compaction, or operator recovery removes an abandoned candidate. |
-| Current | `manifest.json` resolves to a generation whose `snapshotPath` names this file. | Keep exactly one. Never delete it during cleanup. |
-| Superseded | A newer manifest pointer was committed. | Delete best effort after publication; retry on later managed retention checks and compactions. |
+| State      | Meaning                                                                        | Retention rule                                                                                                     |
+| ---------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| Candidate  | Snapshot payload was written, but the manifest pointer does not name it yet.   | Keep during publication; a later retention check, compaction, or operator recovery removes an abandoned candidate. |
+| Current    | `manifest.json` resolves to a generation whose `snapshotPath` names this file. | Keep exactly one. Never delete it during cleanup.                                                                  |
+| Superseded | A newer manifest pointer was committed.                                        | Delete best effort after publication; retry on later managed retention checks and compactions.                     |
 
 The normal-operation physical bounds for protocol data are:
 

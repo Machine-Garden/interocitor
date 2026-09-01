@@ -22,10 +22,10 @@ them. The storage provider can make data available without receiving plaintext.
 Interocitor exposes two related surfaces with different availability
 guarantees:
 
-| Surface       | Behavior                                                                                                                           | Remote storage                                                         |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| CRDT rows     | Reads and writes use a caller-supplied local store. An outbox carries encrypted changes when transport is available.               | Encrypted changes and snapshots are merged and compacted by clients.   |
-| Durable files | `putFile`, `getFile`, `openFile`, and `deleteFile` call the remote adapter directly. There is no core file cache or offline queue. | Encrypted bytes remain at their app path until overwritten or deleted. |
+| Surface       | Behavior                                                                                                                           | Remote storage                                                    |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| CRDT rows     | Reads and writes use a caller-supplied local store. An outbox carries encoded changes when transport is available.                 | Changes and snapshots are merged and compacted by clients.        |
+| Durable files | `putFile`, `getFile`, `openFile`, and `deleteFile` call the remote adapter directly. There is no core file cache or offline queue. | File bytes remain at their app path until overwritten or deleted. |
 
 With a non-null key source, row payloads and file bytes are encrypted before
 upload. Storage still observes transport metadata such as object names, sizes,
@@ -35,18 +35,46 @@ boundary.
 
 ## Package map
 
-| Package                | Start here                                                                                                  |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `@interocitor/core`    | [Engine, schemas, adapters, pairing, recovery, and file APIs](packages/core/README.md)                      |
-| `@interocitor/web`     | [Browser local stores, credential custody, and image helpers](packages/web/README.md)                       |
-| `@interocitor/react`   | [Context and reactive row/image hooks](packages/react/README.md)                                            |
-| `@interocitor/workers` | [Cloudflare Worker runtime with D1 plus configurable durable file-body storage](packages/workers/README.md) |
-| InterocitorSwift       | [Swift source package](packages/interocitor-swift/README.md)                                                |
-| `interocitor`          | [Python core for headless workers and protocol integrations](packages/interocitor-python/README.md)         |
+| Package                | Start here                                                                                                                       |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `@interocitor/core`    | [Engine, schemas, adapters, pairing, recovery, and file APIs](packages/core/README.md)                                           |
+| `@interocitor/web`     | [Browser local stores, credential custody, and image helpers](packages/web/README.md)                                            |
+| `@interocitor/react`   | [Context and reactive row/image hooks](packages/react/README.md)                                                                 |
+| `@interocitor/workers` | [Cloudflare Worker runtime with D1 plus configurable durable file-body storage](packages/workers/README.md)                      |
+| InterocitorSwift       | [Apple-platform runtime with local SQLite rows and Core-compatible encrypted mailbox sync](packages/interocitor-swift/README.md) |
+| `interocitor`          | [Python core for headless workers and protocol integrations](packages/interocitor-python/README.md)                              |
 
 The browser package is the recommended entry point for browser applications;
 it supplies the local-store and credential-store implementations used with the
 core engine.
+
+## Validate a release
+
+Use a macOS 14 or later release host with Xcode or Xcode Command Line Tools,
+Swift 5.10 or later, Python 3.11 or later, and a Playwright-supported even
+Node.js line: 22.12 or later in the 22.x line, 24.x, or 26.x. If the Node
+installation does not include Corepack, install it before enabling the
+repository's pinned Yarn version. Then prepare an isolated Python environment
+and the Chromium binary used by the browser suites:
+
+```bash
+if ! command -v corepack >/dev/null 2>&1; then
+  npm install --global corepack@latest
+fi
+corepack enable
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e "packages/interocitor-python[test]"
+yarn install --immutable
+yarn test:e2e:install
+yarn preflight
+```
+
+`yarn preflight` owns the JavaScript static, build, unit, package, browser, and
+example suites, followed by Python protocol tests and Swift integration plus
+Core interoperability. Use `yarn validate` for the shorter JavaScript gate
+while iterating; it still runs the Todo browser suite and therefore requires
+the installed Chromium binary.
 
 ## Guides and reference
 

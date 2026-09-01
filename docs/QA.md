@@ -76,14 +76,15 @@ recovery are described in
 ### How are conflicts resolved?
 
 Changes to different fields are combined. If two devices change the same
-field, one clear rule chooses the result: the app can prefer the incoming
-value, the local value, the latest value, or its own custom rule.
+field, the value with the greater hybrid logical clock (HLC) wins by default.
+An app can instead provide a deterministic, commutative, associative, and
+idempotent custom merge function so every device reaches the same result.
 
 ### What is the default conflict rule?
 
-For a database with a defined schema, the incoming synchronized value wins.
-Without a schema, the latest change wins. An app should choose the rule
-explicitly when the distinction matters.
+Defined and schema-less databases both default to HLC-based last-write-wins.
+That order is deterministic across devices, but it is not proof of real-time or
+causal order because each device contributes its own wall clock.
 
 ### Will every device end up with the same data?
 
@@ -111,12 +112,12 @@ without a version. Those updates use the normal row and file APIs.
 Interocitor transports and merges row changes; the application owns when the
 update runs, concurrent execution, old-client compatibility, partial completion,
 and file cleanup. See the
-[application-owned migration patterns](../packages/core/README.md#application-owned-data-migrations)
+[application-owned migration patterns](../packages/core/docs/data-migrations.md)
 for examples and the exact boundary.
 
 The exact choices are listed under
-[conflict resolution](../packages/core/README.md#conflict-resolution) and
-[deletion semantics](../packages/core/README.md#deletion-semantics).
+[conflict resolution](../packages/core/docs/api-reference.md#conflict-resolution) and
+[deletion semantics](../packages/core/docs/api-reference.md#deletion-semantics).
 
 ## Servers, workers, and size
 
@@ -128,9 +129,10 @@ the key also gives it access to the whole row database, not just one task.
 
 ### Does the storage server process my data?
 
-No. The bundled Cloudflare Worker stores and relays encrypted data but does
-not receive the secret key or read protected rows. Processing needs a separate
-trusted program, such as a headless Python client.
+No. The bundled Cloudflare Worker stores and relays the payloads that clients
+upload. For an encrypted database, clients encrypt those payloads before they
+arrive; the Worker does not receive the secret key or read protected rows.
+Processing needs a separate trusted program, such as a headless Python client.
 
 ### Can I let an agent see only some tables or rows?
 
@@ -166,7 +168,7 @@ Interocitor does not choose shards, route requests, or join data across them.
 Each shard is a normal database and becomes a full local copy when opened; the
 application owns routing, cross-shard work, and key management.
 
-See the [database storage layout](../packages/core/README.md#remote-mailbox-layout)
+See the [database storage layout](../packages/core/docs/adapter-contract.md#folder-layout-the-engine-writes)
 and [shared-key scenarios](../packages/core/docs/shared-key-scenarios.md).
 
 ### Is there a database size limit?
@@ -205,7 +207,7 @@ database, measure its snapshot, and leave at least 25% free for growth.
 
 ### Can I disable the full local copy?
 
-No. Row synchronization currently requires a local store and does not support
+No. Row synchronization requires a local store and does not support
 selective tables, selected rows, or remote-only queries. A memory-only store
 forgets the data after shutdown, but it still holds the full row database in
 memory while running.
@@ -235,9 +237,9 @@ not compete.
 ### What happens to deleted rows?
 
 A small deletion marker is retained in snapshots so an older device cannot
-bring the row back. The current protocol does not garbage-collect tombstones;
-offline expiry prevents stale queued writes from publishing automatically but
-is not yet a tombstone deletion proof.
+bring the row back. The protocol does not garbage-collect tombstones. Offline
+expiry prevents stale queued writes from publishing automatically, but it does
+not prove that a tombstone is safe to delete.
 
 ### Are files compacted?
 
@@ -257,7 +259,7 @@ Interocitor is not a hosting service and does not take custody of the data.
 Your data, your storage, your responsibility: you own access, cost, quotas,
 backups, retention, availability, and the provider you trust.
 
-See the available [storage adapters](../packages/core/README.md#adapters).
+See the available [storage adapters](../packages/core/README.md#mailbox-adapter).
 
 ### How is my row data preserved?
 

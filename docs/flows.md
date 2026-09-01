@@ -110,7 +110,7 @@ CRDT pull/flush can merge them into the joined mesh.
 availability fallbacks, not successful sync. A degraded local store may lose
 session-only writes on reload until they have flushed remotely. An
 offline-ready `connect()` means the engine is ready for local work but is
-not yet connected to the remote. Validation errors such as encryption
+disconnected from the remote. Validation errors such as encryption
 mismatch, poison, or schema incompatibility are not availability fallbacks;
 they still surface as hard correctness/security errors.
 

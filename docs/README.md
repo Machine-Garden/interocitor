@@ -6,17 +6,44 @@
 
 # Interocitor public site
 
-Interocitor fits browser apps whose trusted endpoints may hold plaintext while
-a protected mesh keeps row changes, snapshots, and durable-file bodies
-unreadable to the remote mailbox. Products that require server-side search,
-analytics, business logic, or administrator access to plaintext need a
-conventional server database instead.
+Interocitor's public site shows how trusted endpoints keep local working state
+and use a remote mailbox to exchange protected row changes, snapshots, and
+durable-file bodies. It introduces the product through concrete uses before
+routing architecture decisions to their canonical technical owners.
 
 `index.html` owns product-fit and threat-boundary orientation.
 `how-it-works.html` owns the visual explanation of the file-sync pattern,
 Interocitor's row-sync lifecycle, bounded catch-up through compaction, and its
 trust boundary. Keep detailed claims at one of these owners and link from the
 other instead of duplicating them.
+
+Four decision guides bridge product fit to the canonical technical owners:
+
+- `trust.html` owns the endpoint-authority, key-custody, recovery, and rotation decision;
+- `data-boundaries.html` owns the row, file, mesh, availability, and sizing decision;
+- `mailbox.html` owns mailbox placement and operational responsibility;
+- `automation.html` owns the trusted-processor, isolation, and delivery-semantics decision.
+
+These pages explain consequences and route to exact contracts. Package READMEs
+and package-local documentation remain the owners of APIs, options, defaults,
+limits, and procedures.
+
+## Author the static site
+
+Edit page content under `site/pages/`. Those templates use SSI-style header and
+footer directives; `site/build.ts` is the single owner of shared site chrome,
+relative routes, current-page state, and demo variants. Generate the deployable
+HTML after changing a page or the shared chrome:
+
+```bash
+yarn build:docs:site
+```
+
+Generated pages under `docs/` are committed deployment artifacts. Do not edit
+their header, footer, or body directly. `yarn check:docs:site` fails when an
+artifact differs from its template and shared chrome. `site/build.mjs` only
+compiles and executes the TypeScript owner on supported Node versions; it does
+not contain page or layout decisions.
 
 Recommended Cloudflare Pages settings:
 
@@ -56,6 +83,7 @@ Keep these local anchors stable:
 | Remote backends    | `#remotes`        |
 | Security boundary  | `#security`       |
 | Operational limits | `#docs`           |
+| Architecture paths | `#decisions`      |
 
 ## Public pages
 
@@ -63,7 +91,12 @@ Keep these local anchors stable:
 | ----------------------------- | ----------------------------------------------------------------------------- |
 | `index.html`                  | Is Interocitor a fit for my application and threat model?                     |
 | `how-it-works.html`           | How do independent changes converge, and what happens after history piles up? |
+| `trust.html`                  | Which endpoints may read the mesh, and how will its key lifecycle be handled? |
+| `data-boundaries.html`        | What belongs in rows, files, and separate meshes?                             |
+| `mailbox.html`                | Where should the mailbox run, and who owns its operational risks?             |
+| `automation.html`             | How should a trusted worker or agent coordinate and isolate its work?         |
 | `examples/todomvc/index.html` | Can two Interocitor clients converge entirely inside one browser tab?         |
+| `examples/chat/index.html`    | Can two trusted clients exchange encrypted messages through a blind mailbox?  |
 
 ## Publication metadata
 
@@ -89,11 +122,11 @@ python3 -m http.server 4174 --directory docs
 Open `http://127.0.0.1:4174/`. Short documentation routes return `404` in this
 mode.
 
-To exercise `_redirects` from the repository root, use the Wrangler binary
-already owned by the Cloudflare example workspace:
+To exercise `_headers` and `_redirects` from the repository root, use the
+repository's pinned Wrangler binary:
 
 ```bash
-yarn workspace todo-cloudflare-do-example exec wrangler pages dev ../../docs --port 4174
+yarn exec wrangler pages dev docs --port 4174
 ```
 
 ## Release gate

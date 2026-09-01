@@ -1,0 +1,102 @@
+.demo-button {
+  border-color: rgba(214, 255, 103, 0.5) !important;
+}
+
+.decision-chooser {
+  padding: clamp(76px, 9vw, 118px) 0;
+  border-top: 1px solid var(--line);
+  background:
+    radial-gradient(circle at 80% 20%, rgba(112, 220, 255, 0.1), transparent 26rem), #08120f;
+}
+
+.decision-chooser-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.72fr);
+  align-items: end;
+  gap: 60px;
+  margin-bottom: 48px;
+}
+
+.decision-chooser-heading h2 {
+  max-width: 13ch;
+  margin-bottom: 0;
+  font-size: clamp(2.8rem, 5vw, 5rem);
+  letter-spacing: -0.065em;
+  line-height: 0.96;
+}
+
+.decision-chooser-heading p {
+  margin-bottom: 0;
+  color: var(--muted);
+}
+
+.decision-chooser-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.decision-choice {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 20px;
+  min-height: 190px;
+  padding: clamp(24px, 3.2vw, 38px);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.025);
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease,
+    background 160ms ease;
+}
+
+.decision-choice:hover {
+  border-color: var(--mint);
+  background: rgba(113, 245, 189, 0.045);
+  transform: translateY(-2px);
+}
+
+.decision-choice > span:first-child {
+  color: var(--mint);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+}
+
+.decision-choice strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: clamp(1.2rem, 2vw, 1.65rem);
+  letter-spacing: -0.035em;
+}
+
+.decision-choice p {
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.decision-choice > span:last-child {
+  color: var(--mint);
+  font-size: 1.15rem;
+}
+
+@media (max-width: 900px) {
+  .decision-chooser-heading {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .decision-chooser-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .decision-choice {
+    grid-template-columns: auto 1fr;
+  }
+
+  .decision-choice > span:last-child {
+    display: none;
+  }
+}

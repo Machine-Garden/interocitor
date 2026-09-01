@@ -1,3 +1,15 @@
 {
-  "$schema": "./node_modules/oxfmt/configuration_schema.json"
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": [
+    "docs/automation.html",
+    "docs/data-boundaries.html",
+    "docs/examples/chat/app.js",
+    "docs/examples/chat/index.html",
+    "docs/examples/todomvc/app.js",
+    "docs/examples/todomvc/index.html",
+    "docs/how-it-works.html",
+    "docs/index.html",
+    "docs/mailbox.html",
+    "docs/trust.html"
+  ]
 }

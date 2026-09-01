@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Designing a trusted Interocitor mesh</title>
+    <meta
+      name="description"
+      content="Decide which endpoints may read an Interocitor mesh, where its key may exist, and how access, recovery, and compromise will be handled."
+    />
+    <meta name="theme-color" content="#07110f" />
+    <meta name="color-scheme" content="dark light" />
+    <link rel="icon" href="assets/mark-dark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="index.css" />
+    <link rel="stylesheet" href="decision.css" />
+  </head>
+  <body class="decision-page">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <!--#include virtual="/_includes/site-header.html" -->
+    <main id="main">
+      <section class="decision-hero">
+        <div class="shell decision-hero-grid">
+          <div>
+            <p class="decision-kicker">Architecture decision 01 · Trust and keys</p>
+            <h1>Design the mesh around <span>who may read it.</span></h1>
+            <p class="decision-lede">
+              Encryption can keep protected payloads away from the remote mailbox. It cannot keep
+              plaintext away from an endpoint that holds the mesh key. Decide that endpoint set, key
+              custody, recovery, and compromise response as one design.
+            </p>
+          </div>
+          <dl class="decision-summary">
+            <dt>Decision</dt>
+            <dd>
+              <strong>Define the confidentiality boundary</strong>, not merely whether encryption is
+              enabled.
+            </dd>
+            <dt>Core boundary</dt>
+            <dd>Every authorized runtime that resolves the mesh key can read the row database.</dd>
+            <dt>Completion</dt>
+            <dd>Name trusted endpoints, key sources, recovery owners, and the rotation path.</dd>
+          </dl>
+        </div>
+      </section>
+
+      <section class="decision-section light">
+        <div class="shell">
+          <div class="decision-heading">
+            <div>
+              <p class="decision-label">Start with authority</p>
+              <h2>A key is a read capability.</h2>
+            </div>
+            <div>
+              <p>
+                A phone, browser tab, native app, worker, or agent becomes a trusted endpoint when
+                it receives usable mesh key material. Runtime labels do not narrow that authority.
+                Separate databases and keys create the meaningful isolation boundary.
+              </p>
+            </div>
+          </div>
+          <div class="decision-grid">
+            <article>
+              <p class="decision-index">01</p>
+              <h3>Trusted endpoint</h3>
+              <p>
+                May decrypt rows and files, apply application policy, and publish changes. Device
+                security and application isolation protect the local plaintext copy.
+              </p>
+            </article>
+            <article>
+              <p class="decision-index">02</p>
+              <h3>Remote mailbox</h3>
+              <p>
+                Stores and returns protected artifacts without the final key. It still sees routing
+                and operational metadata and can affect availability.
+              </p>
+            </article>
+            <article>
+              <p class="decision-index">03</p>
+              <h3>Deployment owner</h3>
+              <p>
+                Controls admission, storage access, retention, backup, and restore. Those controls
+                complement payload encryption; they do not replace it.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="decision-section">
+        <div class="shell">
+          <div class="decision-heading">
+            <div>
+              <p class="decision-label">Key custody choices</p>
+              <h2>Choose how the endpoint earns the key.</h2>
+            </div>
+            <div>
+              <p>
+                Interocitor supports portable and application-bound key sources. The right choice
+                follows from which material may travel, what must be available offline, and which
+                external policy the application can reliably enforce.
+              </p>
+            </div>
+          </div>
+          <div class="decision-grid">
+            <article>
+              <p class="decision-index">Portable</p>
+              <h3>One transferable capability</h3>
+              <p>
+                A generated portable key can move between trusted clients and supports offline use.
+              </p>
+              <ul>
+                <li>Anyone who copies it can read the mesh</li>
+                <li>Credential storage changes where it rests</li>
+                <li>Recovery can restore the same capability</li>
+              </ul>
+            </article>
+            <article>
+              <p class="decision-index">Bound</p>
+              <h3>Application-supplied material</h3>
+              <p>
+                The application provides additional material or policy before deriving the mesh key.
+              </p>
+              <ul>
+                <li>Isolation depends on the actual derivation</li>
+                <li>Provider availability can affect opening</li>
+                <li>The application owns prompts and versions</li>
+              </ul>
+            </article>
+            <article>
+              <p class="decision-index">Isolation</p>
+              <h3>Separate mesh, separate key</h3>
+              <p>
+                Use a distinct database and key when an endpoint should not read everything in
+                another mesh.
+              </p>
+              <ul>
+                <li>No per-row access from one shared key</li>
+                <li>No silent revocation of copied material</li>
+                <li>Migration is the full rotation path</li>
+              </ul>
+            </article>
+          </div>
+          <div class="decision-callout">
+            <div>
+              <p class="decision-label">Important limit</p>
+              <h3>Removing storage access does not erase a copied key.</h3>
+            </div>
+            <p>
+              If an endpoint may be compromised or removed, plan to create a new mesh and key, move
+              the data from a still-trusted endpoint, and retire the old location. Login changes
+              alone cannot make copied key material harmless.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="decision-section">
+        <div class="shell">
+          <div class="decision-heading">
+            <div>
+              <p class="decision-label">Lifecycle</p>
+              <h2>Prepare the failure paths before launch.</h2>
+            </div>
+            <div>
+              <p>
+                A usable key plan covers normal joining, loss, compromise, and the remote metadata
+                that remains observable.
+              </p>
+            </div>
+          </div>
+          <ul class="decision-checklist">
+            <li>Name every runtime allowed to receive plaintext and mesh key material.</li>
+            <li>Choose portable or application-bound derivation and record every input owner.</li>
+            <li>
+              Protect local plaintext with platform storage, locks, and application isolation.
+            </li>
+            <li>Prepare recovery on another trusted device or publish a wrapper before loss.</li>
+            <li>Use opaque durable-file paths when filenames are sensitive.</li>
+            <li>Document the new-mesh migration used after key compromise.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="decision-section">
+        <div class="shell">
+          <div class="decision-heading">
+            <div>
+              <p class="decision-label">Canonical detail</p>
+              <h2>Continue with the exact contract.</h2>
+            </div>
+            <div>
+              <p>
+                Verify the encryption model first, then choose a key source, recovery path, and
+                browser custody mode that preserve the boundary you intend.
+              </p>
+            </div>
+          </div>
+          <nav class="decision-routes" aria-label="Trust documentation">
+            <a
+              href="https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/security-model.md"
+              ><span>Threat model and metadata exposure</span><strong>Security model →</strong></a
+            ><a
+              href="https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/shared-key-scenarios.md"
+              ><span>Portable and bound source comparison</span
+              ><strong>Shared-key scenarios →</strong></a
+            ><a
+              href="https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/recovery.md"
+              ><span>Prepare and use recovery</span><strong>Recovery guide →</strong></a
+            ><a
+              href="https://github.com/Machine-Garden/interocitor/tree/main/packages/web#credential-storage-choices"
+              ><span>Browser key storage choices</span><strong>Web credential custody →</strong></a
+            >
+          </nav>
+        </div>
+      </section>
+    </main>
+    <!--#include virtual="/_includes/site-footer.html" -->
+  </body>
+</html>

@@ -1,14 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 
-const port = Number(process.env.PLAYWRIGHT_TODOMVC_PORT || "4177");
-const serverEntry = fileURLToPath(
-  new URL("../../../tools/webdav-server/server.mjs", import.meta.url),
-);
+const port = Number(process.env.PLAYWRIGHT_DOCS_SITE_PORT || "4178");
+const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 export default defineConfig({
-  testDir: ".",
-  testMatch: ["todomvc.spec.ts"],
+  testDir: "./tests/e2e",
+  testMatch: ["site.spec.ts"],
   timeout: 30_000,
   expect: { timeout: 5_000 },
   fullyParallel: false,
@@ -20,10 +18,11 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: `PORT=${port} node ${JSON.stringify(serverEntry)} --mode=memory`,
-    url: `http://127.0.0.1:${port}/docs/examples/todomvc/index.html`,
+    command: `yarn exec wrangler pages dev docs --port ${port} --show-interactive-dev-session=false --log-level=error`,
+    url: `http://127.0.0.1:${port}`,
     reuseExistingServer: false,
-    timeout: 10_000,
+    timeout: 30_000,
+    cwd: repoRoot,
   },
   projects: [
     {

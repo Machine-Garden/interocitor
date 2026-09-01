@@ -51,7 +51,7 @@ core engine.
 ## Guides and reference
 
 - [Plain-language questions and answers](docs/QA.md)
-- [Public-offering page source](docs/index.html)
+- [Product fit and threat-boundary overview](docs/index.html)
 - [Terminology](docs/dictionary.md)
 - [Protocol flows](docs/flows.md)
 - [Core adapter contract](packages/core/docs/adapter-contract.md)
@@ -65,6 +65,8 @@ core engine.
 
 ## Runnable examples
 
+- [`docs/examples/chat`](docs/examples/chat/index.html) — two-client encrypted
+  chat with an inspectable in-page mailbox and a 15-message application limit.
 - [`examples/todo-webdav`](examples/todo-webdav/README.md) — smallest two-tab
   row-sync demo with an inspectable local mailbox.
 - [`examples/biometric-keys`](examples/biometric-keys/README.md) — browser

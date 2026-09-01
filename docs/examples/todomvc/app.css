@@ -797,11 +797,97 @@ code {
   font-size: 0.7rem;
 }
 
+.site-map-footer {
+  width: 100%;
+  margin-top: 64px;
+  padding: clamp(48px, 7vw, 76px) max(20px, calc((100% - 1500px) / 2)) 22px;
+  color: #f6f7f2;
+  background: #050b09;
+}
+
+.site-map-footer-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.72fr) minmax(0, 1.28fr);
+  gap: clamp(52px, 9vw, 130px);
+}
+
+.site-map-brand {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.site-map-brand .brand-logo {
+  width: 172px;
+}
+
+.site-map-brand p {
+  max-width: 290px;
+  margin: 22px 0 25px;
+  color: #a9b5af;
+  font-size: 0.86rem;
+}
+
+.footer-demo-note {
+  color: #d6ff67;
+  font-size: 0.76rem;
+  font-weight: 720;
+}
+
+.site-map-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(28px, 5vw, 70px);
+}
+
+.site-map-nav section {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.site-map-nav h2 {
+  margin: 0 0 9px;
+  color: #73817a;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.site-map-nav a {
+  color: #c4cec9;
+  font-size: 0.81rem;
+  font-weight: 650;
+}
+
+.site-map-nav a:hover {
+  color: #71f5bd;
+}
+
+.site-map-bottom {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: clamp(48px, 7vw, 78px);
+  padding-top: 20px;
+  border-top: 1px solid rgba(232, 248, 240, 0.16);
+  color: #73817a;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+}
+
 [hidden] {
   display: none !important;
 }
 
 @media (max-width: 1100px) {
+  .site-map-footer-grid {
+    grid-template-columns: 1fr;
+    gap: 44px;
+  }
+
   .demo-stage {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -844,6 +930,19 @@ code {
 }
 
 @media (max-width: 720px) {
+  .site-map-nav {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .site-map-nav section:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .site-map-bottom {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .site-header {
     grid-template-columns: 1fr auto;
   }

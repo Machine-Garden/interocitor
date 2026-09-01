@@ -8,7 +8,6 @@
 /index-b            / 301
 /index-cloud        / 301
 /index-policy       / 301
-/how-it-works       /how-it-works.html 200
 /examples/todo-webdav/ /examples/todomvc/ 301
 /examples/todo-webdav/index.html /examples/todomvc/ 301
 
@@ -24,3 +23,10 @@
 /worker-runtime      https://github.com/Machine-Garden/interocitor/blob/main/packages/workers/docs/runtime-options.md 302
 /worker-maintenance  https://github.com/Machine-Garden/interocitor/blob/main/packages/workers/docs/maintenance.md 302
 /worker-relay        https://github.com/Machine-Garden/interocitor/blob/main/packages/workers/docs/relay.md 302
+/shared-keys         https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/shared-key-scenarios.md 302
+/web-credentials     https://github.com/Machine-Garden/interocitor/tree/main/packages/web#credential-storage-choices 302
+/data-surfaces       https://github.com/Machine-Garden/interocitor/tree/main/packages/core#keep-rows-and-files-distinct 302
+/compaction          https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/compaction.md 302
+/adapter-contract    https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/adapter-contract.md 302
+/python              https://github.com/Machine-Garden/interocitor/tree/main/packages/interocitor-python#readme 302
+/data-migrations     https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/data-migrations.md 302

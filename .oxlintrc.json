@@ -6,6 +6,7 @@
     "**/.wrangler/**",
     "**/coverage/**",
     "**/webdav-data/**",
+    "docs/examples/chat/app.js",
     "docs/examples/todomvc/app.js"
   ],
   "categories": {

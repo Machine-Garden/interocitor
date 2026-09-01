@@ -1,35 +1,35 @@
-# How to use multiple biometric-protected keys
+# How to use multiple browser-custodied keys
 
-This guide shows how to map app security labels onto browser custody primitives:
+This guide shows how to map app custody labels onto browser custody primitives:
 
-- stored security: `browserStorage`;
-- protected security: `webauthnPlatform`;
-- enforced security: `webauthnCrossPlatform` plus the hybrid hint/transport.
+- stored: `browserStorage`;
+- protected: `webauthnPlatform`;
+- enforced: `webauthnCrossPlatform` plus the hybrid hint/transport.
 
-The same app can use different levels for different secrets.
+The same app can request different custody preferences for different secrets.
 
-## 1. Stored security as browser storage
+## 1. Stored label: browser storage
 
-Use stored security when the app only needs durable browser persistence:
+Use the stored label when the app only needs durable browser persistence:
 
 ```ts
-import { createWebSecretStore } from '@interocitor/web';
+import { createWebSecretStore } from "@interocitor/web";
 
-const draftKeyStore = createWebSecretStore('case-vault:draft-key');
+const draftKeyStore = createWebSecretStore("case-vault:draft-key");
 await draftKeyStore.save(draftKeyBytes);
 ```
 
 This is the default. It stores bytes in localStorage and does not prompt for
 biometric confirmation.
 
-## 2. Protected security as platform WebAuthn
+## 2. Protected label: platform WebAuthn preference
 
-Use protected security when the app wants device-local biometric/passkey custody:
+Use the protected label when the app wants device-local biometric/passkey custody:
 
 ```ts
-const recordSealKeyStore = createWebSecretStore('case-vault:record-seal-key', {
-  custody: 'webauthnPlatform',
-  displayName: 'Case Vault',
+const recordSealKeyStore = createWebSecretStore("case-vault:record-seal-key", {
+  custody: "webauthnPlatform",
+  displayName: "Case Vault",
 });
 
 await recordSealKeyStore.save(recordSealKeyBytes);
@@ -39,14 +39,15 @@ This asks the browser to provision or read a platform authenticator such as
 Touch ID, Face ID, or Windows Hello. The browser may satisfy required user
 verification with another platform-approved method.
 
-## 3. Enforced security as cross-platform WebAuthn
+## 3. Enforced label: cross-platform WebAuthn preference
 
-Use enforced security when the app requires a phone / roaming authenticator:
+Use the enforced label when the app wants the browser to prefer a phone or
+roaming authenticator:
 
 ```ts
-const signerStore = createWebSecretStore('case-vault:jwt-signer', {
-  custody: 'webauthnCrossPlatform',
-  displayName: 'Case Vault',
+const signerStore = createWebSecretStore("case-vault:jwt-signer", {
+  custody: "webauthnCrossPlatform",
+  displayName: "Case Vault",
 });
 
 await signerStore.save(signingKeyBundleBytes);
@@ -58,17 +59,17 @@ discoverable-credential ceremony. It may prompt, reject, return a blob, or
 return `null` when the assertion or `largeBlob` result contains no blob; `null`
 is not a reliable “no phone enrolled” signal.
 
-## 4. Add phone
+## 4. Request another authenticator
 
 Adding a phone is an app-level name for enrolling another cross-platform
 authenticator:
 
 ```ts
 await signerStore.enrollAuthenticator(signingKeyBundleBytes, {
-  authenticatorAttachment: 'cross-platform',
-  hints: ['hybrid'],
-  transports: ['hybrid'],
-  label: 'Anton phone',
+  authenticatorAttachment: "cross-platform",
+  hints: ["hybrid"],
+  transports: ["hybrid"],
+  label: "Anton phone",
 });
 
 const authenticators = signerStore.listAuthenticators();
@@ -88,12 +89,12 @@ credentials held by an authenticator.
 Use `createWebCredentialStore(...)` for Interocitor mesh credentials:
 
 ```ts
-import { createWebCredentialStore } from '@interocitor/web';
+import { createWebCredentialStore } from "@interocitor/web";
 
-const credentialStore = createWebCredentialStore('case-vault', {
-  storage: 'passkey',
-  displayName: 'Case Vault',
-  authenticatorAttachment: 'platform',
+const credentialStore = createWebCredentialStore("case-vault", {
+  storage: "passkey",
+  displayName: "Case Vault",
+  authenticatorAttachment: "platform",
 });
 ```
 
@@ -119,7 +120,7 @@ import {
   importPrivateKey,
   importPublicKey,
   signToken,
-} from '@interocitor/core';
+} from "@interocitor/core";
 
 const stored = await signerStore.load();
 let privateKey;
@@ -133,15 +134,19 @@ if (stored) {
   const created = await generateSigningKeypair();
   privateKey = created.privateKey;
   publicKey = created.publicKey;
-  await signerStore.save(new TextEncoder().encode(JSON.stringify({
-    privateKeyPkcs8: await exportPrivateKey(privateKey),
-    publicKeySpki: await exportPublicKey(publicKey),
-  })));
+  await signerStore.save(
+    new TextEncoder().encode(
+      JSON.stringify({
+        privateKeyPkcs8: await exportPrivateKey(privateKey),
+        publicKeySpki: await exportPublicKey(publicKey),
+      }),
+    ),
+  );
 }
 
 const token = await signToken(privateKey, {
-  sub: 'device-42',
-  scope: 'records:seal',
+  sub: "device-42",
+  scope: "records:seal",
 });
 ```
 

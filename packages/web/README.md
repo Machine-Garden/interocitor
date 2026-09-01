@@ -32,15 +32,15 @@ handling.
 
 ## What this package owns
 
-| Need | Use |
-| --- | --- |
-| Browser local cache / outbox | `IndexedDbLocalStore` |
-| Safer IndexedDB open fallback | `createResilientLocalStore` |
-| Rotatable local DB names for reset/recovery flows | `createNamedLocalStore`, `getActiveLocalDatabaseName` |
-| Local IndexedDB deletion | `resetLocalDatabase`, `resetLocalDatabaseWithDeadline` |
-| Browser credential persistence | `createWebCredentialStore` and concrete credential stores |
-| Additional app key material | `createWebSecretStore` |
-| Browser image upload/display helpers | `putImage`, `getImage`, `getImageBlobUrl` |
+| Need                                              | Use                                                       |
+| ------------------------------------------------- | --------------------------------------------------------- |
+| Browser local cache / outbox                      | `IndexedDbLocalStore`                                     |
+| Safer IndexedDB open fallback                     | `createResilientLocalStore`                               |
+| Rotatable local DB names for reset/recovery flows | `createNamedLocalStore`, `getActiveLocalDatabaseName`     |
+| Local IndexedDB deletion                          | `resetLocalDatabase`, `resetLocalDatabaseWithDeadline`    |
+| Browser credential persistence                    | `createWebCredentialStore` and concrete credential stores |
+| Additional app key material                       | `createWebSecretStore`                                    |
+| Browser image upload/display helpers              | `putImage`, `getImage`, `getImageBlobUrl`                 |
 
 Mailbox adapters such as WebDAV, Google Drive, and Cloudflare live in
 `@interocitor/core`. Browser runtime choices live here.
@@ -49,22 +49,22 @@ Mailbox adapters such as WebDAV, Google Drive, and Cloudflare live in
 
 Documented entrypoints in this package:
 
-| API | Use when |
-| --- | --- |
-| `IndexedDbLocalStore` | Browser tabs should persist local rows, outbox, and metadata in IndexedDB |
-| `createResilientLocalStore` | IndexedDB may be blocked or unstable and the app must keep opening |
-| `createNamedLocalStore`, `getActiveLocalDatabaseName` | The app needs reset/recovery flows that rotate the physical IndexedDB name |
-| `resetLocalDatabase`, `resetLocalDatabaseWithDeadline` | The app needs explicit local-cache deletion UX |
-| `createWebCredentialStore` | The app needs a browser credential custody choice for mesh credentials |
-| `createWebSecretStore` | The app needs browser storage, platform WebAuthn, or cross-platform WebAuthn custody for an app-owned secret |
-| `WebAuthnBlobStore` | The app needs a separate WebAuthn-protected blob such as a record-seal key or JWT signer |
-| `WebAuthnCredentialStore` | The whole credential record should live behind WebAuthn `largeBlob` |
-| `WebAuthnEnvelopeKeyProvider` | The credential record may live elsewhere, but envelope unwrap should require WebAuthn confirmation |
-| `putImage`, `getImage`, `getImageBlobUrl` | The app stores encrypted image files and needs browser upload/display helpers |
-| `LocalStorageCredentialStore`, `SessionStorageCredentialStore`, `MemoryCredentialStore` | The app wants a concrete mesh-credential store instead of the factory |
-| `BrowserCredentialEnvelopeStore`, `MemoryCredentialEnvelopeStore`, `EnvelopedCredentialStore`, `StaticEnvelopeKeyProvider` | The app composes encrypted credential-envelope custody directly |
-| `BrowserStorageSecretStore`, `WebAuthnPlatformSecretStore`, `WebAuthnCrossPlatformSecretStore` | The app wants a concrete arbitrary-secret store instead of `createWebSecretStore` |
-| `DEFAULT_LOCAL_OPEN_TIMEOUT_MS` | The app needs the resilient-store default (`300` ms without an IndexedDB progress signal) |
+| API                                                                                                                        | Use when                                                                                                     |
+| -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `IndexedDbLocalStore`                                                                                                      | Browser tabs should persist local rows, outbox, and metadata in IndexedDB                                    |
+| `createResilientLocalStore`                                                                                                | IndexedDB may be blocked or unstable and the app must keep opening                                           |
+| `createNamedLocalStore`, `getActiveLocalDatabaseName`                                                                      | The app needs reset/recovery flows that rotate the physical IndexedDB name                                   |
+| `resetLocalDatabase`, `resetLocalDatabaseWithDeadline`                                                                     | The app needs explicit local-cache deletion UX                                                               |
+| `createWebCredentialStore`                                                                                                 | The app needs a browser credential custody choice for mesh credentials                                       |
+| `createWebSecretStore`                                                                                                     | The app needs browser storage, platform WebAuthn, or cross-platform WebAuthn custody for an app-owned secret |
+| `WebAuthnBlobStore`                                                                                                        | The app needs a separate WebAuthn-protected blob such as a record-seal key or JWT signer                     |
+| `WebAuthnCredentialStore`                                                                                                  | The whole credential record should live behind WebAuthn `largeBlob`                                          |
+| `WebAuthnEnvelopeKeyProvider`                                                                                              | The credential record may live elsewhere, but envelope unwrap should require WebAuthn confirmation           |
+| `putImage`, `getImage`, `getImageBlobUrl`                                                                                  | The app stores encrypted image files and needs browser upload/display helpers                                |
+| `LocalStorageCredentialStore`, `SessionStorageCredentialStore`, `MemoryCredentialStore`                                    | The app wants a concrete mesh-credential store instead of the factory                                        |
+| `BrowserCredentialEnvelopeStore`, `MemoryCredentialEnvelopeStore`, `EnvelopedCredentialStore`, `StaticEnvelopeKeyProvider` | The app composes encrypted credential-envelope custody directly                                              |
+| `BrowserStorageSecretStore`, `WebAuthnPlatformSecretStore`, `WebAuthnCrossPlatformSecretStore`                             | The app wants a concrete arbitrary-secret store instead of `createWebSecretStore`                            |
+| `DEFAULT_LOCAL_OPEN_TIMEOUT_MS`                                                                                            | The app needs the resilient-store default (`300` ms without an IndexedDB progress signal)                    |
 
 The package root also exports the option, result, hook, and store-contract
 types associated with these values. Import from `@interocitor/web`; the
@@ -84,27 +84,27 @@ browser image helpers, and reset helpers. React hooks live in
 This partial fragment shows the browser-first composition point:
 
 ```ts
-import { Interocitor, PortablePassphraseKeySource } from '@interocitor/core';
-import { WebDAVAdapter } from '@interocitor/core/adapters/webdav';
-import { IndexedDbLocalStore, createWebCredentialStore } from '@interocitor/web';
+import { Interocitor, PortablePassphraseKeySource } from "@interocitor/core";
+import { WebDAVAdapter } from "@interocitor/core/adapters/webdav";
+import { IndexedDbLocalStore, createWebCredentialStore } from "@interocitor/web";
 
-const dbName = 'case-vault';
+const dbName = "case-vault";
 
 const adapter = new WebDAVAdapter({
-  baseUrl: '/webdav',
+  baseUrl: "/webdav",
   auth: { token: webdavToken },
 });
 
 const keySource = new PortablePassphraseKeySource({
   portableKey,
   credentialStore: createWebCredentialStore(dbName, {
-    storage: 'sessionStorage',
+    storage: "sessionStorage",
   }),
 });
 
 const db = new Interocitor(adapter, {
   dbName,
-  remotePath: '/CaseVault',
+  remotePath: "/CaseVault",
   localStore: new IndexedDbLocalStore(dbName),
   keySource,
 });
@@ -122,9 +122,9 @@ app.
 ### IndexedDB cache
 
 ```ts
-import { IndexedDbLocalStore } from '@interocitor/web';
+import { IndexedDbLocalStore } from "@interocitor/web";
 
-const localStore = new IndexedDbLocalStore('case-vault');
+const localStore = new IndexedDbLocalStore("case-vault");
 ```
 
 `IndexedDbLocalStore` stores local rows, indexes, outbox entries, cursors, and
@@ -133,12 +133,12 @@ metadata. It is the normal browser local store.
 ### Resilient open fallback
 
 ```ts
-import { createResilientLocalStore } from '@interocitor/web';
+import { createResilientLocalStore } from "@interocitor/web";
 
 const localStore = createResilientLocalStore({
-  dbName: 'case-vault',
+  dbName: "case-vault",
   onDegraded(info) {
-    console.warn('Local store degraded', info.reason, info.error);
+    console.warn("Local store degraded", info.reason, info.error);
   },
 });
 ```
@@ -154,13 +154,13 @@ swallowed so the engine can keep opening.
 ### Named stores for reset/recovery flows
 
 ```ts
-import { createNamedLocalStore, getActiveLocalDatabaseName } from '@interocitor/web';
+import { createNamedLocalStore, getActiveLocalDatabaseName } from "@interocitor/web";
 
 const localStore = createNamedLocalStore({
-  baseName: 'case-vault',
+  baseName: "case-vault",
 });
 
-console.log(getActiveLocalDatabaseName('case-vault'));
+console.log(getActiveLocalDatabaseName("case-vault"));
 ```
 
 Named stores persist the active physical database name in `localStorage` when
@@ -172,10 +172,10 @@ does not rotate that pointer.
 ### Local reset
 
 ```ts
-import { resetLocalDatabaseWithDeadline } from '@interocitor/web';
+import { resetLocalDatabaseWithDeadline } from "@interocitor/web";
 
-const outcome = await resetLocalDatabaseWithDeadline('case-vault', 1500);
-if (outcome !== 'deleted') {
+const outcome = await resetLocalDatabaseWithDeadline("case-vault", 1500);
+if (outcome !== "deleted") {
   // Show recovery UX; another tab may still hold the database open.
 }
 ```
@@ -196,13 +196,13 @@ select a mode explicitly so their credential-custody boundary is unambiguous.
 ### Tab-session credentials
 
 ```ts
-import { PortablePassphraseKeySource } from '@interocitor/core';
-import { createWebCredentialStore } from '@interocitor/web';
+import { PortablePassphraseKeySource } from "@interocitor/core";
+import { createWebCredentialStore } from "@interocitor/web";
 
 const keySource = new PortablePassphraseKeySource({
   portableKey,
-  credentialStore: createWebCredentialStore('case-vault', {
-    storage: 'sessionStorage',
+  credentialStore: createWebCredentialStore("case-vault", {
+    storage: "sessionStorage",
   }),
 });
 ```
@@ -215,8 +215,8 @@ after the tab session ends.
 ```ts
 const keySource = new PortablePassphraseKeySource({
   portableKey,
-  credentialStore: createWebCredentialStore('case-vault', {
-    storage: 'memory',
+  credentialStore: createWebCredentialStore("case-vault", {
+    storage: "memory",
   }),
 });
 ```
@@ -229,8 +229,8 @@ from somewhere else: a join token, backend session, native app integration, or a
 ```ts
 const keySource = new PortablePassphraseKeySource({
   portableKey,
-  credentialStore: createWebCredentialStore('case-vault', {
-    storage: 'localStorage',
+  credentialStore: createWebCredentialStore("case-vault", {
+    storage: "localStorage",
   }),
 });
 ```
@@ -245,9 +245,9 @@ origin-level custody boundary is acceptable.
 ```ts
 const keySource = new PortablePassphraseKeySource({
   portableKey,
-  credentialStore: createWebCredentialStore('case-vault', {
-    storage: 'passkey',
-    displayName: 'Case Vault',
+  credentialStore: createWebCredentialStore("case-vault", {
+    storage: "passkey",
+    displayName: "Case Vault",
   }),
 });
 ```
@@ -268,31 +268,31 @@ When the app needs separate key material after login, use
 `createWebSecretStore` with a distinct namespace per secret:
 
 ```ts
-import { createWebCredentialStore, createWebSecretStore } from '@interocitor/web';
+import { createWebCredentialStore, createWebSecretStore } from "@interocitor/web";
 
-const credentialStore = createWebCredentialStore('case-vault', {
-  storage: 'passkey',
-  displayName: 'Case Vault',
-  authenticatorAttachment: 'platform',
+const credentialStore = createWebCredentialStore("case-vault", {
+  storage: "passkey",
+  displayName: "Case Vault",
+  authenticatorAttachment: "platform",
 });
 
-const draftKeyStore = createWebSecretStore('case-vault:draft-key');
+const draftKeyStore = createWebSecretStore("case-vault:draft-key");
 
-const recordSealKeyStore = createWebSecretStore('case-vault:record-seal-key', {
-  custody: 'webauthnPlatform',
-  displayName: 'Case Vault',
+const recordSealKeyStore = createWebSecretStore("case-vault:record-seal-key", {
+  custody: "webauthnPlatform",
+  displayName: "Case Vault",
 });
 
-const signerStore = createWebSecretStore('case-vault:jwt-signer', {
-  custody: 'webauthnCrossPlatform',
-  displayName: 'Case Vault',
+const signerStore = createWebSecretStore("case-vault:jwt-signer", {
+  custody: "webauthnCrossPlatform",
+  displayName: "Case Vault",
 });
 
 await signerStore.enrollAuthenticator(signingKeyBundleBytes, {
-  authenticatorAttachment: 'cross-platform',
-  hints: ['hybrid'],
-  transports: ['hybrid'],
-  label: 'Anton phone',
+  authenticatorAttachment: "cross-platform",
+  hints: ["hybrid"],
+  transports: ["hybrid"],
+  label: "Anton phone",
 });
 ```
 
@@ -310,15 +310,15 @@ credential key does not become the application's encryption or signing key.
 ### Enveloped credentials from backend, memory, or browser storage
 
 ```ts
-import { BoundSharedKeySource } from '@interocitor/core';
-import { WebAuthnEnvelopeKeyProvider, createWebCredentialStore } from '@interocitor/web';
+import { BoundSharedKeySource } from "@interocitor/core";
+import { WebAuthnEnvelopeKeyProvider, createWebCredentialStore } from "@interocitor/web";
 
 const keySource = new BoundSharedKeySource({
   portableKey,
-  credentialStore: createWebCredentialStore('case-vault', {
+  credentialStore: createWebCredentialStore("case-vault", {
     envelope: {
       store: backendEnvelopeStore,
-      keyProvider: new WebAuthnEnvelopeKeyProvider('case-vault'),
+      keyProvider: new WebAuthnEnvelopeKeyProvider("case-vault"),
     },
   }),
   derive: async ({ portableKey }) => ({
@@ -349,7 +349,7 @@ unencrypted engine sends the image bytes as-is. The web package adds browser
 input/output helpers.
 
 ```ts
-import { getImageBlobUrl, putImage } from '@interocitor/web';
+import { getImageBlobUrl, putImage } from "@interocitor/web";
 
 await putImage(db, `users/${userId}/avatar.png`, file);
 
@@ -369,7 +369,7 @@ URL returned by `getImageBlobUrl` when it is no longer displayed. Use core
 ## React image hook
 
 ```tsx
-import { useImage } from '@interocitor/react';
+import { useImage } from "@interocitor/react";
 
 function Avatar({ db, path }) {
   const image = useImage(db, path);
@@ -416,7 +416,7 @@ yarn workspace @interocitor/web test:e2e
 - [Core engine](../core/README.md)
 - [Credential store contract](../core/docs/credential-store.md)
 - [Security model](../core/docs/security-model.md)
-- [How to use multiple biometric-protected keys](docs/multiple-biometric-keys.md)
+- [How to use multiple browser-custodied keys](docs/multiple-biometric-keys.md)
 - [WebAuthn blob store reference](docs/webauthn-blob-store.md)
 
 ## License

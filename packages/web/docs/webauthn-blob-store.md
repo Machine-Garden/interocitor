@@ -6,7 +6,7 @@ arbitrary application blobs behind a WebAuthn ceremony.
 Import from the package root:
 
 ```ts
-import { WebAuthnBlobStore } from '@interocitor/web';
+import { WebAuthnBlobStore } from "@interocitor/web";
 ```
 
 This is the low-level browser primitive to use when the app needs more than the
@@ -33,22 +33,22 @@ const store = new WebAuthnBlobStore(namespace, {
 
 ## Options
 
-| Option | Meaning |
-| --- | --- |
-| `rpId` | WebAuthn relying-party id. Defaults to the current hostname. |
-| `displayName` | Human-readable app name shown in passkey / biometric prompts. Defaults to `Interocitor`. |
-| `authenticatorAttachment` | Browser preference: `platform`, `cross-platform`, or `auto`. Defaults to `platform`. |
-| `userVerification` | WebAuthn verification requirement. Default: `required`. |
-| `hints` | Browser UI hints. `['hybrid']` asks for a phone-mediated flow when supported. |
-| `transports` | Credential transport hints. `['hybrid']` narrows read/write ceremonies to hybrid-capable credentials. |
+| Option                    | Meaning                                                                                               |
+| ------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `rpId`                    | WebAuthn relying-party id. Defaults to the current hostname.                                          |
+| `displayName`             | Human-readable app name shown in passkey / biometric prompts. Defaults to `Interocitor`.              |
+| `authenticatorAttachment` | Browser preference: `platform`, `cross-platform`, or `auto`. Defaults to `platform`.                  |
+| `userVerification`        | WebAuthn verification requirement. Default: `required`.                                               |
+| `hints`                   | Browser UI hints. `['hybrid']` asks for a phone-mediated flow when supported.                         |
+| `transports`              | Credential transport hints. `['hybrid']` narrows read/write ceremonies to hybrid-capable credentials. |
 
 ## Attachment preferences
 
-| Preference | Use when |
-| --- | --- |
-| `platform` | The app wants same-device UX such as Touch ID / Face ID / Windows Hello. |
+| Preference       | Use when                                                                                                                |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `platform`       | The app wants same-device UX such as Touch ID / Face ID / Windows Hello.                                                |
 | `cross-platform` | The app wants a roaming or hybrid authenticator path, for example a security key or phone-mediated flow when supported. |
-| `auto` | The app does not care which class the browser uses. |
+| `auto`           | The app does not care which class the browser uses.                                                                     |
 
 `authenticatorAttachment` is a preference, not a guarantee. The browser owns the
 final authenticator-selection UX.
@@ -58,11 +58,11 @@ final authenticator-selection UX.
 ```ts
 await store.save(bytes);
 const bytes = await store.load();
-const platformBytes = await store.load({ authenticatorAttachment: 'platform' });
+const platformBytes = await store.load({ authenticatorAttachment: "platform" });
 const authenticator = await store.enrollAuthenticator(bytes, options);
 const refs = store.listAuthenticators();
 const hasPhoneHint = store.hasAuthenticator({
-  authenticatorAttachment: 'cross-platform',
+  authenticatorAttachment: "cross-platform",
 });
 await store.clear();
 ```
@@ -91,12 +91,12 @@ One `WebAuthnBlobStore` instance corresponds to one protected namespace.
 Create separate namespaces for separate application secrets:
 
 ```ts
-const recordSealKey = new WebAuthnBlobStore('case-vault:record-seal-key', {
-  authenticatorAttachment: 'platform',
+const recordSealKey = new WebAuthnBlobStore("case-vault:record-seal-key", {
+  authenticatorAttachment: "platform",
 });
 
-const jwtSigner = new WebAuthnBlobStore('case-vault:jwt-signer', {
-  authenticatorAttachment: 'cross-platform',
+const jwtSigner = new WebAuthnBlobStore("case-vault:jwt-signer", {
+  authenticatorAttachment: "cross-platform",
 });
 ```
 
@@ -109,18 +109,18 @@ Adding a phone in app UX usually means enrolling another cross-platform
 WebAuthn credential for the same logical blob namespace:
 
 ```ts
-const signer = new WebAuthnBlobStore('case-vault:jwt-signer', {
-  displayName: 'Case Vault',
-  authenticatorAttachment: 'cross-platform',
-  hints: ['hybrid'],
-  transports: ['hybrid'],
+const signer = new WebAuthnBlobStore("case-vault:jwt-signer", {
+  displayName: "Case Vault",
+  authenticatorAttachment: "cross-platform",
+  hints: ["hybrid"],
+  transports: ["hybrid"],
 });
 
 await signer.enrollAuthenticator(signingKeyBundleBytes, {
-  authenticatorAttachment: 'cross-platform',
-  hints: ['hybrid'],
-  transports: ['hybrid'],
-  label: 'Anton phone',
+  authenticatorAttachment: "cross-platform",
+  hints: ["hybrid"],
+  transports: ["hybrid"],
+  label: "Anton phone",
 });
 ```
 

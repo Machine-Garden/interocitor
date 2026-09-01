@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Interocitor } from '@interocitor/core';
-import { getImageBlobUrl, type StoredImageMetadata } from '@interocitor/web';
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Interocitor } from "@interocitor/core";
+import { getImageBlobUrl, type StoredImageMetadata } from "@interocitor/web";
 
 export interface UseImageResult {
   /** Revokable blob: URL, or null while skipped/loading/error. */
@@ -39,7 +39,7 @@ function toError(error: unknown): Error {
 export function useImage<
   S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>,
 >(db: Interocitor<S>, path: string | null | undefined): UseImageResult {
-  const [state, setState] = useState<Omit<UseImageResult, 'revoke'>>(EMPTY_RESULT);
+  const [state, setState] = useState<Omit<UseImageResult, "revoke">>(EMPTY_RESULT);
   const revokeRef = useRef<() => void>(() => {});
 
   const revoke = useCallback(() => {
@@ -62,31 +62,33 @@ export function useImage<
       contentType: null,
     });
 
-    void getImageBlobUrl(db, path).then((image) => {
-      if (cancelled) {
-        image.revoke();
-        return;
-      }
-      revokeRef.current = image.revoke;
-      setState({
-        url: image.url,
-        blob: image.blob,
-        loading: false,
-        error: null,
-        metadata: image.metadata,
-        contentType: image.contentType,
+    void getImageBlobUrl(db, path)
+      .then((image) => {
+        if (cancelled) {
+          image.revoke();
+          return;
+        }
+        revokeRef.current = image.revoke;
+        setState({
+          url: image.url,
+          blob: image.blob,
+          loading: false,
+          error: null,
+          metadata: image.metadata,
+          contentType: image.contentType,
+        });
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) return;
+        setState({
+          url: null,
+          blob: null,
+          loading: false,
+          error: toError(cause),
+          metadata: null,
+          contentType: null,
+        });
       });
-    }).catch((cause: unknown) => {
-      if (cancelled) return;
-      setState({
-        url: null,
-        blob: null,
-        loading: false,
-        error: toError(cause),
-        metadata: null,
-        contentType: null,
-      });
-    });
 
     return () => {
       cancelled = true;

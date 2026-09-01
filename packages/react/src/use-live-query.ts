@@ -1,5 +1,5 @@
-import { useDebugValue, useMemo, useRef, useSyncExternalStore } from 'react';
-import type { QueryDescriptor, QueryResult, WhereClause, WherePrimitive } from '@interocitor/core';
+import { useDebugValue, useMemo, useRef, useSyncExternalStore } from "react";
+import type { QueryDescriptor, QueryResult, WhereClause, WherePrimitive } from "@interocitor/core";
 
 export interface UseLiveQueryResult<R> {
   /** `undefined` until first fetch resolves. */
@@ -13,7 +13,7 @@ interface LiveQueryDebugValue {
   table: string;
   where: string | null;
   orderBy: string | null;
-  status: ReturnType<QueryResult<Record<string, unknown>>['peekStatus']>['status'];
+  status: ReturnType<QueryResult<Record<string, unknown>>["peekStatus"]>["status"];
   rows: number | undefined;
   loading: boolean;
   error: string | null;
@@ -40,7 +40,7 @@ function createLiveQueryDebugValue<T extends Record<string, unknown>, R>(
   ].filter((part): part is string => part !== null);
 
   return {
-    label: `Interocitor useLiveQuery(${labelParts.join(', ')})`,
+    label: `Interocitor useLiveQuery(${labelParts.join(", ")})`,
     table: descriptor.table,
     where,
     orderBy,
@@ -61,16 +61,16 @@ function formatWhereClause(clause: WhereClause | undefined): string | null {
   if (!clause) return null;
 
   switch (clause.op) {
-    case 'between': {
+    case "between": {
       const lower = formatPrimitive(clause.lower);
       const upper = formatPrimitive(clause.upper);
-      const left = clause.lowerOpen ? '(' : '[';
-      const right = clause.upperOpen ? ')' : ']';
+      const left = clause.lowerOpen ? "(" : "[";
+      const right = clause.upperOpen ? ")" : "]";
       return `${clause.field} between ${left}${lower}, ${upper}${right}`;
     }
-    case 'anyOf':
-      return `${clause.field} anyOf [${(clause.values ?? []).map(value => formatPrimitive(value)).join(', ')}]`;
-    case 'startsWith':
+    case "anyOf":
+      return `${clause.field} anyOf [${(clause.values ?? []).map((value) => formatPrimitive(value)).join(", ")}]`;
+    case "startsWith":
       return `${clause.field} startsWith ${formatPrimitive(clause.value)}`;
     default:
       return `${clause.field} ${clause.op} ${formatPrimitive(clause.value)}`;
@@ -78,7 +78,7 @@ function formatWhereClause(clause: WhereClause | undefined): string | null {
 }
 
 function formatPrimitive(value: WherePrimitive | undefined): string {
-  if (value === undefined) return 'undefined';
+  if (value === undefined) return "undefined";
   if (value instanceof Date) return value.toISOString();
   return JSON.stringify(value);
 }
@@ -126,16 +126,24 @@ export function useLiveQuery<T extends Record<string, unknown>, R = T[]>(
   const startedRef = useRef<QueryResult<T> | null>(null);
   if (startedRef.current !== query) {
     startedRef.current = query;
-    void query.load();
+    void query.load().catch(() => {
+      // Error state is read from the query cache after the subscription bridge
+      // below notifies React.
+    });
   }
 
   const subscribe = useMemo(
     () => (notify: () => void) => {
       let active = true;
       const notifyWhenLoaded = () => {
-        void query.load().finally(() => {
-          if (active) notify();
-        });
+        void query.load().then(
+          () => {
+            if (active) notify();
+          },
+          () => {
+            if (active) notify();
+          },
+        );
       };
 
       // `useSyncExternalStore` only re-reads snapshots after `notify()`.
@@ -173,13 +181,13 @@ export function useLiveQuery<T extends Record<string, unknown>, R = T[]>(
   const getSnapshot = (): UseLiveQueryResult<R> => {
     const rows = query.peekCache();
     const status = query.peekStatus();
-    const error = status.status === 'error' ? (status.error ?? null) : null;
+    const error = status.status === "error" ? (status.error ?? null) : null;
 
     // Stale-while-revalidate semantics:
     // - If we have cached rows, keep showing them during refresh.
     // - Loading only when we have no cached rows and the query isn't ready.
     const hasRows = rows !== undefined;
-    const loaded = status.status === 'ready';
+    const loaded = status.status === "ready";
     const loading = !hasRows && !loaded && !error;
 
     let data: R | undefined;
@@ -206,11 +214,11 @@ export function useLiveQuery<T extends Record<string, unknown>, R = T[]>(
 
     const prev = lastResultRef.current;
     if (
-      prev !== null
-      && rows === lastRowsRef.current
-      && data === prev.data
-      && error === prev.error
-      && loading === prev.loading
+      prev !== null &&
+      rows === lastRowsRef.current &&
+      data === prev.data &&
+      error === prev.error &&
+      loading === prev.loading
     ) {
       return prev;
     }

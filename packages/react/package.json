@@ -2,18 +2,27 @@
   "name": "@interocitor/react",
   "version": "0.1.0",
   "description": "React bindings for Interocitor live queries, rows, images, connected stores, and connection status.",
+  "keywords": [
+    "crdt",
+    "interocitor",
+    "local-first",
+    "react"
+  ],
+  "homepage": "https://github.com/Machine-Garden/interocitor/tree/main/packages/react#readme",
+  "bugs": {
+    "url": "https://github.com/Machine-Garden/interocitor/issues"
+  },
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Machine-Garden/interocitor.git",
     "directory": "packages/react"
   },
-  "homepage": "https://github.com/Machine-Garden/interocitor/tree/main/packages/react#readme",
-  "bugs": {
-    "url": "https://github.com/Machine-Garden/interocitor/issues"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -23,36 +32,29 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
-  "scripts": {
-    "check": "tsc --noEmit",
-    "build": "rm -rf ./dist && tsc -p tsconfig.json"
+  "publishConfig": {
+    "access": "public"
   },
-  "peerDependencies": {
-    "@interocitor/core": "0.1.0",
-    "@interocitor/web": "0.1.0",
-    "react": ">=18"
+  "scripts": {
+    "check": "tsc --noEmit && tsc -p tsconfig.tests.json",
+    "build": "rm -rf ./dist && tsc -p tsconfig.json",
+    "test:e2e": "yarn workspace @interocitor/core build && yarn workspace @interocitor/web build && yarn build && ../../node_modules/.bin/playwright test -c ./playwright.config.ts"
   },
   "devDependencies": {
     "@interocitor/core": "workspace:*",
     "@interocitor/web": "workspace:*",
+    "@playwright/test": "^1.54.2",
     "@types/react": "^19.0.0",
     "@types/react-test-renderer": "^19.0.0",
     "react": "^19.0.0",
     "react-test-renderer": "^19.0.0",
     "typescript": "^6.0.0"
   },
-  "keywords": [
-    "interocitor",
-    "react",
-    "local-first",
-    "crdt"
-  ],
-  "license": "MIT",
+  "peerDependencies": {
+    "@interocitor/core": "0.1.0",
+    "@interocitor/web": "0.1.0",
+    "react": ">=18"
+  },
   "engines": {
     "node": ">=18.0.0"
   }

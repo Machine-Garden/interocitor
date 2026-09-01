@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ConnectedStoreCredentials, Interocitor } from '@interocitor/core';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ConnectedStoreCredentials, Interocitor } from "@interocitor/core";
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
 
 /**
  * Result of `useConnectedStores`.
@@ -33,19 +37,21 @@ export function useConnectedStores(db: Interocitor<any>): UseConnectedStoresResu
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const aliveRef = useRef(true);
+  const requestRef = useRef(0);
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    const request = ++requestRef.current;
+    if (aliveRef.current) setLoading(true);
     try {
       const next = await db.connectedStores.list();
-      if (aliveRef.current) {
+      if (aliveRef.current && request === requestRef.current) {
         setCredentials(next);
         setError(null);
       }
     } catch (err) {
-      if (aliveRef.current) setError(err as Error);
+      if (aliveRef.current && request === requestRef.current) setError(toError(err));
     } finally {
-      if (aliveRef.current) setLoading(false);
+      if (aliveRef.current && request === requestRef.current) setLoading(false);
     }
   }, [db]);
 
@@ -54,13 +60,11 @@ export function useConnectedStores(db: Interocitor<any>): UseConnectedStoresResu
     void refresh();
     return () => {
       aliveRef.current = false;
+      requestRef.current += 1;
     };
   }, [refresh]);
 
-  const get = useCallback(
-    (id: string) => db.connectedStores.get(id),
-    [db],
-  );
+  const get = useCallback((id: string) => db.connectedStores.get(id), [db]);
 
   const put = useCallback(
     async (creds: ConnectedStoreCredentials) => {
@@ -100,27 +104,26 @@ export interface UseConnectedStoreResult {
  * vault has no change notification yet — call `refresh()` after a write
  * if needed).
  */
-export function useConnectedStore(
-  db: Interocitor<any>,
-  id: string,
-): UseConnectedStoreResult {
+export function useConnectedStore(db: Interocitor<any>, id: string): UseConnectedStoreResult {
   const [credentials, setCredentials] = useState<ConnectedStoreCredentials | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const aliveRef = useRef(true);
+  const requestRef = useRef(0);
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    const request = ++requestRef.current;
+    if (aliveRef.current) setLoading(true);
     try {
       const next = await db.connectedStores.get(id);
-      if (aliveRef.current) {
+      if (aliveRef.current && request === requestRef.current) {
         setCredentials(next);
         setError(null);
       }
     } catch (err) {
-      if (aliveRef.current) setError(err as Error);
+      if (aliveRef.current && request === requestRef.current) setError(toError(err));
     } finally {
-      if (aliveRef.current) setLoading(false);
+      if (aliveRef.current && request === requestRef.current) setLoading(false);
     }
   }, [db, id]);
 
@@ -129,6 +132,7 @@ export function useConnectedStore(
     void refresh();
     return () => {
       aliveRef.current = false;
+      requestRef.current += 1;
     };
   }, [refresh]);
 

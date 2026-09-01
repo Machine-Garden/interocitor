@@ -8,15 +8,20 @@
 
 React bindings for Interocitor.
 
-Bindings only. React package does not create, init, configure, or connect the engine for you.
-App code owns order:
-- create engine
-- call `configureMesh(...)` before `init()`, or provide `resolveInitialState`
-  in the constructor config so `init()` can invoke it
-- `setRemoteStorage(...)`
-- `init()`
-- optionally call `connect()` to start remote sync
+Bindings only. The React package does not create, initialize, configure, or
+connect the engine. App code owns the normal order:
+
+- construct the engine with its local store, key source, and optional remote
+  adapter and path
+- call `init()`
+- call `connect()` when remote sync is configured
 - provide the initialized engine to React
+
+When pairing or backend discovery supplies mesh state after construction, call
+`configureMesh(...)` before `init()` and attach the adapter with
+`setRemoteStorage(...)` before connecting. A constructor
+`resolveInitialState` callback can supply the same initialization-time mesh
+state.
 
 `connect()` is opportunistic: if cloud setup stalls, core may return in
 offline-ready mode. React hooks still work against local state after
@@ -48,14 +53,14 @@ surrounding error handling.
 
 Documented entrypoints in this package:
 
-| API | Use when |
-| --- | --- |
-| `createInterocitorContext` | You want one typed provider/hook pair for the engine |
-| `useLiveQuery` | A component should subscribe to a live query cache entry |
-| `useRow` | A component should subscribe to one live row |
-| `useImage` | A component should render an Interocitor image file as a revokable `blob:` URL |
-| `useConnectionStatus`, `useIsSolo` | UI should reflect transport state vs local-only mode |
-| `useConnectedStores`, `useConnectedStore` | UI should read or manage connected-store credentials |
+| API                                       | Use when                                                                       |
+| ----------------------------------------- | ------------------------------------------------------------------------------ |
+| `createInterocitorContext`                | You want one typed provider/hook pair for the engine                           |
+| `useLiveQuery`                            | A component should subscribe to a live query cache entry                       |
+| `useRow`                                  | A component should subscribe to one live row                                   |
+| `useImage`                                | A component should render an Interocitor image file as a revokable `blob:` URL |
+| `useConnectionStatus`, `useIsSolo`        | UI should reflect transport state vs local-only mode                           |
+| `useConnectedStores`, `useConnectedStore` | UI should read or manage connected-store credentials                           |
 
 The package root also exports `UseLiveQueryResult`, `UseRowResult`,
 `UseImageResult`, `UseConnectedStoresResult`, `UseConnectedStoreResult`,
@@ -66,8 +71,8 @@ The package root also exports `UseLiveQueryResult`, `UseRowResult`,
 Capture DB types once. No generics in components.
 
 ```ts
-import { createInterocitorContext } from '@interocitor/react';
-import type { InferSchemaType } from '@interocitor/core';
+import { createInterocitorContext } from "@interocitor/react";
+import type { InferSchemaType } from "@interocitor/core";
 
 const schema = {
   tables: {
@@ -89,19 +94,19 @@ The generated hook throws if it is called outside its matching provider. Create
 the pair once at app level and provide an initialized engine.
 
 ```ts
-import { Interocitor, PortablePassphraseKeySource } from '@interocitor/core';
-import { IndexedDbLocalStore, createWebCredentialStore } from '@interocitor/web';
+import { Interocitor, PortablePassphraseKeySource } from "@interocitor/core";
+import { IndexedDbLocalStore, createWebCredentialStore } from "@interocitor/web";
 
-const dbName = 'my-app';
-const portableKey = '...high-entropy-base58...';
+const dbName = "my-app";
+const portableKey = "...high-entropy-base58...";
 
 const db = new Interocitor<DB>(adapter, {
   dbName,
-  remotePath: '/MyApp',
+  remotePath: "/MyApp",
   localStore: new IndexedDbLocalStore(dbName),
   keySource: new PortablePassphraseKeySource({
     portableKey,
-    credentialStore: createWebCredentialStore(dbName, { storage: 'sessionStorage' }),
+    credentialStore: createWebCredentialStore(dbName, { storage: "sessionStorage" }),
   }),
 });
 await db.init();
@@ -123,9 +128,9 @@ const solo = useIsSolo(db);
 const status = useConnectionStatus(db);
 
 if (solo) return <SetupMeshButton />;
-if (status === 'connecting') return <span>Connecting…</span>;
-if (status === 'syncing') return <span>Syncing…</span>;
-if (status === 'offline') return <span>Offline — changes will sync later</span>;
+if (status === "connecting") return <span>Connecting…</span>;
+if (status === "syncing") return <span>Syncing…</span>;
+if (status === "offline") return <span>Offline — changes will sync later</span>;
 return <span>Up to date</span>;
 ```
 
@@ -139,17 +144,14 @@ with `db.getConnectionStatusDetails()`.
 Factory + deps. React-first. No render loop.
 
 ```tsx
-const { data, loading, error } = useLiveQuery(
-  () => db.table('tasks').query(),
-  [db],
-);
+const { data, loading, error } = useLiveQuery(() => db.table("tasks").query(), [db]);
 ```
 
 Filtered query:
 
 ```tsx
 const { data } = useLiveQuery(
-  () => db.table('receipts').where('weekId').equals(weekId).orderBy('uploadedAt', 'desc'),
+  () => db.table("receipts").where("weekId").equals(weekId).orderBy("uploadedAt", "desc"),
   [db, weekId],
 );
 ```
@@ -158,9 +160,9 @@ Selector:
 
 ```tsx
 const { data: weekIds } = useLiveQuery(
-  () => db.table('weekPlans').query(),
+  () => db.table("weekPlans").query(),
   [db],
-  plans => plans.map(plan => plan.weekId),
+  (plans) => plans.map((plan) => plan.weekId),
 );
 ```
 
@@ -173,16 +175,16 @@ until the first fetch resolves.
 ## useRow
 
 ```tsx
-const { data: task } = useRow(db.table('tasks'), taskId);
+const { data: task } = useRow(db.table("tasks"), taskId);
 ```
 
 Advanced factory form and selector:
 
 ```tsx
 const { data: title } = useRow(
-  () => db.table('tasks').row(taskId),
+  () => db.table("tasks").row(taskId),
   [db, taskId],
-  task => task?.title ?? '',
+  (task) => task?.title ?? "",
 );
 ```
 
@@ -203,7 +205,7 @@ Display image files stored with `@interocitor/web`'s `putImage(...)` or
 ```tsx
 function Avatar({ userId }: { userId: string }) {
   const db = useDb();
-  const user = useRow(db.table('users'), userId);
+  const user = useRow(db.table("users"), userId);
   const image = useImage(db, user.data?.avatar_path);
 
   if (user.loading || image.loading) return <span>Loading…</span>;
@@ -217,11 +219,11 @@ function Avatar({ userId }: { userId: string }) {
 Upload pattern:
 
 ```tsx
-import { putImage } from '@interocitor/web';
+import { putImage } from "@interocitor/web";
 
 const path = `users/${userId}/avatar`;
 await putImage(db, path, file);
-await db.table('users').patch(userId, { avatar_path: path });
+await db.table("users").patch(userId, { avatar_path: path });
 ```
 
 `useImage` returns `{ url, blob, loading, error, metadata, contentType, revoke }`.
@@ -233,15 +235,7 @@ uses an encrypted key source. `useImage` does not add encryption.
 ## Connected stores
 
 ```tsx
-const {
-  credentials,
-  loading,
-  error,
-  refresh,
-  get,
-  put,
-  remove,
-} = useConnectedStores(db);
+const { credentials, loading, error, refresh, get, put, remove } = useConnectedStores(db);
 ```
 
 `useConnectedStores` performs an initial list. Successful `put` and `remove`
@@ -268,10 +262,10 @@ test needs it. See [Test an Interocitor product](../core/docs/testing.md).
 No React wrapper needed.
 
 ```tsx
-await db.table('tasks').add({ title: 'Ship it', done: false });
-await db.table('tasks').patch(taskId, { done: true });
-await db.table('tasks').replace(taskId, fullTask);
-await db.table('tasks').delete(taskId);
+await db.table("tasks").add({ title: "Ship it", done: false });
+await db.table("tasks").patch(taskId, { done: true });
+await db.table("tasks").replace(taskId, fullTask);
+await db.table("tasks").delete(taskId);
 ```
 
 Interocitor writes locally first, then syncs in background. Live queries update automatically from engine events.
@@ -283,10 +277,11 @@ These commands are runnable from the repository root after `yarn install`:
 ```bash
 yarn workspace @interocitor/react check
 yarn workspace @interocitor/react build
+yarn workspace @interocitor/react test:e2e
 ```
 
-The package currently has TypeScript/type-fixture coverage, including
-`useImage`, but no package-owned broad React runtime or browser suite.
+The runtime suite builds the matching core, web, and React workspaces before
+exercising the package through its public entry point.
 
 ## License
 

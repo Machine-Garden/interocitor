@@ -25,14 +25,16 @@
  * application should abandon persistence in favour of progress.
  */
 function isUnrecoverableIdbState(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error ?? '');
+  const message = error instanceof Error ? error.message : String(error ?? "");
   const normalized = message.toLowerCase();
-  return normalized.includes('database connection is closing')
-    || normalized.includes('connection is closing')
-    || normalized.includes('invalidstateerror')
-    || normalized.includes('the database connection is closed')
-    || normalized.includes('transaction on idbdatabase')
-    || normalized.includes('connection closed');
+  return (
+    normalized.includes("database connection is closing") ||
+    normalized.includes("connection is closing") ||
+    normalized.includes("invalidstateerror") ||
+    normalized.includes("the database connection is closed") ||
+    normalized.includes("transaction on idbdatabase") ||
+    normalized.includes("connection closed")
+  );
 }
 
 /**
@@ -40,20 +42,18 @@ function isUnrecoverableIdbState(error: unknown): boolean {
  * logs can distinguish open-time stalls from post-open handle death.
  */
 function classifyFallbackReason(error: unknown): string {
-  if (isUnrecoverableIdbState(error)) return 'idb-handle-closing';
-  return 'idb-open-stalled-or-unavailable';
+  if (isUnrecoverableIdbState(error)) return "idb-handle-closing";
+  return "idb-open-stalled-or-unavailable";
 }
 
-import type { DatabaseSchemaDefinition, LocalStore } from '@interocitor/core';
-import { MemoryLocalStore } from '@interocitor/core';
-import { IndexedDbLocalStore } from './indexed-db-local-store.ts';
+import type { DatabaseSchemaDefinition, LocalStore } from "@interocitor/core";
+import { MemoryLocalStore } from "@interocitor/core";
+import { IndexedDbLocalStore } from "./indexed-db-local-store.ts";
 
 /** Default IDB open deadline. Anything longer is a wedged platform. */
 export const DEFAULT_LOCAL_OPEN_TIMEOUT_MS = 300;
 
-export type LocalStoreDegradationReason =
-  | 'idb-handle-closing'
-  | 'idb-open-stalled-or-unavailable';
+export type LocalStoreDegradationReason = "idb-handle-closing" | "idb-open-stalled-or-unavailable";
 
 export interface LocalStoreDegradationInfo {
   reason: LocalStoreDegradationReason;
@@ -96,16 +96,15 @@ export interface ResilientLocalStoreOptions {
  * that case. We *do* want to bail when the open is wedged (no callback
  * fires at all — blocked, suspended tab, dead worker).
  */
-function openWithProgressDeadline(
-  primary: LocalStore,
-  ms: number,
-  label: string,
-): Promise<void> {
+function openWithProgressDeadline(primary: LocalStore, ms: number, label: string): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let progressed = false;
   const onProgress = () => {
     progressed = true;
-    if (timer) { clearTimeout(timer); timer = null; }
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
   };
   // Pass onProgress as an extra argument. IndexedDbLocalStore.open accepts it;
   // adapters that strictly type `open(): Promise<void>` will simply
@@ -131,7 +130,9 @@ function openWithProgressDeadline(
  */
 export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {}): LocalStore {
   const openTimeoutMs = opts.openTimeoutMs ?? DEFAULT_LOCAL_OPEN_TIMEOUT_MS;
-  const primaryFactory = opts.primaryFactory ?? (() => new IndexedDbLocalStore(opts.dbName, opts.dbVersion, opts.schema));
+  const primaryFactory =
+    opts.primaryFactory ??
+    (() => new IndexedDbLocalStore(opts.dbName, opts.dbVersion, opts.schema));
   const fallbackFactory = opts.fallbackFactory ?? (() => new MemoryLocalStore());
 
   let active: LocalStore | null = null;
@@ -145,13 +146,21 @@ export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {})
     console.error(`[interocitor] LocalStore degraded to memory (${classifiedReason}):`, reason);
     if (opts.onDegraded) {
       try {
-        opts.onDegraded({ reason: classifiedReason as LocalStoreDegradationReason, error: reason, dbName: opts.dbName });
+        opts.onDegraded({
+          reason: classifiedReason as LocalStoreDegradationReason,
+          error: reason,
+          dbName: opts.dbName,
+        });
       } catch {
         // Never let a consumer hook stop the engine.
       }
     }
     if (primary) {
-      try { primary.close(); } catch { /* ignore */ }
+      try {
+        primary.close();
+      } catch {
+        /* ignore */
+      }
     }
     const mem = fallbackFactory();
     // MemoryLocalStore.open() is a noop, but call it for contract symmetry.
@@ -176,13 +185,17 @@ export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {})
       if (active) return;
       // If the platform has no IDB at all (worker without IDB exposed,
       // private mode, SSR), don't even try — go straight to memory.
-      if (typeof indexedDB === 'undefined') {
-        active = fallback(new Error('IndexedDB not available in this runtime'), null);
+      if (typeof indexedDB === "undefined") {
+        active = fallback(new Error("IndexedDB not available in this runtime"), null);
         return;
       }
       const primary = primaryFactory();
       try {
-        await openWithProgressDeadline(primary, openTimeoutMs, `IndexedDbLocalStore.open(${opts.dbName ?? 'interocitor'})`);
+        await openWithProgressDeadline(
+          primary,
+          openTimeoutMs,
+          `IndexedDbLocalStore.open(${opts.dbName ?? "interocitor"})`,
+        );
         active = primary;
       } catch (err) {
         active = fallback(err, primary);
@@ -191,7 +204,11 @@ export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {})
 
     close(): void {
       if (!active) return;
-      try { active.close(); } catch { /* ignore */ }
+      try {
+        active.close();
+      } catch {
+        /* ignore */
+      }
       active = null;
       degraded = false;
     },
@@ -205,7 +222,8 @@ export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {})
     clearRows: () => runWithRecovery((store) => store.clearRows()),
     getTableNames: () => runWithRecovery((store) => store.getTableNames()),
 
-    commitLocalMutation: (row, pendingBatch) => runWithRecovery((store) => store.commitLocalMutation(row, pendingBatch)),
+    commitLocalMutation: (row, pendingBatch) =>
+      runWithRecovery((store) => store.commitLocalMutation(row, pendingBatch)),
     promotePendingBatch: () => runWithRecovery((store) => store.promotePendingBatch()),
     pushOutbox: (entry) => runWithRecovery((store) => store.pushOutbox(entry)),
     pushOutboxEntries: (entries) => runWithRecovery((store) => store.pushOutboxEntries(entries)),
@@ -224,7 +242,7 @@ export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {})
   };
 
   // Diagnostic, not a public API. Tests and internal logging can read it.
-  Object.defineProperty(adapter, '__degraded', {
+  Object.defineProperty(adapter, "__degraded", {
     get: () => degraded,
     enumerable: false,
   });
@@ -233,6 +251,6 @@ export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {})
 }
 
 function requireActive(active: LocalStore | null): LocalStore {
-  if (!active) throw new Error('LocalStore not opened');
+  if (!active) throw new Error("LocalStore not opened");
   return active;
 }

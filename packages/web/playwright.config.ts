@@ -1,21 +1,21 @@
-import { defineConfig, devices } from '@playwright/test';
-import { fileURLToPath } from 'node:url';
+import { defineConfig, devices } from "@playwright/test";
+import { fileURLToPath } from "node:url";
 
-const PORT = Number(process.env.PLAYWRIGHT_WEBDAV_PORT || '4175');
-const serverEntry = fileURLToPath(new URL('../../tools/webdav-server/server.mjs', import.meta.url));
+const PORT = Number(process.env.PLAYWRIGHT_WEBDAV_PORT || "4175");
+const serverEntry = fileURLToPath(new URL("../../tools/webdav-server/server.mjs", import.meta.url));
 
 export default defineConfig({
-  testDir: './tests/e2e',
+  testDir: "./tests/e2e",
   timeout: 30_000,
   expect: {
     timeout: 5_000,
   },
   fullyParallel: true,
   retries: 0,
-  reporter: 'list',
+  reporter: "list",
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
-    trace: 'on-first-retry',
+    trace: "on-first-retry",
   },
   webServer: {
     command: `PORT=${PORT} node ${JSON.stringify(serverEntry)} --mode=memory`,
@@ -25,8 +25,8 @@ export default defineConfig({
   },
   projects: [
     {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"] },
     },
   ],
 });

@@ -1,4 +1,4 @@
-import type { Interocitor, StoredFileMetadata } from '@interocitor/core';
+import type { Interocitor, StoredFileMetadata } from "@interocitor/core";
 
 export type ImageInput = Blob | ArrayBuffer | Uint8Array | string;
 
@@ -30,32 +30,32 @@ export interface StoredImageBlobUrl {
 
 function inferImageContentType(path: string, explicit?: string | null): string {
   if (explicit) {
-    if (!explicit.toLowerCase().startsWith('image/')) {
+    if (!explicit.toLowerCase().startsWith("image/")) {
       throw new Error(`Image content type must start with image/: ${explicit}`);
     }
     return explicit;
   }
-  const ext = path.split('?')[0]?.split('#')[0]?.split('.').pop()?.toLowerCase();
+  const ext = path.split("?")[0]?.split("#")[0]?.split(".").pop()?.toLowerCase();
   switch (ext) {
-    case 'jpg':
-    case 'jpeg':
-      return 'image/jpeg';
-    case 'png':
-      return 'image/png';
-    case 'gif':
-      return 'image/gif';
-    case 'webp':
-      return 'image/webp';
-    case 'svg':
-      return 'image/svg+xml';
-    case 'avif':
-      return 'image/avif';
-    case 'bmp':
-      return 'image/bmp';
-    case 'ico':
-      return 'image/x-icon';
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "png":
+      return "image/png";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    case "svg":
+      return "image/svg+xml";
+    case "avif":
+      return "image/avif";
+    case "bmp":
+      return "image/bmp";
+    case "ico":
+      return "image/x-icon";
     default:
-      return 'image/png';
+      return "image/png";
   }
 }
 
@@ -64,9 +64,9 @@ function parseImageDataUrl(dataUrl: string): { data: Uint8Array; contentType?: s
   if (!match) return null;
   const contentType = match[1] || undefined;
   const isBase64 = Boolean(match[2]);
-  const payload = match[3] ?? '';
+  const payload = match[3] ?? "";
   if (isBase64) {
-    const binary = atob(payload.replaceAll(/\s+/g, ''));
+    const binary = atob(payload.replaceAll(/\s+/g, ""));
     const data = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i += 1) data[i] = binary.codePointAt(i)!;
     return { data, contentType };
@@ -83,19 +83,34 @@ async function encodeImageInput(
     const type = inferImageContentType(path, contentType || input.type || undefined);
     return { data: new Uint8Array(await input.arrayBuffer()), contentType: type };
   }
-  if (typeof input === 'string') {
+  if (typeof input === "string") {
     const parsed = parseImageDataUrl(input);
-    if (parsed) return { data: parsed.data, contentType: inferImageContentType(path, contentType || parsed.contentType) };
-    return { data: new TextEncoder().encode(input), contentType: inferImageContentType(path, contentType || 'image/svg+xml') };
+    if (parsed)
+      return {
+        data: parsed.data,
+        contentType: inferImageContentType(path, contentType || parsed.contentType),
+      };
+    return {
+      data: new TextEncoder().encode(input),
+      contentType: inferImageContentType(path, contentType || "image/svg+xml"),
+    };
   }
-  if (input instanceof Uint8Array) return { data: input, contentType: inferImageContentType(path, contentType) };
-  if (input instanceof ArrayBuffer) return { data: new Uint8Array(input), contentType: inferImageContentType(path, contentType) };
-  throw new Error('Unsupported image input in this runtime');
+  if (input instanceof Uint8Array)
+    return { data: input, contentType: inferImageContentType(path, contentType) };
+  if (input instanceof ArrayBuffer)
+    return { data: new Uint8Array(input), contentType: inferImageContentType(path, contentType) };
+  throw new Error("Unsupported image input in this runtime");
 }
 
-function coerceImageMetadata(meta: StoredFileMetadata | null, contentType: string): StoredImageMetadata | null {
+function coerceImageMetadata(
+  meta: StoredFileMetadata | null,
+  contentType: string,
+): StoredImageMetadata | null {
   if (!meta) return null;
-  return { ...meta, contentType: inferImageContentType(meta.path, meta.contentType || contentType) };
+  return {
+    ...meta,
+    contentType: inferImageContentType(meta.path, meta.contentType || contentType),
+  };
 }
 
 export async function putImage<
@@ -113,10 +128,7 @@ export async function putImage<
 
 export async function getImage<
   S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>,
->(
-  db: Interocitor<S>,
-  path: string,
-): Promise<StoredImage> {
+>(db: Interocitor<S>, path: string): Promise<StoredImage> {
   const metadata = await db.getFileMetadata(path);
   const contentType = inferImageContentType(path, metadata?.contentType);
   const data = await db.getFile(path);
@@ -132,10 +144,7 @@ export async function getImage<
 
 export async function getImageBlobUrl<
   S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>,
->(
-  db: Interocitor<S>,
-  path: string,
-): Promise<StoredImageBlobUrl> {
+>(db: Interocitor<S>, path: string): Promise<StoredImageBlobUrl> {
   const image = await getImage(db, path);
   const url = URL.createObjectURL(image.blob);
   return {

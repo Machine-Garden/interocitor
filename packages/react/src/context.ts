@@ -1,5 +1,5 @@
-import { createContext, useContext } from 'react';
-import type { Interocitor } from '@interocitor/core';
+import { createContext, useContext } from "react";
+import type { Interocitor } from "@interocitor/core";
 
 /**
  * Create a typed provider + hook pair for your database.
@@ -11,9 +11,12 @@ import type { Interocitor } from '@interocitor/core';
  * export { CaseVaultProvider, useCaseVault };
  *
  * // bootstrap.ts
- * const db = new Interocitor<DB>({ dbName: 'case-vault', localStore });
- * db.configureMesh({ remotePath: '/CaseVault', passphrase, encrypted: true });
- * await db.setRemoteStorage(adapter);
+ * const db = new Interocitor<DB>(adapter, {
+ *   dbName: 'case-vault',
+ *   remotePath: '/CaseVault',
+ *   localStore,
+ *   keySource,
+ * });
  * await db.init();
  * await db.connect(); // starts remote sync; may return offline-ready
  *
@@ -24,9 +27,7 @@ import type { Interocitor } from '@interocitor/core';
  * const db = useCaseVault();
  * const cases = await db.table('cases').query(); // fully typed
  */
-export function createInterocitorContext<
-  S extends Record<string, Record<string, unknown>>,
->(): [
+export function createInterocitorContext<S extends Record<string, Record<string, unknown>>>(): [
   provider: React.Provider<Interocitor<S> | null>,
   hook: () => Interocitor<S>,
 ] {
@@ -35,7 +36,9 @@ export function createInterocitorContext<
   function useDb(): Interocitor<S> {
     const db = useContext(ctx);
     if (!db) {
-      throw new Error('Interocitor not provided. Build and initialize the engine first, then wrap your app with the provider. connect() can run before or after providing depending on your app bootstrap.');
+      throw new Error(
+        "Interocitor not provided. Build and initialize the engine first, then wrap your app with the provider. connect() can run before or after providing depending on your app bootstrap.",
+      );
     }
     return db;
   }

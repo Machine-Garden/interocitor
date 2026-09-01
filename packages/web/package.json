@@ -2,18 +2,30 @@
   "name": "@interocitor/web",
   "version": "0.1.0",
   "description": "Browser runtime stores, credential stores, and UI helpers for Interocitor.",
+  "keywords": [
+    "browser",
+    "crdt",
+    "indexeddb",
+    "local-first",
+    "offline-first",
+    "sync"
+  ],
+  "homepage": "https://github.com/Machine-Garden/interocitor/tree/main/packages/web#readme",
+  "bugs": {
+    "url": "https://github.com/Machine-Garden/interocitor/issues"
+  },
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Machine-Garden/interocitor.git",
     "directory": "packages/web"
   },
-  "homepage": "https://github.com/Machine-Garden/interocitor/tree/main/packages/web#readme",
-  "bugs": {
-    "url": "https://github.com/Machine-Garden/interocitor/issues"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
+  "files": [
+    "dist",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -47,33 +59,21 @@
       "import": "./dist/storage/reset.js"
     }
   },
-  "files": [
-    "dist",
-    "docs",
-    "README.md",
-    "LICENSE"
-  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
     "build": "rm -rf ./dist && tsc -p tsconfig.json",
-    "test:e2e": "yarn build && ../../node_modules/.bin/playwright test -c ./playwright.config.ts"
-  },
-  "peerDependencies": {
-    "@interocitor/core": "0.1.0"
+    "test:e2e": "yarn workspace @interocitor/core build && yarn build && ../../node_modules/.bin/playwright test -c ./playwright.config.ts"
   },
   "devDependencies": {
     "@interocitor/core": "workspace:*",
     "typescript": "^6.0.0"
   },
-  "keywords": [
-    "local-first",
-    "crdt",
-    "sync",
-    "offline-first",
-    "indexeddb",
-    "browser"
-  ],
-  "license": "MIT",
+  "peerDependencies": {
+    "@interocitor/core": "0.1.0"
+  },
   "engines": {
     "node": ">=18.0.0"
   }

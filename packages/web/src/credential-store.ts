@@ -7,12 +7,12 @@
  * biometric/external key protects a local credential record.
  */
 
-import type { CredentialStore, StoredCredentials } from '@interocitor/core';
+import type { CredentialStore, StoredCredentials } from "@interocitor/core";
 import {
   WebAuthnBlobStore,
   type WebAuthnAttachmentPreference,
   type WebAuthnBlobStoreOptions,
-} from './webauthn.ts';
+} from "./webauthn.ts";
 
 /**
  * Browser-facing credential store contract returned by
@@ -39,10 +39,10 @@ export interface WebCredentialStore extends CredentialStore {
   restoreWithBiometrics?(): Promise<StoredCredentials | null>;
 }
 
-export type CredentialStorageLocation = 'memory' | 'sessionStorage' | 'localStorage' | 'passkey';
-export type EnvelopeStorageLocation = 'memory' | 'sessionStorage' | 'localStorage';
+export type CredentialStorageLocation = "memory" | "sessionStorage" | "localStorage" | "passkey";
+export type EnvelopeStorageLocation = "memory" | "sessionStorage" | "localStorage";
 
-export type CredentialEnvelopeKeyPurpose = 'encrypt' | 'decrypt';
+export type CredentialEnvelopeKeyPurpose = "encrypt" | "decrypt";
 
 /**
  * Supplies a CryptoKey that protects an encrypted credential envelope.
@@ -58,7 +58,7 @@ export interface CredentialEnvelopeKeyProvider {
 
 export type StoredCredentialEnvelope = {
   v: 1;
-  alg: 'AES-GCM';
+  alg: "AES-GCM";
   iv: string;
   ciphertext: string;
 };
@@ -116,43 +116,54 @@ export interface CreateWebCredentialStoreOptions {
   };
 }
 
-type BrowserStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+type BrowserStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 function normalizeStoredCredentials(value: unknown): StoredCredentials | null {
-  if (!value || typeof value !== 'object') return null;
+  if (!value || typeof value !== "object") return null;
   const parsed = value as Partial<StoredCredentials>;
-  if (typeof parsed.portableKey !== 'string' || typeof parsed.deviceId !== 'string') return null;
+  if (typeof parsed.portableKey !== "string" || typeof parsed.deviceId !== "string") return null;
   return {
     portableKey: parsed.portableKey,
     deviceId: parsed.deviceId,
-    ...(typeof parsed.meshId === 'string' && parsed.meshId ? { meshId: parsed.meshId } : {}),
+    ...(typeof parsed.meshId === "string" && parsed.meshId ? { meshId: parsed.meshId } : {}),
   };
 }
 
 function encodeBase64(bytes: Uint8Array): string {
-  let binary = '';
+  let binary = "";
   for (let i = 0; i < bytes.length; i++) binary += String.fromCodePoint(bytes[i]);
   return btoa(binary);
 }
 
 function decodeBase64(value: string): Uint8Array<ArrayBuffer> {
-  const decoded = Uint8Array.from(atob(value), c => c.codePointAt(0)!);
+  const decoded = Uint8Array.from(atob(value), (c) => c.codePointAt(0)!);
   return new Uint8Array(decoded);
 }
 
-function getNamedStorage(location: EnvelopeStorageLocation | CredentialStorageLocation): BrowserStorage | null {
-  if (location === 'localStorage') return typeof localStorage === 'undefined' ? null : localStorage;
-  if (location === 'sessionStorage') return typeof sessionStorage === 'undefined' ? null : sessionStorage;
+function getNamedStorage(
+  location: EnvelopeStorageLocation | CredentialStorageLocation,
+): BrowserStorage | null {
+  if (location === "localStorage") return typeof localStorage === "undefined" ? null : localStorage;
+  if (location === "sessionStorage")
+    return typeof sessionStorage === "undefined" ? null : sessionStorage;
   return null;
 }
 
 class NoopBiometricControls implements WebCredentialStore {
   constructor(private readonly inner: CredentialStore) {}
 
-  save(creds: StoredCredentials): Promise<void> { return this.inner.save(creds); }
-  load(): Promise<StoredCredentials | null> { return this.inner.load(); }
-  clear(): Promise<void> { return this.inner.clear(); }
-  async secureWithBiometrics(): Promise<boolean> { return false; }
+  save(creds: StoredCredentials): Promise<void> {
+    return this.inner.save(creds);
+  }
+  load(): Promise<StoredCredentials | null> {
+    return this.inner.load();
+  }
+  clear(): Promise<void> {
+    return this.inner.clear();
+  }
+  async secureWithBiometrics(): Promise<boolean> {
+    return false;
+  }
 }
 
 // ─── Plain browser storage backends ───────────────────────────────────
@@ -165,7 +176,9 @@ class BrowserStorageCredentialStore implements CredentialStore {
   ) {}
 
   /** Single record per dbName. JSON-encoded `{portableKey, deviceId, meshId}`. */
-  protected recordKey(): string { return `interocitor-creds:${this.dbName}`; }
+  protected recordKey(): string {
+    return `interocitor-creds:${this.dbName}`;
+  }
 
   async save(creds: StoredCredentials): Promise<void> {
     const storage = this.storageProvider();
@@ -200,14 +213,14 @@ class BrowserStorageCredentialStore implements CredentialStore {
 
 export class LocalStorageCredentialStore extends BrowserStorageCredentialStore {
   constructor(dbName: string) {
-    super(dbName, 'localStorage', () => getNamedStorage('localStorage'));
+    super(dbName, "localStorage", () => getNamedStorage("localStorage"));
   }
 }
 
 /** Stores the credential record only for the lifetime of the current tab session. */
 export class SessionStorageCredentialStore extends BrowserStorageCredentialStore {
   constructor(dbName: string) {
-    super(dbName, 'sessionStorage', () => getNamedStorage('sessionStorage'));
+    super(dbName, "sessionStorage", () => getNamedStorage("sessionStorage"));
   }
 }
 
@@ -215,11 +228,16 @@ export class SessionStorageCredentialStore extends BrowserStorageCredentialStore
 export class MemoryCredentialStore implements CredentialStore {
   private readonly records: Map<string, StoredCredentials>;
 
-  constructor(private readonly dbName: string, records?: Map<string, StoredCredentials>) {
+  constructor(
+    private readonly dbName: string,
+    records?: Map<string, StoredCredentials>,
+  ) {
     this.records = records ?? new Map();
   }
 
-  private recordKey(): string { return `interocitor-creds:${this.dbName}`; }
+  private recordKey(): string {
+    return `interocitor-creds:${this.dbName}`;
+  }
 
   async save(creds: StoredCredentials): Promise<void> {
     this.records.set(this.recordKey(), {
@@ -243,18 +261,23 @@ export class MemoryCredentialStore implements CredentialStore {
 
 export class StaticEnvelopeKeyProvider implements CredentialEnvelopeKeyProvider {
   constructor(private readonly key: CryptoKey) {}
-  async getKey(): Promise<CryptoKey> { return this.key; }
+  async getKey(): Promise<CryptoKey> {
+    return this.key;
+  }
 }
 
 /** Persists an encrypted credential envelope in browser storage. */
 export class BrowserCredentialEnvelopeStore implements CredentialEnvelopeStore {
   constructor(
     private readonly dbName: string,
-    storageName: Exclude<EnvelopeStorageLocation, 'memory'>,
-    private readonly storageProvider: () => BrowserStorage | null = () => getNamedStorage(storageName),
+    storageName: Exclude<EnvelopeStorageLocation, "memory">,
+    private readonly storageProvider: () => BrowserStorage | null = () =>
+      getNamedStorage(storageName),
   ) {}
 
-  private recordKey(): string { return `interocitor-creds-envelope:${this.dbName}`; }
+  private recordKey(): string {
+    return `interocitor-creds-envelope:${this.dbName}`;
+  }
 
   async save(envelope: StoredCredentialEnvelope): Promise<void> {
     const storage = this.storageProvider();
@@ -267,7 +290,7 @@ export class BrowserCredentialEnvelopeStore implements CredentialEnvelopeStore {
     const raw = storage.getItem(this.recordKey());
     if (!raw) return null;
     const envelope = JSON.parse(raw) as StoredCredentialEnvelope;
-    return envelope?.v === 1 && envelope.alg === 'AES-GCM' ? envelope : null;
+    return envelope?.v === 1 && envelope.alg === "AES-GCM" ? envelope : null;
   }
 
   async clear(): Promise<void> {
@@ -279,11 +302,16 @@ export class BrowserCredentialEnvelopeStore implements CredentialEnvelopeStore {
 export class MemoryCredentialEnvelopeStore implements CredentialEnvelopeStore {
   private readonly records: Map<string, StoredCredentialEnvelope>;
 
-  constructor(private readonly dbName: string, records?: Map<string, StoredCredentialEnvelope>) {
+  constructor(
+    private readonly dbName: string,
+    records?: Map<string, StoredCredentialEnvelope>,
+  ) {
     this.records = records ?? new Map();
   }
 
-  private recordKey(): string { return `interocitor-creds-envelope:${this.dbName}`; }
+  private recordKey(): string {
+    return `interocitor-creds-envelope:${this.dbName}`;
+  }
 
   async save(envelope: StoredCredentialEnvelope): Promise<void> {
     this.records.set(this.recordKey(), { ...envelope });
@@ -299,8 +327,11 @@ export class MemoryCredentialEnvelopeStore implements CredentialEnvelopeStore {
   }
 }
 
-function createCredentialEnvelopeStore(dbName: string, location: EnvelopeStorageLocation): CredentialEnvelopeStore {
-  if (location === 'memory') return new MemoryCredentialEnvelopeStore(dbName);
+function createCredentialEnvelopeStore(
+  dbName: string,
+  location: EnvelopeStorageLocation,
+): CredentialEnvelopeStore {
+  if (location === "memory") return new MemoryCredentialEnvelopeStore(dbName);
   return new BrowserCredentialEnvelopeStore(dbName, location);
 }
 
@@ -322,13 +353,14 @@ export class EnvelopedCredentialStore implements CredentialStore {
     storageNameOrStore: EnvelopeStorageLocation | CredentialEnvelopeStore,
     private readonly keyProvider: CredentialEnvelopeKeyProvider,
   ) {
-    this.envelopeStore = typeof storageNameOrStore === 'string'
-      ? createCredentialEnvelopeStore(dbName, storageNameOrStore)
-      : storageNameOrStore;
+    this.envelopeStore =
+      typeof storageNameOrStore === "string"
+        ? createCredentialEnvelopeStore(dbName, storageNameOrStore)
+        : storageNameOrStore;
   }
 
   async save(creds: StoredCredentials): Promise<void> {
-    const key = await this.keyProvider.getKey('encrypt');
+    const key = await this.keyProvider.getKey("encrypt");
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const payload: StoredCredentials = {
       portableKey: creds.portableKey,
@@ -336,13 +368,13 @@ export class EnvelopedCredentialStore implements CredentialStore {
       ...(creds.meshId ? { meshId: creds.meshId } : {}),
     };
     const ciphertext = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv },
+      { name: "AES-GCM", iv },
       key,
       this.encoder.encode(JSON.stringify(payload)),
     );
     await this.envelopeStore.save({
       v: 1,
-      alg: 'AES-GCM',
+      alg: "AES-GCM",
       iv: encodeBase64(iv),
       ciphertext: encodeBase64(new Uint8Array(ciphertext)),
     });
@@ -351,9 +383,9 @@ export class EnvelopedCredentialStore implements CredentialStore {
   async load(): Promise<StoredCredentials | null> {
     const envelope = await this.envelopeStore.load();
     if (!envelope) return null;
-    const key = await this.keyProvider.getKey('decrypt');
+    const key = await this.keyProvider.getKey("decrypt");
     const plaintext = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: decodeBase64(envelope.iv) },
+      { name: "AES-GCM", iv: decodeBase64(envelope.iv) },
       key,
       decodeBase64(envelope.ciphertext),
     );
@@ -370,9 +402,9 @@ export class EnvelopedCredentialStore implements CredentialStore {
 function resolveWebAuthnBlobOptions(
   rpIdOrOptions?: string | WebAuthnBlobStoreOptions,
   displayName?: string,
-  options?: Pick<WebAuthnBlobStoreOptions, 'authenticatorAttachment' | 'userVerification'>,
+  options?: Pick<WebAuthnBlobStoreOptions, "authenticatorAttachment" | "userVerification">,
 ): WebAuthnBlobStoreOptions {
-  if (typeof rpIdOrOptions === 'string' || rpIdOrOptions === undefined) {
+  if (typeof rpIdOrOptions === "string" || rpIdOrOptions === undefined) {
     return {
       ...(rpIdOrOptions ? { rpId: rpIdOrOptions } : {}),
       ...(displayName ? { displayName } : {}),
@@ -405,13 +437,13 @@ export class WebAuthnCredentialStore implements CredentialStore {
     dbName: string,
     rpId?: string,
     displayName?: string,
-    options?: Pick<WebAuthnBlobStoreOptions, 'authenticatorAttachment' | 'userVerification'>,
+    options?: Pick<WebAuthnBlobStoreOptions, "authenticatorAttachment" | "userVerification">,
   );
   constructor(
     dbName: string,
-    rpIdOrOptions: string | WebAuthnBlobStoreOptions = globalThis.location?.hostname ?? 'localhost',
-    displayName: string = 'Interocitor',
-    options?: Pick<WebAuthnBlobStoreOptions, 'authenticatorAttachment' | 'userVerification'>,
+    rpIdOrOptions: string | WebAuthnBlobStoreOptions = globalThis.location?.hostname ?? "localhost",
+    displayName: string = "Interocitor",
+    options?: Pick<WebAuthnBlobStoreOptions, "authenticatorAttachment" | "userVerification">,
   ) {
     this.blobStore = new WebAuthnBlobStore(
       dbName,
@@ -455,13 +487,13 @@ export class WebAuthnEnvelopeKeyProvider implements CredentialEnvelopeKeyProvide
     dbName: string,
     rpId?: string,
     displayName?: string,
-    options?: Pick<WebAuthnBlobStoreOptions, 'authenticatorAttachment' | 'userVerification'>,
+    options?: Pick<WebAuthnBlobStoreOptions, "authenticatorAttachment" | "userVerification">,
   );
   constructor(
     dbName: string,
-    rpIdOrOptions: string | WebAuthnBlobStoreOptions = globalThis.location?.hostname ?? 'localhost',
-    displayName: string = 'Interocitor',
-    options?: Pick<WebAuthnBlobStoreOptions, 'authenticatorAttachment' | 'userVerification'>,
+    rpIdOrOptions: string | WebAuthnBlobStoreOptions = globalThis.location?.hostname ?? "localhost",
+    displayName: string = "Interocitor",
+    options?: Pick<WebAuthnBlobStoreOptions, "authenticatorAttachment" | "userVerification">,
   ) {
     this.blobStore = new WebAuthnBlobStore(
       `${dbName}:envelope-key`,
@@ -469,17 +501,20 @@ export class WebAuthnEnvelopeKeyProvider implements CredentialEnvelopeKeyProvide
     );
   }
 
-  async getKey(purpose: CredentialEnvelopeKeyPurpose = 'decrypt'): Promise<CryptoKey> {
+  async getKey(purpose: CredentialEnvelopeKeyPurpose = "decrypt"): Promise<CryptoKey> {
     const stored = await this.blobStore.load();
     if (stored) {
-      return crypto.subtle.importKey('raw', stored, 'AES-GCM', false, ['encrypt', 'decrypt']);
+      return crypto.subtle.importKey("raw", stored, "AES-GCM", false, ["encrypt", "decrypt"]);
     }
-    if (purpose === 'decrypt') {
-      throw new Error('No WebAuthn envelope key is available for decrypt');
+    if (purpose === "decrypt") {
+      throw new Error("No WebAuthn envelope key is available for decrypt");
     }
 
-    const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
-    const raw = await crypto.subtle.exportKey('raw', key);
+    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, [
+      "encrypt",
+      "decrypt",
+    ]);
+    const raw = await crypto.subtle.exportKey("raw", key);
     await this.blobStore.save(new Uint8Array(raw));
     return key;
   }
@@ -509,36 +544,44 @@ export class WebAuthnEnvelopeKeyProvider implements CredentialEnvelopeKeyProvide
  * should be gated by a key provider such as {@link WebAuthnEnvelopeKeyProvider}.
  */
 export function createWebCredentialStore(dbName: string, displayName?: string): WebCredentialStore;
-export function createWebCredentialStore(dbName: string, options: CreateWebCredentialStoreOptions): WebCredentialStore;
+export function createWebCredentialStore(
+  dbName: string,
+  options: CreateWebCredentialStoreOptions,
+): WebCredentialStore;
 export function createWebCredentialStore(
   dbName: string,
   displayNameOrOptions?: string | CreateWebCredentialStoreOptions,
 ): WebCredentialStore {
-  const options: CreateWebCredentialStoreOptions = typeof displayNameOrOptions === 'string'
-    ? { displayName: displayNameOrOptions }
-    : displayNameOrOptions ?? {};
+  const options: CreateWebCredentialStoreOptions =
+    typeof displayNameOrOptions === "string"
+      ? { displayName: displayNameOrOptions }
+      : (displayNameOrOptions ?? {});
 
   if (options.envelope) {
-    return new NoopBiometricControls(new EnvelopedCredentialStore(
-      dbName,
-      options.envelope.store ?? options.envelope.storage ?? 'localStorage',
-      options.envelope.keyProvider,
-    ));
+    return new NoopBiometricControls(
+      new EnvelopedCredentialStore(
+        dbName,
+        options.envelope.store ?? options.envelope.storage ?? "localStorage",
+        options.envelope.keyProvider,
+      ),
+    );
   }
 
-  switch (options.storage ?? 'localStorage') {
-    case 'memory':
+  switch (options.storage ?? "localStorage") {
+    case "memory":
       return new NoopBiometricControls(new MemoryCredentialStore(dbName, options.memory));
-    case 'sessionStorage':
+    case "sessionStorage":
       return new NoopBiometricControls(new SessionStorageCredentialStore(dbName));
-    case 'passkey':
-      return new NoopBiometricControls(new WebAuthnCredentialStore(dbName, {
-        rpId: options.rpId,
-        displayName: options.displayName,
-        authenticatorAttachment: options.authenticatorAttachment,
-        userVerification: options.userVerification,
-      }));
-    case 'localStorage':
+    case "passkey":
+      return new NoopBiometricControls(
+        new WebAuthnCredentialStore(dbName, {
+          rpId: options.rpId,
+          displayName: options.displayName,
+          authenticatorAttachment: options.authenticatorAttachment,
+          userVerification: options.userVerification,
+        }),
+      );
+    case "localStorage":
       return new NoopBiometricControls(new LocalStorageCredentialStore(dbName));
   }
 }

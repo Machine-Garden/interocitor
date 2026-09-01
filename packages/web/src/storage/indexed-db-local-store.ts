@@ -20,17 +20,19 @@ import type {
   SchemaField,
   WhereClause,
   WherePrimitive,
-} from '@interocitor/core';
+} from "@interocitor/core";
 
-const DEFAULT_DB_NAME = 'interocitor';
+const DEFAULT_DB_NAME = "interocitor";
 const DEFAULT_DB_VERSION = 1;
-const CACHE_FINGERPRINT_META_KEY = 'interocitor:cache:fingerprint';
+const CACHE_FINGERPRINT_META_KEY = "interocitor:cache:fingerprint";
 const fallbackLockTails = new Map<string, Promise<void>>();
 
 async function withFallbackLock<T>(name: string, operation: () => Promise<T>): Promise<T> {
   const previous = fallbackLockTails.get(name) ?? Promise.resolve();
   let release!: () => void;
-  const current = new Promise<void>((resolve) => { release = resolve; });
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   fallbackLockTails.set(name, current);
   await previous.catch(() => {});
   try {
@@ -42,13 +44,13 @@ async function withFallbackLock<T>(name: string, operation: () => Promise<T>): P
 }
 
 const STORES = {
-  rows: 'rows',         // key: "{table}/{rowId}"
-  outbox: 'outbox',     // key: auto-increment
-  cursors: 'cursors',   // key: deviceId
-  meta: 'meta',         // key: string
+  rows: "rows", // key: "{table}/{rowId}"
+  outbox: "outbox", // key: auto-increment
+  cursors: "cursors", // key: deviceId
+  meta: "meta", // key: string
 } as const;
 
-const SCHEMA_INDEX_PREFIX = 'idx:';
+const SCHEMA_INDEX_PREFIX = "idx:";
 
 function schemaIndexName(table: string, indexName: string): string {
   return `${SCHEMA_INDEX_PREFIX}${table}:${indexName}`;
@@ -57,7 +59,7 @@ function schemaIndexName(table: string, indexName: string): string {
 function schemaIndexKeyPath(field: string): string[] {
   // Index key is composite: [table, payload-field-value]. Both live under
   // namespaced parents now. ColumnEntry stores the user value under `.value`.
-  return ['_meta.table', `payload.${field}.value`];
+  return ["_meta.table", `payload.${field}.value`];
 }
 
 function normalizeSchema(schema?: DatabaseSchemaDefinition): DatabaseSchemaDefinition | undefined {
@@ -74,7 +76,9 @@ function domStringListToArray(list: DOMStringList): string[] {
   return out;
 }
 
-function expectedSchemaIndexes(schema?: DatabaseSchemaDefinition): Map<string, { keyPath: string[]; unique: boolean }> {
+function expectedSchemaIndexes(
+  schema?: DatabaseSchemaDefinition,
+): Map<string, { keyPath: string[]; unique: boolean }> {
   const expected = new Map<string, { keyPath: string[]; unique: boolean }>();
   if (!schema) return expected;
   // Object.keys() returns a fresh array, and the package targets ES2022.
@@ -94,7 +98,9 @@ function expectedSchemaIndexes(schema?: DatabaseSchemaDefinition): Map<string, {
     }
     // The spread creates a fresh array, and the package targets ES2022.
     // eslint-disable-next-line unicorn/no-array-sort
-    const indexes = [...(def.indexes ?? [])].sort((a, b) => a.name.localeCompare(b.name) || a.field.localeCompare(b.field));
+    const indexes = [...(def.indexes ?? [])].sort(
+      (a, b) => a.name.localeCompare(b.name) || a.field.localeCompare(b.field),
+    );
     for (const index of indexes) {
       expected.set(schemaIndexName(table, index.name), {
         keyPath: schemaIndexKeyPath(index.field),
@@ -129,27 +135,27 @@ function compare(a: WherePrimitive, b: WherePrimitive): number {
 function matchesClause(value: unknown, clause: WhereClause): boolean {
   if (value === undefined || value === null) return false;
   switch (clause.op) {
-    case 'equals':
+    case "equals":
       return compare(value as WherePrimitive, clause.value as WherePrimitive) === 0;
-    case 'above':
+    case "above":
       return compare(value as WherePrimitive, clause.value as WherePrimitive) > 0;
-    case 'aboveOrEqual':
+    case "aboveOrEqual":
       return compare(value as WherePrimitive, clause.value as WherePrimitive) >= 0;
-    case 'below':
+    case "below":
       return compare(value as WherePrimitive, clause.value as WherePrimitive) < 0;
-    case 'belowOrEqual':
+    case "belowOrEqual":
       return compare(value as WherePrimitive, clause.value as WherePrimitive) <= 0;
-    case 'between': {
+    case "between": {
       const lowerCmp = compare(value as WherePrimitive, clause.lower as WherePrimitive);
       const upperCmp = compare(value as WherePrimitive, clause.upper as WherePrimitive);
       const lowerOk = clause.lowerOpen ? lowerCmp > 0 : lowerCmp >= 0;
       const upperOk = clause.upperOpen ? upperCmp < 0 : upperCmp <= 0;
       return lowerOk && upperOk;
     }
-    case 'startsWith':
-      return typeof value === 'string' && value.startsWith(String(clause.value));
-    case 'anyOf':
-      return (clause.values ?? []).some(v => compare(value as WherePrimitive, v) === 0);
+    case "startsWith":
+      return typeof value === "string" && value.startsWith(String(clause.value));
+    case "anyOf":
+      return (clause.values ?? []).some((v) => compare(value as WherePrimitive, v) === 0);
     default:
       return false;
   }
@@ -163,8 +169,8 @@ function hasSchemaIndex(
   const tableSchema = schema?.tables[table];
   if (!tableSchema) return undefined;
 
-  const legacy = tableSchema.indexes?.find(index => index.field === field);
-  if (legacy) return legacy;
+  const declaredIndex = tableSchema.indexes?.find((index) => index.field === field);
+  if (declaredIndex) return declaredIndex;
 
   const fromField = tableSchema.fields?.[field] as SchemaField<unknown> | undefined;
   if (!fromField) return undefined;
@@ -186,37 +192,42 @@ function rangeForClause(table: string, clause: WhereClause): IDBKeyRange | null 
   const tableUpperBound = [table, []];
 
   switch (clause.op) {
-    case 'equals':
+    case "equals":
       return IDBKeyRange.only([table, clause.value]);
-    case 'above':
+    case "above":
       return IDBKeyRange.bound([table, clause.value], tableUpperBound, true, false);
-    case 'aboveOrEqual':
+    case "aboveOrEqual":
       return IDBKeyRange.bound([table, clause.value], tableUpperBound, false, false);
-    case 'below':
+    case "below":
       return IDBKeyRange.bound(tableLowerBound, [table, clause.value], false, true);
-    case 'belowOrEqual':
+    case "belowOrEqual":
       return IDBKeyRange.bound(tableLowerBound, [table, clause.value], false, false);
-    case 'between':
+    case "between":
       return IDBKeyRange.bound(
         [table, clause.lower],
         [table, clause.upper],
         clause.lowerOpen ?? false,
         clause.upperOpen ?? false,
       );
-    case 'startsWith': {
-      const prefix = String(clause.value ?? '');
+    case "startsWith": {
+      const prefix = String(clause.value ?? "");
       return IDBKeyRange.bound([table, prefix], [table, `${prefix}\uFFFF`], false, false);
     }
-    case 'anyOf':
+    case "anyOf":
       return null;
     default:
       return null;
   }
 }
 
-function reconcileSchemaIndexes(rowsStore: IDBObjectStore, schema?: DatabaseSchemaDefinition): void {
+function reconcileSchemaIndexes(
+  rowsStore: IDBObjectStore,
+  schema?: DatabaseSchemaDefinition,
+): void {
   const expected = expectedSchemaIndexes(schema);
-  const existing = domStringListToArray(rowsStore.indexNames).filter(name => name.startsWith(SCHEMA_INDEX_PREFIX));
+  const existing = domStringListToArray(rowsStore.indexNames).filter((name) =>
+    name.startsWith(SCHEMA_INDEX_PREFIX),
+  );
 
   for (const indexName of existing) {
     if (!expected.has(indexName)) {
@@ -238,7 +249,8 @@ function openDB(
   onProgress?: () => void,
 ): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = dbVersion === undefined ? indexedDB.open(dbName) : indexedDB.open(dbName, dbVersion);
+    const req =
+      dbVersion === undefined ? indexedDB.open(dbName) : indexedDB.open(dbName, dbVersion);
 
     req.onupgradeneeded = () => {
       // Signal "the platform is alive and processing". The resilient wrapper
@@ -246,13 +258,17 @@ function openDB(
       // (creating indexes over many rows on a slow device) is making
       // progress, not blocked. Without this, a legitimate upgrade past the
       // deadline would falsely trigger memory-mode fallback.
-      try { onProgress?.(); } catch { /* never let a bad listener break open */ }
+      try {
+        onProgress?.();
+      } catch {
+        /* never let a bad listener break open */
+      }
       const db = req.result;
       if (!db.objectStoreNames.contains(STORES.rows)) {
         // keyPath uses dotted path into the new namespaced row shape.
         // IndexedDB resolves "_meta.key" against the stored object.
-        const rows = db.createObjectStore(STORES.rows, { keyPath: '_meta.key' });
-        rows.createIndex('by_table', '_meta.table', { unique: false });
+        const rows = db.createObjectStore(STORES.rows, { keyPath: "_meta.key" });
+        rows.createIndex("by_table", "_meta.table", { unique: false });
       }
       if (!db.objectStoreNames.contains(STORES.outbox)) {
         db.createObjectStore(STORES.outbox, { autoIncrement: true });
@@ -276,7 +292,11 @@ function openDB(
       // Without this handler, an upgrade open elsewhere would hang on
       // 'blocked' until this connection is closed manually.
       db.onversionchange = () => {
-        try { db.close(); } catch { /* already closed */ }
+        try {
+          db.close();
+        } catch {
+          /* already closed */
+        }
       };
       resolve(db);
     };
@@ -287,20 +307,18 @@ function openDB(
     // init() timeout with no diagnostic. Reject loudly with an actionable
     // message instead.
     req.onblocked = () => {
-      reject(new Error(
-        `IndexedDB open blocked: another connection to "${dbName}" is open at a lower version ` +
-        `(requested v${dbVersion ?? 'current'}). Close other tabs/workers using this database, ` +
-        `or ensure prior LocalStore instances called close().`,
-      ));
+      reject(
+        new Error(
+          `IndexedDB open blocked: another connection to "${dbName}" is open at a lower version ` +
+            `(requested v${dbVersion ?? "current"}). Close other tabs/workers using this database, ` +
+            `or ensure prior LocalStore instances called close().`,
+        ),
+      );
     };
   });
 }
 
-function tx(
-  db: IDBDatabase,
-  stores: string | string[],
-  mode: IDBTransactionMode
-): IDBTransaction {
+function tx(db: IDBDatabase, stores: string | string[], mode: IDBTransactionMode): IDBTransaction {
   return db.transaction(stores, mode);
 }
 
@@ -346,37 +364,41 @@ export class IndexedDbLocalStore implements LocalStore {
     this.dbName = dbName ?? DEFAULT_DB_NAME;
     this.configuredDbVersion = dbVersion;
     this.expectedIndexes = expectedSchemaIndexes(this.schema);
-    this.desiredFingerprint = JSON.stringify(Array.from(this.expectedIndexes.entries()).map(([name, def]) => ({
-      name,
-      keyPath: def.keyPath,
-      unique: def.unique,
-    })));
+    this.desiredFingerprint = JSON.stringify(
+      Array.from(this.expectedIndexes.entries()).map(([name, def]) => ({
+        name,
+        keyPath: def.keyPath,
+        unique: def.unique,
+      })),
+    );
   }
 
   async withLock<T>(name: string, operation: () => Promise<T>): Promise<T> {
     const lockName = `interocitor:${this.dbName}:${name}`;
-    if (typeof navigator !== 'undefined' && navigator.locks) {
+    if (typeof navigator !== "undefined" && navigator.locks) {
       return navigator.locks.request(lockName, operation);
     }
     return withFallbackLock(lockName, operation);
   }
 
   private async readCacheFingerprint(db: IDBDatabase): Promise<string | undefined> {
-    const t = tx(db, STORES.meta, 'readonly');
+    const t = tx(db, STORES.meta, "readonly");
     const value = await reqToPromise(t.objectStore(STORES.meta).get(CACHE_FINGERPRINT_META_KEY));
-    return typeof value === 'string' ? value : undefined;
+    return typeof value === "string" ? value : undefined;
   }
 
   private async writeCacheFingerprint(db: IDBDatabase): Promise<void> {
-    const t = tx(db, STORES.meta, 'readwrite');
+    const t = tx(db, STORES.meta, "readwrite");
     t.objectStore(STORES.meta).put(this.desiredFingerprint, CACHE_FINGERPRINT_META_KEY);
     await txComplete(t);
   }
 
   private needsRepair(db: IDBDatabase, storedFingerprint?: string): boolean {
     if (!db.objectStoreNames.contains(STORES.rows)) return true;
-    const rows = tx(db, STORES.rows, 'readonly').objectStore(STORES.rows);
-    const existing = new Set(domStringListToArray(rows.indexNames).filter(name => name.startsWith(SCHEMA_INDEX_PREFIX)));
+    const rows = tx(db, STORES.rows, "readonly").objectStore(STORES.rows);
+    const existing = new Set(
+      domStringListToArray(rows.indexNames).filter((name) => name.startsWith(SCHEMA_INDEX_PREFIX)),
+    );
     if (storedFingerprint !== this.desiredFingerprint) return true;
     if (existing.size !== this.expectedIndexes.size) return true;
     for (const name of this.expectedIndexes.keys()) {
@@ -398,7 +420,9 @@ export class IndexedDbLocalStore implements LocalStore {
       // a beat to finalize the close. Onversionchange on the prior handle
       // is still our backstop if any other connection lingers.
       db.close();
-      await new Promise<void>(resolve => { setTimeout(resolve, 0); });
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
       // A reopen is itself "progress" — the deadline (if any) has already
       // been disarmed, but we keep the contract by signaling again on the
       // upcoming upgrade-needed.
@@ -432,7 +456,7 @@ export class IndexedDbLocalStore implements LocalStore {
   }
 
   private ensureDB(): IDBDatabase {
-    if (!this.db) throw new Error('LocalStore not opened');
+    if (!this.db) throw new Error("LocalStore not opened");
     return this.db;
   }
 
@@ -444,7 +468,7 @@ export class IndexedDbLocalStore implements LocalStore {
 
   async getRow(table: string, rowId: string): Promise<Row | undefined> {
     const db = this.ensureDB();
-    const t = tx(db, STORES.rows, 'readonly');
+    const t = tx(db, STORES.rows, "readonly");
     const store = t.objectStore(STORES.rows);
     const result = await reqToPromise(store.get(this.rowKey(table, rowId)));
     return result as Row | undefined;
@@ -461,7 +485,7 @@ export class IndexedDbLocalStore implements LocalStore {
 
   async putRow(row: Row): Promise<void> {
     const db = this.ensureDB();
-    const t = tx(db, STORES.rows, 'readwrite');
+    const t = tx(db, STORES.rows, "readwrite");
     const store = t.objectStore(STORES.rows);
     store.put(this.withKey(row));
     await txComplete(t);
@@ -470,7 +494,7 @@ export class IndexedDbLocalStore implements LocalStore {
   async putRows(rows: Row[]): Promise<void> {
     if (rows.length === 0) return;
     const db = this.ensureDB();
-    const t = tx(db, STORES.rows, 'readwrite');
+    const t = tx(db, STORES.rows, "readwrite");
     const store = t.objectStore(STORES.rows);
     for (const row of rows) {
       store.put(this.withKey(row));
@@ -480,11 +504,11 @@ export class IndexedDbLocalStore implements LocalStore {
 
   async getTable(table: string): Promise<Row[]> {
     const db = this.ensureDB();
-    const t = tx(db, STORES.rows, 'readonly');
+    const t = tx(db, STORES.rows, "readonly");
     const store = t.objectStore(STORES.rows);
-    const index = store.index('by_table');
+    const index = store.index("by_table");
     const results = await reqToPromise(index.getAll(table));
-    return (results as Row[]).filter(r => !r._meta.deleted);
+    return (results as Row[]).filter((r) => !r._meta.deleted);
   }
 
   async queryWhere(table: string, clause: WhereClause): Promise<Row[]> {
@@ -493,19 +517,19 @@ export class IndexedDbLocalStore implements LocalStore {
 
     if (!indexDef) {
       const rows = await this.getTable(table);
-      return rows.filter(row => matchesClause(readColumnValue(row, clause.field), clause));
+      return rows.filter((row) => matchesClause(readColumnValue(row, clause.field), clause));
     }
 
-    const t = tx(db, STORES.rows, 'readonly');
+    const t = tx(db, STORES.rows, "readonly");
     const store = t.objectStore(STORES.rows);
     const indexName = schemaIndexName(table, indexDef.name);
     if (!store.indexNames.contains(indexName)) {
       const rows = await this.getTable(table);
-      return rows.filter(row => matchesClause(readColumnValue(row, clause.field), clause));
+      return rows.filter((row) => matchesClause(readColumnValue(row, clause.field), clause));
     }
     const index = store.index(indexName);
 
-    if (clause.op === 'anyOf') {
+    if (clause.op === "anyOf") {
       const values = clause.values ?? [];
       const merged = new Map<string, Row>();
       for (const value of values) {
@@ -521,7 +545,7 @@ export class IndexedDbLocalStore implements LocalStore {
 
     const range = rangeForClause(table, clause);
     const results = await reqToPromise(index.getAll(range ?? undefined));
-    return (results as Row[]).filter(row => !row._meta.deleted && row._meta.table === table);
+    return (results as Row[]).filter((row) => !row._meta.deleted && row._meta.table === table);
   }
 
   async getTableNames(): Promise<string[]> {
@@ -529,9 +553,9 @@ export class IndexedDbLocalStore implements LocalStore {
     // Intentionally avoids openKeyCursor: Safari rejects null as a key range
     // argument in some IDB versions. A full-store getAll() is safe everywhere
     // and acceptable here — called once at init on an otherwise-empty DB.
-    const t = tx(db, STORES.rows, 'readonly');
+    const t = tx(db, STORES.rows, "readonly");
     const store = t.objectStore(STORES.rows);
-    const all = await reqToPromise(store.getAll()) as Row[];
+    const all = (await reqToPromise(store.getAll())) as Row[];
     const names = new Set<string>();
     for (const row of all) {
       const table = row._meta?.table;
@@ -542,14 +566,14 @@ export class IndexedDbLocalStore implements LocalStore {
 
   async getAllRows(): Promise<Row[]> {
     const db = this.ensureDB();
-    const t = tx(db, STORES.rows, 'readonly');
+    const t = tx(db, STORES.rows, "readonly");
     const store = t.objectStore(STORES.rows);
     return reqToPromise(store.getAll()) as Promise<Row[]>;
   }
 
   async clearRows(): Promise<void> {
     const db = this.ensureDB();
-    const t = tx(db, STORES.rows, 'readwrite');
+    const t = tx(db, STORES.rows, "readwrite");
     t.objectStore(STORES.rows).clear();
     await txComplete(t);
   }
@@ -558,9 +582,9 @@ export class IndexedDbLocalStore implements LocalStore {
 
   async commitLocalMutation(row: Row, change: ChangeEntry): Promise<ChangeEntry> {
     const db = this.ensureDB();
-    const t = tx(db, [STORES.rows, STORES.meta], 'readwrite');
+    const t = tx(db, [STORES.rows, STORES.meta], "readwrite");
     const meta = t.objectStore(STORES.meta);
-    const current = await reqToPromise(meta.get('pendingBatch')) as ChangeEntry | undefined;
+    const current = (await reqToPromise(meta.get("pendingBatch"))) as ChangeEntry | undefined;
     const pendingBatch = current
       ? {
           ...current,
@@ -569,20 +593,20 @@ export class IndexedDbLocalStore implements LocalStore {
         }
       : change;
     t.objectStore(STORES.rows).put(this.withKey(row));
-    meta.put(pendingBatch, 'pendingBatch');
-    meta.put(pendingBatch.hlc, 'hlc');
+    meta.put(pendingBatch, "pendingBatch");
+    meta.put(pendingBatch.hlc, "hlc");
     await txComplete(t);
     return pendingBatch;
   }
 
   async promotePendingBatch(): Promise<ChangeEntry | null> {
     const db = this.ensureDB();
-    const t = tx(db, [STORES.meta, STORES.outbox], 'readwrite');
+    const t = tx(db, [STORES.meta, STORES.outbox], "readwrite");
     const meta = t.objectStore(STORES.meta);
-    const pending = await reqToPromise(meta.get('pendingBatch')) as ChangeEntry | undefined;
+    const pending = (await reqToPromise(meta.get("pendingBatch"))) as ChangeEntry | undefined;
     if (pending) {
       t.objectStore(STORES.outbox).add(pending);
-      meta.delete('pendingBatch');
+      meta.delete("pendingBatch");
     }
     await txComplete(t);
     return pending ?? null;
@@ -595,7 +619,7 @@ export class IndexedDbLocalStore implements LocalStore {
   async pushOutboxEntries(entries: ChangeEntry[]): Promise<void> {
     if (entries.length === 0) return;
     const db = this.ensureDB();
-    const t = tx(db, STORES.outbox, 'readwrite');
+    const t = tx(db, STORES.outbox, "readwrite");
     const store = t.objectStore(STORES.outbox);
     for (const entry of entries) store.add(entry);
     await txComplete(t);
@@ -603,7 +627,7 @@ export class IndexedDbLocalStore implements LocalStore {
 
   async peekOutbox(): Promise<ChangeEntry[]> {
     const db = this.ensureDB();
-    const t = tx(db, STORES.outbox, 'readonly');
+    const t = tx(db, STORES.outbox, "readonly");
     return reqToPromise(t.objectStore(STORES.outbox).getAll()) as Promise<ChangeEntry[]>;
   }
 
@@ -611,7 +635,7 @@ export class IndexedDbLocalStore implements LocalStore {
     if (entryIds.length === 0) return;
     const acknowledged = new Set(entryIds);
     const db = this.ensureDB();
-    const t = tx(db, STORES.outbox, 'readwrite');
+    const t = tx(db, STORES.outbox, "readwrite");
     const store = t.objectStore(STORES.outbox);
     await new Promise<void>((resolve, reject) => {
       const request = store.openCursor();
@@ -632,9 +656,9 @@ export class IndexedDbLocalStore implements LocalStore {
 
   async drainOutbox(): Promise<ChangeEntry[]> {
     const db = this.ensureDB();
-    const t = tx(db, STORES.outbox, 'readwrite');
+    const t = tx(db, STORES.outbox, "readwrite");
     const store = t.objectStore(STORES.outbox);
-    const entries = await reqToPromise(store.getAll()) as ChangeEntry[];
+    const entries = (await reqToPromise(store.getAll())) as ChangeEntry[];
     store.clear();
     await txComplete(t);
     return entries;
@@ -642,7 +666,7 @@ export class IndexedDbLocalStore implements LocalStore {
 
   async outboxSize(): Promise<number> {
     const db = this.ensureDB();
-    const t = tx(db, STORES.outbox, 'readonly');
+    const t = tx(db, STORES.outbox, "readonly");
     return reqToPromise(t.objectStore(STORES.outbox).count());
   }
 
@@ -650,24 +674,24 @@ export class IndexedDbLocalStore implements LocalStore {
 
   async getCursor(deviceId: string): Promise<number> {
     const db = this.ensureDB();
-    const t = tx(db, STORES.cursors, 'readonly');
+    const t = tx(db, STORES.cursors, "readonly");
     const result = await reqToPromise(t.objectStore(STORES.cursors).get(deviceId));
     return (result as number) || 0;
   }
 
   async setCursor(deviceId: string, offset: number): Promise<void> {
     const db = this.ensureDB();
-    const t = tx(db, STORES.cursors, 'readwrite');
+    const t = tx(db, STORES.cursors, "readwrite");
     t.objectStore(STORES.cursors).put(offset, deviceId);
     await txComplete(t);
   }
 
   async getAllCursors(): Promise<Record<string, number>> {
     const db = this.ensureDB();
-    const t = tx(db, STORES.cursors, 'readonly');
+    const t = tx(db, STORES.cursors, "readonly");
     const store = t.objectStore(STORES.cursors);
-    const keys = await reqToPromise(store.getAllKeys()) as string[];
-    const values = await reqToPromise(store.getAll()) as number[];
+    const keys = (await reqToPromise(store.getAllKeys())) as string[];
+    const values = (await reqToPromise(store.getAll())) as number[];
     const cursors: Record<string, number> = {};
     for (let i = 0; i < keys.length; i++) {
       cursors[keys[i]] = values[i];
@@ -679,13 +703,13 @@ export class IndexedDbLocalStore implements LocalStore {
 
   async getMeta(key: string): Promise<unknown> {
     const db = this.ensureDB();
-    const t = tx(db, STORES.meta, 'readonly');
+    const t = tx(db, STORES.meta, "readonly");
     return reqToPromise(t.objectStore(STORES.meta).get(key));
   }
 
   async setMeta(key: string, value: unknown): Promise<void> {
     const db = this.ensureDB();
-    const t = tx(db, STORES.meta, 'readwrite');
+    const t = tx(db, STORES.meta, "readwrite");
     t.objectStore(STORES.meta).put(value, key);
     await txComplete(t);
   }
@@ -693,7 +717,7 @@ export class IndexedDbLocalStore implements LocalStore {
   /** Nuke everything. Used before full rehydration. */
   async clearAll(): Promise<void> {
     const db = this.ensureDB();
-    const t = tx(db, Object.values(STORES), 'readwrite');
+    const t = tx(db, Object.values(STORES), "readwrite");
     for (const name of Object.values(STORES)) {
       t.objectStore(name).clear();
     }

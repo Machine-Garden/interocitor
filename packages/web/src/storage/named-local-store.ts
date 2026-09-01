@@ -1,14 +1,8 @@
-import { MemoryLocalStore } from '@interocitor/core';
-import { IndexedDbLocalStore } from './indexed-db-local-store.ts';
-import { createResilientLocalStore } from './resilient-store.ts';
-import type {
-  LocalStore,
-  DatabaseSchemaDefinition,
-} from '@interocitor/core';
-import type {
-  LocalStoreDegradationInfo,
-  LocalStoreDegradedHook,
-} from './resilient-store.ts';
+import { MemoryLocalStore } from "@interocitor/core";
+import { IndexedDbLocalStore } from "./indexed-db-local-store.ts";
+import { createResilientLocalStore } from "./resilient-store.ts";
+import type { LocalStore, DatabaseSchemaDefinition } from "@interocitor/core";
+import type { LocalStoreDegradationInfo, LocalStoreDegradedHook } from "./resilient-store.ts";
 
 /**
  * Versioned IndexedDB rotation primitive.
@@ -55,24 +49,34 @@ export interface PointerStore {
 const memoryPointerSlots = new Map<string, string>();
 
 function defaultPointerStore(): PointerStore {
-  const ls = (typeof globalThis !== 'undefined' && (globalThis as any).localStorage) || null;
-  if (ls && typeof ls.getItem === 'function' && typeof ls.setItem === 'function') {
+  const ls = (typeof globalThis !== "undefined" && (globalThis as any).localStorage) || null;
+  if (ls && typeof ls.getItem === "function" && typeof ls.setItem === "function") {
     return {
       get: (key) => {
-        try { return ls.getItem(key); } catch { return null; }
+        try {
+          return ls.getItem(key);
+        } catch {
+          return null;
+        }
       },
       set: (key, value) => {
-        try { ls.setItem(key, value); } catch { /* ignore */ }
+        try {
+          ls.setItem(key, value);
+        } catch {
+          /* ignore */
+        }
       },
     };
   }
   return {
     get: (key) => memoryPointerSlots.get(key) ?? null,
-    set: (key, value) => { memoryPointerSlots.set(key, value); },
+    set: (key, value) => {
+      memoryPointerSlots.set(key, value);
+    },
   };
 }
 
-const POINTER_PREFIX = 'interocitor:dbName:';
+const POINTER_PREFIX = "interocitor:dbName:";
 const VERSION_SUFFIX = /-v(\d+)$/;
 
 function parseVersion(name: string, baseName: string): number {
@@ -96,10 +100,17 @@ function pointerKey(baseName: string): string {
  * failure is silently swallowed — cleanup is a luxury, not a requirement.
  */
 async function cleanupOlderVersions(baseName: string, currentVersion: number): Promise<void> {
-  const idb = (typeof indexedDB === 'undefined' ? null : indexedDB) as IDBFactory | null;
-  if (!idb || typeof (idb as IDBFactory & { databases?: () => Promise<{ name?: string }[]> }).databases !== 'function') return;
+  const idb = (typeof indexedDB === "undefined" ? null : indexedDB) as IDBFactory | null;
+  if (
+    !idb ||
+    typeof (idb as IDBFactory & { databases?: () => Promise<{ name?: string }[]> }).databases !==
+      "function"
+  )
+    return;
   try {
-    const dbs = await (idb as IDBFactory & { databases: () => Promise<{ name?: string }[]> }).databases();
+    const dbs = await (
+      idb as IDBFactory & { databases: () => Promise<{ name?: string }[]> }
+    ).databases();
     for (const entry of dbs) {
       const name = entry?.name;
       if (!name) continue;
@@ -148,18 +159,26 @@ export function createNamedLocalStore(options: NamedLocalStoreOptions): LocalSto
     activeName = nextName;
     pointer.set(slot, nextName);
     if (options.onRotated) {
-      try { options.onRotated({ from: previousName, to: nextName, reason }); } catch { /* never stuck */ }
+      try {
+        options.onRotated({ from: previousName, to: nextName, reason });
+      } catch {
+        /* never stuck */
+      }
     }
   };
 
   const wrappedOnDegraded: LocalStoreDegradedHook = (info: LocalStoreDegradationInfo) => {
     if (options.onLocalDegraded) {
-      try { options.onLocalDegraded(info); } catch { /* never stuck */ }
+      try {
+        options.onLocalDegraded(info);
+      } catch {
+        /* never stuck */
+      }
     }
     // Only rotate on irrecoverable handle states. Open-stalls fall back to
     // memory in-process; rotation only helps on the *next* open and we keep
     // it for those.
-    if (info.reason === 'idb-handle-closing' || info.reason === 'idb-open-stalled-or-unavailable') {
+    if (info.reason === "idb-handle-closing" || info.reason === "idb-open-stalled-or-unavailable") {
       rotate(info.reason);
     }
   };
@@ -176,7 +195,9 @@ export function createNamedLocalStore(options: NamedLocalStoreOptions): LocalSto
   // Best-effort background cleanup once the active store has had a chance to
   // open. Failures are swallowed.
   const scheduleCleanup = (): void => {
-    Promise.resolve().then(() => cleanupOlderVersions(options.baseName, activeVersion)).catch(() => {});
+    Promise.resolve()
+      .then(() => cleanupOlderVersions(options.baseName, activeVersion))
+      .catch(() => {});
   };
 
   return {
@@ -215,6 +236,9 @@ export function createNamedLocalStore(options: NamedLocalStoreOptions): LocalSto
  * Read the current active DB name for a base name, without opening anything.
  * Useful for diagnostics, banners, or "reset database" UIs.
  */
-export function getActiveLocalDatabaseName(baseName: string, pointer: PointerStore = defaultPointerStore()): string {
+export function getActiveLocalDatabaseName(
+  baseName: string,
+  pointer: PointerStore = defaultPointerStore(),
+): string {
   return pointer.get(pointerKey(baseName)) ?? baseName;
 }

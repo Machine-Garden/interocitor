@@ -1,5 +1,5 @@
-import { useMemo, useRef, useSyncExternalStore } from 'react';
-import type { RowResult, Table } from '@interocitor/core';
+import { useMemo, useRef, useSyncExternalStore } from "react";
+import type { RowResult, Table } from "@interocitor/core";
 
 export interface UseRowResult<R> {
   /** `undefined` until first fetch resolves, or if row doesn't exist. */
@@ -66,33 +66,62 @@ export function useRow<T extends Record<string, unknown>, R = T>(
 ): UseRowResult<R> {
   // Normalize both forms into one `RowResult | null`. `null` means "skip" —
   // matches the previous `useRow(table, undefined)` no-op behavior.
-  const isFactoryForm = typeof tableOrFactory === 'function';
+  const isFactoryForm = typeof tableOrFactory === "function";
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const query = useMemo<RowResult<T> | null>(() => {
-    if (isFactoryForm) {
-      return (tableOrFactory as () => RowResult<T>)();
-    }
-    const rowId = rowIdOrDeps as string | undefined;
-    if (!rowId) return null;
-    return (tableOrFactory as Table<T>).row(rowId);
-    // Factory form: deps array drives invalidation.
-    // Table form: table + rowId drive invalidation.
-  }, isFactoryForm
-    ? (rowIdOrDeps as readonly unknown[])
-    : [tableOrFactory, rowIdOrDeps]);
+  const query = useMemo<RowResult<T> | null>(
+    () => {
+      if (isFactoryForm) {
+        return (tableOrFactory as () => RowResult<T>)();
+      }
+      const rowId = rowIdOrDeps as string | undefined;
+      if (!rowId) return null;
+      return (tableOrFactory as Table<T>).row(rowId);
+      // Factory form: deps array drives invalidation.
+      // Table form: table + rowId drive invalidation.
+    },
+    isFactoryForm ? (rowIdOrDeps as readonly unknown[]) : [tableOrFactory, rowIdOrDeps],
+  );
 
   // Kick a load on first sight of this query. Engine dedupes peers.
   const startedRef = useRef<RowResult<T> | null>(null);
   if (query && startedRef.current !== query) {
     startedRef.current = query;
-    void query.load();
+    void query.load().catch(() => {
+      // Error state is read from the row cache after the subscription bridge
+      // below notifies React.
+    });
   }
 
   const subscribe = useMemo(
     () => (notify: () => void) => {
       if (!query) return () => {};
-      return query.subscribe(() => notify());
+      let active = true;
+      const notifyWhenLoaded = () => {
+        void query.load().then(
+          () => {
+            if (active) notify();
+          },
+          () => {
+            if (active) notify();
+          },
+        );
+      };
+
+      // Loading is asynchronous, while useSyncExternalStore only re-reads
+      // after a notification. Bridge both the initial load and later row
+      // invalidations back into React, keeping any stale row visible while a
+      // refresh is pending.
+      notifyWhenLoaded();
+      const unsubscribe = query.subscribe(() => {
+        notify();
+        notifyWhenLoaded();
+      });
+
+      return () => {
+        active = false;
+        unsubscribe();
+      };
     },
     [query],
   );
@@ -103,6 +132,7 @@ export function useRow<T extends Record<string, unknown>, R = T>(
   const lastRowRef = useRef<T | undefined>(void 0);
   const lastSelectorInputRef = useRef<T | undefined>(void 0);
   const lastSelectorHadInputRef = useRef<boolean>(false);
+  const lastSelectorQueryRef = useRef<RowResult<T> | null>(null);
   const lastSelectorFnRef = useRef<typeof selector>(void 0);
   const lastSelectorOutputRef = useRef<R | undefined>(void 0);
   const lastResultRef = useRef<UseRowResult<R> | null>(null);
@@ -111,7 +141,12 @@ export function useRow<T extends Record<string, unknown>, R = T>(
     if (!query) {
       // Skipped read. Stable empty result.
       const prev = lastResultRef.current;
-      if (prev !== null && prev.data === undefined && prev.loading === false && prev.error === null) {
+      if (
+        prev !== null &&
+        prev.data === undefined &&
+        prev.loading === false &&
+        prev.error === null
+      ) {
         return prev;
       }
       const next: UseRowResult<R> = { data: undefined, loading: false, error: null };
@@ -122,24 +157,28 @@ export function useRow<T extends Record<string, unknown>, R = T>(
 
     const row = query.peekCache();
     const status = query.peekStatus();
-    const error = status.status === 'error' ? (status.error ?? null) : null;
+    const error = status.status === "error" ? (status.error ?? null) : null;
     // 'ready' with row=null means loaded-and-absent — that is NOT loading.
-    const loaded = status.status === 'ready';
+    const loaded = status.status === "ready";
     const loading = !loaded && !error;
 
     let data: R | undefined;
     if (selector) {
       // Re-run selector ONLY when the row identity changes (or transitions
-      // between defined/undefined input). Selector function identity is
-      // intentionally ignored — see useLiveQuery for full rationale.
+      // between defined/undefined input), and once for each new row query so
+      // selectors can map a loaded missing row to an application fallback.
+      // Selector function identity is intentionally ignored — see
+      // useLiveQuery for full rationale.
       const hadInput = row !== undefined;
       if (
-        lastSelectorInputRef.current !== row
-        || lastSelectorHadInputRef.current !== hadInput
+        lastSelectorQueryRef.current !== query ||
+        lastSelectorInputRef.current !== row ||
+        lastSelectorHadInputRef.current !== hadInput
       ) {
         lastSelectorOutputRef.current = selector(row);
         lastSelectorInputRef.current = row;
         lastSelectorHadInputRef.current = hadInput;
+        lastSelectorQueryRef.current = query;
       }
       lastSelectorFnRef.current = selector;
       data = lastSelectorOutputRef.current;
@@ -149,11 +188,11 @@ export function useRow<T extends Record<string, unknown>, R = T>(
 
     const prev = lastResultRef.current;
     if (
-      prev !== null
-      && row === lastRowRef.current
-      && data === prev.data
-      && error === prev.error
-      && loading === prev.loading
+      prev !== null &&
+      row === lastRowRef.current &&
+      data === prev.data &&
+      error === prev.error &&
+      loading === prev.loading
     ) {
       return prev;
     }

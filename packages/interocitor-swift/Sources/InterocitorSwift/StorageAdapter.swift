@@ -117,7 +117,7 @@ public actor MemoryStorageAdapter: StorageAdapter {
 /// Contract every local store implementation must satisfy.
 public protocol LocalStoreAdapter: Sendable {
     func open() async throws
-    nonisolated func close()
+    func close() async throws
 
     func getRow(table: String, rowId: String) async throws -> Row?
     func putRow(_ row: Row) async throws

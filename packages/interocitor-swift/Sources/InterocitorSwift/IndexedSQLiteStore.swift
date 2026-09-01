@@ -63,11 +63,12 @@ public actor IndexedSQLiteStore: LocalStoreAdapter {
         try createSchema()
     }
 
-    public nonisolated func close() {
-        Task { await self._close() }
-    }
-    private func _close() {
-        if let db { sqlite3_close(db) }
+    public func close() async throws {
+        guard let handle = db else { return }
+        let rc = sqlite3_close(handle)
+        guard rc == SQLITE_OK else {
+            throw SQLiteError.close(String(cString: sqlite3_errmsg(handle)))
+        }
         db = nil
     }
 
@@ -495,6 +496,7 @@ private func cmpValues(_ a: AnyCodable, _ b: AnyCodable) -> Int {
 
 enum SQLiteError: Error, LocalizedError {
     case open(String)
+    case close(String)
     case exec(String)
     case prepare(String)
     case step(String)
@@ -502,6 +504,7 @@ enum SQLiteError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .open(let m):    return "SQLite open failed: \(m)"
+        case .close(let m):   return "SQLite close failed: \(m)"
         case .exec(let m):    return "SQLite exec failed: \(m)"
         case .prepare(let m): return "SQLite prepare failed: \(m)"
         case .step(let m):    return "SQLite step failed: \(m)"

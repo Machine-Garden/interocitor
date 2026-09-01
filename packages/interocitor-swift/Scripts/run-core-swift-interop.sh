@@ -48,6 +48,12 @@ for command in node curl swift yarn; do
     fi
 done
 
+if curl -sS --connect-timeout 0.2 --max-time 0.5 \
+    -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null; then
+    echo "Port $PORT already serves HTTP; refusing to reuse a server this script does not own" >&2
+    exit 1
+fi
+
 PORT="$PORT" node "$WEBDAV_SERVER" --mode=memory &
 SERVER_PID=$!
 
@@ -55,10 +61,16 @@ for _ in {1..50}; do
     if curl -sf "http://127.0.0.1:$PORT/" >/dev/null 2>&1; then
         break
     fi
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        wait "$SERVER_PID" 2>/dev/null || true
+        echo "WebDAV server process exited before becoming ready on port $PORT" >&2
+        exit 1
+    fi
     sleep 0.1
 done
 
-if ! curl -sf "http://127.0.0.1:$PORT/" >/dev/null 2>&1; then
+if ! kill -0 "$SERVER_PID" 2>/dev/null || \
+    ! curl -sf "http://127.0.0.1:$PORT/" >/dev/null 2>&1; then
     echo "WebDAV server failed to start on port $PORT" >&2
     exit 1
 fi

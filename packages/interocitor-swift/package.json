@@ -1,8 +1,9 @@
 {
   "name": "interocitor-swift",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
   "description": "Swift workspace for Interocitor with IndexedDB-style storage concepts mapped onto SQLite.",
+  "license": "MIT",
   "files": [
     "Package.swift",
     "Sources",
@@ -11,6 +12,5 @@
   ],
   "scripts": {
     "check": "node -e \"console.log('interocitor-swift placeholder')\""
-  },
-  "license": "MIT"
+  }
 }

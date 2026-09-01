@@ -52,6 +52,11 @@ start_webdav_server() {
         return 1
     fi
 
+    if curl -sS --connect-timeout 0.2 --max-time 0.5 \
+        -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null; then
+        fail "Port $PORT already serves HTTP; refusing to reuse a server this script does not own"
+    fi
+
     log "Starting the Interocitor WebDAV test server on port $PORT..."
     PORT="$PORT" node "$SERVER_MJS" --mode=memory &
     SERVER_PID=$!
@@ -59,11 +64,19 @@ start_webdav_server() {
     # Wait up to 5 s for the server to be ready
     local attempts=0
     until curl -sf "http://127.0.0.1:$PORT/" >/dev/null 2>&1; do
+        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+            wait "$SERVER_PID" 2>/dev/null || true
+            fail "WebDAV server process exited before becoming ready on port $PORT"
+        fi
         if (( attempts++ >= 50 )); then
             fail "WebDAV server failed to start within 5 s"
         fi
         sleep 0.1
     done
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        wait "$SERVER_PID" 2>/dev/null || true
+        fail "WebDAV server process exited before readiness could be confirmed on port $PORT"
+    fi
     log "WebDAV server ready at http://127.0.0.1:$PORT"
     return 0
 }

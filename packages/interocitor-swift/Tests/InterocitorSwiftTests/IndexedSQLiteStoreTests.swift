@@ -33,7 +33,7 @@ final class IndexedSQLiteStoreBasicTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        store.close()
+        try await store.close()
     }
 
     func test_open_succeeds() async throws {
@@ -121,7 +121,7 @@ final class IndexedSQLiteStoreOutboxTests: XCTestCase {
         try await store.open()
     }
 
-    override func tearDown() async throws { store.close() }
+    override func tearDown() async throws { try await store.close() }
 
     private func makeEntry(id: String) -> ChangeEntry {
         ChangeEntry(id: id, ts: 1000, device: "dev_a",
@@ -203,7 +203,7 @@ final class IndexedSQLiteStoreCursorTests: XCTestCase {
         try await store.open()
     }
 
-    override func tearDown() async throws { store.close() }
+    override func tearDown() async throws { try await store.close() }
 
     func test_getCursor_default_zero() async throws {
         let c = try await store.getCursor(deviceId: "dev_unknown")
@@ -248,7 +248,7 @@ final class IndexedSQLiteStoreMetaTests: XCTestCase {
         try await store.open()
     }
 
-    override func tearDown() async throws { store.close() }
+    override func tearDown() async throws { try await store.close() }
 
     func test_setAndGetMeta_string() async throws {
         try await store.setMeta(key: "hlc", value: AnyCodable.string("001000000000000-0000-dev_a"))
@@ -300,15 +300,13 @@ final class IndexedSQLiteStorePersistenceTests: XCTestCase {
             "title": ColumnEntry(value: .string("Persistent"), hlc: "001000000000000-0000-dev_a")
         ])
         try await store1.putRow(row)
-        store1.close()
-        // Let nonisolated close Task complete before reopening a fresh instance
-        try await Task.sleep(nanoseconds: 10_000_000)
+        try await store1.close()
 
         let store2 = IndexedSQLiteStore(configuration: cfg)
         try await store2.open()
         let fetched = try await store2.getRow(table: "tasks", rowId: "p1")
         XCTAssertEqual(fetched?.columns["title"]?.value, .string("Persistent"))
-        store2.close()
+        try await store2.close()
     }
 
     func test_outboxSurvivesReopenCycle() async throws {
@@ -318,8 +316,7 @@ final class IndexedSQLiteStorePersistenceTests: XCTestCase {
         let entry = ChangeEntry(id: "chg_persist", ts: 1000, device: "dev_a",
                                 hlc: "001000000000000-0000-dev_a", ops: [])
         try await store1.pushOutbox(entry)
-        store1.close()
-        try await Task.sleep(nanoseconds: 10_000_000)
+        try await store1.close()
 
         let store2 = IndexedSQLiteStore(configuration: cfg)
         try await store2.open()
@@ -327,7 +324,7 @@ final class IndexedSQLiteStorePersistenceTests: XCTestCase {
         XCTAssertEqual(size, 1)
         let drained = try await store2.drainOutbox()
         XCTAssertEqual(drained[0].id, "chg_persist")
-        store2.close()
+        try await store2.close()
     }
 
     func test_cursorsSurviveReopenCycle() async throws {
@@ -335,14 +332,13 @@ final class IndexedSQLiteStorePersistenceTests: XCTestCase {
         let store1 = IndexedSQLiteStore(configuration: cfg)
         try await store1.open()
         try await store1.setCursor(deviceId: "dev_x", offset: 77)
-        store1.close()
-        try await Task.sleep(nanoseconds: 10_000_000)
+        try await store1.close()
 
         let store2 = IndexedSQLiteStore(configuration: cfg)
         try await store2.open()
         let c = try await store2.getCursor(deviceId: "dev_x")
         XCTAssertEqual(c, 77)
-        store2.close()
+        try await store2.close()
     }
 
     func test_metaSurvivesReopenCycle() async throws {
@@ -350,14 +346,13 @@ final class IndexedSQLiteStorePersistenceTests: XCTestCase {
         let store1 = IndexedSQLiteStore(configuration: cfg)
         try await store1.open()
         try await store1.setMeta(key: "meshId", value: AnyCodable.string("mesh_abc123"))
-        store1.close()
-        try await Task.sleep(nanoseconds: 10_000_000)
+        try await store1.close()
 
         let store2 = IndexedSQLiteStore(configuration: cfg)
         try await store2.open()
         let v = try await store2.getMeta(key: "meshId")
         XCTAssertEqual((v as? AnyCodable)?.stringValue, "mesh_abc123")
-        store2.close()
+        try await store2.close()
     }
 
     func test_clearAll_removesEverything() async throws {
@@ -379,7 +374,7 @@ final class IndexedSQLiteStorePersistenceTests: XCTestCase {
         XCTAssertEqual(cursors, [:])
         let metaVal = try await store.getMeta(key: "k")
         XCTAssertNil(metaVal)
-        store.close()
+        try await store.close()
     }
 }
 
@@ -405,42 +400,48 @@ final class IndexedSQLiteStoreQueryWhereTests: XCTestCase {
     }
 
     func test_equals() async throws {
-        let store = try await makeSeededStore(); defer { store.close() }
+        let store = try await makeSeededStore()
+        addTeardownBlock { try await store.close() }
         let results = try await store.queryWhere(table: "items",
             clause: WhereClause(field: "tag", op: .equals, value: .string("swift")))
         XCTAssertEqual(results.count, 2)
     }
 
     func test_above() async throws {
-        let store = try await makeSeededStore(); defer { store.close() }
+        let store = try await makeSeededStore()
+        addTeardownBlock { try await store.close() }
         let results = try await store.queryWhere(table: "items",
             clause: WhereClause(field: "score", op: .above, value: .int(30)))
         XCTAssertEqual(results.count, 2) // 50, 80
     }
 
     func test_aboveOrEqual() async throws {
-        let store = try await makeSeededStore(); defer { store.close() }
+        let store = try await makeSeededStore()
+        addTeardownBlock { try await store.close() }
         let results = try await store.queryWhere(table: "items",
             clause: WhereClause(field: "score", op: .aboveOrEqual, value: .int(30)))
         XCTAssertEqual(results.count, 3) // 30, 50, 80
     }
 
     func test_below() async throws {
-        let store = try await makeSeededStore(); defer { store.close() }
+        let store = try await makeSeededStore()
+        addTeardownBlock { try await store.close() }
         let results = try await store.queryWhere(table: "items",
             clause: WhereClause(field: "score", op: .below, value: .int(30)))
         XCTAssertEqual(results.count, 2) // 10, 5
     }
 
     func test_belowOrEqual() async throws {
-        let store = try await makeSeededStore(); defer { store.close() }
+        let store = try await makeSeededStore()
+        addTeardownBlock { try await store.close() }
         let results = try await store.queryWhere(table: "items",
             clause: WhereClause(field: "score", op: .belowOrEqual, value: .int(30)))
         XCTAssertEqual(results.count, 3) // 5, 10, 30
     }
 
     func test_between_inclusive() async throws {
-        let store = try await makeSeededStore(); defer { store.close() }
+        let store = try await makeSeededStore()
+        addTeardownBlock { try await store.close() }
         let results = try await store.queryWhere(table: "items",
             clause: WhereClause(field: "score", op: .between,
                                 lower: .int(10), upper: .int(50)))
@@ -448,7 +449,8 @@ final class IndexedSQLiteStoreQueryWhereTests: XCTestCase {
     }
 
     func test_between_open() async throws {
-        let store = try await makeSeededStore(); defer { store.close() }
+        let store = try await makeSeededStore()
+        addTeardownBlock { try await store.close() }
         let results = try await store.queryWhere(table: "items",
             clause: WhereClause(field: "score", op: .between,
                                 lower: .int(10), upper: .int(50),
@@ -457,14 +459,16 @@ final class IndexedSQLiteStoreQueryWhereTests: XCTestCase {
     }
 
     func test_startsWith() async throws {
-        let store = try await makeSeededStore(); defer { store.close() }
+        let store = try await makeSeededStore()
+        addTeardownBlock { try await store.close() }
         let results = try await store.queryWhere(table: "items",
             clause: WhereClause(field: "tag", op: .startsWith, value: .string("sw")))
         XCTAssertEqual(results.count, 2) // swift x2
     }
 
     func test_anyOf() async throws {
-        let store = try await makeSeededStore(); defer { store.close() }
+        let store = try await makeSeededStore()
+        addTeardownBlock { try await store.close() }
         let results = try await store.queryWhere(table: "items",
             clause: WhereClause(field: "tag", op: .anyOf,
                                 values: [.string("ios"), .string("macos")]))

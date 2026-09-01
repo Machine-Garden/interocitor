@@ -71,8 +71,7 @@ public actor MemoryLocalStore: LocalStoreAdapter {
     // MARK: Lifecycle
 
     public func open() async throws { isOpen = true }
-    public nonisolated func close() { Task { await self._close() } }
-    private func _close() { isOpen = false }
+    public func close() async throws { isOpen = false }
 
     // MARK: Rows
 

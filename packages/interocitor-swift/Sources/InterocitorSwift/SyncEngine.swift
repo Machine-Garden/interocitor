@@ -256,7 +256,7 @@ public actor Interocitor {
         if remotePoisonError == nil {
             try await flush()
         }
-        local.close()
+        try await local.close()
         connected   = false
         initialized = false
         remotePoisonError = nil

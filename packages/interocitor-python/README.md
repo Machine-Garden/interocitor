@@ -20,10 +20,10 @@ before it reports work as successful.
 
 The two data surfaces have different behavior:
 
-| Surface | What Python does | Important boundary |
-| --- | --- | --- |
-| Rows | Reads and writes a local CRDT cache, then exchanges changes and snapshots with the mesh. A key source encrypts their contents. | tasks are logical collections, not remote database tables or atomic jobs. |
-| Durable files | Reads and writes bytes at an application path. A key source encrypts their contents. | File operations are direct remote calls, not part of the row outbox or a transaction with a row update. |
+| Surface       | What Python does                                                                                                               | Important boundary                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| Rows          | Reads and writes a local CRDT cache, then exchanges changes and snapshots with the mesh. A key source encrypts their contents. | tasks are logical collections, not remote database tables or atomic jobs.                               |
+| Durable files | Reads and writes bytes at an application path. A key source encrypts their contents.                                           | File operations are direct remote calls, not part of the row outbox or a transaction with a row update. |
 
 Two workers can observe the same task row and both perform its side effect.
 Use an application-owned transactional claim, lease, or idempotency mechanism
@@ -34,15 +34,22 @@ files for its encrypted artifacts.
 
 Python 3.11 or newer is required. Install from a repository revision:
 
-~~~bash
+```bash
 python -m pip install "git+https://github.com/Machine-Garden/interocitor.git#subdirectory=packages/interocitor-python"
-~~~
+```
 
 For a local checkout, use editable mode while developing:
 
-~~~bash
+```bash
 python -m pip install -e packages/interocitor-python
-~~~
+```
+
+Release maintainers can include the package's test runner with the `test`
+extra:
+
+```bash
+python -m pip install -e "packages/interocitor-python[test]"
+```
 
 Pin the Git URL to a tag or commit for a production deployment. The package
 does not load .env files or manage secret storage: a launcher or application
@@ -58,7 +65,7 @@ Use Schema and TableSchema to make the collection's intended fields, merge
 policy, and optional compatibility version visible next to the client setup.
 This runnable example writes a task row and its input file to an in-memory mesh:
 
-~~~python
+```python
 import asyncio
 
 from interocitor import Interocitor, MemoryAdapter, Schema, TableSchema, types
@@ -109,7 +116,7 @@ async def main() -> None:
 
 
 asyncio.run(main())
-~~~
+```
 
 MemoryAdapter makes the example self-contained. A real adapter persists the
 mesh artifacts; a configured key source encrypts their contents.
@@ -121,19 +128,19 @@ disconnect().
 The Python schema has the same logical shape as core's
 DatabaseSchemaDefinition:
 
-| Python declaration | Purpose |
-| --- | --- |
-| Schema(tables=...) | Names logical collections and optionally sets version and a database-wide merge_strategy. |
-| TableSchema(fields=..., merge=...) | Declares intended fields and a table-wide merge policy. |
-| TableMergeConfig(strategy=..., fields=...) | Sets a table default plus field-specific merge overrides. |
+| Python declaration                                   | Purpose                                                                                                                    |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Schema(tables=...)                                   | Names logical collections and optionally sets version and a database-wide merge_strategy.                                  |
+| TableSchema(fields=..., merge=...)                   | Declares intended fields and a table-wide merge policy.                                                                    |
+| TableMergeConfig(strategy=..., fields=...)           | Sets a table default plus field-specific merge overrides.                                                                  |
 | types.string, number, boolean, date, json, enum(...) | Field descriptors matching core's vocabulary. .optional, types.index(...), and types.unique(...) create matching metadata. |
-| TableIndex(...) | Legacy explicit index metadata for a core-shaped schema. |
+| TableIndex(...)                                      | Explicit index metadata accepted in a core-shaped schema.                                                                  |
 
 The recommended Schema builder validates the declaration early. A raw
 core-shaped mapping is also accepted when an application shares configuration
 with JavaScript:
 
-~~~python
+```python
 TASK_SCHEMA = {
     "version": 1,
     "tables": {
@@ -143,7 +150,7 @@ TASK_SCHEMA = {
         },
     },
 }
-~~~
+```
 
 Malformed builder declarations raise SchemaError immediately. A malformed raw
 mapping raises it while Interocitor is constructed, before local initialization
@@ -151,14 +158,14 @@ or remote I/O.
 
 ### What fields and indexes do not do
 
-Schemas are local client configuration, not a runtime validator. In Python
-today, field descriptors do not reject unknown columns, type mismatches, or enum
+Schemas are local client configuration, not a runtime validator. Python field
+descriptors do not reject unknown columns, type mismatches, or enum
 values; unique does not enforce uniqueness; and a schema does not prevent
 mesh.table("another-name"). Validate application input with your own models or
 validation library before writing it.
 
-The package currently ships only MemoryLocalStore, which scans local rows.
-index, unique, and TableIndex are compatible metadata for the core schema
+The package provides `MemoryLocalStore`, which scans local rows. `index`,
+`unique`, and `TableIndex` are compatible metadata for the core schema
 shape; they do not create a Python index or improve query performance. They
 also never provide mesh-wide uniqueness or an atomic task claim.
 
@@ -183,11 +190,11 @@ Interocitor resolves a conflicting column in this order:
 The built-in policy matches core:
 
 - "lww" accepts the column with the higher hybrid logical clock (HLC).
-A missing local column always accepts the incoming value. Deletions use their
-own HLC tombstone rules rather than a field merge policy. Python also accepts a
-custom callable merge strategy, but it must be deterministic, commutative,
-associative, and idempotent. Its code is not transmitted, so every client must
-implement equivalent behavior or replicas can diverge.
+  A missing local column always accepts the incoming value. Deletions use their
+  own HLC tombstone rules rather than a field merge policy. Python also accepts a
+  custom callable merge strategy, but it must be deterministic, commutative,
+  associative, and idempotent. Its code is not transmitted, so every client must
+  implement equivalent behavior or replicas can diverge.
 
 ### Treat version as a compatibility gate
 
@@ -200,7 +207,7 @@ reject an existing manifest.
 Data migration is application-owned. An application can keep one global
 version, version individual tables or rows, or simply update recognizable old
 data without a version. Do not rely on merely changing Schema.version to
-transform existing data. The [core data migration discussion](../core/README.md#application-owned-data-migrations)
+transform existing data. The [core data migration guide](../core/docs/data-migrations.md)
 shows these patterns and the guarantees Interocitor deliberately does not add.
 
 ## Connect a real worker
@@ -209,7 +216,7 @@ The following **illustrative** worker step assumes the host application has
 already loaded its configuration, supplied TASK_SCHEMA, and chosen how to
 validate task input. The Cloudflare I/O URL includes /io/<address>.
 
-~~~python
+```python
 import asyncio
 import os
 
@@ -257,7 +264,7 @@ async def run_one_task() -> None:
 
 
 asyncio.run(run_one_task())
-~~~
+```
 
 require_existing_mesh=True stops a path typo from bootstrapping a new mesh.
 require_encryption=True fails closed if a key source does not yield an encrypted
@@ -275,16 +282,16 @@ cannot acknowledge a completed task on the application's behalf.
 
 ## Lifecycle, rows, and files
 
-| Call | Behavior |
-| --- | --- |
-| await mesh.init() | Opens the local store and resolves the key source. It does not contact the adapter. |
-| await mesh.connect() or async with mesh | Authenticates, loads or joins the mesh, pulls changes, and flushes the local outbox. |
-| mesh.table(name) | Returns a Table handle for row/get, query, where, put, patch, add, and delete. |
-| await mesh.pull() | Merges available remote row changes after a connection has been established. |
-| await mesh.flush() | Uploads queued local row changes. Call it before an external success acknowledgement. |
-| await mesh.put_file/get_file/delete_file/get_file_metadata | Reads or writes durable bytes directly through the adapter; a key source encrypts their contents. |
-| await mesh.compact() | Publishes a snapshot, removes its exactly covered changes and superseded snapshots, and retains tombstones. Designate one checkpoint writer per managed mesh. |
-| await mesh.disconnect() | Ends the session and clears the default volatile local store. |
+| Call                                                       | Behavior                                                                                                                                                      |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| await mesh.init()                                          | Opens the local store and resolves the key source. It does not contact the adapter.                                                                           |
+| await mesh.connect() or async with mesh                    | Authenticates, loads or joins the mesh, pulls changes, and flushes the local outbox.                                                                          |
+| mesh.table(name)                                           | Returns a Table handle for row/get, query, where, put, patch, add, and delete.                                                                                |
+| await mesh.pull()                                          | Merges available remote row changes after a connection has been established.                                                                                  |
+| await mesh.flush()                                         | Uploads queued local row changes. Call it before an external success acknowledgement.                                                                         |
+| await mesh.put_file/get_file/delete_file/get_file_metadata | Reads or writes durable bytes directly through the adapter; a key source encrypts their contents.                                                             |
+| await mesh.compact()                                       | Publishes a snapshot, removes its exactly covered changes and superseded snapshots, and retains tombstones. Designate one checkpoint writer per managed mesh. |
+| await mesh.disconnect()                                    | Ends the session and clears the default volatile local store.                                                                                                 |
 
 Rows may be created or patched after init() and before connect(). Snapshot
 rehydration rebases that queued work. Every immutable change remains eligible
@@ -313,8 +320,8 @@ Python uses the version-3 manifest, change, snapshot, HLC, and AES-GCM envelope
 formats used by @interocitor/core. The public schema shape and merge defaults
 above deliberately match core. Its runtime scope is intentionally smaller:
 
-| Available here | Not provided by this package |
-| --- | --- |
+| Available here                                                                                                                           | Not provided by this package                                                                                                                                                                           |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Memory and Cloudflare adapters, volatile local state, encrypted rows/files, explicit pull/flush, manual compaction, and phrase recovery. | Browser local stores, durable Python local storage, pairing, replica replication, background polling, relay invalidation, query caches/row handles, extra-key sealed files, and a task-claim protocol. |
 
 For remote adapter behavior, artifact layout, compaction rules, and the full
@@ -327,14 +334,14 @@ metadata/security model, use the corresponding core documentation:
 
 ## Public entry points
 
-| Entry point | Use it for |
-| --- | --- |
-| Interocitor and Table | Lifecycle, CRDT row operations, manual sync/compaction, and durable file operations. |
+| Entry point                                                                    | Use it for                                                                                           |
+| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| Interocitor and Table                                                          | Lifecycle, CRDT row operations, manual sync/compaction, and durable file operations.                 |
 | Schema, DatabaseSchema, TableSchema, TableMergeConfig, types, normalize_schema | Local schema declarations, core-compatible merge policy, and conversion of raw core-shaped mappings. |
-| MemoryLocalStore, MemoryAdapter, CloudflareAdapter | Volatile local state and the provided transports. |
-| PortablePassphraseKeySource | A caller-supplied portable full-mesh key. It does not read environment variables. |
-| recover_mesh_credentials, create_recovery_wrapper, publish_recovery_wrapper | Optional recovery phrase wrappers. |
-| encrypt_entry, encrypt_bytes, decrypt_entry, decrypt_bytes, and wire types | Advanced protocol integration and interoperability tooling. |
+| MemoryLocalStore, MemoryAdapter, CloudflareAdapter                             | Volatile local state and the provided transports.                                                    |
+| PortablePassphraseKeySource                                                    | A caller-supplied portable full-mesh key. It does not read environment variables.                    |
+| recover_mesh_credentials, create_recovery_wrapper, publish_recovery_wrapper    | Optional recovery phrase wrappers.                                                                   |
+| encrypt_entry, encrypt_bytes, decrypt_entry, decrypt_bytes, and wire types     | Advanced protocol integration and interoperability tooling.                                          |
 
 Interocitor raises MeshNotFoundError for an existing-mesh guard with no
 manifest, MeshMismatchError for a wrong expected/payload mesh ID, and

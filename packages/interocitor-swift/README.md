@@ -181,7 +181,7 @@ then the database policy; every schema defaults to `lww`.
 application data version. Data migration is application-owned: keep a global,
 table, or row version, or update recognizable old data directly through normal
 row and file operations. The
-[Core migration patterns](../core/README.md#application-owned-data-migrations)
+[Core migration patterns](../core/docs/data-migrations.md)
 show the available approaches and their concurrency boundary.
 
 This is an illustrative configuration to apply consistently in every runtime;
@@ -214,17 +214,17 @@ later `put` creates a new row incarnation and publishes only its new fields.
 
 ## Sync lifecycle
 
-| Call | Network behavior |
-| --- | --- |
-| `initialize()` | Opens and loads the local store; no network |
-| `put`, `delete`, `get`, `query`, `queryWhere` | Local-only |
-| `connect()` | Authenticates the adapter, creates or loads the remote manifest, catches up, flushes, and starts polling |
-| `flush()` | Writes queued local changes to the primary adapter and configured replicas |
-| `pull()` | Lists retained changes and merges filenames not recorded in the local exact-file receipt set |
-| `rehydrate()` | Rebuilds local state from the current snapshot, then pulls newer changes |
-| `compact()` | Pulls, publishes a new snapshot/manifest generation, removes covered changes and superseded snapshots, and retains tombstones |
-| `disconnect()` | Stops polling, flushes when the remote is healthy, and closes the local store |
-| `setRemoteStorage(_:)` | Switches adapters or enters local-only mode |
+| Call                                          | Network behavior                                                                                                              |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `initialize()`                                | Opens and loads the local store; no network                                                                                   |
+| `put`, `delete`, `get`, `query`, `queryWhere` | Local-only                                                                                                                    |
+| `connect()`                                   | Authenticates the adapter, creates or loads the remote manifest, catches up, flushes, and starts polling                      |
+| `flush()`                                     | Writes queued local changes to the primary adapter and configured replicas                                                    |
+| `pull()`                                      | Lists retained changes and merges filenames not recorded in the local exact-file receipt set                                  |
+| `rehydrate()`                                 | Rebuilds local state from the current snapshot, then pulls newer changes                                                      |
+| `compact()`                                   | Pulls, publishes a new snapshot/manifest generation, removes covered changes and superseded snapshots, and retains tombstones |
+| `disconnect()`                                | Stops polling, flushes when the remote is healthy, and closes the local store                                                 |
+| `setRemoteStorage(_:)`                        | Switches adapters or enters local-only mode                                                                                   |
 
 `compact()` is an explicit maintenance operation. The runtime does not provide
 a distributed compaction lease, idle-time policy, or automatic “20 changes”
@@ -238,11 +238,11 @@ durable outbox; scalar HLC state never suppresses a queued or unseen change.
 
 ## Adapters
 
-| Type | Purpose | Important behavior |
-| --- | --- | --- |
-| `WebDAVStorageAdapter` | Basic- or bearer-authenticated WebDAV storage | `baseURL` is the WebDAV service root; the engine appends `remotePath` |
-| `CloudflareStorageAdapter` | An `@interocitor/workers` IO route | `baseURL` includes `/io/<address>`; an optional bearer token is forwarded to host mesh middleware |
-| `StorageAdapter` | Custom byte-oriented transport | Implement async authentication (`isAuthenticated() async -> Bool`), folder, list, read, write, delete, and metadata operations |
+| Type                       | Purpose                                       | Important behavior                                                                                                             |
+| -------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `WebDAVStorageAdapter`     | Basic- or bearer-authenticated WebDAV storage | `baseURL` is the WebDAV service root; the engine appends `remotePath`                                                          |
+| `CloudflareStorageAdapter` | An `@interocitor/workers` IO route            | `baseURL` includes `/io/<address>`; an optional bearer token is forwarded to host mesh middleware                              |
+| `StorageAdapter`           | Custom byte-oriented transport                | Implement async authentication (`isAuthenticated() async -> Bool`), folder, list, read, write, delete, and metadata operations |
 
 `CloudflareStorageAdapter.subscribeToInvalidations` exposes WebSocket
 notifications, but `Interocitor` does not subscribe automatically. An app that
@@ -251,17 +251,17 @@ path.
 
 ## Main public surface
 
-| API | Role |
-| --- | --- |
-| `Interocitor` | Main actor for local rows and sync lifecycle |
+| API                                                                                                 | Role                                                                         |
+| --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `Interocitor`                                                                                       | Main actor for local rows and sync lifecycle                                 |
 | `SyncConfig`, `ReplicaConfig`, `DatabaseSchema`, `TableSchema`, `TableMergeConfig`, `MergeStrategy` | Remote lifecycle settings, logical schema version, and built-in merge policy |
-| `IndexedSQLiteStore`, `IndexedSQLiteStoreConfiguration` | Persistent SQLite local store |
-| `MemoryLocalStore` | In-memory local store |
-| `WebDAVStorageAdapter`, `WebDAVConfig`, `WebDAVAuth` | WebDAV transport |
-| `CloudflareStorageAdapter`, `CloudflareAdapterConfig` | Cloudflare Workers transport |
-| `AnyCodable`, `WhereClause`, `WhereOperator`, `Row`, `SyncEvent` | Row values, local queries, row representation, and events |
-| `generateMeshKey`, `storeKeyInKeychain`, `loadKeyFromKeychain`, `clearKeyFromKeychain` | Mesh-key creation and local custody helpers |
-| `keyToPassphrase`, `passphraseToKey`, `keyToShareURL`, `keyFromFragment` | Portable key export/import helpers; treat their output as a secret |
+| `IndexedSQLiteStore`, `IndexedSQLiteStoreConfiguration`                                             | Persistent SQLite local store                                                |
+| `MemoryLocalStore`                                                                                  | In-memory local store                                                        |
+| `WebDAVStorageAdapter`, `WebDAVConfig`, `WebDAVAuth`                                                | WebDAV transport                                                             |
+| `CloudflareStorageAdapter`, `CloudflareAdapterConfig`                                               | Cloudflare Workers transport                                                 |
+| `AnyCodable`, `WhereClause`, `WhereOperator`, `Row`, `SyncEvent`                                    | Row values, local queries, row representation, and events                    |
+| `generateMeshKey`, `storeKeyInKeychain`, `loadKeyFromKeychain`, `clearKeyFromKeychain`              | Mesh-key creation and local custody helpers                                  |
+| `keyToPassphrase`, `passphraseToKey`, `keyToShareURL`, `keyFromFragment`                            | Portable key export/import helpers; treat their output as a secret           |
 
 The module also exports low-level protocol, CRDT, HLC, manifest, envelope, and
 adapter-support types. They are implementation-facing APIs rather than the
@@ -269,10 +269,11 @@ supported application surface listed above.
 
 `SyncConfig` defaults are `serverManaged: false`,
 `serverId: "server_relay_1"`, `pollInterval: 30`, `flushDebounce: 2`,
-`flushThreshold: 50`, `dbName: "interocitor"`, a seven-day
-no replicas. `deviceName` and `deviceType` are written
-to peer-visible device metadata. The `_owner` field assigned to a local write
-is snapshot metadata, not a last-writer identity across peers.
+`flushThreshold: 50`, `dbName: "interocitor"`, and no replicas. New manifests
+default to a seven-day compaction deadline and a 30-day maximum offline
+duration. `deviceName` and `deviceType` are written to peer-visible device
+metadata. The `_owner` field assigned to a local write is snapshot metadata,
+not a last-writer identity across peers.
 
 ## Remote object layout
 
@@ -342,7 +343,7 @@ Sources/InterocitorSwift/
 - [Repository overview](../../README.md)
 - [Core runtime](../core/README.md)
 - [Cloudflare Workers runtime](../workers/README.md)
-- [Loopback WebDAV test server](../webdav/README.md)
+- [Loopback WebDAV test server](../../tools/webdav-server/README.md)
 
 ## License
 

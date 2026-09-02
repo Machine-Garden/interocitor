@@ -1,0 +1,186 @@
+.safety-warning {
+  width: min(calc(100% - 40px), 1100px);
+  margin: 0 auto 28px;
+  padding: 18px 20px;
+  border: 1px solid rgba(255, 198, 109, 0.42);
+  border-radius: 12px;
+  background: rgba(255, 198, 109, 0.08);
+}
+.safety-warning strong {
+  color: var(--warning);
+}
+.safety-warning p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.65;
+}
+.locator-clients {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.location-actions {
+  display: flex;
+  gap: 8px;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.location-actions button {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  color: var(--muted);
+  background: var(--panel-deep);
+  cursor: pointer;
+}
+.location-actions button:hover {
+  border-color: var(--mint);
+  color: var(--mint);
+}
+.mini-map {
+  position: relative;
+  min-height: 330px;
+  margin: 16px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background:
+    linear-gradient(145deg, rgba(112, 220, 255, 0.08), transparent 45%),
+    repeating-linear-gradient(0deg, transparent 0 39px, rgba(230, 249, 238, 0.035) 40px),
+    repeating-linear-gradient(90deg, transparent 0 39px, rgba(230, 249, 238, 0.035) 40px), #091411;
+}
+.mini-map::before,
+.mini-map::after {
+  position: absolute;
+  padding: 5px 7px;
+  border-radius: 5px;
+  color: var(--faint);
+  background: rgba(5, 11, 10, 0.82);
+  font-family: var(--mono);
+  font-size: 0.58rem;
+}
+.mini-map::before {
+  top: 18%;
+  right: 12%;
+  content: "School";
+}
+.mini-map::after {
+  right: 12%;
+  bottom: 16%;
+  content: "Riverside Park";
+}
+.road {
+  position: absolute;
+  display: block;
+  background: rgba(230, 249, 238, 0.08);
+  transform-origin: center;
+}
+.road-a {
+  top: 49%;
+  left: -10%;
+  width: 120%;
+  height: 11px;
+  transform: rotate(-14deg);
+}
+.road-b {
+  top: -10%;
+  left: 43%;
+  width: 10px;
+  height: 120%;
+  transform: rotate(23deg);
+}
+.map-marker {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  min-width: 88px;
+  padding: 7px 9px;
+  border: 1px solid var(--mint);
+  border-radius: 8px 8px 8px 2px;
+  background: #10201c;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  transform: translate(-10%, -50%);
+  transition:
+    left 260ms ease,
+    top 260ms ease;
+}
+.map-marker::before {
+  position: absolute;
+  bottom: -6px;
+  left: 8px;
+  width: 10px;
+  height: 10px;
+  border-right: 1px solid var(--mint);
+  border-bottom: 1px solid var(--mint);
+  background: #10201c;
+  content: "";
+  transform: rotate(45deg);
+}
+.map-marker strong,
+.map-marker span {
+  position: relative;
+  z-index: 1;
+}
+.map-marker strong {
+  color: var(--mint);
+  font-size: 0.7rem;
+}
+.map-marker span {
+  color: var(--muted);
+  font-size: 0.6rem;
+}
+.marker-sam {
+  border-color: var(--cyan);
+}
+.marker-sam::before {
+  border-color: var(--cyan);
+}
+.marker-sam strong {
+  color: var(--cyan);
+}
+.location-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin: 0;
+  padding: 0 16px 16px;
+  list-style: none;
+}
+.location-list li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-deep);
+}
+.location-list strong {
+  color: var(--ink);
+  font-size: 0.7rem;
+}
+.location-list span,
+.location-list small {
+  color: var(--faint);
+  font-size: 0.62rem;
+}
+.location-list small {
+  justify-self: end;
+  font-family: var(--mono);
+}
+@media (max-width: 900px) {
+  .locator-clients {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 580px) {
+  .safety-warning {
+    width: min(calc(100% - 24px), 1100px);
+  }
+  .location-list {
+    grid-template-columns: 1fr;
+  }
+}

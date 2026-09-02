@@ -87,16 +87,18 @@ Keep these local anchors stable:
 
 ## Public pages
 
-| Page                          | Reader question                                                               |
-| ----------------------------- | ----------------------------------------------------------------------------- |
-| `index.html`                  | Is Interocitor a fit for my application and threat model?                     |
-| `how-it-works.html`           | How do independent changes converge, and what happens after history piles up? |
-| `trust.html`                  | Which endpoints may read the mesh, and how will its key lifecycle be handled? |
-| `data-boundaries.html`        | What belongs in rows, files, and separate meshes?                             |
-| `mailbox.html`                | Where should the mailbox run, and who owns its operational risks?             |
-| `automation.html`             | How should a trusted worker or agent coordinate and isolate its work?         |
-| `examples/todomvc/index.html` | Can two Interocitor clients converge entirely inside one browser tab?         |
-| `examples/chat/index.html`    | Can two trusted clients exchange encrypted messages through a blind mailbox?  |
+| Page                                 | Reader question                                                               |
+| ------------------------------------ | ----------------------------------------------------------------------------- |
+| `index.html`                         | Is Interocitor a fit for my application and threat model?                     |
+| `how-it-works.html`                  | How do independent changes converge, and what happens after history piles up? |
+| `trust.html`                         | Which endpoints may read the mesh, and how will its key lifecycle be handled? |
+| `data-boundaries.html`               | What belongs in rows, files, and separate meshes?                             |
+| `mailbox.html`                       | Where should the mailbox run, and who owns its operational risks?             |
+| `automation.html`                    | How should a trusted worker or agent coordinate and isolate its work?         |
+| `examples/todomvc/index.html`        | Can two Interocitor clients converge entirely inside one browser tab?         |
+| `examples/chat/index.html`           | Can two trusted clients exchange encrypted messages through a blind mailbox?  |
+| `examples/board/index.html`          | Can two local boards make independent changes and converge through a mailbox? |
+| `examples/family-locator/index.html` | What does payload protection solve—and not solve—for sensitive location data? |
 
 ## Publication metadata
 

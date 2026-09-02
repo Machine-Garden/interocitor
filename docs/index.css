@@ -2212,6 +2212,133 @@ h1 em {
     radial-gradient(circle at 80% 40%, rgba(113, 245, 189, 0.07), transparent 25rem), #091411;
 }
 
+.home-page .task-example.board-example,
+.home-page .task-example.locator-example {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(280px, 0.82fr) minmax(390px, 1.18fr);
+  gap: clamp(34px, 7vw, 92px);
+  align-items: center;
+}
+
+.home-page .board-preview {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  padding: clamp(22px, 4vw, 36px);
+  border: 1px solid var(--line-strong);
+  border-radius: 13px;
+  background: #050b0a;
+}
+
+.home-page .board-preview section {
+  min-height: 180px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #091411;
+}
+
+.home-page .board-preview span,
+.home-page .board-preview b {
+  display: block;
+}
+
+.home-page .board-preview span {
+  margin-bottom: 10px;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+}
+
+.home-page .board-preview b {
+  margin-bottom: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  background: #10201c;
+  font-size: 0.7rem;
+  font-weight: 620;
+}
+
+.home-page .locator-preview {
+  position: relative;
+  min-height: 270px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 198, 109, 0.28);
+  border-radius: 13px;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 39px, rgba(230, 249, 238, 0.035) 40px),
+    repeating-linear-gradient(90deg, transparent 0 39px, rgba(230, 249, 238, 0.035) 40px), #050b0a;
+}
+
+.home-page .preview-road {
+  position: absolute;
+  display: block;
+  background: rgba(230, 249, 238, 0.07);
+}
+
+.home-page .road-one {
+  top: 48%;
+  left: -10%;
+  width: 120%;
+  height: 10px;
+  transform: rotate(-12deg);
+}
+
+.home-page .road-two {
+  top: -10%;
+  left: 54%;
+  width: 9px;
+  height: 120%;
+  transform: rotate(19deg);
+}
+
+.home-page .preview-pin {
+  position: absolute;
+  display: grid;
+  padding: 8px 10px;
+  border: 1px solid var(--mint);
+  border-radius: 8px;
+  color: var(--mint);
+  background: #10201c;
+  font-size: 0.72rem;
+}
+
+.home-page .preview-pin small {
+  color: var(--muted);
+  font-size: 0.58rem;
+  font-weight: 500;
+}
+
+.home-page .pin-alex {
+  top: 29%;
+  left: 18%;
+}
+
+.home-page .pin-sam {
+  top: 48%;
+  right: 17%;
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+
+.home-page .locator-preview p {
+  position: absolute;
+  right: 18px;
+  bottom: 14px;
+  left: 18px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.home-page .locator-preview p strong {
+  color: #ffc66d;
+}
+
 .home-page .task-example h3 {
   max-width: 25ch;
   margin-bottom: 13px;
@@ -2885,7 +3012,9 @@ h1 em {
   .home-page .narrow-layout,
   .home-page .story-layout,
   .home-page .task-example.todo-example,
-  .home-page .task-example.chat-example {
+  .home-page .task-example.chat-example,
+  .home-page .task-example.board-example,
+  .home-page .task-example.locator-example {
     grid-template-columns: 1fr;
     gap: 34px;
   }

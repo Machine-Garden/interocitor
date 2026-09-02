@@ -16,6 +16,8 @@ test("public pages render with the deployment security headers", async ({ page }
     ),
   ).toHaveCount(9);
   await expect(page.locator('.site-hero a[href="examples/todomvc/"]')).toBeVisible();
+  await expect(page.locator('.task-example a[href="examples/board/"]')).toBeVisible();
+  await expect(page.locator('.task-example a[href="examples/family-locator/"]')).toBeVisible();
   await expect(page.locator(".site-hero .actions a")).toHaveCount(2);
   await expect(page.locator(".fit-card, .not-fit")).toHaveCount(0);
   await expect(page.getByText("A good fit when", { exact: true })).toHaveCount(0);
@@ -139,10 +141,18 @@ test("every public HTML page exposes the shared site map", async ({ page }) => {
     "/automation",
     "/examples/todomvc/",
     "/examples/chat/",
+    "/examples/board/",
+    "/examples/family-locator/",
   ];
 
   for (const route of routes) {
     await page.goto(route);
+    if (route.startsWith("/examples/")) {
+      const example = page.locator(".demo-code");
+      await expect(example, route).toHaveCount(1);
+      await expect(example.locator("code"), route).toContainText("const schema = {");
+      await expect(example.locator("code"), route).toContainText('db.table("');
+    }
     const footer = page.locator(".site-map-footer");
     await expect(footer, route).toBeVisible();
     await expect(footer.locator(".site-map-nav h2"), route).toHaveText([
@@ -158,6 +168,14 @@ test("every public HTML page exposes the shared site map", async ({ page }) => {
       footer.getByRole("link", { name: "Live TodoMVC", exact: true }),
       route,
     ).toHaveCount(route === "/examples/todomvc/" ? 0 : 1);
+    await expect(
+      footer.getByRole("link", { name: "Live shared board", exact: true }),
+      route,
+    ).toHaveCount(route === "/examples/board/" ? 0 : 1);
+    await expect(
+      footer.getByRole("link", { name: "Protected family locator", exact: true }),
+      route,
+    ).toHaveCount(route === "/examples/family-locator/" ? 0 : 1);
     await expect(
       footer.getByRole("link", { name: "Source on GitHub", exact: true }),
       route,

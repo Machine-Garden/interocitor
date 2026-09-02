@@ -12,6 +12,7 @@
     <meta name="color-scheme" content="dark" />
     <link rel="icon" href="../../assets/mark-dark.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./app.css" />
+    <link rel="stylesheet" href="../demo-code.css" />
   </head>
   <body>
     <a class="skip-link" href="#demo">Skip to the chat</a>
@@ -119,6 +120,34 @@
           content; it is separate from Interocitor’s time-based mailbox retention policy. Reloading
           resets this in-memory demonstration.
         </p>
+      </section>
+      <section class="demo-code" aria-labelledby="chat-code-title">
+        <h2 id="chat-code-title">The minimal shape</h2>
+        <p>
+          Illustrative excerpt: the shared mesh key, stores, and fifteen-message pruning are
+          omitted. The linked TypeScript source is the complete runnable demo.
+        </p>
+        <pre><code>const schema = {
+  tables: {
+    messages: {
+      fields: {
+        id: types.string,
+        sender: types.string,
+        body: types.string,
+        createdAt: types.index(types.number)
+      }
+    }
+  }
+} satisfies DatabaseSchemaDefinition&lt;ChatDB>;
+
+const messages = db.table("messages");
+
+await messages.put(id, { id, sender, body, createdAt: Date.now() });
+await db.flush();
+await peer.pull();</code></pre>
+        <a href="https://github.com/Machine-Garden/interocitor/blob/main/docs/examples/chat/app.ts"
+          >Read the full chat source →</a
+        >
       </section>
     </main>
 

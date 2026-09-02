@@ -1,0 +1,52 @@
+.demo-code {
+  width: min(calc(100% - 40px), 1100px);
+  margin: 0 auto clamp(64px, 9vw, 112px);
+  padding: clamp(24px, 4vw, 40px);
+  border: 1px solid rgba(230, 249, 238, 0.16);
+  border-radius: 14px;
+  background: #050b0a;
+}
+
+.demo-code h2 {
+  margin: 0;
+  color: #edf5ef;
+  font-size: clamp(1.45rem, 3vw, 2.4rem);
+  letter-spacing: -0.04em;
+}
+
+.demo-code > p {
+  max-width: 760px;
+  margin: 12px 0 18px;
+  color: #9eaea5;
+  font-size: 0.82rem;
+  line-height: 1.65;
+}
+
+.demo-code pre {
+  margin: 0;
+  padding: 18px;
+  overflow: auto;
+  border: 1px solid rgba(214, 255, 103, 0.2);
+  border-radius: 9px;
+  color: #d6ff67;
+  background: #07110f;
+  font:
+    0.75rem/1.65 "SFMono-Regular",
+    Consolas,
+    "Liberation Mono",
+    monospace;
+}
+
+.demo-code a {
+  display: inline-block;
+  margin-top: 16px;
+  color: #71f5bd;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+@media (max-width: 580px) {
+  .demo-code {
+    width: min(calc(100% - 24px), 1100px);
+  }
+}

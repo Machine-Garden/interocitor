@@ -7,6 +7,8 @@
     "**/coverage/**",
     "**/webdav-data/**",
     "docs/examples/chat/app.js",
+    "docs/examples/board/app.js",
+    "docs/examples/family-locator/app.js",
     "docs/examples/todomvc/app.js"
   ],
   "categories": {

@@ -135,7 +135,7 @@
           <div class="section-intro compact-intro">
             <div>
               <p class="site-kicker">See it in action</p>
-              <h2 id="use-title">Local apps, encrypted chat and files, trusted automation.</h2>
+              <h2 id="use-title">Local collaboration, protected data and trusted automation.</h2>
             </div>
             <p>
               One model covers application state that changes, files that must stay exact, and
@@ -225,9 +225,64 @@
               </div>
             </article>
 
+            <article class="task-example board-example">
+              <div class="task-example-copy">
+                <p class="example-label"><span>03</span> Collaborative board</p>
+                <h3>A Trello-style board that works from each local copy.</h3>
+                <p>
+                  Maya and Noah add and move cards independently, then exchange encrypted row
+                  changes through the in-page mailbox. Their boards converge without asking the
+                  mailbox to understand columns, cards, or conflicts.
+                </p>
+                <div class="example-outcome">
+                  <strong>Make independent edits, then sync.</strong>
+                  <span
+                    >Watch each board stay local until both clients exchange their changes.</span
+                  >
+                  <a href="examples/board/"
+                    >Try the shared board <span aria-hidden="true">→</span></a
+                  >
+                </div>
+              </div>
+              <div class="board-preview" aria-label="Three-column local-first board preview">
+                <section><span>Ideas</span><b>Interview users</b><b>Plan launch</b></section>
+                <section><span>Doing</span><b>Rewrite onboarding</b></section>
+                <section><span>Done</span><b>Private beta</b></section>
+              </div>
+            </article>
+
+            <article class="task-example locator-example">
+              <div class="task-example-copy">
+                <p class="example-label"><span>04</span> Protected family location</p>
+                <h3>Strong payload privacy does not make a safety product.</h3>
+                <p>
+                  Two devices share encrypted latest-known location rows while the mailbox sees no
+                  place names or coordinates. The five-second demo cadence keeps both views current;
+                  broad key-holder access, consent, revocation, and emergency reliability remain
+                  product responsibilities.
+                </p>
+                <div class="example-outcome">
+                  <strong>Inspect the privacy boundary and the failure boundary.</strong>
+                  <span
+                    >This is a protected-data demonstration, not a tracking recommendation.</span
+                  >
+                  <a href="examples/family-locator/"
+                    >Try the locator boundary <span aria-hidden="true">→</span></a
+                  >
+                </div>
+              </div>
+              <div class="locator-preview" aria-label="Two protected latest-known locations">
+                <span class="preview-road road-one"></span
+                ><span class="preview-road road-two"></span>
+                <b class="preview-pin pin-alex">Alex <small>Home</small></b>
+                <b class="preview-pin pin-sam">Sam <small>School</small></b>
+                <p><strong>Latest known</strong> is not live or emergency-safe.</p>
+              </div>
+            </article>
+
             <article class="task-example file-example">
               <div class="task-example-copy">
-                <p class="example-label"><span>03</span> Private file share</p>
+                <p class="example-label"><span>05</span> Private file share</p>
                 <h3>A private Dropbox over storage you choose.</h3>
                 <p>
                   Let storage do what it is good at—retain and deliver files—without giving it the
@@ -279,7 +334,7 @@
 
             <article class="task-example agent-example">
               <div class="task-example-copy">
-                <p class="example-label"><span>04</span> Agent workflow</p>
+                <p class="example-label"><span>06</span> Agent workflow</p>
                 <h3>Share task state without exposing it to storage.</h3>
                 <p>
                   A product writes a task row. An authorized agent endpoint observes it, does the
@@ -648,6 +703,8 @@
             <a href="how-it-works.html">How it works</a>
             <a href="examples/todomvc/">Live TodoMVC</a>
             <a href="examples/chat/">Live encrypted chat</a>
+            <a href="examples/board/">Live shared board</a>
+            <a href="examples/family-locator/">Protected family locator</a>
             <a href="https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/security-model.md">Security model</a>
           </section>
           <section>

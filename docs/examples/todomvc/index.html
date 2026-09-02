@@ -13,6 +13,7 @@
     <meta name="color-scheme" content="light" />
     <link rel="icon" href="../../assets/mark.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./app.css" />
+    <link rel="stylesheet" href="../demo-code.css" />
   </head>
   <body>
     <a class="skip-link" href="#demo">Skip to the demo</a>
@@ -256,6 +257,35 @@
           when its product needs them.
         </p>
       </section>
+      <section class="demo-code" aria-labelledby="todo-code-title">
+        <h2 id="todo-code-title">The minimal shape</h2>
+        <p>
+          Illustrative excerpt: stores, key custody, and connection setup are omitted. The linked
+          TypeScript source is the complete runnable demo.
+        </p>
+        <pre><code>const schema = {
+  tables: {
+    todos: {
+      fields: {
+        id: types.string,
+        title: types.string,
+        done: types.boolean,
+        createdAt: types.index(types.number)
+      }
+    }
+  }
+} satisfies DatabaseSchemaDefinition&lt;DB>;
+
+const todos = db.table("todos");
+
+await todos.put(id, { id, title, done: false, createdAt: Date.now() });
+await db.flush();
+await peer.pull();</code></pre>
+        <a
+          href="https://github.com/Machine-Garden/interocitor/blob/main/docs/examples/todomvc/app.ts"
+          >Read the full TodoMVC source →</a
+        >
+      </section>
     </main>
 
     <footer class="site-map-footer">
@@ -273,6 +303,8 @@
             <a href="../../index.html">Overview</a>
             <a href="../../how-it-works.html">How it works</a>
             <a href="../../examples/chat/">Live encrypted chat</a>
+            <a href="../../examples/board/">Live shared board</a>
+            <a href="../../examples/family-locator/">Protected family locator</a>
             <a href="https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/security-model.md">Security model</a>
           </section>
           <section>

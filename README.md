@@ -95,6 +95,11 @@ the installed Chromium binary.
 
 - [`docs/examples/chat`](docs/examples/chat/index.html) — two-client encrypted
   chat with an inspectable in-page mailbox and a 15-message application limit.
+- [`docs/examples/board`](docs/examples/board/index.html) — two local-first
+  board clients make independent card changes, then exchange encrypted rows.
+- [`docs/examples/family-locator`](docs/examples/family-locator/index.html) —
+  protected latest-known location rows with explicit privacy, freshness, and
+  safety limits.
 - [`examples/todo-webdav`](examples/todo-webdav/README.md) — smallest two-tab
   row-sync demo with an inspectable local mailbox.
 - [`examples/biometric-keys`](examples/biometric-keys/README.md) — browser

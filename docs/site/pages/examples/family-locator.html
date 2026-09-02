@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Interocitor protected family locator — privacy boundary demo</title>
+    <meta
+      name="description"
+      content="A deliberately limited family-location demo showing protected row payloads, stale local views, metadata exposure, and the safety capabilities Interocitor does not provide."
+    />
+    <meta name="theme-color" content="#07110f" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" href="../../assets/mark-dark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../demo-base.css" />
+    <link rel="stylesheet" href="./app.css" />
+    <link rel="stylesheet" href="../demo-code.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#demo">Skip to the locator</a>
+    <!--#include virtual="/_includes/site-header.html" -->
+    <main>
+      <section class="demo-intro" aria-labelledby="page-title">
+        <p class="eyebrow">Protected location data × Interocitor</p>
+        <h1 id="page-title">Useful privacy boundary. Bad safety system.</h1>
+        <p>
+          Alex and Sam share protected location rows through a mailbox that cannot read the place
+          names. Update one local device and watch the other receive the latest known state on the
+          five-second sync cycle.
+        </p>
+      </section>
+      <aside class="safety-warning" aria-label="Demo limits">
+        <p>
+          Interocitor does not provide continuous background location, guaranteed timely delivery,
+          consent and revocation workflows, selective family-member visibility, geofencing, or an
+          emergency response service. Every endpoint holding the mesh key can read the full row set.
+        </p>
+      </aside>
+      <section class="boundary-strip" aria-label="Demo boundaries">
+        <div>
+          <span>Payload</span><strong>Encrypted before storage</strong
+          ><small>The mailbox does not receive place names or map coordinates.</small>
+        </div>
+        <div>
+          <span>Freshness</span><strong>Auto-sync every 5 seconds</strong
+          ><small>An offline or sleeping device catches up after it reconnects.</small>
+        </div>
+        <div>
+          <span>Trust</span><strong>Every paired endpoint</strong
+          ><small>Mesh keys grant access to every location row in this demo.</small>
+        </div>
+      </section>
+      <section class="demo-toolbar" aria-label="Location synchronization">
+        <p id="sync-status" role="status" aria-live="polite">
+          Auto-sync runs every five seconds. Both devices currently match.
+        </p>
+        <button id="sync-locations" class="primary-action" type="button">Sync now</button>
+      </section>
+      <section
+        id="demo"
+        class="demo-grid locator-clients"
+        aria-label="Two protected family-location clients"
+      >
+        <section
+          class="client-panel locator-client"
+          data-client="alex"
+          aria-labelledby="alex-title"
+        >
+          <header class="client-heading">
+            <div>
+              <span>Trusted device 01</span>
+              <h2 id="alex-title">Alex’s view</h2>
+            </div>
+            <small>local copy</small>
+          </header>
+          <div class="location-actions" aria-label="Set Alex location">
+            <button type="button" data-place="home">Home</button
+            ><button type="button" data-place="school">School</button
+            ><button type="button" data-place="park">Park</button>
+          </div>
+          <div class="mini-map" data-map aria-label="Locations visible to Alex">
+            <span class="road road-a"></span><span class="road road-b"></span>
+          </div>
+          <ul class="location-list" data-location-list></ul>
+        </section>
+        <section class="client-panel locator-client" data-client="sam" aria-labelledby="sam-title">
+          <header class="client-heading">
+            <div>
+              <span>Trusted device 02</span>
+              <h2 id="sam-title">Sam’s view</h2>
+            </div>
+            <small>local copy</small>
+          </header>
+          <div class="location-actions" aria-label="Set Sam location">
+            <button type="button" data-place="home">Home</button
+            ><button type="button" data-place="school">School</button
+            ><button type="button" data-place="park">Park</button>
+          </div>
+          <div class="mini-map" data-map aria-label="Locations visible to Sam">
+            <span class="road road-a"></span><span class="road road-b"></span>
+          </div>
+          <ul class="location-list" data-location-list></ul>
+        </section>
+      </section>
+      <aside class="demo-mailbox" aria-labelledby="mailbox-title">
+        <header>
+          <div>
+            <span>Remote storage</span>
+            <h2 id="mailbox-title">Protected location mailbox</h2>
+          </div>
+          <small id="mailbox-status" data-safe="true">Opening protected mesh…</small>
+        </header>
+        <div class="mailbox-envelope">
+          <strong id="mailbox-path">Waiting for a location update</strong>
+          <pre id="mailbox-preview">Opening the mailbox…</pre>
+        </div>
+        <p class="mailbox-note">
+          The envelope is real mailbox output, truncated only for display. Storage metadata remains
+          observable. Reloading resets the demo.
+        </p>
+      </aside>
+      <section class="demo-explanation" aria-labelledby="locator-limit-title">
+        <p class="eyebrow">What this proves</p>
+        <h2 id="locator-limit-title">Encryption solves less than a locator product must.</h2>
+        <p>
+          Protected payloads can keep stored coordinates out of the mailbox’s plaintext boundary.
+          They do not establish consent, prevent an authorized family endpoint from misusing data,
+          guarantee freshness, erase historical copies, or make delayed state suitable for safety
+          decisions.
+        </p>
+      </section>
+      <section class="demo-code" aria-labelledby="locator-code-title">
+        <h2 id="locator-code-title">The minimal shape</h2>
+        <p>
+          Illustrative excerpt: location acquisition, consent UI, local stores, and mesh-key setup
+          are omitted. The linked TypeScript source is the complete runnable demo.
+        </p>
+        <pre><code>const schema = {
+  tables: {
+    locations: {
+      fields: {
+        id: types.string,
+        name: types.string,
+        place: types.string,
+        x: types.number,
+        y: types.number,
+        updatedAt: types.index(types.number)
+      }
+    }
+  }
+} satisfies DatabaseSchemaDefinition&lt;LocatorDB>;
+
+const locations = db.table("locations");
+
+await locations.put("alex", {
+  id: "alex",
+  name: "Alex",
+  place: "Riverside Park",
+  x: 72,
+  y: 74,
+  updatedAt: Date.now()
+});
+// flushDebounce and pollInterval are both 5 seconds in this demo.</code></pre>
+        <a
+          href="https://github.com/Machine-Garden/interocitor/blob/main/docs/examples/family-locator/app.ts"
+          >Read the full locator source →</a
+        >
+      </section>
+    </main>
+    <!--#include virtual="/_includes/site-footer.html" -->
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,148 @@
+.board-clients {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.board-client form {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.board-heading-actions {
+  display: grid;
+  justify-items: end;
+  gap: 7px;
+}
+
+.board-heading-actions button {
+  padding: 6px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--mint);
+  background: var(--panel-deep);
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+.board-client form label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+}
+.board-client form > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+}
+.board-client input {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px 0 0 7px;
+  color: var(--ink);
+  background: var(--panel-deep);
+}
+.board-client form button {
+  padding: 0 14px;
+  border: 1px solid var(--mint);
+  border-radius: 0 7px 7px 0;
+  color: var(--page);
+  background: var(--mint);
+  font-weight: 720;
+  cursor: pointer;
+}
+.board-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 16px;
+  overflow-x: auto;
+}
+.board-columns > section {
+  min-width: 145px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-deep);
+}
+.board-columns h3 {
+  margin: 0 0 10px;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.board-columns ul {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 280px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.board-columns ul:empty::before {
+  padding: 12px 4px;
+  color: rgba(158, 174, 165, 0.45);
+  font-size: 0.68rem;
+  content: "Drop zone";
+}
+.board-card {
+  display: grid;
+  gap: 7px;
+  padding: 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #10201c;
+  box-shadow: 0 7px 18px rgba(0, 0, 0, 0.18);
+}
+.board-card strong {
+  font-size: 0.78rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.board-card small {
+  color: var(--faint);
+  font-size: 0.58rem;
+}
+.card-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+}
+.card-controls button {
+  width: 27px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--mint);
+  background: var(--panel-deep);
+  cursor: pointer;
+}
+.card-controls button:disabled {
+  color: var(--faint);
+  cursor: default;
+  opacity: 0.35;
+}
+@media (max-width: 1060px) {
+  .board-clients {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 580px) {
+  .board-columns {
+    padding: 12px;
+  }
+  .board-client form > div {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .board-client input,
+  .board-client form button {
+    min-height: 42px;
+    border-radius: 7px;
+  }
+}

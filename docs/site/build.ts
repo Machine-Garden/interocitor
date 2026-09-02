@@ -6,7 +6,7 @@ declare global {
 }
 
 type DecisionPage = "trust" | "data-boundaries" | "mailbox" | "automation";
-type DemoPage = "todomvc" | "chat";
+type DemoPage = "todomvc" | "chat" | "board" | "family-locator";
 
 type Page = {
   source: string;
@@ -44,6 +44,16 @@ const pages: Page[] = [
     source: "site/pages/examples/chat.html",
     output: "examples/chat/index.html",
     header: { kind: "demo", current: "chat", label: "Live encrypted demo" },
+  },
+  {
+    source: "site/pages/examples/board.html",
+    output: "examples/board/index.html",
+    header: { kind: "demo", current: "board", label: "Live local-first board" },
+  },
+  {
+    source: "site/pages/examples/family-locator.html",
+    output: "examples/family-locator/index.html",
+    header: { kind: "demo", current: "family-locator", label: "Protected-data demo" },
   },
 ];
 
@@ -148,6 +158,10 @@ function renderFooter(page: Page): string {
   const demoLinks = [
     demo === "todomvc" ? "" : `<a href="${base}examples/todomvc/">Live TodoMVC</a>`,
     demo === "chat" ? "" : `<a href="${base}examples/chat/">Live encrypted chat</a>`,
+    demo === "board" ? "" : `<a href="${base}examples/board/">Live shared board</a>`,
+    demo === "family-locator"
+      ? ""
+      : `<a href="${base}examples/family-locator/">Protected family locator</a>`,
   ]
     .filter(Boolean)
     .join("\n            ");
@@ -159,7 +173,11 @@ function renderFooter(page: Page): string {
       ? "No account · no WebDAV · no cloud"
       : demo === "chat"
         ? "Two trusted clients · one protected mesh"
-        : "Trusted endpoints · protected mailbox";
+        : demo === "board"
+          ? "Independent local edits · explicit convergence"
+          : demo === "family-locator"
+            ? "Protected payloads · not a safety service"
+            : "Trusted endpoints · protected mailbox";
 
   return `<footer class="site-map-footer">
       <div class="${wrapper}site-map-footer-grid">

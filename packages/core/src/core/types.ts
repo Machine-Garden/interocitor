@@ -4,6 +4,8 @@
  * Core type definitions
  */
 
+import type { PairingCapabilities } from "../handshake/capabilities.ts";
+
 // ─── Device & Identity ───────────────────────────────────────────────
 
 /**
@@ -376,7 +378,7 @@ export interface QueryDescriptor {
   orderBy?: QueryOrderBy;
 }
 
-/** Identity of a single-row read. Lives next to QueryDescriptor on purpose. */
+/** Identity of a single-row read. */
 export interface RowDescriptor {
   table: string;
   rowId: string;
@@ -720,6 +722,15 @@ export interface StorageAdapter {
   getHandshakeConfig?(): string;
 
   /**
+   * Advertise pairing features supported or required by this adapter route.
+   * Missing capability metadata means pairing with no feature requirements.
+   *
+   * Per-call pairing capabilities are unioned with this profile and cannot
+   * remove adapter requirements.
+   */
+  getPairingCapabilities?(): PairingCapabilities | null | Promise<PairingCapabilities | null>;
+
+  /**
    * Drop the per-session ensureFolder cache. Implementers cache "ensured"
    * paths to avoid round-tripping a MKCOL/POST per connect; the engine
    * calls this on mesh swap, transport teardown, and remote poison so the
@@ -888,7 +899,7 @@ export interface SyncConfig<
    *   - local writes still queue to the outbox
    *   - connect() is safely re-callable
    *   - no `throw` escapes connect()
-   * Pepper / consumers can react via `onConnectStalled`.
+   * Applications can react via `onConnectStalled`.
    */
   connectStageTimeoutMs?: number;
   /**

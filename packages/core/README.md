@@ -182,6 +182,7 @@ allowing a reset.
 | `createRecoveryWrapper`, `publishRecoveryWrapper`, `recoverMeshCredentials`                                                                                  | Client-provided recovery phrases for portable-key meshes.                         |
 | `generateShareQR`, `generateJoinQR`, `handleScannedQR`                                                                                                       | Recommended QR pairing flows.                                                     |
 | `createGeneratorSession`, `runScannerHandshake`                                                                                                              | Lower-level pairing handshake control.                                            |
+| `PairingCapabilities`, `PairingCapabilityId`, `HandshakeChannelOptions`, `MESH_GRANT_AUTHORIZATION_V1`, `INDIRECT_MESH_ROUTING_V1`                           | Fail-closed negotiation for protected and indirect pairing.                       |
 | `@interocitor/core/adapters/memory`, `@interocitor/core/adapters/webdav`, `@interocitor/core/adapters/google-drive`, `@interocitor/core/adapters/cloudflare` | Mailbox transports.                                                               |
 | `@interocitor/core/crypto/signing`                                                                                                                           | ECDSA authorship and capability-token helpers.                                    |
 

@@ -2,14 +2,14 @@
 
 Named addresses give one mesh a stable application meaning; checksummed IDs
 let an application provision many meshes without admitting arbitrary storage
-namespaces. Integrity gates decide which addresses are valid.
-`meshMiddleware` separately authenticates and authorizes requests to those
-addresses.
+namespaces. Direct mode uses the requested address as the storage namespace.
+Optional route resolution can instead map one opaque presented address to one
+canonical namespace. Integrity gates decide which canonical addresses are
+valid. `meshMiddleware` separately authenticates and authorizes requests.
 
-The snippets are partial Worker policy fragments. The package names and option
-shapes are checked by the Workers build; supply the surrounding Worker,
-environment bindings, and application identity/policy services. The complete
-runnable deployment is the
+The snippets are partial Worker policy fragments. Supply the surrounding
+Worker, environment bindings, and application identity/policy services. The
+complete runnable deployment is the
 [Cloudflare TODO app example](../../../examples/todo-cloudflare-do/README.md).
 
 ## One stable shared database
@@ -53,6 +53,43 @@ issue/validate operations.
 Knowing a valid checksummed address proves that the address was issued. Mesh
 middleware still decides whether the current request may use it.
 
+## Resolve opaque per-subject routes
+
+Set `resolveMeshRoute` when clients should receive individually replaceable
+addresses without moving the canonical D1, file-body, or relay namespace:
+
+```ts
+runtime: {
+  resolveMeshRoute: async ({ presentedAddress }, env) => {
+    const binding = await env.control.findActiveRoute(presentedAddress);
+    return binding ? { canonicalAddress: binding.canonicalAddress } : null;
+  },
+  meshIntegrityGates: [checksummedMeshIntegrityGate],
+}
+```
+
+This snippet is a partial policy fragment; the host supplies and protects the
+control store. When the resolver is present it is authoritative. `null`
+returns `404`, and the runtime does not retry the presented address as a
+canonical address. A thrown, rejected, or malformed result returns `503`.
+Only omission or `undefined` disables the resolver; a configured non-function
+value also returns `503` instead of enabling direct routing.
+Resolution is exactly one hop; never return another public alias.
+The internal `__interocitor_recovery__` namespace is not a valid public or
+resolved mesh address: direct use returns `404`, and a resolver mapping returns
+`503` without affecting the separate recovery route.
+
+Integrity gates run after resolution. Their `address` and `canonicalAddress`
+fields contain the resolved namespace, while `presentedAddress` retains the
+decoded URL segment. The same fields reach mesh middleware, durable-file store
+selection, and upload policy. D1, file-body keys, built-in audit events, and the
+relay always use the canonical address.
+
+The system handler remains canonical-addressed and never invokes the public
+resolver. Recovery is also outside this pipeline. For per-subject grants,
+delegation, revocation, and pairing, see
+[Protected mesh control](mesh-control.md).
+
 ## Combining address rules
 
 Gates use OR semantics in array order. This deployment supports a stable
@@ -62,8 +99,9 @@ Gates use OR semantics in array order. This deployment supports a stable
 meshIntegrityGates: [({ address }) => address === "main", checksummedMeshIntegrityGate];
 ```
 
-If every gate returns `false`, the Worker returns `404` before middleware or
-storage. A gate exception returns `503`.
+If every gate returns literal `false`, the Worker returns `404` before
+middleware or storage. A gate exception or non-boolean return value returns
+`503`; only literal `true` admits the canonical address.
 
 ## Apply application authentication and authorization
 
@@ -74,15 +112,17 @@ identity provider, or policy engine:
 ```ts
 import { createInterocitorMount, createMeshAuthorizationMiddleware } from "@interocitor/workers";
 
-const authorizeMesh = createMeshAuthorizationMiddleware(async ({ address, request }, env) => {
-  const subject = await env.identity.verify(request);
-  if (!subject) return "deny";
+const authorizeMesh = createMeshAuthorizationMiddleware(
+  async ({ canonicalAddress, request }, env) => {
+    const subject = await env.identity.verify(request);
+    if (!subject) return "deny";
 
-  const permission = await env.permissions.forMesh(subject, address);
-  if (permission === "write") return "full";
-  if (permission === "read") return "readonly";
-  return "deny";
-});
+    const permission = await env.permissions.forMesh(subject, canonicalAddress);
+    if (permission === "write") return "full";
+    if (permission === "read") return "readonly";
+    return "deny";
+  },
+);
 
 const mount = createInterocitorMount({
   mountPrefix: "/sync",
@@ -137,7 +177,8 @@ meshMiddleware: [
     const startedAt = Date.now();
     const response = await next();
     await env.audit.record({
-      address: context.address,
+      presentedAddress: context.presentedAddress,
+      canonicalAddress: context.canonicalAddress,
       access: context.access,
       status: response.status,
       elapsedMs: Date.now() - startedAt,

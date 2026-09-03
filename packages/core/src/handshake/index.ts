@@ -34,15 +34,16 @@
  *
  *   Cloud piece  →  handshakeId
  *                   Scopes two relay files on the shared backend.
- *                   Visible in the cloud but useless without the key.
+ *                   Carries no decryption key or authorization by itself.
  *
  *   Invitation   →  generatorPub (ephemeral ECDH-P256 public key)
  *                   The scanner derives a wrapping key from it via ECDH.
  *
  * Treat the complete QR or pair URL as a short-lived invitation capability:
  * anyone who obtains it and can access the relay can act as the scanner.
- * remotePath and passphrase are not in the payload. They travel through the
- * relay in the ECDH-encrypted credential envelope.
+ * remotePath, passphrase, and optional recipient-specific connectionConfig are
+ * not in the payload. They travel through the relay in the ECDH-encrypted
+ * credential envelope. Capability metadata is public negotiation state.
  *
  * ## Usage
  *
@@ -60,7 +61,7 @@
  * });
  *
  * renderQR(qrEncoded);   // show QR on screen
- * await complete();      // wait for scanner to pick up credentials
+ * await complete();      // publish credentials after receiving the scanner hello
  * ```
  *
  * ### Generate a "join" QR (device wanting to join)
@@ -116,15 +117,35 @@
  */
 
 import type { StorageAdapter } from "../core/types.ts";
-import { encodeQRPayload, buildPairUrl, type HandshakeQRPayload } from "./qr.ts";
+import {
+  encodeQRPayload,
+  buildPairUrl,
+  snapshotHandshakeQRPayload,
+  type HandshakeQRPayload,
+} from "./qr.ts";
 import {
   createGeneratorSession,
   runScannerHandshake,
+  snapshotHandshakeCredentials,
   type HandshakeCredentials,
 } from "./channel.ts";
+import {
+  assertPairingCapabilitiesCompatible,
+  mergePairingCapabilities,
+  pairingCapabilitiesForWire,
+  snapshotPairingCapabilities,
+  type PairingCapabilities,
+} from "./capabilities.ts";
+import { generateHandshakeId } from "./handshake-id.ts";
 
 export { encodeQRPayload, decodeQRPayload, buildPairUrl, parseQRFromUrl } from "./qr.ts";
 export type { HandshakeQRPayload, HandshakeIntent } from "./qr.ts";
+export {
+  INDIRECT_MESH_ROUTING_V1,
+  MESH_GRANT_AUTHORIZATION_V1,
+  UnsupportedPairingCapabilityError,
+} from "./capabilities.ts";
+export type { PairingCapabilities, PairingCapabilityId } from "./capabilities.ts";
 export {
   generateECDHKeypair,
   exportECDHPublicKey,
@@ -132,13 +153,24 @@ export {
   createGeneratorSession,
   runScannerHandshake,
 } from "./channel.ts";
-export type { HandshakeCredentials, GeneratorSession } from "./channel.ts";
+export type { HandshakeChannelOptions, HandshakeCredentials, GeneratorSession } from "./channel.ts";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
-function generateHandshakeId(): string {
-  const b = crypto.getRandomValues(new Uint8Array(12));
-  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+async function resolvePairingCapabilities(
+  adapter: StorageAdapter,
+  explicit?: PairingCapabilities,
+): Promise<PairingCapabilities | undefined> {
+  const explicitCapabilities =
+    explicit === undefined ? undefined : snapshotPairingCapabilities(explicit);
+  const reportedAdapterCapabilities = await adapter.getPairingCapabilities?.();
+  const adapterCapabilities =
+    reportedAdapterCapabilities === undefined || reportedAdapterCapabilities === null
+      ? undefined
+      : snapshotPairingCapabilities(reportedAdapterCapabilities);
+  const capabilities = mergePairingCapabilities(adapterCapabilities, explicitCapabilities);
+  assertPairingCapabilitiesCompatible(capabilities, capabilities);
+  return pairingCapabilitiesForWire(capabilities);
 }
 
 // ─── generateShareQR ─────────────────────────────────────────────────
@@ -156,6 +188,13 @@ export interface GenerateShareQROptions {
   remotePath: string;
   /** Base58 passphrase for the mesh encryption key, or null for unencrypted. */
   passphrase: string | null;
+  /**
+   * Opaque recipient-specific final adapter configuration.
+   * Sent only inside the encrypted credential envelope.
+   */
+  connectionConfig?: string;
+  /** Additional client capabilities, unioned with adapter capabilities. */
+  capabilities?: PairingCapabilities;
   /** Base URL for the pair link embedded in the QR payload (optional). */
   pairBaseUrl?: string;
   /** Polling interval while waiting for the scanner (ms, default 2000). */
@@ -172,8 +211,8 @@ export interface GenerateShareQRResult {
   /** Full pair URL with payload in fragment. null if pairBaseUrl not provided. */
   pairUrl: string | null;
   /**
-   * Wait for the scanner to pick up the credentials.
-   * Resolves when the scanner has read the relay and cleaned up.
+   * Wait for scanner hello, then publish the encrypted credentials.
+   * Resolution does not acknowledge scanner receipt or relay cleanup.
    */
   complete(): Promise<void>;
 }
@@ -185,11 +224,28 @@ export interface GenerateShareQRResult {
 export async function generateShareQR(
   options: GenerateShareQROptions,
 ): Promise<GenerateShareQRResult> {
-  const { adapter, relayBase, remotePath, passphrase, pairBaseUrl, pollIntervalMs, timeoutMs } =
-    options;
+  const {
+    adapter,
+    relayBase,
+    remotePath,
+    passphrase,
+    connectionConfig,
+    capabilities,
+    pairBaseUrl,
+    pollIntervalMs,
+    timeoutMs,
+  } = options;
+  const credentials = snapshotHandshakeCredentials({
+    remotePath,
+    passphrase,
+    ...(connectionConfig !== undefined && { connectionConfig }),
+  });
+  const stableCapabilities =
+    capabilities === undefined ? undefined : snapshotPairingCapabilities(capabilities);
 
   const session = await createGeneratorSession();
   const handshakeId = generateHandshakeId();
+  const resolvedCapabilities = await resolvePairingCapabilities(adapter, stableCapabilities);
 
   const adapterConfig = adapter.getHandshakeConfig?.();
   const qrPayload: HandshakeQRPayload = {
@@ -197,6 +253,7 @@ export async function generateShareQR(
     handshakeId,
     generatorPub: session.generatorPub,
     ...(adapterConfig !== undefined && { adapterConfig }),
+    ...(resolvedCapabilities !== undefined && { capabilities: resolvedCapabilities }),
   };
 
   return {
@@ -204,14 +261,11 @@ export async function generateShareQR(
     qrEncoded: encodeQRPayload(qrPayload),
     pairUrl: pairBaseUrl ? buildPairUrl(pairBaseUrl, qrPayload) : null,
     async complete() {
-      await session.complete(
-        adapter,
-        handshakeId,
-        relayBase,
-        "share",
-        { remotePath, passphrase },
-        { pollIntervalMs, timeoutMs },
-      );
+      await session.complete(adapter, handshakeId, relayBase, "share", credentials, {
+        pollIntervalMs,
+        timeoutMs,
+        capabilities: resolvedCapabilities,
+      });
     },
   };
 }
@@ -226,6 +280,8 @@ export interface GenerateJoinQROptions {
    * Must match the relayBase used by the scanning device.
    */
   relayBase: string;
+  /** Additional client capabilities, unioned with adapter capabilities. */
+  capabilities?: PairingCapabilities;
   /** Base URL for the pair link embedded in the QR payload (optional). */
   pairBaseUrl?: string;
   /** Polling interval while waiting for credentials (ms, default 2000). */
@@ -256,10 +312,13 @@ export interface GenerateJoinQRResult {
 export async function generateJoinQR(
   options: GenerateJoinQROptions,
 ): Promise<GenerateJoinQRResult> {
-  const { adapter, relayBase, pairBaseUrl, pollIntervalMs, timeoutMs } = options;
+  const { adapter, relayBase, capabilities, pairBaseUrl, pollIntervalMs, timeoutMs } = options;
+  const stableCapabilities =
+    capabilities === undefined ? undefined : snapshotPairingCapabilities(capabilities);
 
   const session = await createGeneratorSession();
   const handshakeId = generateHandshakeId();
+  const resolvedCapabilities = await resolvePairingCapabilities(adapter, stableCapabilities);
 
   const adapterConfig = adapter.getHandshakeConfig?.();
   const qrPayload: HandshakeQRPayload = {
@@ -267,6 +326,7 @@ export async function generateJoinQR(
     handshakeId,
     generatorPub: session.generatorPub,
     ...(adapterConfig !== undefined && { adapterConfig }),
+    ...(resolvedCapabilities !== undefined && { capabilities: resolvedCapabilities }),
   };
 
   const credentialsPromise = session
@@ -276,7 +336,7 @@ export async function generateJoinQR(
       relayBase,
       "join",
       null, // generator doesn't have credentials — it wants them
-      { pollIntervalMs, timeoutMs },
+      { pollIntervalMs, timeoutMs, capabilities: resolvedCapabilities },
     )
     .then((result) => {
       if (!result) throw new Error("join handshake produced no credentials");
@@ -319,6 +379,8 @@ export interface HandleScannedQROptions {
    * Ignored when payload.intent === 'share' (you will receive credentials).
    */
   ownCredentials?: HandshakeCredentials;
+  /** Additional client capabilities, unioned with adapter capabilities. */
+  capabilities?: PairingCapabilities;
   /** Polling interval (ms, default 2000). */
   pollIntervalMs?: number;
   /** Give up after this long (ms, default 120000). */
@@ -338,11 +400,24 @@ export async function handleScannedQR(
     adapter: explicitAdapter,
     adapterFromConfig,
     relayBase,
-    payload,
+    payload: unsafePayload,
     ownCredentials,
+    capabilities,
     pollIntervalMs,
     timeoutMs,
   } = options;
+  const payload = snapshotHandshakeQRPayload(unsafePayload);
+  const stableCapabilities =
+    capabilities === undefined ? undefined : snapshotPairingCapabilities(capabilities);
+  if (payload.intent === "join" && !ownCredentials) {
+    throw new Error(
+      'handleScannedQR: ownCredentials required when scanning a "join" QR ' +
+        "(the scanner must push credentials to the generator)",
+    );
+  }
+  const stableOwnCredentials =
+    payload.intent === "join" ? snapshotHandshakeCredentials(ownCredentials) : null;
+
   const adapter =
     explicitAdapter ??
     (payload.adapterConfig && adapterFromConfig
@@ -354,15 +429,11 @@ export async function handleScannedQR(
     );
   }
 
-  if (payload.intent === "join" && !ownCredentials) {
-    throw new Error(
-      'handleScannedQR: ownCredentials required when scanning a "join" QR ' +
-        "(the scanner must push credentials to the generator)",
-    );
-  }
+  const resolvedCapabilities = await resolvePairingCapabilities(adapter, stableCapabilities);
 
-  return runScannerHandshake(adapter, payload, ownCredentials ?? null, relayBase, {
+  return runScannerHandshake(adapter, payload, stableOwnCredentials, relayBase, {
     pollIntervalMs,
     timeoutMs,
+    capabilities: resolvedCapabilities,
   });
 }

@@ -95,21 +95,22 @@ plaintext on the remote.
 
 Even with encryption on, a remote with full access to the bucket sees:
 
-| Signal                  | Source                                                 | What it reveals                                                                                              |
-| ----------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| Mesh ID                 | `manifest.meshId`                                      | Logical identity recorded by the mesh manifest                                                               |
-| Worker mesh address     | `/io/<address>`                                        | D1/R2 namespace selected by the host; it may be a stable name or checksummed ID                              |
-| Durable file path       | `files/<app path>`                                     | Application-supplied path; it reveals a real filename if the application puts one there                      |
-| Device IDs              | `devices/<id>.json`, change‑file names                 | One value per device joined to the mesh                                                                      |
-| Device metadata         | `devices/<id>.json`                                    | Plaintext device ID, optional `displayName`/type, last-seen time, and compaction acknowledgements            |
-| Schema version          | `manifest.schema`                                      | Optional logical compatibility marker when app code sets `schema.version`                                    |
-| Write timestamps        | `<HLC>-chg_<id>.json` names                            | Activity timeline per device                                                                                 |
-| Write rate              | File creation rate                                     | Bursts and idle periods                                                                                      |
-| Row size distribution   | File sizes                                             | Approximate row sizes                                                                                        |
-| Snapshot epoch & size   | `mainline/snapshot-<epoch>-<serverId>.json`            | When compactions happen and how big the dataset is                                                           |
-| Compaction author       | `manifest.writtenBy`, `serverId` in snapshot file name | Which device compacted                                                                                       |
-| Number of devices       | `devices/` listing                                     | Mesh size                                                                                                    |
-| Recovery-wrapper record | `/.interocitor/recovery/` or Worker recovery route     | Stable opaque locator plus wrapper crypto metadata, ciphertext, and timestamp; not recovery words or mesh ID |
+| Signal                   | Source                                                 | What it reveals                                                                                              |
+| ------------------------ | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Mesh ID                  | `manifest.meshId`                                      | Logical identity recorded by the mesh manifest                                                               |
+| Worker presented address | `/io/<address>`                                        | Public route used by the client; it may be a per-subject opaque alias                                        |
+| Worker canonical address | D1 prefixes, file-body keys, and relay object name     | Stable storage namespace; in direct mode it is identical to the presented address                            |
+| Durable file path        | `files/<app path>`                                     | Application-supplied path; it reveals a real filename if the application puts one there                      |
+| Device IDs               | `devices/<id>.json`, change‑file names                 | One value per device joined to the mesh                                                                      |
+| Device metadata          | `devices/<id>.json`                                    | Plaintext device ID, optional `displayName`/type, last-seen time, and compaction acknowledgements            |
+| Schema version           | `manifest.schema`                                      | Optional logical compatibility marker when app code sets `schema.version`                                    |
+| Write timestamps         | `<HLC>-chg_<id>.json` names                            | Activity timeline per device                                                                                 |
+| Write rate               | File creation rate                                     | Bursts and idle periods                                                                                      |
+| Row size distribution    | File sizes                                             | Approximate row sizes                                                                                        |
+| Snapshot epoch & size    | `mainline/snapshot-<epoch>-<serverId>.json`            | When compactions happen and how big the dataset is                                                           |
+| Compaction author        | `manifest.writtenBy`, `serverId` in snapshot file name | Which device compacted                                                                                       |
+| Number of devices        | `devices/` listing                                     | Mesh size                                                                                                    |
+| Recovery-wrapper record  | `/.interocitor/recovery/` or Worker recovery route     | Stable opaque locator plus wrapper crypto metadata, ciphertext, and timestamp; not recovery words or mesh ID |
 
 If any of these are sensitive in your threat model, encryption alone is
 not enough — you need a transport that hides metadata (e.g. a relay that
@@ -153,8 +154,10 @@ Drive).
   different mesh; it is not requester authentication.
 - **Worker mesh address integrity** is deployment policy. A Worker can admit
   stable names such as `main`, checksummed IDs issued under its
-  `meshSecret`, or both. Address integrity decides which namespaces
-  exist; `meshMiddleware` separately decides what a request may do.
+  `meshSecret`, or both. An optional Worker route resolver can map a
+  per-subject presented address to one canonical namespace. Address integrity
+  decides which canonical namespaces exist; `meshMiddleware` separately
+  decides what an authenticated subject may do.
 - **Portable key material is capability-bearing.** In the portable shared-key
   scenario, knowing the portable key is sufficient to read and write the mesh.
   Loss of the portable key = loss of the mesh unless another device or a
@@ -164,22 +167,25 @@ Drive).
 
 ## Recommendations
 
-| Goal                                           | Setting                                                                                                            |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Protect row contents from the storage operator | Configure a non-null `keySource`                                                                                   |
-| Generate strong portable key material          | Use high-entropy generated base58 material                                                                         |
-| Resist portable-key exfiltration on the device | Use `WebAuthnCredentialStore` or an enveloped credential store                                                     |
-| Limit which Worker namespaces may be created   | Configure integrity gates; use checksummed IDs with a deployment `meshSecret` when the application provisions them |
-| Limit who can compact                          | `serverManaged: true` + dedicated `serverId`                                                                       |
-| Detect remote poisoning early                  | Subscribe to `remote:poisoned` and `decode:error`                                                                  |
-| Detect stale credential reuse                  | Subscribe to `credentials:meshMismatch`                                                                            |
+| Goal                                           | Setting                                                                                                             |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Protect row contents from the storage operator | Configure a non-null `keySource`                                                                                    |
+| Generate strong portable key material          | Use high-entropy generated base58 material                                                                          |
+| Resist portable-key exfiltration on the device | Use `WebAuthnCredentialStore` or an enveloped credential store                                                      |
+| Limit which Worker namespaces may be created   | Configure integrity gates; use checksummed IDs with a deployment `meshSecret` when the application provisions them  |
+| Revoke one subject's future controlled mesh IO | Use protected mesh control with a server-authenticated subject, current grant chain, and optional per-subject route |
+| Limit who can compact                          | `serverManaged: true` + dedicated `serverId`                                                                        |
+| Detect remote poisoning early                  | Subscribe to `remote:poisoned` and `decode:error`                                                                   |
+| Detect stale credential reuse                  | Subscribe to `credentials:meshMismatch`                                                                             |
 
 ## Out of scope
 
 - Hiding write timing or device count from the remote.
 - Hiding who compacts (snapshot file names embed the device id).
-- Per-device revocation. Removing a device from a mesh requires rotating
-  the mesh key material, which means creating a new mesh.
+- Cryptographic erasure from a removed endpoint. Worker mesh control can block
+  that subject's subsequent IO and new notify upgrades through the controlled
+  Worker mount without changing the mesh key, but it cannot erase plaintext or
+  key material already copied to the endpoint.
 - Multi‑tenant isolation on a shared remote. The engine assumes one
   mesh per `remotePath`. Two meshes sharing a folder will mis‑decode
   each other's files and poison the remote.

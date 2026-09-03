@@ -3,7 +3,8 @@
 A storage adapter is a thin wrapper over a remote byte store
 (WebDAV, Google Drive, Cloudflare, in‑memory). The engine treats the
 remote as **a mailbox**: it lists files, reads files, writes files,
-deletes files. There is no compute on the remote side.
+deletes files. Portable byte-store semantics do not require remote compute;
+protocol-aware endpoints may add stronger policy and stale-write rejection.
 
 Storage adapters guarantee exact remote-byte semantics. The engine reciprocates
 with serialized same-instance writes per path, bounded retries, exact-history
@@ -41,6 +42,7 @@ interface StorageAdapter {
   getStoredFileMetadata?(path: string): Promise<StoredFileMetadata | null>;
 
   getHandshakeConfig?(): string;
+  getPairingCapabilities?(): PairingCapabilities | null | Promise<PairingCapabilities | null>;
   resetFolderCache?(): void;
 }
 
@@ -214,6 +216,26 @@ initialized local row operations available for a later retry.
   ECDH relay; the config identifies how to reach the same backend endpoint,
   not its password or the mesh `remotePath`. The `remotePath` travels inside
   the encrypted handshake credential envelope.
+
+### Optional: `getPairingCapabilities()`
+
+- Returns the features this adapter route supports and any features a peer
+  must support before received credentials may be accepted.
+- Missing or `null` metadata means an empty capability profile with no adapter
+  pairing requirement. It does not describe how the backend routes mesh
+  requests.
+- High-level pairing unions adapter metadata with explicit per-call
+  `capabilities`; callers cannot remove an adapter requirement.
+- Unknown required IDs are preserved and rejected by peers that do not list
+  them as supported. Capability negotiation does not authenticate a subject or
+  issue an access grant.
+- The requirement governs the participant's credential handling, not relay
+  writes. A hostile or older peer with backend access can upload arbitrary
+  ciphertext; an incompatible participant rejects it without accepting the
+  credentials.
+
+`CloudflareAdapterConfig.pairingCapabilities` supplies this metadata for a
+Cloudflare route. See [Pair devices](pairing.md#negotiate-required-pairing-features).
 
 ### Optional: recovery wrapper storage
 

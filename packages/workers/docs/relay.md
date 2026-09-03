@@ -54,6 +54,13 @@ that exposure matters.
 `GET /sync/notify/<address>/health` passes that same request pipeline and then
 returns relay status including the connected-socket count.
 
+Route removal or grant revocation blocks the next notify upgrade, but does not
+close a socket that was already accepted. The current relay does not retain a
+subject or grant identifier on each connection. Its messages are invalidation
+signals rather than mesh payloads; deployments that require immediate
+per-subject socket closure need a subject-aware relay extension. Polling and
+subsequent IO requests still pass current authorization.
+
 `runtime.verbose` logs missing relay bindings and successful delivery. Failed
 broadcasts produce warnings regardless of verbose mode.
 

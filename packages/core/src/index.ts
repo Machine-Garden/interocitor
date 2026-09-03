@@ -51,6 +51,9 @@ export {
   parseQRFromUrl,
   decodeQRPayload,
   encodeQRPayload,
+  INDIRECT_MESH_ROUTING_V1,
+  MESH_GRANT_AUTHORIZATION_V1,
+  UnsupportedPairingCapabilityError,
 } from "./handshake/index.ts";
 
 export type {
@@ -62,6 +65,9 @@ export type {
   GenerateJoinQROptions,
   GenerateJoinQRResult,
   HandleScannedQROptions,
+  HandshakeChannelOptions,
+  PairingCapabilities,
+  PairingCapabilityId,
   GeneratorSession,
 } from "./handshake/index.ts";
 

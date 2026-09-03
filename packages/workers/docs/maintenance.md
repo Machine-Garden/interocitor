@@ -108,4 +108,4 @@ returns `404`.
 Operations targeting an existing mesh pass `meshIntegrityGates`. ID issue and
 validation do not target an existing mesh. System operations use the host
 policy shown above; they do not pass `meshMiddleware`. A rejected integrity
-gate normally returns `404`; a gate error returns `503`.
+gate normally returns `404`; a gate error or non-boolean result returns `503`.

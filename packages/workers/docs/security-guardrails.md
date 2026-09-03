@@ -7,19 +7,6 @@ Protected meshes reach both stores as client-encrypted payloads; routing and
 operational metadata remain visible. Applications keep mesh keys on clients and
 must supply request authentication and authorization.
 
-## Scope
-
-This document applies to the Cloudflare Workers backend in `@interocitor/workers`:
-
-- row/change storage in **D1**;
-- durable file/image storage metadata in **D1**;
-- durable file/image bytes in the configured **`FileBodyStore`**, selected per
-  mesh; the built-in implementations target R2 and S3-compatible object storage;
-- optional realtime relay via Durable Objects.
-
-It defines the package's storage, encryption, metadata, and access-control
-boundaries.
-
 ## Executive summary
 
 - **Interocitor encrypts application data on the client before upload** when the mesh is configured with a non-null `keySource`.
@@ -27,7 +14,7 @@ boundaries.
 - **The configured file-body store** holds durable file/image bodies. [R2 encrypts objects and object metadata at rest with Cloudflare-managed keys](https://developers.cloudflare.com/r2/reference/data-security/); each S3-compatible provider applies its own at-rest encryption, and AWS can use a configured customer-managed KMS key through `AwsS3FileBodyStore`. Protected Interocitor files arrive at either built-in store as application ciphertext. A custom store owns its provider-level encryption contract.
 - **The server cannot read protected application payloads** without the mesh key. That includes encrypted row data in D1 and encrypted file bytes in the configured file-body store.
 - **Request access is application policy.** The host supplies AuthN/AuthZ through `meshMiddleware`, at the mesh-address level.
-- **Simple key protection exists, but it is not document-level or row-level ACL.** The main protection is that data is useless without the client-held mesh key (or bound key components in the bound-shared-key scenario).
+- **Client-held keys protect payload confidentiality, not document-level or row-level access.** Protected application payloads require the mesh key (or bound key components in the bound-shared-key scenario), while operational metadata remains visible.
 
 ## What is stored where
 
@@ -111,6 +98,8 @@ The Worker and platform can read:
 - client/device identifiers used for sync bookkeeping;
 - plaintext manifest contents;
 - whether a request was allowed or denied by Worker-side access checks.
+- server-readable route bindings and grant metadata when protected mesh
+  control is enabled.
 
 ### The server cannot read
 
@@ -130,9 +119,11 @@ The Workers implementation supports application-defined mesh-level access.
 
 ### What exists
 
-Two layers answer different questions:
+Three stages answer different questions:
 
-- `meshIntegrityGates` decides whether an address designates a mesh;
+- optional `resolveMeshRoute` maps a presented route to one canonical storage
+  address;
+- `meshIntegrityGates` decides whether the canonical address designates a mesh;
 - `meshMiddleware` decides what the current request may do with that mesh.
 
 `createMeshAuthorizationMiddleware` applies `'none'`, `'readonly'`, `'full'`,
@@ -145,6 +136,14 @@ unissued IDs, but anyone who learns a valid ID still needs authorization when
 the mesh is protected. Verify credentials with your AuthN provider and make
 the per-address permission decision in mesh middleware.
 
+`createMeshGrantAuthorizationMiddleware` is the bounded server-readable
+control-plane option. It verifies a current root-to-subject grant chain for
+every admitted IO or notify request, including authority attenuation, expiry,
+and ancestor revocation. The host still owns authentication, policy-root trust,
+persistence, and protected management endpoints. `resolveMeshRoute` can give
+each subject a replaceable opaque route while preserving one canonical
+D1/file/relay namespace. See [Protected mesh control](mesh-control.md).
+
 ### What the package does not provide
 
 The package does **not** provide:
@@ -154,11 +153,14 @@ The package does **not** provide:
 - per-file recipient lists enforced by the Worker;
 - server-side plaintext inspection for policy enforcement;
 - revocation that can make already-exported plaintext unreadable.
+- immediate closure of a notify socket that was authorized before a later
+  revocation.
 
 So the right description is:
 
-> The server model is mesh-level access gating plus client-side key
-> protection, not fine-grained server-enforced data access control.
+> The server model is revocable mesh-level network access plus client-side key
+> protection, not fine-grained server-enforced data access control or erasure
+> of data already held by a client.
 
 ## Complementary controls: asymmetric keys and Cloudflare WARP
 

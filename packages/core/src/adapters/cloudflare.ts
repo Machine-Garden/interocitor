@@ -19,6 +19,7 @@ import type {
   StoredFileMetadata,
   StoredFileWriteOptions,
 } from "../core/types.ts";
+import type { PairingCapabilities } from "../handshake/capabilities.ts";
 
 export interface CloudflareAdapterConfig {
   /** Worker IO base URL that includes a mesh address, e.g. https://worker/io/main */
@@ -31,6 +32,11 @@ export interface CloudflareAdapterConfig {
   recoveryBaseUrl?: string;
   /** Bearer forwarded to the recovery endpoint. Defaults to `token`. */
   recoveryToken?: string;
+  /**
+   * Pairing capabilities supported or required by this Worker route.
+   * This metadata must not contain credentials.
+   */
+  pairingCapabilities?: PairingCapabilities;
 }
 
 interface IoFileMeta {
@@ -49,6 +55,12 @@ interface IoFileMeta {
   taint?: string;
 }
 
+/** Config shape embedded in QR payloads for CloudflareAdapter. Credentials excluded. */
+export interface CloudflareHandshakeConfig {
+  /** Worker IO base URL including the `/io/<address>` path segment. */
+  baseUrl: string;
+}
+
 /**
  * Interocitor-native Cloudflare adapter for Worker + D1 based deployments.
  *
@@ -63,12 +75,6 @@ interface IoFileMeta {
  * });
  * ```
  */
-/** Config shape embedded in QR payloads for CloudflareAdapter. Credentials excluded. */
-export interface CloudflareHandshakeConfig {
-  /** Worker IO base URL including the `/io/<address>` path segment. */
-  baseUrl: string;
-}
-
 export class CloudflareAdapter implements StorageAdapter {
   readonly name = "cloudflare";
 
@@ -186,6 +192,10 @@ export class CloudflareAdapter implements StorageAdapter {
   getHandshakeConfig(): string {
     const cfg: CloudflareHandshakeConfig = { baseUrl: this.config.baseUrl };
     return JSON.stringify(cfg);
+  }
+
+  getPairingCapabilities(): PairingCapabilities | null {
+    return this.config.pairingCapabilities ?? null;
   }
 
   isAuthenticated(): boolean {

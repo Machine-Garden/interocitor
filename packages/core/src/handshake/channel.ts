@@ -1,8 +1,9 @@
 /**
  * @interocitor/core low-level handshake channel
  *
- * Ephemeral ECDH-P256 key exchange over the shared cloud backend (relay).
- * No extra server required — the backend the mesh already uses is the relay.
+ * Ephemeral ECDH-P256 key exchange over a shared cloud backend (relay).
+ * Direct mode can use the mesh backend; protected pairing can use a separately
+ * authorized bootstrap adapter.
  *
  * ## Roles (determined by QR intent, not by which device is "bigger")
  *
@@ -32,31 +33,34 @@
  *   generate ephemeral keypair (Es, es)
  *   sharedSecret = ECDH(generatorPub, es)
  *   wrappingKey  = HKDF(sharedSecret)
- *                                  write scanner-pub.json (Es) →
+ *                                  write scanner-pub.json (Es, capabilities?) →
  *                                                                  read scanner-pub.json
  *                                                                  sharedSecret = ECDH(Es, eg)
  *                                                                  wrappingKey  = HKDF(sharedSecret)
+ *                                                                  validate capabilities
  *
  *   ── if intent == "share": Generator has credentials, Scanner receives ──
- *                                                                  encrypt {remotePath, passphrase}
+ *                                                                  encrypt credentials
  *                                  ← write credentials.json
  *   read credentials.json
- *   decrypt → remotePath, passphrase
+ *   decrypt → remotePath, passphrase, connectionConfig?
  *
  *   ── if intent == "join": Scanner has credentials, Generator receives ──
- *   encrypt {remotePath, passphrase}
+ *   encrypt credentials
  *                                  write credentials.json →
  *                                                                  read credentials.json
- *                                                                  decrypt → remotePath, passphrase
+ *                                                                  decrypt → remotePath, passphrase,
+ *                                                                            connectionConfig?
  *
  *   [whoever received credentials deletes relay files — best-effort]
  *
  * ## Relay files (scoped by handshakeId)
  *
  *   {relayBase}/handshake/{handshakeId}/scanner-pub.json
- *     — scanner's ephemeral ECDH public key
+ *     — scanner's ephemeral ECDH public key and optional capability profile
  *   {relayBase}/handshake/{handshakeId}/credentials.json
- *     — encrypted {remotePath, passphrase?}
+ *     — encrypted {remotePath, passphrase?, connectionConfig?}; version 2
+ *       authenticates the negotiated capability transcript when required
  *
  * ## Security
  *
@@ -72,6 +76,20 @@
  */
 
 import type { StorageAdapter } from "../core/types.ts";
+import {
+  assertPairingCapabilitiesCompatible,
+  isPairingCapabilities,
+  normalizePairingCapabilities,
+  pairingCapabilitiesForWire,
+  type NormalizedPairingCapabilities,
+  type PairingCapabilities,
+} from "./capabilities.ts";
+import { assertValidHandshakeId } from "./handshake-id.ts";
+import {
+  assertHandshakeIntent,
+  snapshotHandshakeQRPayload,
+  type HandshakeQRPayload,
+} from "./qr.ts";
 
 // ─── ECDH / crypto helpers ───────────────────────────────────────────
 
@@ -129,7 +147,7 @@ async function deriveWrappingKey(myPriv: CryptoKey, peerPub: CryptoKey): Promise
 // ─── Credential envelope ─────────────────────────────────────────────
 
 interface CredentialEnvelope {
-  v: 1;
+  v: 1 | 2;
   iv: string; // base64url AES-GCM IV
   ct: string; // base64url ciphertext of JSON-encoded CredentialPayload
 }
@@ -137,22 +155,65 @@ interface CredentialEnvelope {
 interface CredentialPayload {
   remotePath: string;
   passphrase?: string; // base58 passphrase, omitted for unencrypted meshes
+  connectionConfig?: string; // recipient-specific final adapter config, encrypted only
+}
+
+/** @internal Validate and freeze credentials before an asynchronous handshake. */
+export function snapshotHandshakeCredentials(value: unknown): HandshakeCredentials {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Invalid handshake credentials");
+  }
+
+  let remotePath: unknown;
+  let passphrase: unknown;
+  let connectionConfig: unknown;
+  try {
+    const credentials = value as Record<string, unknown>;
+    remotePath = credentials.remotePath;
+    passphrase = credentials.passphrase;
+    connectionConfig = credentials.connectionConfig;
+  } catch {
+    throw new TypeError("Invalid handshake credentials");
+  }
+  if (
+    typeof remotePath !== "string" ||
+    (passphrase !== null && typeof passphrase !== "string") ||
+    (connectionConfig !== undefined && typeof connectionConfig !== "string")
+  ) {
+    throw new TypeError("Invalid handshake credentials");
+  }
+  return Object.freeze({
+    remotePath,
+    passphrase,
+    ...(connectionConfig !== undefined && { connectionConfig }),
+  });
 }
 
 async function encryptCredentials(
   wrappingKey: CryptoKey,
   creds: HandshakeCredentials,
+  additionalData?: Uint8Array,
 ): Promise<string> {
-  const payload: CredentialPayload = { remotePath: creds.remotePath };
-  if (creds.passphrase !== null) {
-    payload.passphrase = creds.passphrase;
+  const stableCredentials = snapshotHandshakeCredentials(creds);
+  const payload: CredentialPayload = { remotePath: stableCredentials.remotePath };
+  if (stableCredentials.passphrase !== null) {
+    payload.passphrase = stableCredentials.passphrase;
+  }
+  if (stableCredentials.connectionConfig !== undefined) {
+    payload.connectionConfig = stableCredentials.connectionConfig;
   }
   const pt = new TextEncoder().encode(JSON.stringify(payload));
   const ivRaw = crypto.getRandomValues(new Uint8Array(IV_LEN));
   const iv = toBuffer(ivRaw);
-  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, wrappingKey, pt);
+  const ct = await crypto.subtle.encrypt(
+    additionalData === undefined
+      ? { name: "AES-GCM", iv }
+      : { name: "AES-GCM", iv, additionalData: toBuffer(additionalData) },
+    wrappingKey,
+    pt,
+  );
   const env: CredentialEnvelope = {
-    v: 1,
+    v: additionalData === undefined ? 1 : 2,
     iv: uint8ToB64url(ivRaw),
     ct: uint8ToB64url(new Uint8Array(ct)),
   };
@@ -162,23 +223,103 @@ async function encryptCredentials(
 async function decryptCredentials(
   wrappingKey: CryptoKey,
   envelope: string,
+  additionalData?: Uint8Array,
 ): Promise<HandshakeCredentials> {
   const { v, iv, ct } = JSON.parse(envelope) as CredentialEnvelope;
-  if (v !== 1) throw new Error(`Unknown handshake envelope version: ${v}`);
+  if (v !== 1 && v !== 2) throw new Error(`Unknown handshake envelope version: ${v}`);
+  if (v === 1 && additionalData !== undefined) {
+    throw new Error("Pairing capability negotiation requires handshake envelope version 2");
+  }
+  if (v === 2 && additionalData === undefined) {
+    throw new Error("Unexpected capability-bound handshake envelope");
+  }
+  if (typeof iv !== "string" || typeof ct !== "string") {
+    throw new TypeError("Invalid handshake credential envelope");
+  }
   const ivBytes = b64urlToUint8(iv);
   const ctBytes = b64urlToUint8(ct);
   const pt = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: toBuffer(ivBytes) },
+    additionalData === undefined
+      ? { name: "AES-GCM", iv: toBuffer(ivBytes) }
+      : {
+          name: "AES-GCM",
+          iv: toBuffer(ivBytes),
+          additionalData: toBuffer(additionalData),
+        },
     wrappingKey,
     toBuffer(ctBytes),
   );
   const raw = JSON.parse(new TextDecoder().decode(pt)) as CredentialPayload;
-  return { remotePath: raw.remotePath, passphrase: raw.passphrase ?? null };
+  if (
+    typeof raw.remotePath !== "string" ||
+    (raw.passphrase !== undefined && typeof raw.passphrase !== "string") ||
+    (raw.connectionConfig !== undefined && typeof raw.connectionConfig !== "string")
+  ) {
+    throw new Error("Invalid handshake credentials");
+  }
+  return {
+    remotePath: raw.remotePath,
+    passphrase: raw.passphrase ?? null,
+    ...(raw.connectionConfig !== undefined && { connectionConfig: raw.connectionConfig }),
+  };
+}
+
+interface ScannerHello {
+  pub: string;
+  capabilities?: PairingCapabilities;
+}
+
+interface CapabilityTranscript {
+  v: 2;
+  intent: "share" | "join";
+  handshakeId: string;
+  generatorPub: string;
+  scannerPub: string;
+  generatorCapabilities: NormalizedPairingCapabilities;
+  scannerCapabilities: NormalizedPairingCapabilities;
+}
+
+function parseScannerHello(data: string): ScannerHello {
+  const raw = JSON.parse(data) as Partial<ScannerHello>;
+  if (
+    typeof raw.pub !== "string" ||
+    (raw.capabilities !== undefined && !isPairingCapabilities(raw.capabilities))
+  ) {
+    throw new Error("Invalid handshake scanner hello");
+  }
+  return {
+    pub: raw.pub,
+    ...(raw.capabilities !== undefined && { capabilities: raw.capabilities }),
+  };
+}
+
+function capabilityTranscriptBytes(
+  intent: "share" | "join",
+  handshakeId: string,
+  generatorPub: string,
+  scannerPub: string,
+  generatorCapabilities: NormalizedPairingCapabilities,
+  scannerCapabilities: NormalizedPairingCapabilities,
+): Uint8Array | undefined {
+  if (generatorCapabilities.required.length === 0 && scannerCapabilities.required.length === 0) {
+    return undefined;
+  }
+  const transcript: CapabilityTranscript = {
+    v: 2,
+    intent,
+    handshakeId,
+    generatorPub,
+    scannerPub,
+    generatorCapabilities,
+    scannerCapabilities,
+  };
+  return new TextEncoder().encode(JSON.stringify(transcript));
 }
 
 // ─── Relay paths ─────────────────────────────────────────────────────
 
 function relayPaths(handshakeId: string, relayBase: string) {
+  assertValidHandshakeId(handshakeId);
   const base = `${relayBase}/handshake/${handshakeId}`;
   return {
     scannerPub: `${base}/scanner-pub.json`,
@@ -235,6 +376,18 @@ export interface HandshakeCredentials {
   remotePath: string;
   /** Base58 passphrase for the mesh encryption key, or null for unencrypted meshes. */
   passphrase: string | null;
+  /**
+   * Opaque recipient-specific final adapter configuration.
+   * It is carried only inside the encrypted credential envelope, never the QR.
+   */
+  connectionConfig?: string;
+}
+
+export interface HandshakeChannelOptions {
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+  /** Features supported or required by this participant. */
+  capabilities?: PairingCapabilities;
 }
 
 // ─── Generator side ──────────────────────────────────────────────────
@@ -257,7 +410,7 @@ export interface GeneratorSession {
     relayBase: string,
     intent: "share" | "join",
     ownCredentials: HandshakeCredentials | null,
-    options?: { pollIntervalMs?: number; timeoutMs?: number },
+    options?: HandshakeChannelOptions,
   ): Promise<HandshakeCredentials | null>;
 }
 
@@ -268,27 +421,45 @@ export async function createGeneratorSession(): Promise<GeneratorSession> {
   return {
     generatorPub,
     async complete(adapter, handshakeId, relayBase, intent, ownCredentials, options = {}) {
+      assertHandshakeIntent(intent);
+      let credentialsToShare: HandshakeCredentials | null = null;
+      if (intent === "share") {
+        if (!ownCredentials) throw new Error("intent=share requires ownCredentials");
+        credentialsToShare = snapshotHandshakeCredentials(ownCredentials);
+      }
       const { pollIntervalMs = 2000, timeoutMs = 120_000 } = options;
       const paths = relayPaths(handshakeId, relayBase);
+      const generatorCapabilities = normalizePairingCapabilities(options.capabilities);
+      assertPairingCapabilitiesCompatible(generatorCapabilities, generatorCapabilities);
 
       // Wait for the scanner to upload their ephemeral public key.
-      const scannerPubSpki = await pollFor(
+      const scannerHello = await pollFor(
         async () => {
           const data = await relayRead(adapter, paths.scannerPub);
           if (!data) return null;
-          return (JSON.parse(data) as { pub: string }).pub ?? null;
+          return parseScannerHello(data);
         },
         pollIntervalMs,
         timeoutMs,
       );
 
-      const scannerPublicKey = await importECDHPublicKey(scannerPubSpki);
+      const scannerCapabilities = normalizePairingCapabilities(scannerHello.capabilities);
+      assertPairingCapabilitiesCompatible(generatorCapabilities, scannerCapabilities);
+
+      const scannerPublicKey = await importECDHPublicKey(scannerHello.pub);
       const wrappingKey = await deriveWrappingKey(keypair.privateKey, scannerPublicKey);
+      const additionalData = capabilityTranscriptBytes(
+        intent,
+        handshakeId,
+        generatorPub,
+        scannerHello.pub,
+        generatorCapabilities,
+        scannerCapabilities,
+      );
 
       if (intent === "share") {
         // Generator has credentials → encrypt and push them for the scanner.
-        if (!ownCredentials) throw new Error("intent=share requires ownCredentials");
-        const envelope = await encryptCredentials(wrappingKey, ownCredentials);
+        const envelope = await encryptCredentials(wrappingKey, credentialsToShare!, additionalData);
         await relayWrite(adapter, paths.credentials, envelope);
         // Generator does not clean up — scanner deletes after reading.
         return null; // Generator already has credentials; nothing new to return.
@@ -299,7 +470,7 @@ export async function createGeneratorSession(): Promise<GeneratorSession> {
         pollIntervalMs,
         timeoutMs,
       );
-      const credentials = await decryptCredentials(wrappingKey, envelope);
+      const credentials = await decryptCredentials(wrappingKey, envelope, additionalData);
       // Clean up relay files after reading.
       relayCleanup(adapter, paths).catch(() => {});
       return credentials;
@@ -322,28 +493,53 @@ export async function createGeneratorSession(): Promise<GeneratorSession> {
  */
 export async function runScannerHandshake(
   adapter: StorageAdapter,
-  payload: {
-    intent: "share" | "join";
-    handshakeId: string;
-    generatorPub: string;
-  },
+  payload: HandshakeQRPayload,
   ownCredentials: HandshakeCredentials | null,
   relayBase: string,
-  options: { pollIntervalMs?: number; timeoutMs?: number } = {},
+  options: HandshakeChannelOptions = {},
 ): Promise<HandshakeCredentials | null> {
-  const { intent, handshakeId, generatorPub } = payload;
+  const stablePayload = snapshotHandshakeQRPayload(payload);
+  const { intent, handshakeId, generatorPub } = stablePayload;
+  let credentialsToSend: HandshakeCredentials | null = null;
+  if (intent === "join") {
+    if (!ownCredentials) throw new Error("intent=join requires scanner to have ownCredentials");
+    credentialsToSend = snapshotHandshakeCredentials(ownCredentials);
+  }
   const { pollIntervalMs = 2000, timeoutMs = 120_000 } = options;
   const paths = relayPaths(handshakeId, relayBase);
+  const generatorCapabilities = normalizePairingCapabilities(stablePayload.capabilities);
+  const scannerCapabilities = normalizePairingCapabilities(options.capabilities);
+
+  // Reject before publishing a scanner hello or any credentials.
+  assertPairingCapabilitiesCompatible(scannerCapabilities, generatorCapabilities);
 
   const keypair = await generateECDHKeypair();
   const scannerPub = await exportECDHPublicKey(keypair.publicKey);
 
   // Upload our public key — this signals the generator we are here.
-  await relayWrite(adapter, paths.scannerPub, JSON.stringify({ pub: scannerPub }));
+  const scannerCapabilitiesWire = pairingCapabilitiesForWire(scannerCapabilities);
+  await relayWrite(
+    adapter,
+    paths.scannerPub,
+    JSON.stringify({
+      pub: scannerPub,
+      ...(scannerCapabilitiesWire !== undefined && {
+        capabilities: scannerCapabilitiesWire,
+      }),
+    }),
+  );
 
   // Derive the shared wrapping key using the generator's public key from the QR.
   const generatorPublicKey = await importECDHPublicKey(generatorPub);
   const wrappingKey = await deriveWrappingKey(keypair.privateKey, generatorPublicKey);
+  const additionalData = capabilityTranscriptBytes(
+    intent,
+    handshakeId,
+    generatorPub,
+    scannerPub,
+    generatorCapabilities,
+    scannerCapabilities,
+  );
 
   if (intent === "share") {
     // Generator will push credentials → wait and decrypt.
@@ -352,13 +548,12 @@ export async function runScannerHandshake(
       pollIntervalMs,
       timeoutMs,
     );
-    const credentials = await decryptCredentials(wrappingKey, envelope);
+    const credentials = await decryptCredentials(wrappingKey, envelope, additionalData);
     relayCleanup(adapter, paths).catch(() => {});
     return credentials;
   }
   // intent === 'join': we push credentials to the generator.
-  if (!ownCredentials) throw new Error("intent=join requires scanner to have ownCredentials");
-  const envelope = await encryptCredentials(wrappingKey, ownCredentials);
+  const envelope = await encryptCredentials(wrappingKey, credentialsToSend!, additionalData);
   await relayWrite(adapter, paths.credentials, envelope);
   // Scanner already has credentials; nothing new to return.
   return null;

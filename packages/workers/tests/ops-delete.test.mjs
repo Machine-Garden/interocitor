@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { opDeletePath, opGetFile, opListChildren, opPutImmutable } from "../dist/ops.js";
-import { listingCacheKeyFor } from "../dist/paths.js";
+import { cacheKeyFor, listingCacheKeyFor } from "../dist/paths.js";
 
 class Statement {
   constructor(db, sql) {
@@ -109,6 +109,22 @@ class MemoryCache {
     return this.entries.delete(String(input));
   }
 }
+
+test("cache keys keep mesh prefixes and paths as opaque tuple members", () => {
+  for (const makeKey of [cacheKeyFor, listingCacheKeyFor]) {
+    const traversalKey = new URL(makeKey("attacker", "/../victim/manifest-1.json")).href;
+    const victimKey = new URL(makeKey("victim", "/manifest-1.json")).href;
+    assert.notEqual(traversalKey, victimKey);
+
+    const queryKey = new URL(makeKey("mesh", "/file.json?variant=attacker")).href;
+    const plainKey = new URL(makeKey("mesh", "/file.json")).href;
+    assert.notEqual(queryKey, plainKey);
+  }
+
+  const dotPrefixFileKey = new URL(cacheKeyFor("..", "/same")).href;
+  const dotPrefixListingKey = new URL(listingCacheKeyFor("..", "/same")).href;
+  assert.notEqual(dotPrefixFileKey, dotPrefixListingKey);
+});
 
 test("compacted changes bypass per-colo cache and deletion decrements byte metrics", async () => {
   const previousCaches = globalThis.caches;

@@ -8,6 +8,19 @@ export {
 
 export type { WithInterocitorOptions } from "./worker.ts";
 
+export {
+  attenuateMeshGrant,
+  createMeshGrantAuthorizationMiddleware,
+  markMeshGrantRevoked,
+} from "./access-control.ts";
+
+export type {
+  MeshAccessGrant,
+  MeshGrantAttenuation,
+  MeshGrantAuthorizationOptions,
+  MeshGrantPrincipal,
+} from "./access-control.ts";
+
 export { InterocitorRelayDurableObject, broadcast } from "./relay.ts";
 
 export type { BroadcastDiagnostics } from "./relay.ts";
@@ -39,6 +52,10 @@ export type {
   MeshIntegrityGate,
   MeshMiddleware,
   MeshRequestContext,
+  MeshRouteContext,
+  MeshRouteIdentity,
+  MeshRouteResolution,
+  MeshRouteResolver,
   CorsOptions,
   WorkerAuditEvent,
   WorkerAuditOutcome,

@@ -8,22 +8,6 @@
 
 Cloudflare Workers runtime for [Interocitor](https://github.com/Machine-Garden/interocitor). Handles both app-data surfaces — CRDT row sync in D1 and durable file/image bodies in a configured file-body store — plus optional realtime relay, all behind a single URL prefix in your existing Worker. Built-in store adapters support Cloudflare R2 and S3-compatible object storage, with AWS as the default S3 endpoint.
 
-> **Public release:** build the `0.1.0` API from the matching monorepo
-> workspaces.
-
-From the repository root:
-
-```bash
-yarn install
-yarn workspace @interocitor/workers build
-```
-
-TypeScript and Wrangler fragments in this README are illustrative unless a
-section explicitly links a runnable command. They use the package's current
-API but assume host Worker bindings, environment types, and application policy.
-The [Cloudflare TODO app example](../../examples/todo-cloudflare-do/README.md) is
-the complete runnable deployment.
-
 ## Quick start
 
 This illustrative Worker entry serves one protected application database at
@@ -96,7 +80,7 @@ Recovery wrappers are capability-addressed by their opaque locator. See
 
 ## Public API
 
-Documented entrypoints in this package:
+Choose the entry point that owns the Worker boundary you need:
 
 | API                                                                                                                                                                            | Use when                                                                                                                                 |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
@@ -104,21 +88,25 @@ Documented entrypoints in this package:
 | `createInterocitorMount`                                                                                                                                                       | You want explicit route matching and manual delegation inside a larger Worker                                                            |
 | `createInterocitorSystemHandler`                                                                                                                                               | You choose to expose maintenance or mesh-ID operations from a host-owned route                                                           |
 | `createMeshAuthorizationMiddleware`                                                                                                                                            | You want a four-state `none` / `readonly` / `full` / `deny` application access decision                                                  |
+| `createMeshGrantAuthorizationMiddleware`                                                                                                                                       | You want current plaintext grants, bounded delegation, and revocation enforced for each admitted IO/notify request                       |
+| `attenuateMeshGrant`, `markMeshGrantRevoked`                                                                                                                                   | Your protected control plane creates a narrower child grant or persists terminal revocation                                              |
 | `checksummedMeshIntegrityGate`                                                                                                                                                 | You accept only addresses issued by your checksum authority                                                                              |
 | `InterocitorRelayDurableObject`                                                                                                                                                | You want realtime invalidation over WebSockets in addition to polling                                                                    |
 | `broadcast`                                                                                                                                                                    | You need to enqueue a custom relay invalidation outside the built-in write/delete paths                                                  |
 | `applySchema`, `ensureSchema`, `SCHEMA_STATEMENTS`                                                                                                                             | You need programmatic D1 schema setup instead of the packaged SQL file                                                                   |
-| `InterocitorMountOptions`, `InterocitorRuntimeOptions`, `InterocitorSystemHandlerOptions`, `CorsOptions`                                                                       | Configuration contracts; see the [reference](docs/runtime-options.md)                                                                    |
-| `InterocitorMount`, `InterocitorSystemHandler`, `WithInterocitorOptions`                                                                                                       | Returned handler and wrapper contracts                                                                                                   |
-| `MeshIntegrityGate`, `MeshMiddleware`, `MeshAuthorizer`, `MeshAuthorization`, `MeshAuthorizationMiddlewareOptions`, `MeshRequestContext`, `MeshIntegrityContext`, `MeshAccess` | Mesh integrity and application-policy contracts                                                                                          |
+| `InterocitorMountOptions`, `InterocitorRuntimeOptions`, `InterocitorSystemHandlerOptions`, `CorsOptions`                                                                       | You configure a mount, system handler, runtime policy, or exact-origin CORS; see the [reference](docs/runtime-options.md)                |
+| `InterocitorMount`, `InterocitorSystemHandler`, `WithInterocitorOptions`                                                                                                       | You type a returned handler or wrapper that the host retains and composes                                                                |
+| `MeshIntegrityGate`, `MeshMiddleware`, `MeshAuthorizer`, `MeshAuthorization`, `MeshAuthorizationMiddlewareOptions`, `MeshRequestContext`, `MeshIntegrityContext`, `MeshAccess` | You implement custom address-integrity or per-request application policy                                                                 |
+| `MeshRouteResolver`, `MeshRouteContext`, `MeshRouteResolution`, `MeshRouteIdentity`                                                                                            | Each subject needs a replaceable one-hop public route to stable canonical storage; see [protected mesh control](docs/mesh-control.md)    |
+| `MeshAccessGrant`, `MeshGrantAttenuation`, `MeshGrantAuthorizationOptions`, `MeshGrantPrincipal`                                                                               | Your protected control store models bounded delegation and supplies identity/policy callbacks                                            |
 | `FileUploadAuthorizationRequest`, `FileUploadAuthorizationResult`                                                                                                              | You need app-owned policy before durable file uploads are accepted                                                                       |
 | `FileBodyStore`, `FileBody`, `FileBodyValue`, `FileBodyWriteOptions`, `FileBodyStorageContext`                                                                                 | You implement or select a durable file-body destination without changing Worker authorization or D1 metadata                             |
 | `R2FileBodyStore`, `R2Bucket`, `R2ObjectBody`                                                                                                                                  | You use a Cloudflare R2 binding as the file-body destination                                                                             |
 | `S3FileBodyStore`, `S3FileBodyStoreConfig`, `S3AddressingStyle`                                                                                                                | You keep the Worker and D1 control plane while placing durable file bodies in any S3-compatible bucket; omitted endpoint defaults to AWS |
 | `AwsS3FileBodyStore`, `AwsS3FileBodyStoreConfig`                                                                                                                               | You want AWS bucket/region validation and optional SSE-KMS headers                                                                       |
-| `WorkerAuditEvent`, `WorkerAuditOutcome`                                                                                                                                       | Completed storage-operation instrumentation contracts                                                                                    |
-| `BroadcastDiagnostics`                                                                                                                                                         | Optional logging controls for `broadcast`                                                                                                |
-| `D1Database`, `DurableObjectNamespace`, `ExecutionContextLike`, `WorkerLike`                                                                                                   | Minimal runtime structural types used by the package API                                                                                 |
+| `WorkerAuditEvent`, `WorkerAuditOutcome`                                                                                                                                       | You consume completed storage-operation events in application instrumentation                                                            |
+| `BroadcastDiagnostics`                                                                                                                                                         | You customize relay broadcast diagnostics and logging                                                                                    |
+| `D1Database`, `DurableObjectNamespace`, `ExecutionContextLike`, `WorkerLike`                                                                                                   | Your host needs the minimal Worker binding shapes used by this package                                                                   |
 
 ## Runtime
 
@@ -174,7 +162,7 @@ Programmatic hosts can call `ensureSchema(db)` once per D1 binding object; it
 uses a `WeakSet` fast path and idempotent `CREATE ... IF NOT EXISTS`
 statements. `applySchema(db)` executes the idempotent statements every time.
 `SCHEMA_STATEMENTS` exposes the base statements for tooling; the functions
-also apply the compatibility check for the `stored_files.taint` column.
+also ensure the `stored_files.taint` column exists.
 
 ### Realtime relay
 
@@ -216,10 +204,11 @@ export default {
 
 Durable app file bodies are stored in the `FileBodyStore` returned by `files`, while paths, quotas, and operational metadata remain in D1. `R2FileBodyStore` adapts an R2 binding; `S3FileBodyStore` signs exact-key requests to an S3-compatible endpoint and defaults to AWS when no endpoint is supplied. Other destinations can implement the same exact-key contract. This is separate from sync change files: files are uploaded, read, overwritten, and deleted directly; they are never compacted or merged.
 
-The resolver receives the accepted mesh address, so one deployment can keep
-ordinary meshes in R2 and route residency-sensitive meshes to S3. A mesh must
-always resolve to the same store: changing the result later strands its existing
-file bodies. `taint` remains opaque metadata and does not select a store.
+The `files` resolver receives the accepted canonical mesh address, so one
+deployment can keep ordinary meshes in R2 and place residency-sensitive meshes
+in S3. A canonical mesh address must always select the same store: changing the
+result later strands its existing file bodies. `taint` remains opaque metadata
+and does not select a store.
 
 The host deployment owns store construction, endpoint allowlisting, and
 provider credentials. The browser and request metadata cannot supply a shared
@@ -353,6 +342,12 @@ For either model, integrity gates define which addresses exist. Mesh
 middleware decides what the current request may do. Read [Mesh addresses and
 access](docs/mesh-access.md) for the complete named/checksummed model,
 four-state authorization, AuthN/AuthZ integration, and middleware composition.
+
+When every person or device needs a replaceable opaque route to one unchanged
+storage namespace, enable the default-off `resolveMeshRoute` hook and use the
+grant middleware. Read [Protected mesh control](docs/mesh-control.md) for the
+control/data boundary, delegation rules, pairing contract, and revocation
+limits.
 
 ## Maintenance and system operations
 

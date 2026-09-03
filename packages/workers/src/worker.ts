@@ -25,7 +25,6 @@ import type {
   InterocitorRuntimeOptions,
   WorkerLike,
   FileBodyStore,
-  FileUploadAuthorizationResult,
   CorsOptions,
   MeshAccess,
   MeshAuthorization,
@@ -35,6 +34,9 @@ import type {
   MeshIntegrityGate,
   MeshMiddleware,
   MeshRequestContext,
+  MeshRouteIdentity,
+  MeshRouteResolution,
+  MeshRouteResolver,
   InterocitorSystemHandler,
   WorkerAuditEvent,
 } from "./types.ts";
@@ -49,6 +51,10 @@ export type {
   MeshIntegrityGate,
   MeshMiddleware,
   MeshRequestContext,
+  MeshRouteContext,
+  MeshRouteIdentity,
+  MeshRouteResolution,
+  MeshRouteResolver,
   InterocitorSystemHandler,
 } from "./types.ts";
 
@@ -64,6 +70,10 @@ const DEFAULT_MAINLINE_BYTES = 16 * 1024 * 1024;
 const DEFAULT_GENERIC_FILE_BYTES = 8 * 1024 * 1024;
 
 const textEncoder = new TextEncoder();
+
+function isReservedMeshStorageAddress(address: string): boolean {
+  return address === RECOVERY_STORAGE_PREFIX;
+}
 
 function wrapSchemaError(error: unknown): never {
   const message = error instanceof Error ? error.message : String(error);
@@ -81,6 +91,7 @@ const DEFAULT_STORED_FILE_BYTES = 32 * 1024 * 1024;
 const DEFAULT_MESH_STORED_BYTES = 512 * 1024 * 1024;
 
 interface ResolvedRuntimeConfig {
+  resolveMeshRoute?: MeshRouteResolver<unknown>;
   meshIntegrityGates: readonly MeshIntegrityGate<unknown>[];
   meshMiddleware: readonly MeshMiddleware<unknown>[];
   enableScheduledMaintenance: boolean;
@@ -113,10 +124,16 @@ function resolveRuntimeConfig<Env>(
 ): ResolvedRuntimeConfig {
   const scheduledMaintenance = runtime?.enableScheduledMaintenance?.(env);
   const verbose = runtime?.verbose?.(env);
+  const meshIntegrityGates = runtime?.meshIntegrityGates;
+  const meshMiddleware = runtime?.meshMiddleware;
   return {
-    meshIntegrityGates: (runtime?.meshIntegrityGates ??
-      []) as readonly MeshIntegrityGate<unknown>[],
-    meshMiddleware: (runtime?.meshMiddleware ?? []) as readonly MeshMiddleware<unknown>[],
+    resolveMeshRoute: runtime?.resolveMeshRoute as MeshRouteResolver<unknown> | undefined,
+    meshIntegrityGates: (meshIntegrityGates === undefined
+      ? []
+      : meshIntegrityGates) as readonly MeshIntegrityGate<unknown>[],
+    meshMiddleware: (meshMiddleware === undefined
+      ? []
+      : meshMiddleware) as readonly MeshMiddleware<unknown>[],
     enableScheduledMaintenance:
       scheduledMaintenance === true || scheduledMaintenance === "1" || scheduledMaintenance === 1,
     pathTtlHours: parsePositiveNumber(runtime?.pathTtlHours?.(env), 0),
@@ -214,7 +231,8 @@ function fileSizeLimitForPathType(pathType: string, runtime: ResolvedRuntimeConf
  * Enforce a four-state application access decision as mesh middleware.
  *
  * `none` and `full` continue, `readonly` rejects writes, and `deny` rejects
- * every request. Authorizer failures and invalid decisions return `503`.
+ * every admitted IO/notify request. Authorizer failures and invalid decisions
+ * return `503`.
  */
 export function createMeshAuthorizationMiddleware<Env>(
   authorizer: MeshAuthorizer<Env>,
@@ -239,20 +257,50 @@ export function createMeshAuthorizationMiddleware<Env>(
   };
 }
 
-async function resolveMesh<Env>(
-  address: string,
+function meshRouteIdentity(presentedAddress: string, canonicalAddress: string): MeshRouteIdentity {
+  return Object.freeze({ presentedAddress, canonicalAddress });
+}
+
+async function admitMeshRoute<Env>(
+  route: MeshRouteIdentity,
   request: Request,
   env: Env,
   runtime: ResolvedRuntimeConfig,
-): Promise<string | Response> {
+): Promise<MeshRouteIdentity | Response> {
+  let gates: MeshIntegrityGate<Env>[];
+  try {
+    if (!Array.isArray(runtime.meshIntegrityGates)) {
+      return jsonResponse({ error: "Mesh integrity unavailable" }, 503);
+    }
+    gates = [];
+    const length = runtime.meshIntegrityGates.length;
+    for (let index = 0; index < length; index++) {
+      if (!(index in runtime.meshIntegrityGates)) {
+        return jsonResponse({ error: "Mesh integrity unavailable" }, 503);
+      }
+      const gate = runtime.meshIntegrityGates[index];
+      if (typeof gate !== "function") {
+        return jsonResponse({ error: "Mesh integrity unavailable" }, 503);
+      }
+      gates.push(gate as MeshIntegrityGate<Env>);
+    }
+  } catch {
+    return jsonResponse({ error: "Mesh integrity unavailable" }, 503);
+  }
+
   const integrity: MeshIntegrityContext = {
-    address,
+    address: route.canonicalAddress,
+    presentedAddress: route.presentedAddress,
+    canonicalAddress: route.canonicalAddress,
     request: request.clone(),
-    verifyChecksum: () => isValidChecksummedMesh(address, runtime.meshSecret),
+    verifyChecksum: () => isValidChecksummedMesh(route.canonicalAddress, runtime.meshSecret),
   };
   try {
-    for (const gate of runtime.meshIntegrityGates) {
-      if (await gate(integrity, env)) return address;
+    for (const gate of gates) {
+      const result = await gate(integrity, env);
+      if (result === true) return route;
+      if (result !== false)
+        throw new TypeError("mesh integrity gate returned a non-boolean result");
     }
   } catch (error) {
     if (runtime.verbose) console.warn("[interocitor:mesh] integrity gate failed", error);
@@ -261,24 +309,122 @@ async function resolveMesh<Env>(
   return jsonResponse({ error: "Not found" }, 404);
 }
 
+async function resolvePublicMeshRoute<Env>(
+  presentedAddress: string,
+  request: Request,
+  env: Env,
+  runtime: ResolvedRuntimeConfig,
+  surface: "io" | "notify",
+  access: MeshAccess,
+): Promise<MeshRouteIdentity | Response> {
+  let canonicalAddress = presentedAddress;
+  const usesResolver = runtime.resolveMeshRoute !== undefined;
+  if (usesResolver) {
+    if (typeof runtime.resolveMeshRoute !== "function") {
+      return jsonResponse({ error: "Mesh route unavailable" }, 503);
+    }
+    try {
+      const resolution: MeshRouteResolution | null = await (
+        runtime.resolveMeshRoute as MeshRouteResolver<Env>
+      )(
+        {
+          presentedAddress,
+          request: request.clone(),
+          surface,
+          access,
+        },
+        env,
+      );
+      if (resolution === null) return jsonResponse({ error: "Not found" }, 404);
+      if (typeof resolution !== "object" || Array.isArray(resolution)) {
+        return jsonResponse({ error: "Mesh route unavailable" }, 503);
+      }
+      const resolvedCanonicalAddress = resolution.canonicalAddress;
+      if (
+        typeof resolvedCanonicalAddress !== "string" ||
+        resolvedCanonicalAddress.trim().length === 0
+      ) {
+        return jsonResponse({ error: "Mesh route unavailable" }, 503);
+      }
+      canonicalAddress = resolvedCanonicalAddress;
+    } catch (error) {
+      if (runtime.verbose) console.warn("[interocitor:mesh] route resolver failed", error);
+      return jsonResponse({ error: "Mesh route unavailable" }, 503);
+    }
+  }
+  if (isReservedMeshStorageAddress(canonicalAddress)) {
+    return usesResolver
+      ? jsonResponse({ error: "Mesh route unavailable" }, 503)
+      : jsonResponse({ error: "Not found" }, 404);
+  }
+  return admitMeshRoute(
+    meshRouteIdentity(presentedAddress, canonicalAddress),
+    request,
+    env,
+    runtime,
+  );
+}
+
+async function admitCanonicalMesh<Env>(
+  canonicalAddress: string,
+  request: Request,
+  env: Env,
+  runtime: ResolvedRuntimeConfig,
+): Promise<string | Response> {
+  const result = await admitMeshRoute(
+    meshRouteIdentity(canonicalAddress, canonicalAddress),
+    request,
+    env,
+    runtime,
+  );
+  return result instanceof Response ? result : result.canonicalAddress;
+}
+
 async function runMeshMiddleware<Env>(
   context: MeshRequestContext,
   env: Env,
   middleware: readonly MeshMiddleware<unknown>[],
   terminal: () => Promise<Response>,
-  index = 0,
 ): Promise<Response> {
-  const layer = middleware[index] as MeshMiddleware<Env> | undefined;
-  if (!layer) return terminal();
-  let continued = false;
-  return layer({ ...context, request: context.request.clone() }, env, () => {
-    if (continued)
-      return Promise.resolve(
-        jsonResponse({ error: "Middleware called next() more than once" }, 500),
-      );
-    continued = true;
-    return runMeshMiddleware(context, env, middleware, terminal, index + 1);
-  });
+  let layers: MeshMiddleware<Env>[];
+  try {
+    if (!Array.isArray(middleware)) {
+      return jsonResponse({ error: "Mesh middleware unavailable" }, 503);
+    }
+    layers = [];
+    const length = middleware.length;
+    for (let index = 0; index < length; index++) {
+      if (!(index in middleware)) {
+        return jsonResponse({ error: "Mesh middleware unavailable" }, 503);
+      }
+      const layer = middleware[index];
+      if (typeof layer !== "function") {
+        return jsonResponse({ error: "Mesh middleware unavailable" }, 503);
+      }
+      layers.push(layer as MeshMiddleware<Env>);
+    }
+  } catch {
+    return jsonResponse({ error: "Mesh middleware unavailable" }, 503);
+  }
+
+  const invoke = async (index: number): Promise<Response> => {
+    const layer = layers[index];
+    if (!layer) return terminal();
+    let continued = false;
+    const response = await layer({ ...context, request: context.request.clone() }, env, () => {
+      if (continued)
+        return Promise.resolve(
+          jsonResponse({ error: "Middleware called next() more than once" }, 500),
+        );
+      continued = true;
+      return invoke(index + 1);
+    });
+    return response instanceof Response
+      ? response
+      : jsonResponse({ error: "Mesh middleware unavailable" }, 503);
+  };
+
+  return invoke(0);
 }
 
 function ioRequestAccess(op: string, method: string): MeshAccess | null {
@@ -815,26 +961,49 @@ async function handleGetStoredFile<Env>(
   return withCors(new Response(object.body, { status: 200, headers }));
 }
 
-async function normalizeAuthorization(
-  result: FileUploadAuthorizationResult,
-): Promise<{ allowed: boolean; reason?: string; status: number }> {
+function normalizeAuthorization(result: unknown): {
+  allowed: boolean;
+  reason?: string;
+  status: number;
+} {
   if (typeof result === "boolean") return { allowed: result, status: result ? 200 : 403 };
+  if (result === null || typeof result !== "object" || Array.isArray(result)) {
+    throw new TypeError("upload authorization returned an invalid result");
+  }
+  const { allowed, reason, status } = result as Partial<{
+    allowed: unknown;
+    reason: unknown;
+    status: unknown;
+  }>;
+  if (typeof allowed !== "boolean") {
+    throw new TypeError("upload authorization returned an invalid allowed decision");
+  }
+  if (reason !== undefined && typeof reason !== "string") {
+    throw new TypeError("upload authorization returned an invalid reason");
+  }
+  if (
+    status !== undefined &&
+    (!Number.isInteger(status) || (status as number) < 400 || (status as number) > 599)
+  ) {
+    throw new TypeError("upload authorization returned an invalid rejection status");
+  }
   return {
-    allowed: result.allowed,
-    reason: result.reason,
-    status: result.status ?? (result.allowed ? 200 : 403),
+    allowed,
+    ...(reason === undefined ? {} : { reason }),
+    status: (status as number | undefined) ?? (allowed ? 200 : 403),
   };
 }
 
 async function handlePutStoredFile<Env>(
   db: DatabaseAdapter,
   store: FileBodyStore | undefined,
-  prefix: string,
+  route: MeshRouteIdentity,
   path: string,
   request: Request,
   runtime: ResolvedRuntimeConfig,
   env: Env,
 ): Promise<Response> {
+  const prefix = route.canonicalAddress;
   if (!store) return jsonResponse({ error: "File body store not configured" }, 501);
   const bytes = await readBytes(request);
   if (!bytes) return jsonResponse({ error: "Invalid request body" }, 400);
@@ -859,24 +1028,34 @@ async function handlePutStoredFile<Env>(
       { error: "Mesh storage quota exceeded", limit: runtime.maxMeshStoredBytes },
       413,
     );
-  if (runtime.authorizeFileUpload) {
-    const auth = await normalizeAuthorization(
-      await runtime.authorizeFileUpload(
-        {
-          address: prefix,
-          path: normalized,
-          uploadedByDeviceId,
-          size: bytes.byteLength,
-          plaintextSize: Number.isFinite(plaintextSize) ? plaintextSize : undefined,
-          contentType,
-          taint: taint ?? undefined,
-          currentMeshStoredBytes: current,
-          maxMeshStoredBytes: runtime.maxMeshStoredBytes,
-          request,
-        },
-        env,
-      ),
-    );
+  if (runtime.authorizeFileUpload !== undefined) {
+    if (typeof runtime.authorizeFileUpload !== "function") {
+      return jsonResponse({ error: "Upload authorization unavailable" }, 503);
+    }
+    let auth: ReturnType<typeof normalizeAuthorization>;
+    try {
+      auth = normalizeAuthorization(
+        await runtime.authorizeFileUpload(
+          {
+            address: prefix,
+            presentedAddress: route.presentedAddress,
+            canonicalAddress: route.canonicalAddress,
+            path: normalized,
+            uploadedByDeviceId,
+            size: bytes.byteLength,
+            plaintextSize: Number.isFinite(plaintextSize) ? plaintextSize : undefined,
+            contentType,
+            taint: taint ?? undefined,
+            currentMeshStoredBytes: current,
+            maxMeshStoredBytes: runtime.maxMeshStoredBytes,
+            request,
+          },
+          env,
+        ),
+      );
+    } catch {
+      return jsonResponse({ error: "Upload authorization unavailable" }, 503);
+    }
     if (!auth.allowed)
       return jsonResponse({ error: auth.reason || "Upload rejected" }, auth.status);
   }
@@ -999,7 +1178,7 @@ async function handleSystemOperation<Env>(
     if (!prefix || !op) return jsonResponse({ error: "Missing prefix or op" }, 400);
     let storageKey = prefix;
     if (op !== "issue-mesh-id" && op !== "validate-mesh-id") {
-      const mesh = await resolveMesh(prefix, integrityRequest, env, runtime);
+      const mesh = await admitCanonicalMesh(prefix, integrityRequest, env, runtime);
       if (mesh instanceof Response) return mesh;
       storageKey = mesh;
     }
@@ -1057,10 +1236,17 @@ async function handleWsUpgrade<Env>(
   prefix: string,
   relayGetter?: (env: Env) => DurableObjectNamespace,
 ): Promise<Response> {
-  const mesh = await resolveMesh(prefix, request, env, runtime);
-  if (mesh instanceof Response) return mesh;
+  const route = await resolvePublicMeshRoute(prefix, request, env, runtime, "notify", "read");
+  if (route instanceof Response) return route;
   return runMeshMiddleware(
-    { address: mesh, request, surface: "notify", access: "read" },
+    {
+      address: route.canonicalAddress,
+      presentedAddress: route.presentedAddress,
+      canonicalAddress: route.canonicalAddress,
+      request,
+      surface: "notify",
+      access: "read",
+    },
     env,
     runtime.meshMiddleware,
     async () => {
@@ -1068,11 +1254,11 @@ async function handleWsUpgrade<Env>(
       if (!relay) {
         if (runtime.verbose)
           console.warn("[interocitor:relay] notify request failed: relay binding not configured", {
-            prefix,
+            address: route.canonicalAddress,
           });
         return new Response("WebSocket relay not configured", { status: 501 });
       }
-      const stub = relay.get(relay.idFromName(mesh));
+      const stub = relay.get(relay.idFromName(route.canonicalAddress));
       const url = new URL(request.url);
       if (
         request.method.toUpperCase() === "GET" &&
@@ -1103,17 +1289,30 @@ async function handleIoRequest<Env>(
   const { prefix, op } = parseIo(url);
   const access = ioRequestAccess(op, method);
   if (!access) return withCors(new Response("Not found", { status: 404 }));
-  const mesh = await resolveMesh(prefix, request, env, runtime);
-  if (mesh instanceof Response) return mesh;
+  const route = await resolvePublicMeshRoute(prefix, request, env, runtime, "io", access);
+  if (route instanceof Response) return route;
   return runMeshMiddleware(
-    { address: mesh, request, surface: "io", access },
+    {
+      address: route.canonicalAddress,
+      presentedAddress: route.presentedAddress,
+      canonicalAddress: route.canonicalAddress,
+      request,
+      surface: "io",
+      access,
+    },
     env,
     runtime.meshMiddleware,
     async () => {
       const db = resolveDatabase(env, dbGetter);
       const relay = relayGetter ? relayGetter(env) : undefined;
-      const files = filesGetter ? filesGetter(env, { address: mesh }) : undefined;
-      const storageKey = mesh;
+      const files = filesGetter
+        ? filesGetter(env, {
+            address: route.canonicalAddress,
+            presentedAddress: route.presentedAddress,
+            canonicalAddress: route.canonicalAddress,
+          })
+        : undefined;
+      const storageKey = route.canonicalAddress;
 
       if (op === "health" && method === "GET") {
         return withCors(new Response("interocitor cloudflare worker\n", { status: 200 }));
@@ -1145,7 +1344,7 @@ async function handleIoRequest<Env>(
         if (method === "GET")
           return handleGetStoredFile(db, files, storageKey, path, request, runtime, env);
         if (method === "PUT")
-          return handlePutStoredFile(db, files, storageKey, path, request, runtime, env);
+          return handlePutStoredFile(db, files, route, path, request, runtime, env);
         if (method === "DELETE")
           return handleDeleteStoredFile(db, files, storageKey, path, request, runtime, env);
       }

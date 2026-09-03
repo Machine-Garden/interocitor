@@ -330,6 +330,47 @@ test("durable-file storage can be selected by accepted mesh address", async () =
   assert.deepEqual(selections, ["sensitive-au", "sensitive-au"]);
 });
 
+test("a resolved route stores and audits durable files under only the canonical address", async () => {
+  let canonicalAddress = "";
+  let uploadContext;
+  const auditEvents = [];
+  const { env, mount, system } = createHarness({
+    resolveMeshRoute: ({ presentedAddress }) =>
+      presentedAddress === "public-handle" && canonicalAddress ? { canonicalAddress } : null,
+    authorizeFileUpload: (context) => {
+      uploadContext = context;
+      return true;
+    },
+    storageOperationAudit: (event) => auditEvents.push(event),
+  });
+  canonicalAddress = await issueMeshId(system, env);
+
+  const put = await upload(mount, env, "public-handle", "/docs/aliased.txt", "secret");
+  assert.equal(put.status, 201);
+  assert.equal(env.DB.storedFiles.has(env.DB.key(canonicalAddress, "/docs/aliased.txt")), true);
+  assert.equal(env.DB.storedFiles.has(env.DB.key("public-handle", "/docs/aliased.txt")), false);
+  assert.deepEqual(
+    {
+      address: uploadContext.address,
+      presentedAddress: uploadContext.presentedAddress,
+      canonicalAddress: uploadContext.canonicalAddress,
+    },
+    {
+      address: canonicalAddress,
+      presentedAddress: "public-handle",
+      canonicalAddress,
+    },
+  );
+  assert.equal(
+    [...env.FILES.objects.keys()][0],
+    `meshes/${encodeURIComponent(canonicalAddress)}/files/docs%2Faliased.txt`,
+  );
+  assert.equal(
+    auditEvents.find((event) => event.op === "stored-file-write")?.address,
+    canonicalAddress,
+  );
+});
+
 test("durable-file storage requires the explicit files getter", async () => {
   const env = { DB: new MemoryD1(), INTEROCITOR_FILES: new MemoryFileBodyStore() };
   const mount = createInterocitorMount({
@@ -366,6 +407,58 @@ test("recovery wrappers live outside mesh-address IO and cannot be overwritten",
     createCtx(),
   );
   assert.equal(duplicate.status, 409);
+});
+
+test("the recovery storage namespace cannot be admitted as a public mesh", async () => {
+  const env = { DB: new MemoryD1() };
+  const locator = "a".repeat(43);
+  const recoveryUrl = `https://example.test/recovery/${locator}`;
+  const wrapperPath = encodeURIComponent(`/wrappers/${locator}.json`);
+  const openMount = createInterocitorMount({
+    db: (value) => value.DB,
+    runtime: { meshIntegrityGates: [() => true] },
+  });
+
+  assert.equal(
+    (
+      await openMount.fetch(
+        new Request(recoveryUrl, { method: "PUT", body: '{"opaque":true}' }),
+        env,
+        createCtx(),
+      )
+    ).status,
+    201,
+  );
+
+  const internalAddress = "__interocitor_recovery__";
+  const directUrl = `https://example.test/io/${internalAddress}/file?path=${wrapperPath}`;
+  assert.equal((await openMount.fetch(new Request(directUrl), env, createCtx())).status, 404);
+  assert.equal(
+    (await openMount.fetch(new Request(directUrl, { method: "DELETE" }), env, createCtx())).status,
+    404,
+  );
+
+  const aliasedMount = createInterocitorMount({
+    db: (value) => value.DB,
+    runtime: {
+      resolveMeshRoute: () => ({ canonicalAddress: internalAddress }),
+      meshIntegrityGates: [() => true],
+    },
+  });
+  assert.equal(
+    (
+      await aliasedMount.fetch(
+        new Request("https://example.test/io/public-route/file?path=/anything"),
+        env,
+        createCtx(),
+      )
+    ).status,
+    503,
+  );
+
+  const recovery = await openMount.fetch(new Request(recoveryUrl), env, createCtx());
+  assert.equal(recovery.status, 200);
+  assert.equal(await recovery.text(), '{"opaque":true}');
 });
 
 test("the mesh authorizer delegates every IO and relay pass check to the application", async () => {
@@ -905,6 +998,28 @@ test("durable-file stores enforce device id, file size, mesh quota, callback rej
     rejected.find((item) => item.path === "/blocked.txt"),
     { path: "/blocked.txt", taint: "group2" },
   );
+});
+
+test("malformed durable-file upload policy configuration and results fail closed", async () => {
+  const malformedPolicies = [
+    false,
+    0,
+    "",
+    null,
+    () => ({ allowed: "false" }),
+    () => "not a decision",
+    () => {
+      throw new Error("policy unavailable");
+    },
+  ];
+
+  for (const authorizeFileUpload of malformedPolicies) {
+    const { env, mount, system } = createHarness({ authorizeFileUpload });
+    const meshId = await issueMeshId(system, env);
+    const response = await upload(mount, env, meshId, "/must-not-write.txt", "safe");
+    assert.equal(response.status, 503);
+    assert.equal(env.FILES.objects.size, 0);
+  }
 });
 
 test("scheduled maintenance treats an omitted TTL as disabled", async () => {

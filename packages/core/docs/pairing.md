@@ -38,7 +38,8 @@ Both directions use the same wire protocol.
 
 ## QR and pair-link payload
 
-The encoded payload contains at most four fields:
+The direct-mode payload has three required fields and may add `adapterConfig`.
+Capability-aware pairing can also add `capabilities`:
 
 ```jsonc
 {
@@ -46,6 +47,10 @@ The encoded payload contains at most four fields:
   "handshakeId": "3f9ac2…e1", // random 12-byte hex      ← CLOUD PIECE
   "generatorPub": "MFkwEwYH…", // ECDH-P256 public key    ← INVITATION PIECE
   "adapterConfig": "{\"baseUrl\":…}", // backend connection info  ← WHERE TO RELAY
+  "capabilities": {
+    "supported": ["mesh-routing:indirect:v1"],
+    "required": ["mesh-routing:indirect:v1"],
+  },
 }
 ```
 
@@ -58,6 +63,10 @@ Scopes two relay files on the shared backend. Polling times out after
 {adapterRoot}/handshake/{handshakeId}/scanner-pub.json
 {adapterRoot}/handshake/{handshakeId}/credentials.json
 ```
+
+Core generates a random 24-character lowercase-hex ID. Decoded and low-level
+session IDs may use one URL-safe path segment of 1–128 ASCII letters, digits,
+`_`, or `-`; anything else is rejected before adapter I/O.
 
 Anyone with backend access can see these files. Backend access alone is not
 enough to decrypt the credential envelope.
@@ -96,23 +105,80 @@ boundary.
 
 `relayBase` is the folder prefix inside that adapter for temporary handshake
 objects. It is not the engine's mesh `remotePath`. With Cloudflare, the adapter
-base URL already selects a Worker `/io/<address>` route; that route address is a
-server-side storage namespace and need not equal `manifest.meshId`. Keep the
-adapter base URL, route address, relay base, mesh path, and manifest identity as
-separate values. See [Mesh addresses and access](../../workers/docs/mesh-access.md)
-for the Worker boundary.
+base URL selects a public Worker `/io/<address>` route. In direct mode that
+address is also the storage namespace. With route resolution it is only the
+presented address; the Worker selects a separate canonical storage address.
+Neither address needs to equal `manifest.meshId`. Keep the adapter base URL,
+presented route, canonical address, relay base, mesh path, and manifest identity
+as separate values. See
+[Mesh addresses and access](../../workers/docs/mesh-access.md) for the Worker
+boundary.
 
 ### What is NOT in the QR
 
-`remotePath` and `passphrase` never appear in the QR. They travel through the
-relay, encrypted with the ECDH-derived wrapping key. Credentials (passwords,
-tokens, OAuth secrets) never appear in the QR either.
+`remotePath`, `passphrase`, and the optional recipient-specific
+`connectionConfig` never appear in the QR. They travel through the relay,
+encrypted with the ECDH-derived wrapping key. Credentials (passwords, tokens,
+OAuth secrets) never appear in the QR either.
+
+## Negotiate required pairing features
+
+`PairingCapabilityId` is a string. `PairingCapabilities` has `supported` and
+optional `required` capability IDs. Core currently names two cross-package
+features:
+
+| Capability                    | Meaning                                                                 |
+| ----------------------------- | ----------------------------------------------------------------------- |
+| `MESH_GRANT_AUTHORIZATION_V1` | The application understands server-enforced root-to-subject mesh grants |
+| `INDIRECT_MESH_ROUTING_V1`    | The application understands a presented route distinct from storage     |
+
+Capability IDs remain strings so an application can add its own feature.
+Unknown supported IDs are retained. An unknown required ID fails closed with
+`UnsupportedPairingCapabilityError`; its `code` is
+`UNSUPPORTED_PAIRING_CAPABILITY` and `missingCapabilities` identifies the
+unsatisfied requirements.
+
+Each `supported` or `required` array accepts at most 32 IDs. An ID is a
+non-empty string of at most 128 characters. Negotiation removes duplicates and
+sorts IDs before comparison and transcript authentication. A participant must
+also list its own required IDs as supported; an internally unsatisfied profile
+fails with the same typed error.
+
+An invalid local or adapter profile, including a merged profile over the
+32-ID limit, throws `TypeError` while setting up the handshake. A malformed QR
+profile makes `decodeQRPayload()` throw `Invalid handshake QR payload` and
+makes `parseQRFromUrl()` return `null`; malformed scanner hello metadata
+rejects generator completion.
+
+The QR advertises the generator's profile. The scanner advertises its profile
+in `scanner-pub.json`. Both sides check that every required feature is
+supported before accepting credentials. If either side requires a feature,
+the credential envelope uses version 2 and binds both normalized profiles,
+both ephemeral public keys, the intent, and handshake ID as AES-GCM additional
+authenticated data. Changing an advertised profile or substituting a
+version-1 envelope therefore fails.
+
+This is an acceptance guarantee, not a relay-write filter. A hostile or older
+peer that can reach the backend can still upload arbitrary ciphertext. A
+participant with unmet requirements rejects before accepting those
+credentials; a conforming participant also checks compatibility before it
+intentionally sends its own.
+
+If neither side requires a capability, the credential envelope remains the
+version-1 shape. Optional `StorageAdapter.getPairingCapabilities()`
+metadata is unioned with explicit per-call `capabilities`; an explicit option
+cannot remove an adapter requirement.
+
+A capability profile states what the application is prepared to do. It does
+not authenticate the person holding the invitation, approve a grant, or prove
+that a route binding exists. Those decisions remain with the host identity and
+control service.
 
 ## Recommended API flow
 
-The snippets in this section are partial application flows. They use current
-public names, but the application still owns adapter authentication, local
-store construction, UI, and error handling.
+The snippets in this section are partial application flows. The application
+still owns adapter authentication, local-store construction, UI, and error
+handling.
 
 ### Generate a share payload
 
@@ -199,6 +265,78 @@ if (result) {
 // Join intent: this scanner sent its credentials and receives null.
 ```
 
+### Pair a protected indirect route
+
+Use a separately authorized bootstrap adapter for the relay. After the host
+approves the recipient and issues its route and request credential, the sharing
+side sends the recipient-specific final adapter configuration through
+`connectionConfig`:
+
+On the sharing device:
+
+```ts
+import {
+  INDIRECT_MESH_ROUTING_V1,
+  MESH_GRANT_AUTHORIZATION_V1,
+  generateShareQR,
+} from "@interocitor/core";
+
+const protectedCapabilities = {
+  supported: [MESH_GRANT_AUTHORIZATION_V1, INDIRECT_MESH_ROUTING_V1],
+  required: [MESH_GRANT_AUTHORIZATION_V1, INDIRECT_MESH_ROUTING_V1],
+};
+
+const invitation = await generateShareQR({
+  adapter: bootstrapAdapter,
+  relayBase: "/Pairing",
+  remotePath,
+  passphrase: keySource.getPortableKey(),
+  capabilities: protectedCapabilities,
+  connectionConfig: JSON.stringify({
+    baseUrl: "https://worker.example/sync/io/recipient-route",
+    token: recipientRequestToken,
+  }),
+});
+
+renderQR(invitation.qrEncoded);
+await invitation.complete();
+```
+
+On the receiving device, after scanning that invitation:
+
+```ts
+import {
+  INDIRECT_MESH_ROUTING_V1,
+  MESH_GRANT_AUTHORIZATION_V1,
+  decodeQRPayload,
+  handleScannedQR,
+  parseQRFromUrl,
+} from "@interocitor/core";
+import { CloudflareAdapter } from "@interocitor/core/adapters/cloudflare";
+
+const protectedCapabilities = {
+  supported: [MESH_GRANT_AUTHORIZATION_V1, INDIRECT_MESH_ROUTING_V1],
+  required: [MESH_GRANT_AUTHORIZATION_V1, INDIRECT_MESH_ROUTING_V1],
+};
+const payload = parseQRFromUrl(window.location.hash) ?? decodeQRPayload(rawQRString);
+const received = await handleScannedQR({
+  adapter: bootstrapAdapter,
+  relayBase: "/Pairing",
+  payload,
+  capabilities: protectedCapabilities,
+});
+
+if (!received?.connectionConfig) throw new Error("Protected route was not issued");
+const dataAdapter = new CloudflareAdapter(JSON.parse(received.connectionConfig));
+```
+
+This is a partial application flow. The host owns recipient authentication,
+approval, route and token issuance, storage of the final adapter config, and
+connection error handling. Do not put `recipientRequestToken` in the public
+bootstrap adapter or QR, and do not copy the inviter's own route or token.
+See [Protected mesh control](../../workers/docs/mesh-control.md) for the Worker
+side.
+
 If the payload includes `adapterConfig`, an application can instead provide
 `adapterFromConfig` to `handleScannedQR`. Core treats the string as opaque; the
 runtime owns adapter construction and authentication.
@@ -210,6 +348,12 @@ All three high-level operations accept:
 | `pollIntervalMs` | `2000`   | How often to check the relay (ms) |
 | `timeoutMs`      | `120000` | Give up after this long (ms)      |
 
+They also accept optional `capabilities`. `generateShareQR` additionally
+accepts optional `connectionConfig`, which is returned as part of
+`HandshakeCredentials` only after encrypted transfer. `CloudflareAdapter` can
+receive `pairingCapabilities` in its constructor so the route's requirements
+are applied automatically.
+
 ## Protocol reference
 
 ### Wire sequence — `share` intent
@@ -218,22 +362,25 @@ All three high-level operations accept:
 Generator (has credentials)            Relay backend              Scanner (joining)
 ───────────────────────────            ─────────────              ─────────────────
 generate ephemeral ECDH keypair (Eg, eg)
-encode {intent:"share", handshakeId, Eg}
+encode {intent:"share", handshakeId, Eg, capabilities?}
 → QR / pair URL
 
                                                         scan QR → parse {handshakeId, Eg}
+                                                        validate required capabilities
                                                         generate ephemeral keypair (Es, es)
                                                         sharedSecret = ECDH(Eg, es)
                                                         wrappingKey  = HKDF-SHA-256(sharedSecret)
-                                  ← scanner-pub.json {pub: Es}
+                                  ← scanner-pub.json {pub: Es, capabilities?}
 
-read scanner-pub.json → Es
+read scanner-pub.json → Es + scanner capabilities
 sharedSecret = ECDH(Es, eg)
 wrappingKey  = HKDF-SHA-256(sharedSecret)       [same key, by ECDH commutativity]
-encrypt {remotePath, passphrase?} with wrappingKey
+validate required capabilities
+encrypt {remotePath, passphrase?, connectionConfig?} with wrappingKey
                                   credentials.json →
                                                         read credentials.json
-                                                        decrypt → remotePath, passphrase
+                                                        decrypt → remotePath, passphrase,
+                                                                  connectionConfig?
                                                         delete scanner-pub.json, credentials.json
                                                         → configure engine and connect
 ```
@@ -244,22 +391,25 @@ encrypt {remotePath, passphrase?} with wrappingKey
 Generator (wants credentials)          Relay backend              Scanner (has credentials)
 ─────────────────────────────          ─────────────              ────────────────────────
 generate ephemeral ECDH keypair (Eg, eg)
-encode {intent:"join", handshakeId, Eg}
+encode {intent:"join", handshakeId, Eg, capabilities?}
 → QR / pair URL
 
                                                         scan QR → parse {handshakeId, Eg}
+                                                        validate required capabilities
                                                         generate ephemeral keypair (Es, es)
                                                         sharedSecret = ECDH(Eg, es)
                                                         wrappingKey  = HKDF-SHA-256(sharedSecret)
-                                  ← scanner-pub.json {pub: Es}
-                                                        encrypt {remotePath, passphrase?} with wrappingKey
+                                  ← scanner-pub.json {pub: Es, capabilities?}
+                                                        encrypt {remotePath, passphrase?,
+                                                                 connectionConfig?} with wrappingKey
                                   ← credentials.json
 
-read scanner-pub.json → Es
+read scanner-pub.json → Es + scanner capabilities
 sharedSecret = ECDH(Es, eg)
 wrappingKey  = HKDF-SHA-256(sharedSecret)
+validate required capabilities
 read credentials.json
-decrypt → remotePath, passphrase
+decrypt → remotePath, passphrase, connectionConfig?
 delete scanner-pub.json, credentials.json
 → configure engine and connect
 ```
@@ -268,26 +418,44 @@ delete scanner-pub.json, credentials.json
 
 ## Relay file formats
 
-`scanner-pub.json` — written by scanner, read by generator:
+`scanner-pub.json` — written by scanner, read by generator. The
+`capabilities` member is omitted for an empty profile:
 
 ```json
-{ "pub": "<base64url SPKI of scanner's ephemeral ECDH public key>" }
+{
+  "pub": "<base64url SPKI of scanner's ephemeral ECDH public key>",
+  "capabilities": {
+    "supported": ["mesh-routing:indirect:v1"],
+    "required": ["mesh-routing:indirect:v1"]
+  }
+}
 ```
 
-`credentials.json` — written by whichever side has credentials:
+`credentials.json` — written by whichever side has credentials. Version 1 is
+retained when neither participant requires a capability:
 
 ```json
 { "v": 1, "iv": "<base64url AES-GCM IV>", "ct": "<base64url ciphertext>" }
 ```
 
+Version 2 has the same JSON fields with `"v": 2`. Its AES-GCM additional
+authenticated data binds the intent, handshake ID, both public keys, and both
+normalized capability profiles. The additional data is not stored in the
+envelope because each participant reconstructs it from its local session.
+
 The ciphertext decrypts to:
 
 ```json
-{ "remotePath": "/team-alpha", "passphrase": "<high-entropy base58 value>" }
+{
+  "remotePath": "/team-alpha",
+  "passphrase": "<high-entropy base58 value>",
+  "connectionConfig": "<optional recipient-specific adapter configuration>"
+}
 ```
 
 `passphrase` is omitted on the wire and returned as `null` for unencrypted
-meshes.
+meshes. `connectionConfig` is also omitted unless the application supplies a
+recipient-specific final connection.
 
 ## Key derivation
 
@@ -315,12 +483,16 @@ ECDH(Eg, es) == ECDH(Es, eg)   ✓
 | Cloud access alone is not enough                   | Relay files omit `generatorPub`; deriving the wrapping key requires the invitation payload as well as a scanner private key |
 | Payload possession is sufficient to act as scanner | Treat a QR image or pair URL as a short-lived invitation and do not publish or log it                                       |
 | Session isolation                                  | Each handshake gets a fresh random `handshakeId`                                                                            |
+| Required-feature downgrade is rejected             | Both peers validate requirements; version 2 authenticates the normalized negotiation transcript                             |
 | Relay files self-destruct                          | Deleted on success by the receiving side (best-effort)                                                                      |
-| No extra server                                    | The mesh's own backend folder is the relay                                                                                  |
+| No protocol-specific relay server                  | Direct mode can use the mesh backend; protected mode can use a separately authorized bootstrap adapter                      |
 
 ## Low-level exports
 
-For custom UI flows or alternative transports:
+For custom UI flows or alternative transports, import these APIs from
+`@interocitor/core`. The QR encoding APIs, capability constants,
+`PairingCapabilities`, and `PairingCapabilityId` are also available from
+`@interocitor/core/handshake/qr`.
 
 ```ts
 // QR encoding
@@ -338,3 +510,7 @@ importECDHPublicKey(spki); // → CryptoKey
 createGeneratorSession(); // → { generatorPub, complete() }
 runScannerHandshake(adapter, payload, ownCredentials, relayBase, options);
 ```
+
+`HandshakeChannelOptions` is the low-level `options` contract. Its
+`pollIntervalMs` and `timeoutMs` defaults are 2,000 ms and 120,000 ms; its
+optional `capabilities` is the local capability profile.

@@ -12,7 +12,9 @@ Interocitor is a protocol and client library for trusted endpoints, not a
 database server. Each endpoint owns its local row state, applies application
 policy, and merges row changes. The remote mailbox behaves like a hard drive:
 it stores and returns row artifacts and durable files, but it does not query
-records, resolve conflicts, or run application logic.
+records, interpret protected contents, or resolve conflicts. A deployment may
+add a separate server-readable control plane for routing and access policy;
+that policy does not merge or query protected application records.
 
 With a non-null key source, clients encrypt payloads before the remote receives
 them. The storage provider can make data available without receiving plaintext.

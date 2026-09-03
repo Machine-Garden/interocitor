@@ -153,8 +153,12 @@ export interface R2Bucket {
 
 /** Stable mesh context supplied while selecting a durable file-body destination. */
 export interface FileBodyStorageContext {
-  /** Accepted mesh address whose durable file is being accessed. */
+  /** Canonical storage address; equal to `canonicalAddress`. */
   address: string;
+  /** Decoded route address supplied by the client. */
+  presentedAddress: string;
+  /** Stable D1, file-body, cache, and relay namespace. */
+  canonicalAddress: string;
 }
 
 /**
@@ -166,8 +170,12 @@ export interface FileBodyStorageContext {
  * opaque.
  */
 export interface FileUploadAuthorizationRequest {
-  /** Accepted mesh address whose durable-file namespace receives the write. */
+  /** Canonical storage address; equal to `canonicalAddress`. */
   address: string;
+  /** Decoded route address supplied by the client. */
+  presentedAddress: string;
+  /** Stable namespace receiving the durable-file write. */
+  canonicalAddress: string;
   /** Normalized durable-file path. */
   path: string;
   /** Client-supplied `X-Interocitor-Device-Id` value. */
@@ -196,10 +204,49 @@ export type FileUploadAuthorizationResult =
   | boolean
   | { allowed: boolean; reason?: string; status?: number };
 
-/** Information available while deciding whether a mesh address exists. */
+/** The access requested from a mesh route. */
+export type MeshAccess = "read" | "write";
+
+/** Immutable identity retained while one public mesh request is handled. */
+export interface MeshRouteIdentity {
+  /** Decoded route address supplied by the client. */
+  readonly presentedAddress: string;
+  /** Stable D1, file-body, cache, and relay namespace. */
+  readonly canonicalAddress: string;
+}
+
+/** Information supplied to an optional public mesh-route resolver. */
+export interface MeshRouteContext {
+  /** Decoded route address supplied by the client. */
+  presentedAddress: string;
+  /** Clone of the incoming request. */
+  request: Request;
+  /** Route family handling the request. */
+  surface: "io" | "notify";
+  /** Operation class determined before route resolution. */
+  access: MeshAccess;
+}
+
+/** Successful one-hop public route resolution. */
+export interface MeshRouteResolution {
+  /** Stable namespace selected for this presented address. */
+  canonicalAddress: string;
+}
+
+/** Resolve a public address to its canonical storage namespace. */
+export type MeshRouteResolver<Env = unknown> = (
+  context: MeshRouteContext,
+  env: Env,
+) => MeshRouteResolution | null | Promise<MeshRouteResolution | null>;
+
+/** Information available while deciding whether a canonical mesh address exists. */
 export interface MeshIntegrityContext {
-  /** Route segment after `/io/` or `/notify/`, preserved as the storage key. */
+  /** Canonical storage address; equal to `canonicalAddress`. */
   address: string;
+  /** Decoded route address supplied by the client. */
+  presentedAddress: string;
+  /** Stable namespace being admitted. */
+  canonicalAddress: string;
   /** Clone of the incoming request. */
   request: Request;
   /** Validate `address` with the checksum authority configured by `meshSecret`. */
@@ -211,20 +258,21 @@ export interface MeshIntegrityContext {
  *
  * Gates are OR-composed in array order. The first `true` accepts the address
  * unchanged. If every gate returns `false`, the request receives `404`; a
- * thrown or rejected gate produces `503`.
+ * thrown, rejected, or non-boolean gate result produces `503`.
  */
 export type MeshIntegrityGate<Env = unknown> = (
   context: MeshIntegrityContext,
   env: Env,
 ) => boolean | Promise<boolean>;
 
-/** The access requested from a mesh route. */
-export type MeshAccess = "read" | "write";
-
 /** An accepted mesh request passed through application middleware. */
 export interface MeshRequestContext {
-  /** Route segment requested by the client, such as `'main'`. */
+  /** Canonical storage address; equal to `canonicalAddress`. */
   address: string;
+  /** Decoded route address supplied by the client. */
+  presentedAddress: string;
+  /** Stable namespace selected for the request. */
+  canonicalAddress: string;
   /** Clone of the incoming request. */
   request: Request;
   /** Route family handling the request. */
@@ -341,6 +389,12 @@ export interface DatabaseAdapter {
  */
 export interface InterocitorRuntimeOptions<Env = unknown> {
   /**
+   * Optional authoritative one-hop mapping for public IO/notify addresses.
+   * When configured, returning `null` rejects with `404`; the runtime never
+   * falls back to using the presented address directly.
+   */
+  resolveMeshRoute?: MeshRouteResolver<Env>;
+  /**
    * Rules defining which mesh addresses exist. Required for mesh IO/notify:
    * the default empty list rejects every address with `404`.
    */
@@ -381,6 +435,7 @@ export interface InterocitorRuntimeOptions<Env = unknown> {
    *
    * Return `true` to allow, `false` to reject with default status, or an
    * explicit `{ allowed, status, reason }` object to control the response.
+   * A malformed result or unavailable configured callback returns `503`.
    */
   authorizeFileUpload?: (
     request: FileUploadAuthorizationRequest,

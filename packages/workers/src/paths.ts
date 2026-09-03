@@ -98,9 +98,9 @@ export function meshRootForPath(
  * @param path - Absolute file path.
  */
 export function cacheKeyFor(prefix: string, path: string): string {
-  const safePrefix = encodeURIComponent(prefix);
-  const safePath = path.startsWith("/") ? path : `/${path}`;
-  return `https://interocitor-cache/${safePrefix}${safePath}`;
+  const safePrefix = `p-${encodeURIComponent(prefix)}`;
+  const safePath = encodeURIComponent(path.startsWith("/") ? path : `/${path}`);
+  return `https://interocitor-cache/files/${safePrefix}/${safePath}`;
 }
 
 /**
@@ -110,7 +110,7 @@ export function cacheKeyFor(prefix: string, path: string): string {
  * caches cannot collide.
  */
 export function listingCacheKeyFor(prefix: string, path: string): string {
-  const safePrefix = encodeURIComponent(prefix);
-  const safePath = path.startsWith("/") ? path : `/${path}`;
-  return `https://interocitor-cache/listings/${safePrefix}${safePath}`;
+  const safePrefix = `p-${encodeURIComponent(prefix)}`;
+  const safePath = encodeURIComponent(path.startsWith("/") ? path : `/${path}`);
+  return `https://interocitor-cache/listings/${safePrefix}/${safePath}`;
 }

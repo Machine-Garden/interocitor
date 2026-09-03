@@ -1,0 +1,5 @@
+.next/
+.vinext/
+.wrangler/
+dist/
+public/

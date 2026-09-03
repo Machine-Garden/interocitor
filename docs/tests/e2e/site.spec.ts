@@ -21,7 +21,8 @@ test("the established landing page renders with deployment security headers", as
   await expect(page.locator('.task-example a[href="/examples/board/"]')).toBeVisible();
   await expect(page.locator('.task-example a[href="/examples/family-locator/"]')).toBeVisible();
   await expect(page.locator(".site-hero .actions a")).toHaveCount(2);
-  await expect(page.locator(".decision-choice")).toHaveCount(4);
+  await expect(page.locator(".decision-choice")).toHaveCount(5);
+  await expect(page.locator('.decision-choice[href="/auth"]')).toBeVisible();
 });
 
 test("Markdown documentation owns its content, outline, and metadata", async ({ page }) => {
@@ -29,6 +30,7 @@ test("Markdown documentation owns its content, outline, and metadata", async ({ 
     ["/trust", "Designing a trusted Interocitor mesh"],
     ["/data-boundaries", "Plan Interocitor data scope and availability"],
     ["/mailbox", "Choose and operate an Interocitor mailbox"],
+    ["/auth", "Choose an Interocitor authorization model"],
     ["/automation", "Design trusted automation with Interocitor"],
     ["/qa", "Interocitor questions and answers"],
     ["/dictionary", "Interocitor dictionary"],
@@ -64,9 +66,9 @@ test("architecture links use client-side navigation", async ({ page }) => {
   );
   documentRequests = 0;
 
-  await page.locator('.decision-choice[href="/trust"]').click();
-  await expect(page).toHaveURL(/\/trust$/);
-  await expect(page.locator(".docs-hero h1")).toContainText("who may read it");
+  await page.locator('.decision-choice[href="/auth"]').click();
+  await expect(page).toHaveURL(/\/auth$/);
+  await expect(page.locator(".docs-hero h1")).toContainText("authority that owns them");
   expect(documentRequests).toBe(0);
 });
 
@@ -144,7 +146,7 @@ test("landing and documentation stay usable at a narrow viewport", async ({ page
   await page.goto("/");
 
   const choices = page.locator(".decision-choice");
-  await expect(choices).toHaveCount(4);
+  await expect(choices).toHaveCount(5);
   await expect(choices.first()).toBeVisible();
   await expect(page.locator('.site-hero a[href="/examples/todomvc/"]')).toBeVisible();
   await expect(page.locator("#decisions h2")).toContainText("Turn the model into an architecture");

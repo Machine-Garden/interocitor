@@ -43,6 +43,8 @@ Protocol awareness can add guardrails without receiving plaintext. It does not r
 
 A predictable route such as `main` is a namespace, not a credential. Enforce application authentication and explicit mesh authorization unless the deployment is intentionally public.
 
+Use the host application's current resource policy for ordinary multi-user access. See [Access and identity](/auth) before introducing subject-specific routes or an application-managed grant chain.
+
 ### Capacity and abuse
 
 Apply request body limits and per-mesh durable-file quotas. Monitor object growth, uncompacted change history, rejected writes, and maintenance backlog.

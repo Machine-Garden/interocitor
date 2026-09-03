@@ -1,9 +1,15 @@
 # Protected mesh control
 
-Use protected mesh control when several people share one encrypted mesh but
-must have independently revocable network access. The Cloudflare Worker keeps
-a small, server-readable control plane while the Interocitor data plane remains
-client encrypted.
+Use protected mesh control when an application must issue and delegate its own
+revocable grants, or give subjects replaceable routes, independently of an
+existing identity provider's resource permissions. For ordinary multi-user
+access, keep one stable address and authorize each request through the host
+application instead; see
+[Mesh addresses and access](mesh-access.md#authorize-people-through-the-host-application).
+
+In the specialized grant model, several people share one encrypted mesh while
+the Cloudflare Worker keeps a small, server-readable control plane. The
+Interocitor data plane remains client encrypted.
 
 This is a reference-monitor boundary, not another Interocitor mesh:
 

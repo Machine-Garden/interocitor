@@ -666,8 +666,19 @@ export function HomeLanding() {
                 </div>
                 <span aria-hidden="true">↗</span>
               </SpaLink>
-              <SpaLink className="decision-choice" href="automation.html">
+              <SpaLink className="decision-choice" href="auth.html">
                 <span>04</span>
+                <div>
+                  <strong>Choose access and identity</strong>
+                  <p>
+                    Keep ordinary authorization with the host, or adopt application-managed grants
+                    when delegation truly requires them.
+                  </p>
+                </div>
+                <span aria-hidden="true">↗</span>
+              </SpaLink>
+              <SpaLink className="decision-choice" href="automation.html">
+                <span>05</span>
                 <div>
                   <strong>Design trusted automation</strong>
                   <p>
@@ -775,6 +786,7 @@ export function HomeLanding() {
               <SpaLink href="trust.html">Trust &amp; keys</SpaLink>
               <SpaLink href="data-boundaries.html">Rows, files &amp; scale</SpaLink>
               <SpaLink href="mailbox.html">Mailbox operations</SpaLink>
+              <SpaLink href="auth.html">Access &amp; identity</SpaLink>
               <SpaLink href="automation.html">Trusted automation</SpaLink>
             </section>
             <section>

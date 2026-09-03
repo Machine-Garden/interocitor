@@ -54,9 +54,11 @@ export default withInterocitor<Env>(appWorker, {
 });
 ```
 
-The exact bearer comparison is a small working application policy. Replace
-the authorizer with the AuthN/AuthZ system used by your host application. See
-[Mesh addresses and access](docs/mesh-access.md).
+The exact bearer comparison is a small working application policy. For an
+ordinary multi-user deployment, replace it with the host application's current
+identity and resource authorization. Interocitor enforces that decision; the
+host owns provider login, sessions, membership checks, and revocation
+freshness. See [Mesh addresses and access](docs/mesh-access.md).
 
 The Cloudflare adapter base URL is `/sync/io/main`. The QR handshake relay base
 is a separate app-level logical path such as `/Taska`.

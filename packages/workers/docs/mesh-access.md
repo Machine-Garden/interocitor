@@ -103,11 +103,31 @@ If every gate returns literal `false`, the Worker returns `404` before
 middleware or storage. A gate exception or non-boolean return value returns
 `503`; only literal `true` admits the canonical address.
 
-## Apply application authentication and authorization
+## Authorize people through the host application
 
-The application decides how a request becomes a subject and what that subject
-may do. The authorizer can call any bearer-token verifier, session service,
-identity provider, or policy engine:
+For an ordinary multi-user deployment, keep one stable mesh address and use
+the host application's current subject and resource authorization. This is the
+recommended operational revocation path: when the host stops granting a person
+access, subsequent IO requests and new notify connections are denied. It needs
+neither a per-subject route nor an Interocitor grant chain.
+
+Interocitor runs the middleware and enforces its decision. It does not perform
+provider login, keep OAuth credentials or entitlement caches current, decide
+repository or team membership, or own the application's approval UI. Those are
+host-application responsibilities. Authentication must produce a stable,
+server-verified subject; do not accept a subject or author claimed by the
+client.
+
+For example, a host using a GitHub App can authenticate the person with a
+[user-to-server token](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-with-a-github-app-on-behalf-of-a-user),
+then map that person's current repository, organization, or team access to a
+canonical mesh. An installation token represents the app installation rather
+than the calling person. Exchange provider credentials for a host session and
+keep them out of mesh passphrases, QR payloads, and pairing
+`connectionConfig`; each participant signs in as themselves.
+
+The authorizer can call the host's bearer verifier, session service, identity
+provider adapter, or policy engine:
 
 ```ts
 import { createInterocitorMount, createMeshAuthorizationMiddleware } from "@interocitor/workers";
@@ -144,6 +164,16 @@ The four results are:
 | `deny`     | `403` | `403` | The request has no mesh access.                                                     |
 
 An authorizer exception or invalid result returns `503`.
+
+`createMeshAuthorizationMiddleware` maps `deny` to `403` (or concealed `404`);
+it does not implement an interactive login flow. If a client must be prompted
+to sign in, the host or an earlier custom `MeshMiddleware` owns the `401`
+challenge and provider redirect before authorization is evaluated.
+
+This boundary revokes future Worker access. It cannot erase plaintext or keys
+already held by a client, and it does not close a notify socket that was
+admitted earlier. Use short connection lifetimes or a subject-aware relay when
+the deployment needs bounded socket-revocation latency.
 
 ### Conceal accepted addresses from denied callers
 

@@ -1,7 +1,7 @@
 ---
 title: Design trusted automation with Interocitor
 description: Add a worker or agent as a trusted endpoint while preserving key custody, isolation, coordination, and delivery boundaries.
-kicker: Architecture decision 04 · Trusted automation
+kicker: Architecture decision 05 · Trusted automation
 heading: Treat automation as a trusted peer, not a mailbox feature.
 lede: A worker or agent can observe local rows, act, and write results through the same mesh. Once it holds the key, it is inside the plaintext boundary. CRDT convergence still does not make work exactly once.
 ---

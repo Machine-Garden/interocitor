@@ -93,6 +93,8 @@ The mesh key protects payload contents. A protocol-aware Worker’s request poli
 
 Authorization does not give the Worker plaintext, and encryption does not prove that a caller should be admitted. Neither layer becomes a per-row or per-file ACL.
 
+Choose the owner and revocation model in [Access and identity](/auth).
+
 ## Same artifacts, different backend guardrails {#adapter-boundary}
 
 WebDAV exposes portable file operations. A Cloudflare Worker carries the same protected artifacts but can recognize protocol paths and reject some invalid states.

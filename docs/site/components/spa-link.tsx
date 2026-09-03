@@ -11,7 +11,7 @@ function cleanPath(href: string): string {
 
   const cleaned = href
     .replace(/^index\.html(?=#|$)/, "/")
-    .replace(/^(how-it-works|trust|data-boundaries|mailbox|automation)\.html/, "/$1");
+    .replace(/^(how-it-works|trust|data-boundaries|mailbox|auth|automation)\.html/, "/$1");
   return cleaned.startsWith("/") ? cleaned : `/${cleaned}`;
 }
 

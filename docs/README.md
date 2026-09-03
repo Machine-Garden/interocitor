@@ -26,6 +26,8 @@ Reader-facing documentation is Markdown:
   sizing;
 - `site/content/mailbox.md` owns mailbox placement and operational
   responsibility;
+- `site/content/auth.md` owns the choice between host-owned authorization and
+  specialized application-managed grants;
 - `site/content/automation.md` owns trusted processors, isolation, and delivery
   semantics;
 - `QA.md`, `dictionary.md`, and `flows.md` are rendered directly as reference
@@ -78,6 +80,7 @@ security headers, redirects, metadata, and live-demo reachability.
 | `/trust`           | Which endpoints may read the mesh, and how will its key lifecycle be handled? |
 | `/data-boundaries` | What belongs in rows, files, and separate meshes?                             |
 | `/mailbox`         | Where should the mailbox run, and who owns its operational risks?             |
+| `/auth`            | Should mesh access follow host policy or application-managed grants?          |
 | `/automation`      | How should a trusted worker or agent coordinate and isolate its work?         |
 | `/qa`              | What are the plain-language product and threat-boundary answers?              |
 | `/dictionary`      | What does each protocol and security term mean?                               |

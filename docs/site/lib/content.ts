@@ -1,4 +1,5 @@
 import automationSource from "../content/automation.md";
+import authSource from "../content/auth.md";
 import dataBoundariesSource from "../content/data-boundaries.md";
 import howItWorksSource from "../content/how-it-works.md";
 import mailboxSource from "../content/mailbox.md";
@@ -45,6 +46,12 @@ const sources: SourceRecord[] = [
     group: "Architecture",
   },
   { slug: "mailbox", navLabel: "Mailbox", source: mailboxSource, group: "Architecture" },
+  {
+    slug: "auth",
+    navLabel: "Access & identity",
+    source: authSource,
+    group: "Architecture",
+  },
   {
     slug: "automation",
     navLabel: "Automation",

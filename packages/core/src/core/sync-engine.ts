@@ -40,6 +40,8 @@ import type {
   SealedFile,
   RetentionPolicy,
   QuarantinedOfflineChanges,
+  ChangeObservation,
+  ChangeObservationListener,
 } from "./types.ts";
 
 import type { HLC } from "./types.ts";
@@ -77,6 +79,7 @@ import {
 } from "./compaction.ts";
 import { createDeviceId } from "./ids.ts";
 import { resolveRetentionPolicy } from "./retention.ts";
+import { cloneChangeEntry, cloneRow, createRowChangeEffect } from "./change-effects.ts";
 
 // ─── Config ──────────────────────────────────────────────────────────
 
@@ -179,6 +182,7 @@ export interface InterocitorInitContext<
   queryWhere<K extends keyof S & string>(table: K, clause: WhereClause): Promise<S[K][]>;
   table<K extends keyof S & string>(name: K): Table<S[K]>;
   on(listener: SyncEventListener): () => void;
+  observeChanges(listener: ChangeObservationListener): () => void;
   getDeviceId(): string;
   getMeshId(): string | undefined;
   isEncrypted(): boolean;
@@ -215,6 +219,13 @@ type RowCacheEntry = {
   row?: Row | null;
   error?: Error;
   promise?: Promise<Row | undefined>;
+};
+
+type PendingLocalRowEffect = {
+  table: string;
+  rowId: string;
+  before?: Row;
+  after: Row;
 };
 
 export class Interocitor<
@@ -279,6 +290,9 @@ export class Interocitor<
 
   // Event listeners
   private listeners: Set<SyncEventListener> = new Set();
+  private changeObservationListeners: Set<ChangeObservationListener> = new Set();
+  private pendingLocalEffects: Map<string, PendingLocalRowEffect> = new Map();
+  private pendingLocalObservationListeners: Set<ChangeObservationListener> | null = null;
   private readonly schema?: DatabaseSchemaDefinition<S>;
   private readonly dbName: string;
   private deviceIdConfigured = false;
@@ -415,6 +429,8 @@ export class Interocitor<
     await this.refreshHlcFromLocal();
     const tableName = table as string;
     const current = await this.local.getRow(tableName, rowId);
+    const captureObservation = this.shouldCaptureLocalObservation();
+    const before = captureObservation && current ? cloneRow(current) : undefined;
     const isResurrection = current?._meta.deleted === true;
     // Clone row with namespaced shape. New rows and resurrected tombstones start
     // with empty payload so a partial insert after delete cannot republish
@@ -447,8 +463,12 @@ export class Interocitor<
 
     const op = this.rowToSyncOp(row);
     const hlc = this.getRowHlc(row);
-    if (op && hlc) await this.commitLocalMutation(row, op, hlc);
-    else await this.local.putRow(row);
+    if (op && hlc) {
+      await this.commitLocalMutation(row, op, hlc, captureObservation, before);
+    } else {
+      await this.local.putRow(row);
+      if (!this.pendingBatch) this.pendingLocalObservationListeners = null;
+    }
     this.knownTables.add(tableName);
 
     this.emit({ type: "change", table: tableName, rowId, row });
@@ -464,6 +484,8 @@ export class Interocitor<
     const tableName = table as string;
     const current = await this.local.getRow(tableName, rowId);
     if (!current || current._meta.deleted) return;
+    const captureObservation = this.shouldCaptureLocalObservation();
+    const before = captureObservation ? cloneRow(current) : undefined;
 
     const nextHlc = hlcNow(this.hlc);
     this.hlc = nextHlc;
@@ -475,8 +497,12 @@ export class Interocitor<
     current.payload = {};
     const op = this.rowToSyncOp(current);
     const hlc = this.getRowHlc(current);
-    if (op && hlc) await this.commitLocalMutation(current, op, hlc);
-    else await this.local.putRow(current);
+    if (op && hlc) {
+      await this.commitLocalMutation(current, op, hlc, captureObservation, before);
+    } else {
+      await this.local.putRow(current);
+      if (!this.pendingBatch) this.pendingLocalObservationListeners = null;
+    }
     this.emit({ type: "delete", table: tableName, rowId });
   }
 
@@ -486,14 +512,28 @@ export class Interocitor<
    * implicit period of `batchWindowMs`. Either way the result is one
    * ChangeEntry per batch instead of one per write.
    */
-  private async commitLocalMutation(row: Row, op: Op, hlc: string): Promise<void> {
-    this.pendingBatch = await this.local.commitLocalMutation(row, {
-      id: generateId("chg"),
-      ts: Date.now(),
-      device: this.deviceId,
-      hlc,
-      ops: [op],
-    });
+  private async commitLocalMutation(
+    row: Row,
+    op: Op,
+    hlc: string,
+    captureObservation: boolean,
+    before: Row | undefined,
+  ): Promise<void> {
+    try {
+      this.pendingBatch = await this.local.commitLocalMutation(row, {
+        id: generateId("chg"),
+        ts: Date.now(),
+        device: this.deviceId,
+        hlc,
+        ops: [op],
+      });
+    } catch (error) {
+      if (!this.pendingBatch) this.pendingLocalObservationListeners = null;
+      throw error;
+    }
+    if (captureObservation) {
+      this.recordPendingLocalEffect(row._meta.table, row._meta.rowId, before, row);
+    }
     if (this.isBatching()) return;
     if (this.config.batchWindowMs <= 0) {
       await this.flushPendingBatch();
@@ -802,6 +842,7 @@ export class Interocitor<
       queryWhere: this.queryWhereNow.bind(this),
       table: <K extends keyof S & string>(name: K) => new Table(context as any, name),
       on: this.on.bind(this),
+      observeChanges: this.observeChanges.bind(this),
       getDeviceId: this.getDeviceId.bind(this),
       getMeshId: this.getMeshId.bind(this),
       isEncrypted: this.isEncrypted.bind(this),
@@ -1167,6 +1208,8 @@ export class Interocitor<
   private async loadLocalState(): Promise<void> {
     this.tables = {};
     this.knownTables = new Set();
+    this.pendingLocalEffects.clear();
+    this.pendingLocalObservationListeners = null;
     const pendingBatch = await this.local.getMeta("pendingBatch");
     this.pendingBatch =
       pendingBatch && typeof pendingBatch === "object"
@@ -1354,6 +1397,8 @@ export class Interocitor<
     await this.local.withLock(SYNC_STATE_LOCK, async () => {
       this.clearBatchTimer();
       this.pendingBatch = null;
+      this.pendingLocalEffects.clear();
+      this.pendingLocalObservationListeners = null;
       await ChangeObservationLedger.clearAll(this.local);
       if (this.schema?.version !== undefined) {
         await this.local.setMeta("schema:version", this.schema.version);
@@ -1417,6 +1462,57 @@ export class Interocitor<
   on(listener: SyncEventListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /**
+   * Observe locally promoted and remotely decoded change entries for this
+   * engine session. Observations are endpoint-relative and best effort: core
+   * does not persist, replay, authenticate, or globally order them.
+   *
+   * Errors thrown by a listener do not interrupt local writes or synchronization.
+   */
+  observeChanges(listener: ChangeObservationListener): () => void {
+    this.changeObservationListeners.add(listener);
+    return () => {
+      this.changeObservationListeners.delete(listener);
+      this.pendingLocalObservationListeners?.delete(listener);
+    };
+  }
+
+  private emitChangeObservation(
+    observation: ChangeObservation,
+    listeners: ReadonlySet<ChangeObservationListener> = this.changeObservationListeners,
+  ): void {
+    for (const listener of listeners) {
+      try {
+        listener(structuredClone(observation));
+      } catch {
+        // Observation is deliberately outside the row/sync correctness path.
+      }
+    }
+  }
+
+  private recordPendingLocalEffect(
+    table: string,
+    rowId: string,
+    before: Row | undefined,
+    after: Row,
+  ): void {
+    const key = JSON.stringify([table, rowId]);
+    const current = this.pendingLocalEffects.get(key);
+    this.pendingLocalEffects.set(key, {
+      table,
+      rowId,
+      before: current ? current.before : before ? cloneRow(before) : undefined,
+      after: cloneRow(after),
+    });
+  }
+
+  private shouldCaptureLocalObservation(): boolean {
+    if (!this.pendingBatch && this.pendingLocalObservationListeners === null) {
+      this.pendingLocalObservationListeners = new Set(this.changeObservationListeners);
+    }
+    return (this.pendingLocalObservationListeners?.size ?? 0) > 0;
   }
 
   private emit(event: SyncEvent): void {
@@ -2553,6 +2649,23 @@ export class Interocitor<
     const pending = await this.local.promotePendingBatch();
     if (!pending) return;
     this.pendingBatch = null;
+    const effects = [...this.pendingLocalEffects.values()]
+      .map(({ table, rowId, before, after }) => createRowChangeEffect(table, rowId, before, after))
+      .filter((effect) => effect !== null);
+    const observationListeners = this.pendingLocalObservationListeners;
+    this.pendingLocalEffects.clear();
+    this.pendingLocalObservationListeners = null;
+    if (effects.length > 0 && observationListeners && observationListeners.size > 0) {
+      this.emitChangeObservation(
+        {
+          source: "local",
+          observedAt: Date.now(),
+          change: cloneChangeEntry(pending),
+          effects,
+        },
+        observationListeners,
+      );
+    }
     this.scheduleFlush();
   }
 
@@ -3114,6 +3227,10 @@ export class Interocitor<
         knownTables: this.knownTables,
         schema: this.schema,
         emit: (e) => this.emit(e),
+        observeChange:
+          this.changeObservationListeners.size > 0
+            ? (observation) => this.emitChangeObservation(observation)
+            : undefined,
         ensureRowsCached: (ops) => this.ensureRowsCached(ops),
         poisonRemote: (err, path) => this.poisonRemote(err, path),
         loadOrCreateManifest: async () => {

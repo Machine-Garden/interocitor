@@ -41,6 +41,20 @@
       .muted {
         color: #666;
       }
+
+      .example-nav {
+        margin-top: 32px;
+        padding-top: 20px;
+        border-top: 1px solid #ddd;
+      }
+
+      .example-nav ul {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 18px;
+        padding: 0;
+        list-style: none;
+      }
     </style>
   </head>
   <body>
@@ -135,6 +149,18 @@
     </section>
 
     <p id="status">Disconnected.</p>
+
+    <nav class="example-nav" aria-labelledby="more-examples-title">
+      <h2 id="more-examples-title">Explore the other examples</h2>
+      <ul>
+        <li><a href="../../docs/examples/todomvc/">Live in-memory TodoMVC</a></li>
+        <li><a href="../../docs/examples/chat/">Live encrypted chat</a></li>
+        <li><a href="../../docs/examples/board/">Live shared board</a></li>
+        <li><a href="../../docs/examples/family-locator/">Protected family locator</a></li>
+        <li><a href="../todo-webdav/">TODO over WebDAV</a></li>
+        <li><a href="../biometric-keys/">Browser key custody</a></li>
+      </ul>
+    </nav>
 
     <script type="importmap">
       {

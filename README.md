@@ -93,6 +93,9 @@ the installed Chromium binary.
 
 ## Runnable examples
 
+- [`docs/examples/todomvc`](docs/examples/todomvc/index.html) — up to three
+  local-first clients, inspectable mailbox files, compaction, and a best-effort
+  endpoint diff journal.
 - [`docs/examples/chat`](docs/examples/chat/index.html) — two-client encrypted
   chat with an inspectable in-page mailbox and a 15-message application limit.
 - [`docs/examples/board`](docs/examples/board/index.html) — two local-first

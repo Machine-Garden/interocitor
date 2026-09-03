@@ -195,6 +195,12 @@ export type {
   // Events
   SyncEvent,
   SyncEventListener,
+  ChangeObservation,
+  ChangeObservationListener,
+  ChangeObservationSource,
+  RowChangeEffect,
+  RowChangeKind,
+  ColumnChangeEffect,
   ConnectionStatus,
   ConnectionStatusDetails,
   RemoteInvalidationPayload,

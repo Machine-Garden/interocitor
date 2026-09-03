@@ -162,6 +162,15 @@ function renderFooter(page: Page): string {
     demo === "family-locator"
       ? ""
       : `<a href="${base}examples/family-locator/">Protected family locator</a>`,
+    demo
+      ? `<a href="https://github.com/Machine-Garden/interocitor/tree/main/examples/todo-webdav#readme">TODO over WebDAV</a>`
+      : "",
+    demo
+      ? `<a href="https://github.com/Machine-Garden/interocitor/tree/main/examples/biometric-keys#readme">Browser key custody</a>`
+      : "",
+    demo
+      ? `<a href="https://github.com/Machine-Garden/interocitor/tree/main/examples/todo-cloudflare-do#readme">TODO over Cloudflare</a>`
+      : "",
   ]
     .filter(Boolean)
     .join("\n            ");

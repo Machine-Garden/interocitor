@@ -118,3 +118,12 @@ real browser.
 - [Core engine](../../packages/core/README.md)
 - [Browser helpers](../../packages/web/README.md)
 - [Internal loopback WebDAV server](../../tools/webdav-server/README.md)
+
+## Other runnable examples
+
+- [Live in-memory TodoMVC](../../docs/examples/todomvc/index.html)
+- [Live encrypted chat](../../docs/examples/chat/index.html)
+- [Live shared board](../../docs/examples/board/index.html)
+- [Protected family locator](../../docs/examples/family-locator/index.html)
+- [Browser key custody](../biometric-keys/README.md)
+- [TODO over Cloudflare](../todo-cloudflare-do/README.md)

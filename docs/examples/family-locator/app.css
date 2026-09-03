@@ -171,9 +171,132 @@
   justify-self: end;
   font-family: var(--mono);
 }
+
+.change-journal {
+  width: min(calc(100% - 40px), 1420px);
+  margin: 24px auto 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(12, 25, 22, 0.92);
+}
+
+.change-journal > header {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.75fr) minmax(360px, 1.25fr);
+  gap: clamp(28px, 6vw, 90px);
+  padding: 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.change-journal h2 {
+  margin: 0;
+  font-size: clamp(1.45rem, 2.5vw, 2.35rem);
+  letter-spacing: -0.04em;
+}
+
+.change-journal > header > p,
+.change-journal-boundary {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.65;
+}
+
+.change-journal > header > p {
+  align-self: end;
+}
+
+#change-journal-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-height: 420px;
+  margin: 0;
+  padding: 12px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+#change-journal-list > li {
+  min-width: 0;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+#change-journal-list > li:nth-child(odd) {
+  border-right: 1px solid var(--line);
+}
+
+#change-journal-list > li > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+#change-journal-list strong,
+#change-journal-list span,
+#change-journal-list small,
+.change-journal-effects p {
+  font-family: var(--mono);
+}
+
+#change-journal-list strong {
+  color: var(--ink);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+}
+
+#change-journal-list span {
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--mint);
+  background: rgba(113, 245, 189, 0.09);
+  font-size: 0.56rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.change-journal-effects p {
+  margin: 9px 0 0;
+  overflow-wrap: anywhere;
+  color: #b9c9c0;
+  font-size: 0.63rem;
+  line-height: 1.6;
+}
+
+#change-journal-list small {
+  display: block;
+  margin-top: 8px;
+  color: var(--faint);
+  font-size: 0.56rem;
+}
+
+#change-journal-list .change-journal-empty {
+  grid-column: 1 / -1;
+  border-right: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  text-align: center;
+}
+
+.change-journal-boundary {
+  padding: 14px 22px 18px;
+  border-top: 1px solid var(--line);
+}
+
 @media (max-width: 900px) {
   .locator-clients {
     grid-template-columns: 1fr;
+  }
+
+  .change-journal > header,
+  #change-journal-list {
+    grid-template-columns: 1fr;
+  }
+
+  #change-journal-list > li:nth-child(odd) {
+    border-right: 0;
   }
 }
 @media (max-width: 580px) {

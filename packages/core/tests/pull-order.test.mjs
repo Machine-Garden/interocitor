@@ -53,6 +53,7 @@ function createPullHarness({ payloads, listings, initialMetadata = {}, schema, m
   }
   const tables = {};
   const events = [];
+  const observations = [];
   const changeReads = [];
   let listIndex = 0;
   let hlc = { ts: 0, counter: 0, nodeId: "reader" };
@@ -98,6 +99,9 @@ function createPullHarness({ payloads, listings, initialMetadata = {}, schema, m
     emit(event) {
       events.push(event);
     },
+    observeChange(observation) {
+      observations.push(observation);
+    },
     async ensureRowsCached() {},
     async poisonRemote(error) {
       return error instanceof Error ? error : new Error(String(error));
@@ -109,12 +113,83 @@ function createPullHarness({ payloads, listings, initialMetadata = {}, schema, m
     metadata,
     tables,
     events,
+    observations,
     changeReads,
     async pull() {
       hlc = await pull(context);
     },
   };
 }
+
+test("pull observes a stale entry even when every incoming field loses", async () => {
+  const stale = "000000000000010-0000-writer-stale";
+  const current = "000000000000020-0000-writer-current";
+  const stalePath = changePath(stale, "chg_stale");
+  const currentPath = changePath(current, "chg_current");
+  const harness = createPullHarness({
+    payloads: new Map([
+      [stalePath, changePayload(stale, "chg_stale", "stale-value")],
+      [currentPath, changePayload(current, "chg_current", "current-value")],
+    ]),
+    listings: [[currentPath], [stalePath, currentPath]],
+  });
+
+  await harness.pull();
+  await harness.pull();
+
+  assert.equal(harness.tables.tasks["shared-task"].payload.state.value, "current-value");
+  assert.equal(harness.observations.length, 2);
+  assert.equal(harness.observations[0].effects[0].kind, "create");
+  assert.equal(harness.observations[1].fileName, stalePath.split("/").at(-1));
+  assert.deepEqual(harness.observations[1].effects, []);
+});
+
+test("pull reports only the columns that win a mixed remote merge", async () => {
+  const first = "000000000000020-0000-writer-first";
+  const mixed = "000000000000030-0000-writer-mixed";
+  const firstPath = changePath(first, "chg_first");
+  const mixedPath = changePath(mixed, "chg_mixed");
+  const harness = createPullHarness({
+    payloads: new Map([
+      [
+        firstPath,
+        payloadForOps(first, "chg_first", [
+          {
+            type: "upsert",
+            table: "tasks",
+            rowId: "shared-task",
+            columns: {
+              title: { value: "current-title", hlc: first },
+              count: { value: 1, hlc: "000000000000005-0000-writer-first" },
+            },
+          },
+        ]),
+      ],
+      [
+        mixedPath,
+        payloadForOps(mixed, "chg_mixed", [
+          {
+            type: "upsert",
+            table: "tasks",
+            rowId: "shared-task",
+            columns: {
+              title: { value: "stale-title", hlc: "000000000000010-0000-writer-mixed" },
+              count: { value: 2, hlc: mixed },
+            },
+          },
+        ]),
+      ],
+    ]),
+    listings: [[firstPath, mixedPath]],
+  });
+
+  await harness.pull();
+
+  assert.equal(harness.observations.length, 2);
+  assert.deepEqual(Object.keys(harness.observations[1].effects[0].fields), ["count"]);
+  assert.equal(harness.observations[1].effects[0].fields.count.before.value, 1);
+  assert.equal(harness.observations[1].effects[0].fields.count.after.value, 2);
+});
 
 function permutations(values) {
   if (values.length <= 1) return [values];

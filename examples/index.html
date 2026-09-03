@@ -26,6 +26,22 @@
     <p>Run <code>yarn demo:todo</code>, then choose the flow you want to explore.</p>
     <ul>
       <li>
+        <a href="/docs/examples/todomvc/">Live in-memory TodoMVC</a> — up to three clients,
+        inspectable mailbox files, compaction, and a live endpoint diff journal.
+      </li>
+      <li>
+        <a href="/docs/examples/chat/">Live encrypted chat</a> — two clients exchange protected
+        messages and enforce an application-owned history limit.
+      </li>
+      <li>
+        <a href="/docs/examples/board/">Live shared board</a> — independent local card edits
+        converge after an explicit sync.
+      </li>
+      <li>
+        <a href="/docs/examples/family-locator/">Protected family locator</a> — encrypted location
+        rows, freshness and safety boundaries, and endpoint-local change observation.
+      </li>
+      <li>
         <a href="/examples/todo-webdav/index.html">TODO app over local WebDAV</a> — open it in two
         tabs to create and join an encrypted row-sync session.
       </li>
@@ -35,14 +51,13 @@
         >
         — open it once to compare the application's three key-custody labels.
       </li>
+      <li>
+        <a href="/examples/todo-cloudflare-do/index.html">TODO app over Cloudflare</a> — run an
+        application-owned Worker using D1, R2, and optional realtime invalidation.
+      </li>
     </ul>
     <p>
-      The
-      <a
-        href="https://github.com/Machine-Garden/interocitor/tree/main/examples/todo-cloudflare-do#readme"
-        >Cloudflare D1/R2 TODO example</a
-      >
-      has its own Worker provisioning and local-run instructions.
+      The Cloudflare example requires its linked Worker provisioning and local-run instructions.
     </p>
   </body>
 </html>

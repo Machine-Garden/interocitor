@@ -141,6 +141,14 @@
       .warning {
         color: var(--warn);
       }
+
+      .example-nav ul {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 18px;
+        padding: 0;
+        list-style: none;
+      }
     </style>
   </head>
   <body>
@@ -221,6 +229,19 @@
           available ceremony and <code>largeBlob</code> support.
         </p>
       </section>
+
+      <nav class="panel example-nav" aria-labelledby="more-examples-title" style="margin-top: 18px">
+        <span class="eyebrow">More demos</span>
+        <h2 id="more-examples-title">Explore the other examples</h2>
+        <ul>
+          <li><a href="../../docs/examples/todomvc/">Live in-memory TodoMVC</a></li>
+          <li><a href="../../docs/examples/chat/">Live encrypted chat</a></li>
+          <li><a href="../../docs/examples/board/">Live shared board</a></li>
+          <li><a href="../../docs/examples/family-locator/">Protected family locator</a></li>
+          <li><a href="../todo-webdav/">TODO over WebDAV</a></li>
+          <li><a href="../todo-cloudflare-do/">TODO over Cloudflare</a></li>
+        </ul>
+      </nav>
     </main>
 
     <script type="module" src="./app.js"></script>

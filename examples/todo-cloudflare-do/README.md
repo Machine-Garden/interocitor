@@ -226,3 +226,12 @@ Workers workspace. Rebuild before every deployment.
 - [Core engine](../../packages/core/README.md)
 - [Browser helpers](../../packages/web/README.md)
 - [Workers runtime](../../packages/workers/README.md)
+
+## Other runnable examples
+
+- [Live in-memory TodoMVC](../../docs/examples/todomvc/index.html)
+- [Live encrypted chat](../../docs/examples/chat/index.html)
+- [Live shared board](../../docs/examples/board/index.html)
+- [Protected family locator](../../docs/examples/family-locator/index.html)
+- [TODO over WebDAV](../todo-webdav/README.md)
+- [Browser key custody](../biometric-keys/README.md)

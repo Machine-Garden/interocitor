@@ -12,6 +12,7 @@ import type {
   ChangesHead,
   SyncEvent,
   DatabaseSchemaDefinition,
+  ChangeObservation,
 } from "./types.ts";
 import type { HLC } from "./types.ts";
 import { hlcParse, hlcReceive, hlcSerialize } from "./hlc.ts";
@@ -25,6 +26,7 @@ import {
   changeFileHlc,
   compareChangeFiles,
 } from "./change-observation.ts";
+import { captureRowsForOps, cloneChangeEntry, effectsFromCapturedRows } from "./change-effects.ts";
 
 export interface PullContext {
   adapter: StorageAdapter;
@@ -37,6 +39,7 @@ export interface PullContext {
   knownTables: Set<string>;
   schema?: DatabaseSchemaDefinition;
   emit: (event: SyncEvent) => void;
+  observeChange?: (observation: ChangeObservation) => void;
   ensureRowsCached: (ops: Op[]) => Promise<void>;
   poisonRemote: (error: unknown, path?: string) => Promise<Error>;
   loadOrCreateManifest: () => Promise<void>;
@@ -111,6 +114,7 @@ export async function pull(ctx: PullContext): Promise<HLC> {
         hlc = hlcReceive(hlc, remoteHlc);
 
         await ctx.ensureRowsCached(entry.ops);
+        const captured = ctx.observeChange ? captureRowsForOps(tables, entry.ops) : null;
         const affected = applyChangeEntry(
           tables,
           entry,
@@ -121,6 +125,15 @@ export async function pull(ctx: PullContext): Promise<HLC> {
           await local.putRows(affected);
           totalMerged += affected.length;
           emitAffectedRows(affected, knownTables, emit);
+        }
+        if (ctx.observeChange && captured) {
+          ctx.observeChange({
+            source: "remote",
+            observedAt: Date.now(),
+            fileName: file.name,
+            change: cloneChangeEntry(entry),
+            effects: effectsFromCapturedRows(tables, captured),
+          });
         }
 
         const lateChange = observation.observe(file.name, entry.hlc);

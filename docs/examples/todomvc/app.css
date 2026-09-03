@@ -75,6 +75,7 @@ a {
 .intro,
 .mesh-control,
 .demo-stage,
+.change-journal,
 .explanation,
 .page-footer {
   width: min(calc(100% - 40px), 1500px);
@@ -748,6 +749,108 @@ a {
   color: #f3f4f6;
 }
 
+.change-journal {
+  margin-top: clamp(56px, 7vw, 96px);
+  overflow: hidden;
+  border: 1px solid #d5d9df;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: 0 18px 42px rgba(17, 24, 39, 0.08);
+}
+
+.change-journal > header {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.72fr) minmax(320px, 1.28fr);
+  gap: clamp(28px, 6vw, 90px);
+  padding: 24px 28px;
+  border-bottom: 1px solid var(--line);
+}
+
+.change-journal h2 {
+  margin: 0;
+  font-size: clamp(1.45rem, 2.4vw, 2.25rem);
+  letter-spacing: -0.04em;
+}
+
+.change-journal > header > p {
+  align-self: end;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+#change-journal-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-height: 440px;
+  margin: 0;
+  padding: 14px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+#change-journal-list > li {
+  min-width: 0;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+#change-journal-list > li:nth-child(odd) {
+  border-right: 1px solid var(--line);
+}
+
+#change-journal-list > li > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+#change-journal-list strong,
+#change-journal-list span,
+#change-journal-list small {
+  font-family: var(--mono);
+}
+
+#change-journal-list strong {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+#change-journal-list span {
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--green);
+  background: rgba(47, 143, 104, 0.1);
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.change-journal-effects p {
+  margin: 9px 0 0;
+  overflow-wrap: anywhere;
+  color: #374151;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  line-height: 1.55;
+}
+
+#change-journal-list small {
+  display: block;
+  margin-top: 8px;
+  color: #8b8b8b;
+  font-size: 0.58rem;
+}
+
+#change-journal-list .change-journal-empty {
+  grid-column: 1 / -1;
+  border-right: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
 .explanation {
   display: grid;
   grid-template-columns: minmax(220px, 0.75fr) minmax(420px, 1.25fr);
@@ -952,8 +1055,17 @@ code {
   }
 
   .demo-stage,
+  .change-journal > header,
   .explanation {
     grid-template-columns: 1fr;
+  }
+
+  #change-journal-list {
+    grid-template-columns: 1fr;
+  }
+
+  #change-journal-list > li:nth-child(odd) {
+    border-right: 0;
   }
 
   .client-pane[data-client="client-2"] {

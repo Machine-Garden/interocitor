@@ -2,6 +2,7 @@ import {
   Interocitor,
   MemoryLocalStore,
   types,
+  type ChangeObservation,
   type DatabaseSchemaDefinition,
 } from "../../../packages/core/src/index.ts";
 import { MemoryAdapter } from "../../../packages/core/src/adapters/memory.ts";
@@ -88,10 +89,13 @@ const compactButton = required<HTMLButtonElement>("#compact-demo");
 const addClientControl = required<HTMLElement>("#add-client-control");
 const addClientButton = required<HTMLButtonElement>("#add-client-demo");
 const resetButton = required<HTMLButtonElement>("#reset-demo");
+const changeJournal = required<HTMLOListElement>("#change-journal-list");
 
 let mutationQueue = Promise.resolve();
 let selectedFilePath: string | null = null;
 let compacting = false;
+const observedChanges: Array<{ client: Client; observation: ChangeObservation }> = [];
+const MAX_OBSERVED_CHANGES = 18;
 
 function getClient(id: ClientId): Client {
   const client = clients.find((candidate) => candidate.id === id);
@@ -130,6 +134,58 @@ function visibleTodos(client: Client, all: Todo[]): Todo[] {
   if (client.filter === "active") return all.filter((todo) => !todo.done);
   if (client.filter === "completed") return all.filter((todo) => todo.done);
   return all;
+}
+
+function formatObservedValue(value: unknown): string {
+  if (value === undefined) return "∅";
+  const encoded = JSON.stringify(value);
+  return encoded === undefined ? String(value) : encoded;
+}
+
+function renderChangeJournal(): void {
+  const entries = observedChanges.map(({ client, observation }) => {
+    const item = document.createElement("li");
+    const heading = document.createElement("div");
+    const clientLabel = document.createElement("strong");
+    const source = document.createElement("span");
+    clientLabel.textContent = client.label;
+    source.textContent = observation.source;
+    heading.append(clientLabel, source);
+
+    const effects = document.createElement("div");
+    effects.className = "change-journal-effects";
+    if (observation.effects.length === 0) {
+      const noEffect = document.createElement("p");
+      noEffect.textContent = "No fields changed on this endpoint.";
+      effects.append(noEffect);
+    }
+    for (const effect of observation.effects) {
+      const row = document.createElement("p");
+      const fields = Object.entries(effect.fields)
+        .map(
+          ([name, transition]) =>
+            `${name}: ${formatObservedValue(transition.before?.value)} → ${formatObservedValue(transition.after?.value)}`,
+        )
+        .join(" · ");
+      row.textContent = `${effect.kind} ${effect.table}/${effect.rowId}${fields ? ` · ${fields}` : ""}`;
+      effects.append(row);
+    }
+
+    const metadata = document.createElement("small");
+    const attempted = observation.change.ops.length;
+    metadata.textContent = `${attempted} attempted ${attempted === 1 ? "operation" : "operations"} · ${new Date(observation.observedAt).toLocaleTimeString()}`;
+    item.append(heading, effects, metadata);
+    return item;
+  });
+  changeJournal.replaceChildren(...entries);
+}
+
+function observeClient(client: Client): void {
+  client.db.observeChanges((observation) => {
+    observedChanges.unshift({ client, observation });
+    observedChanges.splice(MAX_OBSERVED_CHANGES);
+    renderChangeJournal();
+  });
 }
 
 type FilesystemNode = {
@@ -412,6 +468,8 @@ function bindClient(client: Client): void {
   const clearCompleted = required<HTMLButtonElement>("[data-clear-completed]", client.root);
   const toggleConnectionButton = connectionButton(client);
   const filterButtons = [...client.root.querySelectorAll<HTMLButtonElement>("[data-filter]")];
+
+  observeClient(client);
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();

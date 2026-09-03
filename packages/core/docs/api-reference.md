@@ -54,6 +54,7 @@ fields; use `keySource: null` for an unencrypted mesh.
 | `getManifest()`                                   | Current in-memory manifest or `null`.                                                                                                                                                                                             |
 | `getMeshId()` / `getDeviceId()` / `isEncrypted()` | Current identity and encryption state.                                                                                                                                                                                            |
 | `on(listener)`                                    | Subscribe to `SyncEvent`; returns an unsubscribe function.                                                                                                                                                                        |
+| `observeChanges(listener)`                        | Observe live local and remote change entries plus their net effect on this endpoint; returns an unsubscribe function.                                                                                                             |
 
 The full connect pipeline applies `connectStageTimeoutMs` to its named stages.
 This is not a deadline around every adapter request: the reload head probe and
@@ -112,6 +113,44 @@ commutative, associative, and idempotent to preserve convergence. See
 reads hide tombstoned rows, while snapshots retain tombstones so an older
 queued write cannot resurrect deleted data. Reusing the same row ID starts a
 new row incarnation; fields from the deleted incarnation do not carry over.
+
+### Observe changes
+
+Use `observeChanges` when application code needs the attempted CRDT operations
+and their effective field changes at the merge boundary:
+
+```ts
+const observations: ChangeObservation[] = [];
+const unsubscribe = db.observeChanges((observation) => {
+  observations.push(observation);
+});
+```
+
+One observation represents one remotely decoded `ChangeEntry` or one promoted
+local batch. Its `effects` contain one net transition per affected row. Each
+field includes its before and/or after `ColumnEntry`; changing only the CRDT
+timestamp is still an effect because it can influence a later merge. A remote
+entry whose operations all lose is observable with an empty `effects` array.
+`fileName` is present only for remote observations.
+
+The feed is live and endpoint-relative. A subscription starts with the next
+local batch; it does not join a batch that is already open or recover a pending
+batch from an earlier session. Core does not persist or replay historical
+observations, emit history while installing a snapshot, authenticate the
+claimed `change.device` or `change.user`, prove that the remote disclosed every
+change, or establish global chronology. TypeScript Core does not populate
+`change.user` for local mutations. A remote file can be delivered again
+if pull applied it but failed before persisting its receipt, so consumers that
+persist observations should tolerate gaps and duplicates. `observedAt` is this
+endpoint's callback time; the entry HLC remains conflict order rather than a
+trusted wall clock. Errors thrown by a listener do not interrupt row writes or
+synchronization, and each listener receives a detached copy it cannot use to
+mutate engine state. Callbacks are not awaited; asynchronous work and rejected
+promises remain the listener's responsibility.
+
+Persisting observations copies plaintext current and historical values outside
+the row store. The application owns storage security, redaction, retention,
+failure handling, and any stronger audit or authorship guarantees.
 
 ### Schema typing
 

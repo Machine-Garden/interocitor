@@ -66,6 +66,51 @@ export interface ChangeEntry {
   ops: Op[];
 }
 
+// ─── Change observation ──────────────────────────────────────────────
+
+export type ChangeObservationSource = "local" | "remote";
+
+export type RowChangeKind = "create" | "update" | "delete" | "resurrect";
+
+/** One CRDT column transition caused by an observed change entry. */
+export interface ColumnChangeEffect {
+  before?: ColumnEntry;
+  after?: ColumnEntry;
+}
+
+/**
+ * Net effect of one change entry on one row in this endpoint's local state.
+ *
+ * A field is present when either its value or its CRDT timestamp changed.
+ * Delete effects contain the removed columns as `before` values. A delete for
+ * an unseen row can therefore have an empty `fields` object.
+ */
+export interface RowChangeEffect {
+  table: string;
+  rowId: string;
+  kind: RowChangeKind;
+  fields: Record<string, ColumnChangeEffect>;
+}
+
+/**
+ * Live observation of one locally promoted or remotely decoded change entry.
+ *
+ * This is endpoint-relative, session-scoped evidence for diagnostics and
+ * application-owned best-effort logs. It is not persisted, replayed, globally
+ * complete, or authenticated by core. `fileName` is present only for remote
+ * change files; local entries may not have been published when observed.
+ */
+export interface ChangeObservation {
+  source: ChangeObservationSource;
+  observedAt: number;
+  fileName?: string;
+  change: ChangeEntry;
+  effects: RowChangeEffect[];
+}
+
+/** Listener registered with {@link Interocitor.observeChanges}. */
+export type ChangeObservationListener = (observation: ChangeObservation) => void;
+
 // ─── Row (as stored in local DB) ─────────────────────────────────────
 
 /**

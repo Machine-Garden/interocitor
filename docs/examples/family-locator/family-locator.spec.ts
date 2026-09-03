@@ -45,6 +45,19 @@ test("the demo states the safety and trust limits", async ({ page }) => {
   await expect(page.getByText("Every paired endpoint")).toBeVisible();
 });
 
+test("the endpoint journal exposes local and remote plaintext diffs", async ({ page }) => {
+  await page.evaluate(() => window.__locatorDemo.update("alex", "park"));
+  await page.evaluate(() => window.__locatorDemo.sync());
+
+  const journal = page.locator("#change-journal-list");
+  await expect(journal).toContainText("Alex’s device");
+  await expect(journal).toContainText("Sam’s device");
+  await expect(journal).toContainText("local");
+  await expect(journal).toContainText("remote");
+  await expect(journal).toContainText('place: "Home" → "Riverside Park"');
+  await expect(page.getByText("not authenticated, complete, or globally ordered")).toBeVisible();
+});
+
 test("the locator remains usable at a narrow viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();

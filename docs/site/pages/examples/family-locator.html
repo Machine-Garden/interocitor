@@ -118,6 +118,26 @@
           observable. Reloading resets the demo.
         </p>
       </aside>
+      <section class="change-journal" aria-labelledby="change-journal-title">
+        <header>
+          <div>
+            <p class="eyebrow">Optional change observation</p>
+            <h2 id="change-journal-title">Plaintext diffs are created at the endpoint</h2>
+          </div>
+          <p>
+            Each trusted device can observe its own local and remote merge effects. This in-memory
+            feed deliberately exposes historical location values, showing why an application that
+            persists it must own security, redaction, and retention.
+          </p>
+        </header>
+        <ol id="change-journal-list" aria-live="polite">
+          <li class="change-journal-empty">Update a location to observe both device views.</li>
+        </ol>
+        <p class="change-journal-boundary">
+          This is best-effort endpoint evidence, not authenticated, complete, or globally ordered
+          audit history. Reloading clears it.
+        </p>
+      </section>
       <section class="demo-explanation" aria-labelledby="locator-limit-title">
         <p class="eyebrow">What this proves</p>
         <h2 id="locator-limit-title">Encryption solves less than a locator product must.</h2>
@@ -150,6 +170,9 @@
 } satisfies DatabaseSchemaDefinition&lt;LocatorDB>;
 
 const locations = db.table("locations");
+const changeLog: ChangeObservation[] = [];
+
+db.observeChanges((observation) => changeLog.push(observation));
 
 await locations.put("alex", {
   id: "alex",

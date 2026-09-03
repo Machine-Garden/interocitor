@@ -69,6 +69,20 @@ test("an older offline change remains observable after another client advances h
     ]);
 });
 
+test("the live journal shows local and remote row effects", async ({ page }) => {
+  await page.goto("/docs/examples/todomvc/index.html");
+  await page.waitForFunction(() => window.__todoMvcDemo?.ready());
+
+  await addTodo(page, "journal entry");
+
+  const entries = page.locator("#change-journal-list > li");
+  await expect(entries).toHaveCount(2);
+  await expect(entries).toContainText(["Client 2", "Client 1"]);
+  await expect(entries).toContainText(["remote", "local"]);
+  await expect(entries.first()).toContainText('title: ∅ → "journal entry"');
+  await expect(page.getByText("it is not authenticated or complete audit history")).toBeVisible();
+});
+
 test("three clients converge as two offline writers reconnect one at a time", async ({ page }) => {
   await page.goto("/docs/examples/todomvc/index.html");
   await page.waitForFunction(() => window.__todoMvcDemo?.ready());

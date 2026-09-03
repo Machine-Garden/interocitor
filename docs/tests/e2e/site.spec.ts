@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("public pages render with the deployment security headers", async ({ page }) => {
+test("the established landing page renders with deployment security headers", async ({ page }) => {
   const landing = await page.goto("/");
   expect(landing?.status()).toBe(200);
   const headers = landing?.headers() ?? {};
@@ -9,39 +9,65 @@ test("public pages render with the deployment security headers", async ({ page }
   expect(headers["x-content-type-options"]).toBe("nosniff");
   expect(headers["referrer-policy"]).toBe("strict-origin-when-cross-origin");
   expect(headers["permissions-policy"]).toContain("camera=()");
+
   await expect(page).toHaveTitle("Interocitor — local-first app data without trusting the cloud");
   await expect(
     page.locator(
       "#why, #use-cases, #plain-language, #surfaces, #model, #remotes, #security, #decisions, #docs",
     ),
   ).toHaveCount(9);
-  await expect(page.locator('.site-hero a[href="examples/todomvc/"]')).toBeVisible();
-  await expect(page.locator('.task-example a[href="examples/board/"]')).toBeVisible();
-  await expect(page.locator('.task-example a[href="examples/family-locator/"]')).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your app keeps working." })).toBeVisible();
+  await expect(page.locator('.site-hero a[href="/examples/todomvc/"]')).toBeVisible();
+  await expect(page.locator('.task-example a[href="/examples/board/"]')).toBeVisible();
+  await expect(page.locator('.task-example a[href="/examples/family-locator/"]')).toBeVisible();
   await expect(page.locator(".site-hero .actions a")).toHaveCount(2);
-  await expect(page.locator(".fit-card, .not-fit")).toHaveCount(0);
-  await expect(page.getByText("A good fit when", { exact: true })).toHaveCount(0);
+  await expect(page.locator(".decision-choice")).toHaveCount(4);
+});
 
-  const decisionPages = new Map([
+test("Markdown documentation owns its content, outline, and metadata", async ({ page }) => {
+  const documentation = new Map([
     ["/trust", "Designing a trusted Interocitor mesh"],
     ["/data-boundaries", "Plan Interocitor data scope and availability"],
     ["/mailbox", "Choose and operate an Interocitor mailbox"],
     ["/automation", "Design trusted automation with Interocitor"],
+    ["/qa", "Interocitor questions and answers"],
+    ["/dictionary", "Interocitor dictionary"],
+    ["/flows", "Interocitor protocol flows"],
   ]);
 
-  for (const [route, title] of decisionPages) {
+  for (const [route, title] of documentation) {
     const response = await page.goto(route);
     expect(response?.status(), route).toBe(200);
     await expect(page).toHaveTitle(title);
-    await expect(page.locator("main h1")).toHaveCount(1);
-    await expect(page.locator(".decision-summary dt").first()).toHaveText("Decision");
-    await expect(page.getByText("Choose this page when", { exact: true })).toHaveCount(0);
-    await expect(page.locator(".decision-routes a")).toHaveCount(4);
+    await expect(page.locator(".docs-hero h1")).toHaveCount(1);
+    await expect(page.locator(".docs-content h2").first()).toBeVisible();
+    await expect(page.locator(".docs-sidebar a[aria-current='page']")).toHaveCount(1);
+    await expect(page.locator(".docs-outline a").first()).toBeVisible();
   }
 
   const explainer = await page.goto("/how-it-works");
   expect(explainer?.status()).toBe(200);
   await expect(page).toHaveTitle("How Interocitor handles independent operators");
+  await expect(page.locator("#journey")).toBeVisible();
+  await expect(page.locator("#compaction")).toBeVisible();
+  await expect(page.locator("#boundary")).toBeVisible();
+});
+
+test("architecture links use client-side navigation", async ({ page }) => {
+  let documentRequests = 0;
+  page.on("request", (request) => {
+    if (request.resourceType() === "document") documentRequests += 1;
+  });
+  await page.goto("/");
+  await page.waitForFunction(() =>
+    Boolean((window as Window & { next?: { router?: unknown } }).next?.router),
+  );
+  documentRequests = 0;
+
+  await page.locator('.decision-choice[href="/trust"]').click();
+  await expect(page).toHaveURL(/\/trust$/);
+  await expect(page.locator(".docs-hero h1")).toContainText("who may read it");
+  expect(documentRequests).toBe(0);
 });
 
 test("short documentation routes keep their public targets", async ({ request }) => {
@@ -108,37 +134,30 @@ test("short documentation routes keep their public targets", async ({ request })
 
   for (const [route, target] of routes) {
     const response = await request.get(route, { maxRedirects: 0 });
-    expect(response.status(), route).toBe(302);
+    expect([307, 308], route).toContain(response.status());
     expect(response.headers().location, route).toBe(target);
   }
 });
 
-test("decision paths stay usable at a narrow viewport", async ({ page }) => {
+test("landing and documentation stay usable at a narrow viewport", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
 
   const choices = page.locator(".decision-choice");
   await expect(choices).toHaveCount(4);
   await expect(choices.first()).toBeVisible();
-  await expect(page.locator('.site-hero a[href="examples/todomvc/"]')).toBeVisible();
-  await expect(page.locator(".site-hero .actions a")).toHaveCount(2);
+  await expect(page.locator('.site-hero a[href="/examples/todomvc/"]')).toBeVisible();
   await expect(page.locator("#decisions h2")).toContainText("Turn the model into an architecture");
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 
   await choices.first().click();
   await expect(page).toHaveURL(/\/trust$/);
-  await expect(page.locator("main h1")).toBeVisible();
+  await expect(page.locator(".docs-hero h1")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
-test("every public HTML page exposes the shared site map", async ({ page }) => {
+test("live examples remain reachable from the SPA", async ({ page }) => {
   const routes = [
-    "/",
-    "/how-it-works",
-    "/trust",
-    "/data-boundaries",
-    "/mailbox",
-    "/automation",
     "/examples/todomvc/",
     "/examples/chat/",
     "/examples/board/",
@@ -146,38 +165,15 @@ test("every public HTML page exposes the shared site map", async ({ page }) => {
   ];
 
   for (const route of routes) {
-    await page.goto(route);
-    if (route.startsWith("/examples/")) {
-      const example = page.locator(".demo-code");
-      await expect(example, route).toHaveCount(1);
-      await expect(example.locator("code"), route).toContainText("const schema = {");
-      await expect(example.locator("code"), route).toContainText('db.table("');
-    }
-    const footer = page.locator(".site-map-footer");
-    await expect(footer, route).toBeVisible();
-    await expect(footer.locator(".site-map-nav h2"), route).toHaveText([
-      "Explore",
-      "Architecture guides",
-      "Build",
-    ]);
+    const response = await page.goto(route);
+    expect(response?.status(), route).toBe(200);
+    const example = page.locator(".demo-code");
+    await expect(example, route).toHaveCount(1);
+    await expect(example.locator("code"), route).toContainText("const schema = {");
+    await expect(example.locator("code"), route).toContainText('db.table("');
+    await expect(page.locator(".site-map-footer"), route).toBeVisible();
     await expect(
-      footer.getByRole("link", { name: "Trust & keys", exact: true }),
-      route,
-    ).toBeVisible();
-    await expect(
-      footer.getByRole("link", { name: "Live TodoMVC", exact: true }),
-      route,
-    ).toHaveCount(route === "/examples/todomvc/" ? 0 : 1);
-    await expect(
-      footer.getByRole("link", { name: "Live shared board", exact: true }),
-      route,
-    ).toHaveCount(route === "/examples/board/" ? 0 : 1);
-    await expect(
-      footer.getByRole("link", { name: "Protected family locator", exact: true }),
-      route,
-    ).toHaveCount(route === "/examples/family-locator/" ? 0 : 1);
-    await expect(
-      footer.getByRole("link", { name: "Source on GitHub", exact: true }),
+      page.getByRole("link", { name: "Source on GitHub", exact: true }),
       route,
     ).toHaveAttribute("href", "https://github.com/Machine-Garden/interocitor");
   }

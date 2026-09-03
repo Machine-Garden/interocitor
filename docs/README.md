@@ -1,143 +1,118 @@
-<p align="center">
-  <a href="https://github.com/Machine-Garden/interocitor">
-    <img src="assets/hero.svg" alt="Interocitor" width="560" />
-  </a>
-</p>
-
 # Interocitor public site
 
-Interocitor's public site shows how trusted endpoints keep local working state
-and use a remote mailbox to exchange protected row changes, snapshots, and
-durable-file bodies. It introduces the product through concrete uses before
-routing architecture decisions to their canonical technical owners.
+The public site helps an application-fit evaluator decide whether Interocitor’s
+local full-copy rows, directly remote files, trusted endpoints, and mailbox
+boundary fit a product. It then routes builders and deployment owners to the
+technical contract they control.
 
-`index.html` owns product-fit and threat-boundary orientation.
-`how-it-works.html` owns the visual explanation of the file-sync pattern,
-Interocitor's row-sync lifecycle, bounded catch-up through compaction, and its
-trust boundary. Keep detailed claims at one of these owners and link from the
-other instead of duplicating them.
+The site is a Vinext/React application under `site/`. Navigation between the
+landing page and documentation uses client-side transitions, while direct URLs
+remain independently renderable.
 
-Four decision guides bridge product fit to the canonical technical owners:
+## Content owners
 
-- `trust.html` owns the endpoint-authority, key-custody, recovery, and rotation decision;
-- `data-boundaries.html` owns the row, file, mesh, availability, and sizing decision;
-- `mailbox.html` owns mailbox placement and operational responsibility;
-- `automation.html` owns the trusted-processor, isolation, and delivery-semantics decision.
+The existing landing page is a deliberately designed product surface. Its
+React source is `site/components/home-landing.tsx`; `index.css` and
+`chooser.css` own its established visual treatment. Preserve its content,
+section anchors, diagrams, and examples unless the requested work explicitly
+changes the landing page.
 
-These pages explain consequences and route to exact contracts. Package READMEs
-and package-local documentation remain the owners of APIs, options, defaults,
-limits, and procedures.
+Reader-facing documentation is Markdown:
 
-## Author the static site
+- `site/content/how-it-works.md` owns the visual and conceptual sync story;
+- `site/content/trust.md` owns endpoint authority, key custody, recovery, and
+  rotation;
+- `site/content/data-boundaries.md` owns rows, files, meshes, availability, and
+  sizing;
+- `site/content/mailbox.md` owns mailbox placement and operational
+  responsibility;
+- `site/content/automation.md` owns trusted processors, isolation, and delivery
+  semantics;
+- `QA.md`, `dictionary.md`, and `flows.md` are rendered directly as reference
+  pages rather than copied into another source format.
 
-Edit page content under `site/pages/`. Those templates use SSI-style header and
-footer directives; `site/build.ts` is the single owner of shared site chrome,
-relative routes, current-page state, and demo variants. Generate the deployable
-HTML after changing a page or the shared chrome:
+Front matter supplies each focused page’s browser title, description, kicker,
+heading, and lede. Second-level Markdown headings form the page outline. An
+explicit heading anchor uses this form:
+
+```markdown
+## Keys and plaintext stay at the ends {#boundary}
+```
+
+Keep detailed claims at one canonical owner and link from other pages instead
+of duplicating them. Package READMEs and package-local documentation remain the
+owners of APIs, options, defaults, limits, and procedures.
+
+## Work on the site
+
+Install from the repository root, then run the site workspace:
 
 ```bash
+yarn install --immutable
+yarn workspace @interocitor/site dev
+```
+
+The site prepares its public assets before development and builds. This copies
+the committed live-demo artifacts and shared logo assets into the framework’s
+generated `public/` directory; do not edit that directory.
+
+Validate a site change with:
+
+```bash
+yarn check:docs:site
 yarn build:docs:site
+yarn test:e2e:docs:site
 ```
 
-Generated pages under `docs/` are committed deployment artifacts. Do not edit
-their header, footer, or body directly. `yarn check:docs:site` fails when an
-artifact differs from its template and shared chrome. `site/build.mjs` only
-compiles and executes the TypeScript owner on supported Node versions; it does
-not contain page or layout decisions.
+`yarn check:docs:site` type-checks the application. The build emits the
+Cloudflare Worker-compatible Sites artifact. The browser suite checks the
+landing-page contract, Markdown routes, client-side navigation, narrow layouts,
+security headers, redirects, metadata, and live-demo reachability.
 
-Recommended Cloudflare Pages settings:
+## Stable public routes
 
-- Build command: none
-- Build output directory: `docs`
-- Framework preset: none / static
+| Route              | Reader question                                                               |
+| ------------------ | ----------------------------------------------------------------------------- |
+| `/`                | Is Interocitor a fit for my application and threat model?                     |
+| `/how-it-works`    | How do independent changes converge, and how is catch-up bounded?             |
+| `/trust`           | Which endpoints may read the mesh, and how will its key lifecycle be handled? |
+| `/data-boundaries` | What belongs in rows, files, and separate meshes?                             |
+| `/mailbox`         | Where should the mailbox run, and who owns its operational risks?             |
+| `/automation`      | How should a trusted worker or agent coordinate and isolate its work?         |
+| `/qa`              | What are the plain-language product and threat-boundary answers?              |
+| `/dictionary`      | What does each protocol and security term mean?                               |
+| `/flows`           | What is the exact ordering for core sync flows?                               |
 
-## Content boundary
+The landing-page anchors `#why`, `#use-cases`, `#plain-language`, `#model`,
+`#surfaces`, `#remotes`, `#security`, `#decisions`, and `#docs` are also part of
+the public route contract.
 
-Site maintainers keep public pages at the product-decision layer:
+Legacy `.html` URLs redirect to their clean route. Short routes such as `/web`,
+`/workers`, `/mesh-access`, `/recovery`, and `/security` redirect to the
+corresponding canonical repository documentation.
 
-- advertise the product outcome before implementation detail;
-- explain the use cases and trust boundary;
-- show the product surfaces and deployment choices;
-- route visitors through the sync model, data surfaces, storage choices, and
-  trust boundary;
-- let visitors understand the complete sync loop through diagrams before
-  routing them to protocol reference;
-- expose external developer links only when their targets are anonymously
-  reachable.
+## Runnable examples
 
-The site must not expose a repository quickstart, package map, API reference, or
-protocol manual as landing-page content. Keep those details in the root README,
-package READMEs, package-local docs, examples, and JSDoc.
+The live examples under `examples/` remain standalone browser applications:
 
-## Landing-page anchors
+- `/examples/todomvc/`
+- `/examples/chat/`
+- `/examples/board/`
+- `/examples/family-locator/`
 
-Keep these local anchors stable:
+Their HTML is application scaffolding for a runnable example, not a duplicate
+documentation source. Keep each example aligned with the public API and retain
+the statement that its in-memory mailbox resets when the page reloads.
 
-| Concept            | Anchor            |
-| ------------------ | ----------------- |
-| Why Interocitor    | `#why`            |
-| Use cases          | `#use-cases`      |
-| Plain-language fit | `#plain-language` |
-| Rows and files     | `#surfaces`       |
-| Data model         | `#model`          |
-| Remote backends    | `#remotes`        |
-| Security boundary  | `#security`       |
-| Operational limits | `#docs`           |
-| Architecture paths | `#decisions`      |
+## Security and publication
 
-## Public pages
+The application Worker applies the public security-header policy to rendered
+pages. Protected payload claims must continue to state both halves of the
+boundary: a mailbox dump does not reveal protected row values or ordinary file
+contents, while object names, sizes, timing, identifiers, request identity,
+withholding, deletion, and rollback remain observable or possible.
 
-| Page                                 | Reader question                                                               |
-| ------------------------------------ | ----------------------------------------------------------------------------- |
-| `index.html`                         | Is Interocitor a fit for my application and threat model?                     |
-| `how-it-works.html`                  | How do independent changes converge, and what happens after history piles up? |
-| `trust.html`                         | Which endpoints may read the mesh, and how will its key lifecycle be handled? |
-| `data-boundaries.html`               | What belongs in rows, files, and separate meshes?                             |
-| `mailbox.html`                       | Where should the mailbox run, and who owns its operational risks?             |
-| `automation.html`                    | How should a trusted worker or agent coordinate and isolate its work?         |
-| `examples/todomvc/index.html`        | Can two Interocitor clients converge entirely inside one browser tab?         |
-| `examples/chat/index.html`           | Can two trusted clients exchange encrypted messages through a blind mailbox?  |
-| `examples/board/index.html`          | Can two local boards make independent changes and converge through a mailbox? |
-| `examples/family-locator/index.html` | What does payload protection solve—and not solve—for sensitive location data? |
-
-## Publication metadata
-
-Site maintainers own the public URL metadata. A release may include a canonical
-URL, `og:url`, or public `@see` URL only while the production domain resolves,
-serves the page over valid TLS, and passes an anonymous link crawl. Keep that
-metadata absent whenever any condition fails.
-
-The `/how-it-works` route serves the visual explainer. Short documentation
-routes such as `/web`, `/workers`, `/mesh-access`, `/recovery`, and `/security`
-are also defined in `_redirects` and lead to the corresponding public repository
-documentation. Cloudflare Pages or Wrangler interprets these redirects; a basic
-static file server does not.
-
-## Local preview
-
-For the landing page alone:
-
-```bash
-python3 -m http.server 4174 --directory docs
-```
-
-Open `http://127.0.0.1:4174/`. Short documentation routes return `404` in this
-mode.
-
-To exercise `_headers` and `_redirects` from the repository root, use the
-repository's pinned Wrangler binary:
-
-```bash
-yarn exec wrangler pages dev docs --port 4174
-```
-
-## Release gate
-
-The site maintainer applies this gate to every public release. Block the release
-unless:
-
-1. source and documentation targets are anonymously reachable;
-2. repository examples from a clean clone support the homepage's
-   capability claims;
-3. the candidate deployment serves both public pages and every short route; and
-4. publication metadata satisfies the policy above.
+Sites configuration lives in `site/.openai/hosting.json`. A publication may
+advertise a canonical production URL only after it resolves, serves valid TLS,
+and passes an anonymous link crawl. Keep canonical URL metadata absent until
+those conditions hold.

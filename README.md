@@ -81,7 +81,7 @@ the installed Chromium binary.
 ## Guides and reference
 
 - [Plain-language questions and answers](docs/QA.md)
-- [Product fit and threat-boundary overview](docs/index.html)
+- [Public site architecture and content owners](docs/README.md)
 - [Terminology](docs/dictionary.md)
 - [Protocol flows](docs/flows.md)
 - [Core adapter contract](packages/core/docs/adapter-contract.md)

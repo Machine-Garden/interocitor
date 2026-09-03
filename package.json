@@ -25,6 +25,7 @@
     "url": "git+https://github.com/Machine-Garden/interocitor.git"
   },
   "workspaces": [
+    "docs/site",
     "packages/*",
     "tools/*",
     "examples/*"
@@ -34,7 +35,7 @@
     "build:int": "yarn workspace @interocitor/core build",
     "build:web": "yarn workspace @interocitor/web build",
     "build:all": "yarn workspaces foreach --all --topological-dev --parallel run build",
-    "build:docs:site": "node docs/site/build.mjs",
+    "build:docs:site": "yarn workspace @interocitor/site build",
     "build:docs:todomvc": "node docs/examples/todomvc/build.mjs",
     "build:docs:chat": "node docs/examples/chat/build.mjs",
     "build:docs:board": "node docs/examples/board/build.mjs",
@@ -43,7 +44,7 @@
     "check:types": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/web/tsconfig.json --noEmit && tsc -p packages/react/tsconfig.json --noEmit && tsc -p packages/react/tsconfig.tests.json && tsc -p packages/workers/tsconfig.json --noEmit",
     "check:knip": "knip --workspace packages/core --workspace packages/web --workspace packages/react --workspace packages/workers --include files --no-progress --reporter compact",
     "check:webdav-server": "yarn workspace @interocitor/webdav-server check",
-    "check:docs:site": "node docs/site/build.mjs --check",
+    "check:docs:site": "yarn workspace @interocitor/site check",
     "check:docs:todomvc": "node docs/examples/todomvc/build.mjs --check",
     "check:docs:chat": "node docs/examples/chat/build.mjs --check",
     "check:docs:board": "node docs/examples/board/build.mjs --check",

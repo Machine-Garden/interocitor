@@ -14,14 +14,14 @@ export default defineConfig({
   retries: 0,
   reporter: "list",
   use: {
-    baseURL: `http://127.0.0.1:${port}`,
+    baseURL: `http://localhost:${port}`,
     trace: "on-first-retry",
   },
   webServer: {
-    command: `yarn exec wrangler pages dev docs --port ${port} --show-interactive-dev-session=false --log-level=error`,
-    url: `http://127.0.0.1:${port}`,
+    command: `yarn workspace @interocitor/site dev --port ${port}`,
+    url: `http://localhost:${port}`,
     reuseExistingServer: false,
-    timeout: 30_000,
+    timeout: 60_000,
     cwd: repoRoot,
   },
   projects: [

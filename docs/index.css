@@ -2542,6 +2542,28 @@ h1 em {
   padding: clamp(22px, 3vw, 31px);
 }
 
+.home-page .demo-journey {
+  display: grid;
+  gap: 11px;
+  justify-items: center;
+  padding: clamp(24px, 4vw, 42px);
+  color: #dce7e1;
+  text-align: center;
+}
+
+.home-page .demo-journey span {
+  width: min(100%, 300px);
+  padding: 13px 16px;
+  border: 1px solid rgba(113, 245, 189, 0.24);
+  border-radius: 8px;
+  background: rgba(113, 245, 189, 0.05);
+}
+
+.home-page .demo-journey b {
+  color: var(--mint);
+  font-weight: 500;
+}
+
 .home-page .code-window code,
 .home-page .file-code code {
   color: #dce7e1;

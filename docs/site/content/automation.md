@@ -1,72 +1,70 @@
 ---
-title: Design trusted automation with Interocitor
-description: Add a worker or agent as a trusted endpoint while preserving key custody, isolation, coordination, and delivery boundaries.
-kicker: Architecture decision 05 · Trusted automation
-heading: Treat automation as a trusted peer, not a mailbox feature.
-lede: A worker or agent can observe local rows, act, and write results through the same mesh. Once it holds the key, it is inside the plaintext boundary. CRDT convergence still does not make work exactly once.
+title: How should an agent join an Interocitor mesh?
+description: Treat automation as a trusted endpoint, isolate its readable data, and coordinate external side effects explicitly.
+kicker: Automation · Trusted endpoints
+heading: An agent with the mesh key is a fully trusted endpoint.
+lede: It can read the complete mesh, publish row changes, and trigger effects outside the database. Query scope is not isolation, and CRDT convergence is not exactly-once execution.
 ---
+
+## Treat the agent as a trusted endpoint {#room}
+
+An agent or background worker joins a mesh in the same security role as a user device. It opens a local store, receives or derives the mesh key, synchronizes rows, and publishes changes through the mailbox.
+
+```mermaid
+flowchart LR
+    A[User endpoint] <--> B[Encrypted mailbox]
+    B <--> C[Agent endpoint with mesh key]
+    C --> D[Read complete row state<br/>publish derived rows]
+```
+
+The mailbox does not schedule work or assign meaning to a row. The application defines which row transitions should trigger automation, how retries work, and where results are recorded.
+
+## Do not mistake query scope for isolation {#privacy}
+
+A key-bearing agent can read the complete row database even when its normal query selects one table or tenant. A filter limits expected behavior; it is not a confidentiality boundary.
+
+Use a separate mesh when an agent should see only one tenant, when compromise needs a smaller blast radius, or when its external actions carry materially different risk. Moving data between meshes then becomes an explicit trusted operation owned by the application.
+
+## Coordinate effects outside the CRDT {#duplicate}
+
+CRDT merge rules make row replicas converge. They cannot make an external side effect happen exactly once. Two agents may both observe an unclaimed task before either change reaches the other, then both send the email or charge the payment.
+
+Choose coordination by consequence:
+
+| Requirement                              | Appropriate control                                           |
+| ---------------------------------------- | ------------------------------------------------------------- |
+| Repetition is harmless                   | Stable idempotency key accepted by the external receiver.     |
+| One worker should usually act            | A visible claim or lease with owner, expiry, and retry rules. |
+| Exactly one effect is a hard requirement | A central transactional coordinator that owns the effect.     |
+| A result can be recomputed               | Deterministic result identity derived from the input.         |
+
+“One claim eventually wins” does not prove that only one external action occurred.
+
+## Define the processing loop {#routine}
+
+For each automated workflow:
+
+1. define the row state that makes work eligible;
+2. reread the durable row immediately before acting;
+3. assign a stable identity to each external effect;
+4. record attempts, results, and failures;
+5. bound retries and route repeatedly failing work for inspection;
+6. monitor the agent and mailbox as separate dependencies.
+
+Protect the agent’s key with the same care as any other trusted endpoint.
+
+## Plan revocation and replacement {#last-day}
+
+Removing mailbox access blocks later connections. It cannot erase a copied key, local rows, or secrets already sent to another service.
+
+If the agent or mesh key is compromised, disable the agent, preserve evidence, create a new mesh and key, and migrate from an endpoint that remains trusted. Before launch, identify who can perform each step.
+
+Continue with [endpoint trust](/trust), [mesh boundaries](/data-boundaries), or [the security model](/security).
 
 ## Decision summary {#summary}
 
-|                   |                                                                                       |
-| ----------------- | ------------------------------------------------------------------------------------- |
-| **Decision**      | Choose the trusted processor, its mesh scope, and its coordination rule.              |
-| **Core boundary** | A key-bearing worker may read the complete row database and can publish changes.      |
-| **Complete when** | Key custody, isolation, retries, claims, outputs, and failure ownership are explicit. |
-
-## A processor is another endpoint {#endpoint}
-
-The automation runtime opens a local store, resolves mesh key material, connects to the mailbox, and observes or queries rows. It applies application logic and writes result rows or durable files back.
-
-```text
-product endpoint ⇄ protected mailbox ⇄ worker endpoint
-     plaintext                               plaintext
-```
-
-The mailbox remains storage. It does not invoke the worker, decide which row is a task, or record that an external side effect succeeded.
-
-## Isolate by mesh, not by row convention {#isolation}
-
-A worker with the mesh key can decrypt the full row database. Filtering a query or agreeing to read one table is application behavior, not cryptographic isolation.
-
-Use a separate mesh and key when:
-
-- different agents should see different tenants or workflows;
-- one processor has a wider external-action capability;
-- compromise or revocation must have a smaller blast radius;
-- retention, deployment ownership, or availability differs.
-
-Cross-mesh transfer then becomes an explicit trusted application step. That extra boundary is useful only if the product owns the bridge and its failure cases.
-
-## Convergence is not a job queue {#coordination}
-
-Two processors can observe the same task before either sees the other’s claim. The CRDT will converge their row changes, but it cannot undo a duplicated email, payment, or external API call.
-
-Choose an application rule that matches the side effect:
-
-| Requirement                       | Application pattern                                    |
-| --------------------------------- | ------------------------------------------------------ |
-| Duplicate work is harmless        | Idempotent handler with a stable operation key         |
-| One processor should normally act | Claim row plus expiry and visible owner                |
-| Strict single execution matters   | External coordinator or transactional system of record |
-| A result can be recomputed        | Deterministic output row keyed by input version        |
-
-> “Eventually one winning claim” is not the same as “only one side effect happened.”
-
-## Design the processor lifecycle {#lifecycle}
-
-- Define which row transition makes work eligible.
-- Use observation as a wake-up signal, then re-read durable state.
-- Give each action a stable idempotency key.
-- Record claim, attempt, result, and failure state where trusted peers can converge on them.
-- Put large outputs in durable files and reference them from rows.
-- Bound retries and surface poison work for human or system review.
-- Protect headless key material and rotate to a new mesh after compromise.
-- Monitor mailbox availability separately from processor health.
-
-## Continue with the exact contract {#continue}
-
-- [Python runtime](https://github.com/Machine-Garden/interocitor/tree/main/packages/interocitor-python#readme) — build a headless compatible peer.
-- [Change observation](https://github.com/Machine-Garden/interocitor/tree/main/packages/core#observe-completed-pulls) — wake on completed merge effects.
-- [Data migrations](https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/data-migrations.md) — application-owned concurrent processing patterns.
-- [Trust and keys](/trust) — scope key custody and compromise response.
+|                      |                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------- |
+| **Trust**            | A key-bearing agent can read the complete mesh and publish changes.             |
+| **Containment**      | Use separate meshes for different readers and compromise boundaries.            |
+| **External effects** | Add idempotency, leases, or a transactional owner; merge alone is insufficient. |

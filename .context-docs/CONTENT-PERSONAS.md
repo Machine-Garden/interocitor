@@ -40,6 +40,20 @@ decision they control changes. Select one primary class for a surface or major
 route; route a materially different decision to its established owner instead
 of writing parallel versions of the same facts.
 
+## Universal reader contract
+
+Assume no supplied context and little spare attention. Do not infer low
+intelligence, low cognitive ability, or lack of technical experience from
+either condition.
+
+The public site uses the economy and self-containment of a good high-school
+textbook: plain and lively, but intellectually respectful. Metaphor may
+introduce a precise concept; the text must then keep the concept’s real name
+and consequences. Deeper documentation uses university-level precision,
+terminology, trade-offs, and worked explanations. Internal documentation owns
+research-institute-level mechanisms, protocols, proofs, failure modes, and
+operational detail, and must not appear in the ordinary visitor path.
+
 ## Keep tasks below the cast
 
 | Observed episode                                 | Class                     | Context or modifier                                        | Established route                                                             |

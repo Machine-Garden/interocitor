@@ -1,12 +1,16 @@
 import automationSource from "../content/automation.md";
 import authSource from "../content/auth.md";
+import compactionSource from "../content/compaction.md";
 import dataBoundariesSource from "../content/data-boundaries.md";
+import dictionarySource from "../content/dictionary.md";
+import flowsSource from "../content/flows.md";
 import howItWorksSource from "../content/how-it-works.md";
 import mailboxSource from "../content/mailbox.md";
+import qaSource from "../content/qa.md";
+import securitySource from "../content/security.md";
+import storageSource from "../content/storage.md";
+import taintedFilesSource from "../content/tainted-files.md";
 import trustSource from "../content/trust.md";
-import dictionarySource from "../../dictionary.md";
-import flowsSource from "../../flows.md";
-import qaSource from "../../QA.md";
 
 export type PageRecord = {
   slug: string;
@@ -18,7 +22,7 @@ export type PageRecord = {
   lede: string;
   body: string;
   outline: Array<{ id: string; label: string }>;
-  group: "Architecture" | "Reference";
+  group: "Learn" | "Plan" | "Reference";
 };
 
 type Metadata = Pick<PageRecord, "title" | "description" | "kicker" | "heading" | "lede">;
@@ -36,69 +40,74 @@ const sources: SourceRecord[] = [
     slug: "how-it-works",
     navLabel: "How it works",
     source: howItWorksSource,
-    group: "Architecture",
+    group: "Learn",
   },
-  { slug: "trust", navLabel: "Trust & keys", source: trustSource, group: "Architecture" },
+  {
+    slug: "storage",
+    navLabel: "Storage model",
+    source: storageSource,
+    group: "Learn",
+  },
+  {
+    slug: "security",
+    navLabel: "Security model",
+    source: securitySource,
+    group: "Learn",
+  },
+  {
+    slug: "compaction",
+    navLabel: "Compaction",
+    source: compactionSource,
+    group: "Learn",
+  },
+  {
+    slug: "tainted-files",
+    navLabel: "Tainted files",
+    source: taintedFilesSource,
+    group: "Learn",
+  },
+  { slug: "trust", navLabel: "Trust & key custody", source: trustSource, group: "Plan" },
   {
     slug: "data-boundaries",
-    navLabel: "Data scope",
+    navLabel: "Data boundaries",
     source: dataBoundariesSource,
-    group: "Architecture",
+    group: "Plan",
   },
-  { slug: "mailbox", navLabel: "Mailbox", source: mailboxSource, group: "Architecture" },
+  {
+    slug: "mailbox",
+    navLabel: "Mailbox operations",
+    source: mailboxSource,
+    group: "Plan",
+  },
   {
     slug: "auth",
-    navLabel: "Access & identity",
+    navLabel: "Authentication",
     source: authSource,
-    group: "Architecture",
+    group: "Plan",
   },
   {
     slug: "automation",
     navLabel: "Automation",
     source: automationSource,
-    group: "Architecture",
+    group: "Plan",
   },
   {
     slug: "qa",
-    navLabel: "Questions & answers",
+    navLabel: "Q&A",
     source: qaSource,
     group: "Reference",
-    metadata: {
-      title: "Interocitor questions and answers",
-      description:
-        "Plain-language answers about Interocitor's fit, trust, availability, keys, workers, and scale.",
-      kicker: "Plain-language reference",
-      heading: "Honest answers before architecture.",
-      lede: "Use these questions to test Interocitor against a real product, threat model, or operational requirement before choosing packages and adapters.",
-    },
   },
   {
     slug: "dictionary",
-    navLabel: "Dictionary",
+    navLabel: "Glossary",
     source: dictionarySource,
     group: "Reference",
-    metadata: {
-      title: "Interocitor dictionary",
-      description:
-        "The precise meaning of Interocitor's keys, meshes, stores, artifacts, and trust boundaries.",
-      kicker: "Terminology reference",
-      heading: "Use the protocol’s terms precisely.",
-      lede: "These definitions distinguish encryption capabilities, mesh identity, local persistence, remote storage, and recovery roles across every runtime.",
-    },
   },
   {
     slug: "flows",
-    navLabel: "Protocol flows",
+    navLabel: "Core flows",
     source: flowsSource,
     group: "Reference",
-    metadata: {
-      title: "Interocitor protocol flows",
-      description:
-        "Sequence and flow references for connect, flush, pull, compaction, bootstrap, and rehydration.",
-      kicker: "Protocol reference",
-      heading: "Follow each artifact through the mesh.",
-      lede: "These flows expose request ordering, encryption boundaries, observation state, and compaction behavior for compatible implementations.",
-    },
   },
 ];
 
@@ -150,30 +159,15 @@ export const shortRoutes: Record<string, string> = {
   react: "https://github.com/Machine-Garden/interocitor/tree/main/packages/react#readme",
   workers: "https://github.com/Machine-Garden/interocitor/tree/main/packages/workers#readme",
   examples: "https://github.com/Machine-Garden/interocitor/tree/main/examples",
-  security:
-    "https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/security-model.md",
-  recovery:
-    "https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/recovery.md",
-  "mesh-access":
-    "https://github.com/Machine-Garden/interocitor/blob/main/packages/workers/docs/mesh-access.md",
-  "worker-runtime":
-    "https://github.com/Machine-Garden/interocitor/blob/main/packages/workers/docs/runtime-options.md",
-  "worker-maintenance":
-    "https://github.com/Machine-Garden/interocitor/blob/main/packages/workers/docs/maintenance.md",
-  "worker-relay":
-    "https://github.com/Machine-Garden/interocitor/blob/main/packages/workers/docs/relay.md",
-  "shared-keys":
-    "https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/shared-key-scenarios.md",
-  "web-credentials":
-    "https://github.com/Machine-Garden/interocitor/tree/main/packages/web#credential-storage-choices",
-  "data-surfaces":
-    "https://github.com/Machine-Garden/interocitor/tree/main/packages/core#keep-rows-and-files-distinct",
-  compaction:
-    "https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/compaction.md",
-  "adapter-contract":
-    "https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/adapter-contract.md",
-  python:
-    "https://github.com/Machine-Garden/interocitor/tree/main/packages/interocitor-python#readme",
-  "data-migrations":
-    "https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/data-migrations.md",
+  recovery: "/qa#lost-key",
+  "mesh-access": "/auth",
+  "worker-runtime": "/mailbox",
+  "worker-maintenance": "/mailbox#operations",
+  "worker-relay": "/flows#access",
+  "shared-keys": "/trust",
+  "web-credentials": "/trust#custody",
+  "data-surfaces": "/data-boundaries",
+  "adapter-contract": "/mailbox",
+  python: "/automation",
+  "data-migrations": "/automation#duplicate",
 };

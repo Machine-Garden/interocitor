@@ -2,8 +2,11 @@
 
 The public site helps an application-fit evaluator decide whether Interocitor’s
 local full-copy rows, directly remote files, trusted endpoints, and mailbox
-boundary fit a product. It then routes builders and deployment owners to the
-technical contract they control.
+boundary fit a product. It reads like a good high-school textbook:
+self-contained, compact, plain, lively, and intellectually respectful. It
+assumes no supplied context and little spare attention, never low intelligence.
+Deeper package documentation owns university-level explanation and reference;
+internal material stays out of the ordinary visitor path.
 
 The site is a Vinext/React application under `site/`. Navigation between the
 landing page and documentation uses client-side transitions, while direct URLs
@@ -20,14 +23,17 @@ changes the landing page.
 Reader-facing documentation is Markdown:
 
 - `site/content/how-it-works.md` owns the visual and conceptual sync story;
+- `site/content/storage.md` owns the local and remote storage model, the
+  application-layer protection point, and physical backend placement;
 - `site/content/trust.md` owns endpoint authority, key custody, recovery, and
   rotation;
 - `site/content/data-boundaries.md` owns rows, files, meshes, availability, and
   sizing;
 - `site/content/mailbox.md` owns mailbox placement and operational
   responsibility;
-- `site/content/auth.md` owns the choice between host-owned authorization and
-  specialized application-managed grants;
+- `site/content/auth.md` owns the relationship among host authentication, mesh
+  middleware, recovery phrases, mesh keys, tainted-file keys, and specialized
+  application-managed grants;
 - `site/content/automation.md` owns trusted processors, isolation, and delivery
   semantics;
 - `QA.md`, `dictionary.md`, and `flows.md` are rendered directly as reference
@@ -76,11 +82,12 @@ security headers, redirects, metadata, and live-demo reachability.
 | Route              | Reader question                                                               |
 | ------------------ | ----------------------------------------------------------------------------- |
 | `/`                | Is Interocitor a fit for my application and threat model?                     |
-| `/how-it-works`    | How do independent changes converge, and how is catch-up bounded?             |
+| `/how-it-works`    | What is Interocitor, why use it, and how does one change travel?              |
+| `/storage`         | What rests locally and remotely, and where does each backend put it?          |
 | `/trust`           | Which endpoints may read the mesh, and how will its key lifecycle be handled? |
 | `/data-boundaries` | What belongs in rows, files, and separate meshes?                             |
 | `/mailbox`         | Where should the mailbox run, and who owns its operational risks?             |
-| `/auth`            | Should mesh access follow host policy or application-managed grants?          |
+| `/auth`            | How do host auth, middleware, recovery, taints, and grants compose?           |
 | `/automation`      | How should a trusted worker or agent coordinate and isolate its work?         |
 | `/qa`              | What are the plain-language product and threat-boundary answers?              |
 | `/dictionary`      | What does each protocol and security term mean?                               |

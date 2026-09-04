@@ -1,115 +1,218 @@
 ---
-title: How Interocitor handles independent operators
-description: Follow one row change from a local write through an encrypted mailbox, merge, compaction, and recovery.
-kicker: How Interocitor syncs
-heading: Independent operators can converge without a central editor.
-lede: Each endpoint changes its own local rows. The network carries uniquely named artifacts; trusted endpoints interpret and merge them. Snapshots keep later catch-up bounded.
+title: Why Interocitor works the way it does
+description: Understand why Interocitor keeps row state local, exchanges protected changes through a mailbox, and merges them on trusted endpoints.
+kicker: Start here · The complete story
+heading: Work locally. Exchange facts. Converge at the trusted ends.
+lede: Interocitor separates the place where an application works from the place that carries its data. That choice lets trusted endpoints remain useful offline and converge without asking remote storage to read or resolve their rows.
 ---
 
-## Two operators, one mesh, no coordination {#evolution}
+## Let’s begin with the problem Interocitor solves {#begin}
 
-Imagine Device A changes a document title while Device B, offline elsewhere, approves the same document. A shared `state.json` file would force one device to overwrite the other or require the server to understand the document. Interocitor records the two edits as independent operations instead.
+Most applications make a remote database the authority. Every read and write crosses the network, and the server decides what the current state means. That is a sensible design when the server is always reachable and is allowed to see, query, and coordinate the data.
 
-| Device A                   | Device B              | Result after exchange   |
-| -------------------------- | --------------------- | ----------------------- |
-| `title = "Q3 field notes"` | `status = "approved"` | Both fields are present |
+Interocitor starts with a different storage promise: protected application data is encrypted on the trusted endpoint, **before the remote stores it**. The mesh key stays on trusted endpoints. Whether the mailbox is carried by WebDAV, Google Drive, or a Cloudflare Worker, protected payloads arrive as ciphertext and remain ciphertext while at rest there or in a remote backup.
 
-For concurrent writes to the same field, the schema’s CRDT policy and hybrid logical clocks determine a stable result. The mailbox never chooses a winner.
+The storage service does not need the mesh key to list, keep, or return those artifacts. Only the trusted endpoints you admit hold the key and plaintext. This does not make an endpoint invulnerable—a compromised endpoint can still expose both—but it removes remote storage from the plaintext trust boundary. Because Interocitor adds this protection at the application layer, its confidentiality boundary does not depend on how the storage platform encrypts disks or manages platform keys.
 
-> Storage preserves artifacts. Trusted endpoints resolve intent.
+It becomes the wrong bargain when an application must keep working through a lost connection, when several endpoints may edit independently, or when the storage provider should carry protected data without receiving plaintext. Moving the same database into one shared file does not solve the coordination problem: two offline writers can each upload a complete but incomplete view, and one replacement can erase the other writer’s work.
 
-## One change crosses the mesh {#journey}
+Interocitor changes the unit of exchange. Each trusted endpoint owns a complete local row database and records each edit as a separate change. The remote stores those changes as protected artifacts. Trusted endpoints later collect the same facts and apply the same merge rules, so they can reach the same result without negotiating before every write.
 
-### 1. Write locally
+> The network carries work between replicas. It is not permission to begin work.
 
-The application writes through its local table API. The local store updates immediately and records a durable outbox entry. Once that store has opened, row work does not wait for remote storage.
+This is why Interocitor is both **local-first** and **client-merged**. The application can respond from local state, while a remote mailbox can make artifacts available without becoming the application database or conflict authority.
 
-### 2. Encode and protect
+## See why one shared state file fails {#evolution}
 
-On `flush()`, Core turns the outbox entry into a uniquely named change artifact. With a non-null key source, the row payload is encrypted before the storage adapter receives it.
+Aya changes a field report’s title while offline. Bo independently approves the same report. If both upload a complete `state.json` to one path, each file is based on a world that does not contain the other edit. The storage provider may keep the last upload or create a conflict copy, but it cannot infer that the new title and the approval belong together.
 
-```text
-device_a local row
-  → outbox entry
-  → encrypted change file
-  → remote changes/ path
+```mermaid
+flowchart LR
+    A[Aya's full copy<br/>new title] --> C[Same state.json path]
+    B[Bo's full copy<br/>approved] --> C
+    C --> D[One replacement wins<br/>or two conflict copies remain]
 ```
 
-### 3. Store without interpreting
+Interocitor publishes the two edits under distinct identities instead. Neither change replaces the other, and the trusted endpoints have the schema and key needed to combine their field-level intent.
 
-The mailbox retains the change file and the device’s small control records. It can list, read, write, and delete objects. It does not query rows, run application policy, or merge concurrent edits.
+## Identify the three responsibilities {#characters}
 
-### 4. Pull and merge at the receiver
+The design works because no component is pretending to be another one:
 
-Device B lists change filenames after its cursor, downloads unseen artifacts, decrypts them, and applies CRDT operations to its own local store. It advances observation state only after the change is accepted.
+| Component                             | What it owns                                                                                                           | What it does not own                                      |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| **Application on a trusted endpoint** | Gives rows meaning, applies product policy, and decides which people and devices may participate.                     | Remote storage, synchronization, or generic merge logic.  |
+| **Interocitor runtime**               | Commits local row changes, records pending work, protects artifacts, and applies the schema’s deterministic merge rules. | The application UI, identity system, or product policy.   |
+| **Remote mailbox**                    | Stores and returns change artifacts, snapshots, control records, and durable files.                                   | Row queries, application policy, or conflict resolution.  |
 
-The routine loop is deliberately small:
+Every participating endpoint has its own runtime and local row store. With a non-null key source, each key-bearing endpoint is trusted with the complete mesh: it may hold plaintext and can decrypt the rows and ordinary files it obtains. The mailbox is a rendezvous point for protected artifacts, not the database engine.
 
-1. change local state;
-2. queue and encrypt an artifact;
-3. store it in the mailbox;
-4. pull and merge on another trusted endpoint.
+That boundary is the central trade-off. Interocitor removes the remote from the plaintext and merge path, but it places more responsibility on trusted endpoints and on the application that admits them.
 
-## Fold history into a baseline {#compaction}
+## See how Interocitor stores data {#storage}
 
-An append-only change history becomes expensive for a new or returning endpoint. Compaction publishes the current merged row state as a snapshot and points the mesh manifest at it.
+Interocitor does not copy one live database between machines. It keeps working rows and an outbox on each trusted endpoint, carries protected changes and snapshots through a remote sync mailbox, and stores durable files remotely on a separate path.
 
-The safe publication sequence is:
+With protection configured, payloads are encrypted before the storage adapter receives them. The [storage chapter](/storage) shows exactly what rests locally, what remains visible remotely, and how WebDAV, Google Drive, Cloudflare + R2, and Cloudflare + S3 carry that model.
 
-1. pull the latest visible changes;
-2. capture the exact filenames covered by the candidate snapshot;
-3. write the encrypted snapshot;
-4. write its generation manifest;
-5. switch `manifest.json` to that complete generation;
-6. remove only the captured change files.
+## Follow one row change from intent to convergence {#journey}
 
-Snapshot first and pointer last means a reader sees either the previous complete generation or the new complete generation. It is never directed to a baseline that has not been written.
+One edit crosses five boundaries. Each boundary exists for a reason:
 
-### Deletion must remain visible
+```mermaid
+flowchart LR
+    A[Commit local row] --> B[Record pending work]
+    B --> C[Give the change a stable identity]
+    C --> D[Protect and publish the artifact]
+    D --> E[Verify, decrypt, and merge elsewhere]
+```
 
-A deleted row becomes a tombstone operation. Removing that operation before every relevant endpoint has incorporated it could let an old value reappear. Compaction therefore carries tombstones into the snapshot and retires only change files with exact coverage.
+### 1. Commit the row locally
 
-The adapter contract does not promise compare-and-swap writes. Two clients can publish valid compactions that race, so strict deployments should use a server-managed single compactor. See the [compaction contract](https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/compaction.md).
+The application writes to its local table. Interocitor commits the new row state and the pending description of that change together, before any remote publication begins. The application can immediately read the result from the same local store.
 
-## Keys and plaintext stay at the ends {#boundary}
+This is what makes the row path local-first: a temporary network failure does not become an application-write failure. Crash durability depends on the chosen local store. A durable browser or native store can preserve queued work across a reload or process restart; an in-memory store cannot.
 
-With a non-null key source, protected payloads cross the adapter boundary as ciphertext.
+### 2. Promote completed work to the outbox
 
-| Trusted endpoint                                         | Remote mailbox                                                       |
-| -------------------------------------------------------- | -------------------------------------------------------------------- |
-| Mesh key, plaintext rows, application policy, CRDT merge | Ciphertext payloads, paths, sizes, timing, manifests, device records |
+Interocitor groups the completed local operation into pending work and promotes it to the local outbox. The outbox separates **accepted locally** from **published remotely**. With a durable local store, failed publication leaves the operation available for a later retry instead of asking the application to reconstruct the user’s intent.
 
-A raw mailbox or database dump does not reveal protected row values or ordinary durable-file contents. A malicious or failed remote can still withhold, delete, reorder, or roll back artifacts. Client-side encryption provides confidentiality and per-object integrity; it does not provide availability or a monotonic storage history.
+This distinction also makes lifecycle boundaries honest. Opening the local store is enough for row work; connecting to the mailbox is a later step that catches the endpoint up and publishes queued work.
 
-This merge story applies to structured rows. Durable files use the same encryption boundary but a simpler lifecycle: direct remote put, get, overwrite, and delete, with no CRDT merge or core offline queue.
+### 3. Give the change a stable identity and order
 
-## Encryption and authorization answer different questions {#protection}
+When the outbox is flushed, the operation becomes a uniquely named change artifact. Its identity prevents another writer from replacing it at the same path. Its hybrid logical clock, or **HLC**, supplies deterministic conflict order when two operations touch the same field.
 
-The mesh key protects payload contents. A protocol-aware Worker’s request policy decides whether a request may reach the mesh at all.
+Those jobs must not be confused. An HLC can answer “which value wins under this merge rule?” It cannot prove “every earlier change has been received.” Devices create changes independently and may publish an older-clocked artifact after another device has already advanced a newer clock.
 
-- **Mesh key:** enables a trusted endpoint to decrypt rows and ordinary files.
-- **Mesh authorization:** can grant read-only, full, or denied access to a mailbox namespace.
-- **Application policy:** may add narrower, time-limited operations around a specific workflow.
+### 4. Protect and publish the artifact
 
-Authorization does not give the Worker plaintext, and encryption does not prove that a caller should be admitted. Neither layer becomes a per-row or per-file ACL.
+With a non-null key source, Interocitor encrypts and authenticates the row operation before handing it to the storage adapter. The adapter writes that opaque artifact to the mailbox. Object paths and control records remain visible so the mailbox can route and return data, but it does not receive the row schema or plaintext operation.
 
-Choose the owner and revocation model in [Access and identity](/auth).
+Publishing a separate artifact is what avoids the shared-file collision. Aya’s title change and Bo’s approval can coexist remotely even when neither writer knew about the other.
 
-## Same artifacts, different backend guardrails {#adapter-boundary}
+### 5. Pull, verify, and merge on another endpoint
 
-WebDAV exposes portable file operations. A Cloudflare Worker carries the same protected artifacts but can recognize protocol paths and reject some invalid states.
+Another endpoint lists the available change artifacts and subtracts the exact filenames it has already accepted. Head markers, cursors, and clocks can make work easier to find, but exact change identities are the observation record: a late file must remain eligible even when its HLC sorts behind the endpoint’s current frontier.
 
-| Pressure             | Generic WebDAV contract                         | Cloudflare Worker mitigation                                     |
-| -------------------- | ----------------------------------------------- | ---------------------------------------------------------------- |
-| Stale control write  | Same-path PUT follows host overwrite semantics  | Lower manifest generations and clocks can be rejected            |
-| Immutable history    | A client convention unless the host adds policy | Change files, manifests, and snapshots use insert-once semantics |
-| Mesh admission       | Usually follows account or directory access     | Address gates and middleware can grant explicit mesh access      |
-| Abuse and operations | Provider-specific                               | Typed body limits, quotas, audit events, and TTL maintenance     |
+For every unseen artifact, the endpoint verifies and decrypts the payload, applies its CRDT operations to the local store, and records the artifact as observed. Only then can a later pull safely skip that identity.
 
-These controls reduce accidental overwrite, unauthorized use, and unbounded uploads through the normal API. They do not make a compromised host trustworthy or serialize equal-generation compaction races.
+The complete routine loop is therefore:
 
-## The repeatable loop {#recap}
+1. commit useful local state;
+2. preserve the pending operation;
+3. publish one protected, uniquely identified artifact;
+4. discover every unseen artifact by identity;
+5. merge accepted operations on each trusted endpoint.
 
-Operators change local state without waiting for one another. Each publication is a uniquely named protected change; ordinary storage carries it; trusted endpoints merge it. Cursors make routine pulls incremental, and snapshots bound the work of joining later.
+The [core flow diagrams](/flows) show the same journey as message sequences.
 
-Continue with the [core adapter contract](https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/adapter-contract.md) or choose an [architecture decision](/trust).
+## Resolve concurrent edits without arrival-order winners {#collision}
+
+Suppose Aya changes a field report’s title while Bo, offline elsewhere, approves the same report:
+
+| Aya changed               | Bo changed          | Result after both artifacts arrive |
+| ------------------------- | ------------------- | ---------------------------------- |
+| Title → “Northern lights” | Status → “Approved” | The new title and the approval     |
+
+Changes to different fields normally preserve both intentions. If both writers change the same field, the schema’s configured CRDT rule decides the value. The built-in last-write-wins rule compares HLCs; a custom rule must be deterministic, commutative, associative, and idempotent. The direction of synchronization—push or pull—and the order in which files happen to arrive do not choose a different winner.
+
+Deletion follows the same model. A delete becomes a **tombstone**, a small operation that records that the row incarnation was removed. Erasing that fact too early could let an old offline update bring the row back.
+
+Convergence applies to row data, not arbitrary external effects. Two endpoints can converge on the same “email sent” row after both have already sent the email. Payments, notifications, and jobs still need an application-owned claim, lease, or idempotency rule. [Trusted automation explains that separate coordination problem](/automation).
+
+## Fold growing history into a safe baseline {#history}
+
+The change-per-artifact design prevents writers from overwriting one another, but it creates an append-only history. A device that follows along only processes new artifacts. A new or long-absent device has no such starting point and would eventually need to replay every change ever published.
+
+**Compaction** bounds that catch-up work. One trusted compactor reconstructs the complete current row state, captures the exact artifact filenames represented in it, and publishes the result as an encrypted snapshot.
+
+```mermaid
+flowchart LR
+    A[Flush local work and pull visible changes] --> B[Capture exact observed identities]
+    B --> C[Write complete encrypted snapshot]
+    C --> D[Publish the new baseline pointer]
+    D --> E[Delete only captured change files]
+```
+
+The order is the safety argument:
+
+1. publish the compactor’s own pending work;
+2. pull every remote change currently visible;
+3. capture the exact identities included in the snapshot;
+4. write the complete snapshot before advertising it;
+5. switch the current baseline to that complete generation;
+6. delete only the captured change files.
+
+A change that appears after the capture is absent from the deletion set and remains for the next pull, even if its HLC is lower than the snapshot watermark. Tombstones remain inside the snapshot because a scalar clock cannot prove that every independently publishing endpoint has exhausted its older work.
+
+Ordinary adapters do not provide the compare-and-swap or distributed lease needed to make concurrent compaction safe. Two compactors can race the current pointer and delete different covered sets, so a deployment must arrange one compaction publisher at a time. [The compaction guide covers ownership, retention, late return, quarantine, and failure recovery](/compaction).
+
+Compaction changes the cost of joining, not the meaning of the rows. A snapshot is the same converged state expressed as a new baseline followed by a shorter tail of changes.
+
+## Keep rows and durable files on different roads {#roads}
+
+The story so far applies to structured rows. Durable files share the protection boundary but deliberately use a different availability model:
+
+| Surface           | Why it exists                                                                 | Availability and change model                                                                  |
+| ----------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| **CRDT rows**     | Structured state must remain useful and mergeable while endpoints are apart. | Reads and writes use the local store; protected changes synchronize later and merge by field. |
+| **Durable files** | Exact bytes should remain one application-addressed object.                   | Put, get, overwrite, and delete call the remote adapter directly; Core adds no offline queue, cache, merge, or compaction. |
+
+An application can keep a file’s path and metadata in a row, so the reference remains available offline, while fetching the bytes only when transport is available. It must add its own file cache or retry policy when the product needs a different experience. Deleting a row does not automatically delete the file it references.
+
+[Rows, files, and meshes](/data-boundaries) helps choose the correct surface before implementation.
+
+## Keep keys, plaintext, and merge decisions at the ends {#boundaries}
+
+```text
+trusted endpoint  →  protected remote mailbox  →  trusted endpoint
+plaintext + key              ciphertext             plaintext + key
+```
+
+With a non-null key source, protected row changes, snapshots, and ordinary durable files are encrypted before the mailbox receives them. A mailbox or database dump therefore does not reveal their protected contents, and modified ciphertext fails integrity verification instead of becoming valid plaintext.
+
+That promise has sharp edges:
+
+- object paths, sizes, timing, request identity, device records, and control metadata remain visible;
+- local row stores contain plaintext, and every endpoint with the mesh key can read the complete mesh data it obtains;
+- the remote can withhold, delete, or replay valid artifacts, remain unavailable, or restore an older consistent state;
+- encryption cannot repair a compromised trusted endpoint or prove that the remote disclosed every change.
+
+Interocitor protects confidentiality and per-object integrity across the adapter boundary. It does not turn remote storage into an available, monotonic, or cryptographically complete history. [The security model follows each threat and recovery consequence](/security).
+
+## Separate encryption from authorization {#protection}
+
+Encryption and authorization work together, but answer different questions:
+
+| Boundary               | Question                                                                    |
+| ---------------------- | --------------------------------------------------------------------------- |
+| **Mesh key**           | Can this endpoint decrypt the mesh’s protected rows and ordinary files?     |
+| **Mesh authorization** | May this authenticated subject reach this remote mesh now?                  |
+| **Application policy** | Should this person or workflow perform this product action?                 |
+
+A mesh address selects a namespace; it is not a credential. Possessing a mesh key is a decryption capability; it is not proof that a current network request should be admitted. Conversely, passing Worker authorization does not give the Worker the mesh key or plaintext.
+
+Neither boundary creates a built-in per-row or per-file ACL. Use separate meshes when row audiences differ, or an application-owned tainted-file key when one file needs a narrower audience. [Authentication and access explains how host identity, middleware, recovery, grants, and keys compose](/auth).
+
+## Keep backend choice behind one storage contract {#adapter-title}
+
+WebDAV, Google Drive, and a protocol-aware Cloudflare Worker all perform the same fundamental mailbox role: store and return artifacts without merging rows or receiving the mesh key. They differ in physical placement, account ownership, availability, recovery, and the guardrails they can enforce.
+
+The [storage chapter](/storage) explains those layouts, including Cloudflare with R2 or S3 file bodies. [Mailbox operations](/mailbox) helps choose the operational owner and plan access, limits, backup, and restore. Package documentation owns exact adapter and deployment configuration.
+
+## Decision summary {#summary}
+
+Interocitor repeats one idea at every scale: preserve independently created facts, interpret them only where the schema and keys live, and replace long history only with a complete baseline whose exact coverage is known.
+
+| Stage                     | Why it exists                                                                      |
+| ------------------------- | ---------------------------------------------------------------------------------- |
+| **Change locally**        | Keep the application responsive and useful without a remote round trip.            |
+| **Queue locally**         | Preserve accepted work according to the local store’s durability until publication succeeds. |
+| **Protect and publish**   | Let ordinary storage carry independent artifacts without receiving row plaintext.  |
+| **Pull and merge**        | Let trusted endpoints resolve field intent and converge independently of arrival.  |
+| **Compact carefully**     | Bound future catch-up without deleting late or unobserved work.                     |
+
+This is a fit when trusted endpoints may hold a complete local row replica, offline progress matters, and the product can own endpoint admission, key custody, mailbox operations, and any coordination for side effects. It is not a server-side query engine, selective row-sharing system, exactly-once job queue, or guarantee that an untrusted remote stays available.
+
+Continue by the decision you control: examine [storage placement](/storage), follow [security and failure](/security), choose [row, file, and mesh boundaries](/data-boundaries), design [authentication and key custody](/auth), select a [mailbox owner](/mailbox), or inspect the [exact core flows](/flows).

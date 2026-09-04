@@ -14,11 +14,11 @@ export function HomeLanding() {
           <nav className="nav-links" aria-label="Primary navigation">
             <SpaLink href="#why">Why Interocitor</SpaLink>
             <SpaLink href="examples/todomvc/">Live TodoMVC</SpaLink>
-            <SpaLink href="#decisions">Architecture guides</SpaLink>
-            <SpaLink href="#security">Trust boundary</SpaLink>
+            <SpaLink href="#decisions">Choose a path</SpaLink>
+            <SpaLink href="#security">Security model</SpaLink>
           </nav>
           <SpaLink className="nav-cta" href="how-it-works.html">
-            How it works <span aria-hidden="true">↗</span>
+            Docs <span aria-hidden="true">↗</span>
           </SpaLink>
         </div>
       </header>
@@ -32,16 +32,15 @@ export function HomeLanding() {
                 <span className="heading-highlight">Your storage provider stays blind.</span>
               </h1>
               <p className="site-hero-lede">
-                Interocitor keeps structured data on trusted devices, syncs independent changes when
-                connectivity returns, and carries documents and media as durable files. With a key
-                source, payloads are encrypted before remote storage receives them.
+                Interocitor keeps useful rows on trusted devices, exchanges changes when the network
+                returns, and encrypts private contents before the remote mailbox receives them.
               </p>
               <div className="actions">
                 <SpaLink className="button primary demo-button" href="examples/todomvc/">
                   Try live TodoMVC <span aria-hidden="true">↗</span>
                 </SpaLink>
                 <SpaLink className="button secondary" href="how-it-works.html">
-                  See the technical model
+                  Open how it works
                 </SpaLink>
               </div>
             </div>
@@ -56,16 +55,14 @@ export function HomeLanding() {
             </div>
             <div className="intro-copy">
               <p>
-                Server-owned state is convenient, but it turns network outages into product outages
-                and puts database operators inside the plaintext trust boundary. Interocitor splits
-                synchronization from storage: trusted endpoints merge changes; the remote stores and
-                moves them.
+                Many apps stop when the server disappears. Interocitor lets trusted devices keep
+                working with local rows, then use the network to exchange changes when it returns.
               </p>
             </div>
           </div>
 
           <div className="shell responsibility-map">
-            <p>Responsibility split with a non-null key source</p>
+            <p>Who does what?</p>
             <dl>
               <div>
                 <dt>Trusted devices</dt>
@@ -77,7 +74,7 @@ export function HomeLanding() {
               </div>
               <div>
                 <dt>Storage operator</dt>
-                <dd>Operates storage without payload plaintext.</dd>
+                <dd>Runs storage without reading private contents.</dd>
               </div>
             </dl>
           </div>
@@ -86,25 +83,22 @@ export function HomeLanding() {
             <article>
               <h3>Keep working without a round trip</h3>
               <p>
-                A local-first interface can respond from local state when a device is in the field,
-                moving between networks, or temporarily offline. Connectivity becomes the way work
-                travels, not a prerequisite for doing the work.
+                A device in the field or on a train can keep reading and changing local rows. The
+                network is how work travels, not permission to begin.
               </p>
             </article>
             <article>
               <h3>Store data without sharing the contents</h3>
               <p>
-                A provider can retain and serve encrypted artifacts without needing the final
-                decryption key. This narrows the confidentiality boundary and makes a storage dump
-                materially less revealing than a plaintext application database.
+                The mailbox can keep encrypted artifacts without holding the key that opens them. A
+                stolen mailbox reveals far less than a plain application database.
               </p>
             </article>
             <article>
               <h3>Put the mailbox where it belongs</h3>
               <p>
-                The same application model can use a Cloudflare mailbox, a user’s Google Drive, a
-                WebDAV server or home NAS, or a custom adapter. The storage decision can follow the
-                product’s deployment, ownership, and operational needs.
+                Use Cloudflare, Google Drive, WebDAV, a home NAS, or another remote backend. Choose
+                one whose ownership and failure modes your product can explain.
               </p>
             </article>
           </div>
@@ -118,8 +112,8 @@ export function HomeLanding() {
                 <h2 id="use-title">Local collaboration, protected data and trusted automation.</h2>
               </div>
               <p>
-                One model covers application state that changes, files that must stay exact, and
-                trusted workers that need to participate without exposing their work to storage.
+                Watch local rows converge, files cross the blind mailbox, and trusted agents join
+                the workflow.
               </p>
             </div>
 
@@ -131,15 +125,14 @@ export function HomeLanding() {
                   </p>
                   <h3>TodoMVC, live in this browser.</h3>
                   <p>
-                    Use two familiar TodoMVC clients side by side. A live in-page filesystem exposes
-                    the exact manifest, device, head, and change files without asking the visitor to
-                    provide storage or run a backend.
+                    Use two familiar TodoMVC clients side by side. Make a change, cut the network,
+                    reconnect, and watch the other side catch up.
                   </p>
                   <div className="example-outcome">
-                    <strong>Make convergence observable.</strong>
+                    <strong>Watch two local copies converge.</strong>
                     <span>
-                      Change either client, simulate a disconnect, and inspect the files created on
-                      reconnection. Everything resets when the page reloads.
+                      Change either client and watch local work travel when the network returns.
+                      Everything resets when the page reloads.
                     </span>
                     <SpaLink href="examples/todomvc/">
                       Try the live TodoMVC <span aria-hidden="true">→</span>
@@ -147,7 +140,7 @@ export function HomeLanding() {
                   </div>
                 </div>
 
-                <div className="code-window" aria-label="Partial TodoMVC application code">
+                <div className="code-window" aria-label="A TodoMVC change crossing the mailbox">
                   <div className="code-window-bar">
                     <span aria-hidden="true">
                       <i></i>
@@ -156,23 +149,13 @@ export function HomeLanding() {
                     </span>
                     <b>one page · two clients</b>
                   </div>
-                  <pre>
-                    <code>
-                      <span className="code-keyword">const</span> memory ={" "}
-                      <span className="code-keyword">new</span> MemoryAdapter();
-                      <span className="code-keyword">const</span> left = createDatabase(
-                      <span className="code-string">'client-1'</span>);
-                      <span className="code-keyword">const</span> right = createDatabase(
-                      <span className="code-string">'client-2'</span>);
-                      <span className="code-keyword">await</span> left.table(
-                      <span className="code-string">'todos'</span>).add({"{"}
-                      title: <span className="code-string">'Ship it'</span>, done:{" "}
-                      <span className="code-value">false</span>
-                      {"}"});
-                      <span className="code-keyword">await</span> left.flush();
-                      <span className="code-keyword">await</span> right.pull();
-                    </code>
-                  </pre>
+                  <div className="demo-journey">
+                    <span>Aya changes a task offline</span>
+                    <b aria-hidden="true">↓</b>
+                    <span>The network returns</span>
+                    <b aria-hidden="true">↓</b>
+                    <span>Bo sees the same task</span>
+                  </div>
                 </div>
               </article>
 
@@ -183,9 +166,8 @@ export function HomeLanding() {
                   </p>
                   <h3>Two clients. One mailbox that cannot read the conversation.</h3>
                   <p>
-                    Alice and Bob share a mesh key and exchange message rows through an inspectable
-                    in-page mailbox. The application deletes messages older than the newest fifteen,
-                    synchronizes the tombstones, and compacts covered history.
+                    Alice and Bob share a key and exchange message rows through an inspectable
+                    in-page mailbox. The mailbox never receives their readable conversation.
                   </p>
                   <div className="example-outcome">
                     <strong>Inspect the actual ciphertext.</strong>
@@ -210,8 +192,8 @@ export function HomeLanding() {
                   </div>
                   <div className="chat-envelope">
                     <span>Mailbox</span>
-                    <strong>v1 · iv · ciphertext</strong>
-                    <small>no mesh key</small>
+                    <strong>encrypted artifact</strong>
+                    <small>no key to open it</small>
                   </div>
                   <div className="chat-bubble bob-bubble">
                     <span>Bob</span>
@@ -267,7 +249,7 @@ export function HomeLanding() {
                   <p className="example-label">
                     <span>04</span> Protected family location
                   </p>
-                  <h3>Strong payload privacy does not make a safety product.</h3>
+                  <h3>Encrypted location data does not make a safety product.</h3>
                   <p>
                     Two devices share encrypted latest-known location rows while the mailbox sees no
                     place names or coordinates. The five-second demo cadence keeps both views
@@ -306,9 +288,8 @@ export function HomeLanding() {
                   </p>
                   <h3>A private Dropbox over storage you choose.</h3>
                   <p>
-                    Let storage do what it is good at—retain and deliver files—without giving it the
-                    document contents. Interocitor encrypts bytes before the adapter receives them,
-                    then another paired endpoint decrypts the same object.
+                    Let storage retain and deliver files without giving it the document contents.
+                    One trusted device encrypts the bytes; another trusted device decrypts them.
                   </p>
                 </div>
 
@@ -342,16 +323,9 @@ export function HomeLanding() {
                   </div>
                 </div>
 
-                <pre className="file-code" aria-label="Partial durable-file application code">
-                  <code>
-                    <span className="code-keyword">await</span> db.putFile(path, bytes, file.type);
-                    <span className="code-keyword">const</span> copy ={" "}
-                    <span className="code-keyword">await</span> db.getFile(path);
-                  </code>
-                </pre>
                 <p className="example-limit">
-                  File calls use the remote directly, so transfers need connectivity. Object paths,
-                  sizes, timing, and request identity can still be visible to the storage operator.
+                  File transfers need a network. Their paths, sizes, and timing can still be visible
+                  to the remote.
                 </p>
               </article>
 
@@ -362,11 +336,9 @@ export function HomeLanding() {
                   </p>
                   <h3>Share task state without exposing it to storage.</h3>
                   <p>
-                    A product writes a task row. An authorized agent endpoint observes it, does the
-                    work, and writes result rows or files back into the same mesh. Both endpoints
-                    can keep their own working state; the mailbox only exchanges encrypted
-                    artifacts. Work that must happen once needs an application-owned claim, lease,
-                    or safe retry rule.
+                    A product leaves a task row. A trusted agent reads it, does the work, and
+                    returns a result. If pressing the outside-world button twice would hurt, the
+                    product must add a rule that makes only one press count.
                   </p>
                 </div>
 
@@ -383,7 +355,7 @@ export function HomeLanding() {
                   <div className="workflow-node blind-node">
                     <span>Remote mailbox</span>
                     <strong>Cannot read the task</strong>
-                    <small>Stores artifacts</small>
+                    <small>Stores encrypted artifacts</small>
                   </div>
                   <div className="workflow-transfer">
                     <span>encrypted results</span>
@@ -395,8 +367,8 @@ export function HomeLanding() {
                     <small>Reads, acts, writes</small>
                   </div>
                   <figcaption>
-                    The agent holds a mesh key and sees plaintext, so isolate workflows into
-                    separate databases and keys when they need smaller trust boundaries.
+                    The agent holds a key and sees plaintext. Give a powerful agent the narrowest
+                    mesh that fits its work.
                   </figcaption>
                 </figure>
               </article>
@@ -413,35 +385,32 @@ export function HomeLanding() {
             <div className="story-heading">
               <p className="site-kicker">What that means in practice</p>
               <h2 id="story-title">
-                The useful copy stays close. The remote carries sealed parcels.
+                The useful copy stays local. The remote carries encrypted changes.
               </h2>
               <p className="story-note">
-                A plain-language view of the promises—and the trade-offs.
+                Rows keep working offline; file bytes still require network access.
               </p>
             </div>
             <div className="story-prose">
               <p className="story-lede">
-                Picture two people changing the same shared workspace from different devices. One is
-                offline on a train; the other is connected at home. Each can keep changing local
+                Consider two people changing the same shared workspace from different devices. One
+                is offline on a train; the other is connected at home. Each can keep changing local
                 rows. When their devices can reach the mailbox again, they exchange encrypted
                 changes and arrive at the same result without asking the mailbox to choose a winner.
               </p>
               <p>
                 The mailbox is important, but deliberately unhelpful: it stores and returns
-                protected artifacts without receiving the final key or interpreting the row data
-                inside them. It can still see operational metadata—names, sizes, timing, request
-                identity, and device identifiers—and it can still lose, withhold, or roll back what
-                it stores.
+                encrypted artifacts without receiving the key or understanding the rows inside. It
+                still sees metadata such as paths, sizes, and timing, and it can still lose or hide
+                what it stores.
               </p>
               <p>
-                That is why local-first and encrypted do not mean consequence-free. Row work
-                survives offline only when the app uses durable local storage; durable-file calls
-                still need a connection. A lost key needs recovery prepared in advance, a copied key
-                requires a new database and key for full revocation, and important data still needs
-                tested backups.
+                Local-first and encrypted are strong promises with explicit limits. Files still need
+                network access. A lost key needs recovery prepared earlier. A copied key means
+                moving to a new mesh, and important data still needs a tested backup.
               </p>
               <SpaLink className="text-link" href="QA.md">
-                Read the simple questions and honest answers <span aria-hidden="true">→</span>
+                Read common questions and direct answers <span aria-hidden="true">→</span>
               </SpaLink>
             </div>
           </div>
@@ -450,19 +419,19 @@ export function HomeLanding() {
         <section id="model" className="site-section model-summary" aria-labelledby="model-title">
           <div className="shell narrow-layout">
             <div>
-              <p className="site-kicker">Why local convergence matters</p>
+              <p className="site-kicker">Why convergence matters</p>
               <h2 id="model-title">Independent work does not need a central editor.</h2>
             </div>
             <div>
               <p>
-                Trusted devices can change local rows without first acquiring a server lock or
-                waiting for a leader. Interocitor’s structured data model lets those devices
-                converge after they exchange encrypted changes.
+                Trusted devices can change local rows without waiting for a leader. After they
+                exchange encrypted change artifacts, the same merge rules lead them to the same
+                result.
               </p>
               <aside className="section-takeaway">
                 <span>Design consequence</span>
                 <strong>The remote can remain a mailbox, not the central editor.</strong>
-                <p>Application policy and trusted processing stay at the endpoints.</p>
+                <p>The devices keep the key and do the meaningful work.</p>
               </aside>
               <SpaLink className="text-link" href="how-it-works.html">
                 Follow a change through the complete sync loop <span aria-hidden="true">→</span>
@@ -486,9 +455,8 @@ export function HomeLanding() {
                 </h2>
               </div>
               <p>
-                Application state and file content need different promises. Treating them honestly
-                avoids forcing large binary objects into a merge model or pretending remote files
-                have the same offline behavior as local records.
+                Working facts and heavy files need different promises. Keeping them honest stops a
+                phone carrying every video and stops the app pretending remote files are offline.
               </p>
             </div>
 
@@ -497,19 +465,16 @@ export function HomeLanding() {
                 <p className="card-type">Structured rows</p>
                 <h3>Local working state that can converge</h3>
                 <p>
-                  Use rows for the facts an application reads, changes, and reconciles across
-                  devices—titles, statuses, notes, relationships, and other structured state. Reads
-                  and writes use the application’s local store, so the product can remain responsive
-                  without a live remote.
+                  Use rows for titles, statuses, notes, and other facts people keep changing. They
+                  live on the device first, so work can continue without a live remote.
                 </p>
               </article>
               <article>
                 <p className="card-type">Durable files</p>
                 <h3>Exact remote objects for documents and media</h3>
                 <p>
-                  Use files when the bytes themselves must remain intact. They are encrypted before
-                  storage, but they are not merged as records. File calls need the remote, which
-                  makes their availability boundary explicit instead of hiding it.
+                  Use files for PDFs, photos, audio, and video. They are encrypted before storage
+                  and fetched when needed, but their bytes do not merge like rows.
                 </p>
               </article>
             </div>
@@ -528,32 +493,39 @@ export function HomeLanding() {
             </div>
             <div>
               <p>
-                Storage is part of a product’s trust, cost, portability, and recovery story. Some
-                teams want an operated Cloudflare deployment. Some want data in a user-controlled
-                Google Drive account. Others prefer WebDAV on infrastructure they already own.
+                Storage is part of a product’s trust, cost, and recovery story. Start with the
+                smallest home every endpoint can reach, then add infrastructure only when the
+                application needs it.
               </p>
               <p>
-                Interocitor keeps those choices behind the same storage role. Changing the operator
-                does not require moving plaintext merge logic into that operator’s environment.
+                Each can play the same mailbox role without becoming the place that reads rows and
+                decides what they mean.
               </p>
               <ul className="remote-list" aria-label="Supported storage approaches">
                 <li>
-                  <strong>Cloudflare</strong>
-                  <span>Operate a mailbox with D1 and R2.</span>
+                  <strong>Local NAS</strong>
+                  <span>Keep one household or office mailbox on its own network.</span>
                 </li>
                 <li>
-                  <strong>Google Drive</strong>
-                  <span>Let a user connect their own storage.</span>
+                  <strong>Private WebDAV</strong>
+                  <span>Operate a reachable server without giving it plaintext.</span>
                 </li>
                 <li>
-                  <strong>WebDAV</strong>
-                  <span>Use a compatible server or home NAS.</span>
+                  <strong>Family Google Drive</strong>
+                  <span>Let one clearly owned Drive account carry the mailbox.</span>
                 </li>
                 <li>
-                  <strong>Custom adapter</strong>
-                  <span>Fit an existing storage environment.</span>
+                  <strong>Cloudflare Free</strong>
+                  <span>Run a small protocol-aware mailbox within current allowances.</span>
+                </li>
+                <li>
+                  <strong>Advanced Cloudflare</strong>
+                  <span>Add application policy, operations, realtime, and R2 or S3 bodies.</span>
                 </li>
               </ul>
+              <SpaLink className="text-link" href="storage.html">
+                See how Interocitor stores data <span aria-hidden="true">→</span>
+              </SpaLink>
             </div>
           </div>
         </section>
@@ -566,26 +538,24 @@ export function HomeLanding() {
           <div className="shell">
             <div className="section-intro">
               <div>
-                <p className="site-kicker">The actual trust boundary</p>
+                <p className="site-kicker">Security boundary</p>
                 <h2 id="security-title">
-                  Encryption narrows trust.
-                  <span className="heading-highlight caution">It does not remove it.</span>
+                  The mailbox stays blind.
+                  <span className="heading-highlight caution">The key holders do not.</span>
                 </h2>
               </div>
               <div className="intro-copy">
                 <p>
-                  With a non-null key source, row payloads, snapshots, durable-file bodies, and
-                  recovery-wrapper contents are encrypted before the remote adapter receives them.
+                  Protected rows, snapshots, and files are encrypted before the remote receives
+                  them.
                   <strong className="key-point">
-                    The final decryption keys and usable plaintext remain at trusted endpoints.
+                    Trusted devices keep the keys and readable contents.
                   </strong>
                 </p>
                 <p>
-                  The remote still observes operational metadata such as object names, sizes,
-                  timing, request identity, mesh identifiers, and device identifiers. It can also
-                  withhold, delete, or roll back stored data. Interocitor protects payload
-                  confidentiality and entry integrity; reliable storage and backups still protect
-                  availability.
+                  The mailbox still sees metadata such as paths, sizes, timing, and device activity.
+                  It can also hide, delete, or replay an older protected object. Good storage and
+                  tested backups still matter.
                 </p>
               </div>
             </div>
@@ -594,27 +564,23 @@ export function HomeLanding() {
               <article className="boundary-card protected">
                 <h3>Protected from the remote</h3>
                 <ul>
-                  <li>Row field names and values</li>
-                  <li>Snapshot payloads</li>
-                  <li>Durable-file contents</li>
-                  <li>Recovery-wrapper contents</li>
+                  <li>Private row contents</li>
+                  <li>Fresh-start snapshots</li>
+                  <li>Ordinary file contents</li>
                 </ul>
               </article>
               <article className="boundary-card visible">
                 <h3>Still visible to the remote</h3>
                 <ul>
-                  <li>Object names, paths, sizes, and timing</li>
-                  <li>Mesh and device identifiers</li>
-                  <li>Request and storage-account identity</li>
-                  <li>Deletion, withholding, and rollback opportunities</li>
+                  <li>Paths, sizes, and timing</li>
+                  <li>Mesh and device activity</li>
+                  <li>The power to lose, hide, or replay objects</li>
                 </ul>
               </article>
             </div>
 
             <p className="security-route">
-              See the{" "}
-              <SpaLink href="how-it-works.html#boundary">illustrated trust boundary</SpaLink> for
-              the path from trusted endpoints through remote storage.
+              Read <SpaLink href="security.html">the complete security model</SpaLink>.
             </p>
           </div>
         </section>
@@ -623,56 +589,44 @@ export function HomeLanding() {
           <div className="shell">
             <div className="decision-chooser-heading">
               <div>
-                <p className="site-kicker">Choose the next decision</p>
-                <h2 id="decisions-title">Turn the model into an architecture.</h2>
+                <p className="site-kicker">Choose the next guide</p>
+                <h2 id="decisions-title">Plan the system boundaries.</h2>
               </div>
-              <p>
-                Interocitor changes where plaintext, working state, availability, and processing
-                live. Follow the question you control before reaching for package configuration.
-              </p>
+              <p>Start with the product decision you need to make.</p>
             </div>
 
-            <nav className="decision-chooser-grid" aria-label="Architecture decision guides">
+            <nav className="decision-chooser-grid" aria-label="Planning guides">
               <SpaLink className="decision-choice" href="trust.html">
                 <span>01</span>
                 <div>
-                  <strong>Design a trusted mesh</strong>
-                  <p>
-                    Choose which endpoints may read plaintext and how keys, recovery, and compromise
-                    are handled.
-                  </p>
+                  <strong>Who receives the key?</strong>
+                  <p>Draw the trusted circle and prepare for loss or theft.</p>
                 </div>
                 <span aria-hidden="true">↗</span>
               </SpaLink>
               <SpaLink className="decision-choice" href="data-boundaries.html">
                 <span>02</span>
                 <div>
-                  <strong>Plan data scope and availability</strong>
-                  <p>
-                    Place data into convergent rows, directly remote files, and appropriately
-                    bounded meshes.
-                  </p>
+                  <strong>What travels as rows or files?</strong>
+                  <p>Classify local rows, remote files, and separate mesh boundaries.</p>
                 </div>
                 <span aria-hidden="true">↗</span>
               </SpaLink>
               <SpaLink className="decision-choice" href="mailbox.html">
                 <span>03</span>
                 <div>
-                  <strong>Choose and operate a mailbox</strong>
-                  <p>
-                    Assign access, metadata, quotas, retention, backup, and restoration to the right
-                    owner.
-                  </p>
+                  <strong>Who keeps the mailbox?</strong>
+                  <p>Choose the backend, its operational owner, and its recovery plan.</p>
                 </div>
                 <span aria-hidden="true">↗</span>
               </SpaLink>
               <SpaLink className="decision-choice" href="auth.html">
                 <span>04</span>
                 <div>
-                  <strong>Choose access and identity</strong>
+                  <strong>How does authentication fit?</strong>
                   <p>
-                    Keep ordinary authorization with the host, or adopt application-managed grants
-                    when delegation truly requires them.
+                    Keep host identity, mesh middleware, recovery words, and decryption keys in
+                    separate roles.
                   </p>
                 </div>
                 <span aria-hidden="true">↗</span>
@@ -680,11 +634,8 @@ export function HomeLanding() {
               <SpaLink className="decision-choice" href="automation.html">
                 <span>05</span>
                 <div>
-                  <strong>Design trusted automation</strong>
-                  <p>
-                    Give workers and agents honest authority, isolation, coordination, and retry
-                    semantics.
-                  </p>
+                  <strong>Should an agent join the mesh?</strong>
+                  <p>Treat it as a trusted endpoint and coordinate external effects separately.</p>
                 </div>
                 <span aria-hidden="true">↗</span>
               </SpaLink>
@@ -699,7 +650,7 @@ export function HomeLanding() {
         >
           <div className="shell">
             <div className="decision-heading">
-              <p className="site-kicker">Before choosing the architecture</p>
+              <p className="site-kicker">Before using real data</p>
               <h2 id="decision-title">Decide who holds trust, not only where bytes live.</h2>
               <p>
                 A local-first encrypted mesh changes several product responsibilities. These are the
@@ -773,17 +724,19 @@ export function HomeLanding() {
               <h2>Explore</h2>
               <SpaLink href="index.html">Overview</SpaLink>
               <SpaLink href="how-it-works.html">How it works</SpaLink>
+              <SpaLink href="storage.html">Storage model</SpaLink>
+              <SpaLink href="flows.html">Core flows</SpaLink>
+              <SpaLink href="security.html">Security model</SpaLink>
+              <SpaLink href="compaction.html">Compaction</SpaLink>
+              <SpaLink href="tainted-files.html">Tainted files</SpaLink>
               <SpaLink href="examples/todomvc/">Live TodoMVC</SpaLink>
               <SpaLink href="examples/chat/">Live encrypted chat</SpaLink>
               <SpaLink href="examples/board/">Live shared board</SpaLink>
               <SpaLink href="examples/family-locator/">Protected family locator</SpaLink>
-              <SpaLink href="https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/security-model.md">
-                Security model
-              </SpaLink>
             </section>
             <section>
-              <h2>Architecture guides</h2>
-              <SpaLink href="trust.html">Trust &amp; keys</SpaLink>
+              <h2>Plan your app</h2>
+              <SpaLink href="trust.html">Trust &amp; key custody</SpaLink>
               <SpaLink href="data-boundaries.html">Rows, files &amp; scale</SpaLink>
               <SpaLink href="mailbox.html">Mailbox operations</SpaLink>
               <SpaLink href="auth.html">Access &amp; identity</SpaLink>

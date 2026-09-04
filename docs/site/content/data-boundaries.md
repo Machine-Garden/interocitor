@@ -1,71 +1,65 @@
 ---
-title: Plan Interocitor data scope and availability
-description: Decide what belongs in convergent rows, directly remote files, and separate meshes before choosing an application topology.
-kicker: Architecture decision 02 · Data scope
-heading: Give each kind of data the promise it needs.
-lede: Rows are complete local working state that converges. Durable files are exact remote objects fetched on demand. Separate meshes bound replication, trust, and failure together.
+title: What belongs in Interocitor rows, files, and meshes?
+description: Classify local mergeable rows, directly remote files, separate trust domains, and data that needs another system.
+kicker: Data · Scope and availability
+heading: Rows, durable files, and meshes carry different guarantees.
+lede: Put structured working state in rows, exact byte objects in durable files, and different row audiences in different meshes.
 ---
+
+## Classify data by behavior {#map}
+
+Consider a field-response application with map markers, team status, photos, and drone video. Storing all of it as replicated rows would force every endpoint to carry the entire media archive.
+
+Classify it instead:
+
+- **Rows:** marker positions, captions, status, and file references. They are structured state that should remain useful offline and merge across endpoints.
+- **Durable files:** photos, PDFs, audio, and video. Their exact bytes stay remote and are fetched when needed.
+- **Meshes:** separate full-copy row databases for groups with different readers, keys, retention, or failure boundaries.
+- **Another system:** data that needs server-side plaintext queries, strict central transactions, or another guarantee Interocitor does not provide.
+
+## Compare availability and update semantics {#offline}
+
+| Operation               | Row                               | Durable file                                          |
+| ----------------------- | --------------------------------- | ----------------------------------------------------- |
+| Read                    | From the endpoint’s local store   | Fetch from remote storage                             |
+| Change                  | Commit locally and publish later  | Upload directly to remote storage                     |
+| Work offline            | Yes, after local initialization   | Only with an application-owned cache                  |
+| Resolve concurrent work | Apply the field’s CRDT merge rule | A same-path write replaces bytes by adapter semantics |
+
+A row can retain a file reference and enough metadata to render the interface while offline. The file bytes remain unavailable until transport returns unless the application implements a cache.
+
+## Use a mesh as a trust and failure boundary {#mesh}
+
+A mesh combines three decisions: who eventually receives the complete row database, who can derive its key, and which remote history is backed up, retained, or lost together.
+
+Split a mesh when readers, ownership, retention, or failure impact genuinely differ. Do not split merely to reduce a query. Once split, the application must own any trusted process that moves information across the boundary.
+
+If rows may remain shared but one attachment needs fewer readers, keep the mesh and [seal that durable file with a tainted-file key](/tainted-files).
+
+## Measure the full-copy constraint {#scale}
+
+Every endpoint opening a mesh must hold its complete row database. Capacity therefore depends on the weakest supported endpoint and the actual shape of the data, not a universal row limit.
+
+Measure:
+
+- one realistic complete snapshot;
+- startup and catch-up time on the weakest supported device;
+- local storage limits;
+- peak changes between snapshots;
+- memory and query behavior under the expected schema.
+
+Move large byte payloads to durable files first. Split the mesh only when the product can also own the resulting trust and workflow boundary.
+
+## Write the first data map {#pack}
+
+Create four lists: local rows, directly remote files, separate-reader meshes, and data that belongs elsewhere. For each list, state its offline, privacy, and recovery guarantee in one sentence.
+
+Then follow [the data flows](/flows) and [how snapshots bound catch-up](/compaction).
 
 ## Decision summary {#summary}
 
-|                   |                                                                                   |
-| ----------------- | --------------------------------------------------------------------------------- |
-| **Decision**      | Set database boundaries, offline expectations, and practical scale.               |
-| **Core boundary** | Opening a row mesh means holding its complete row database locally.               |
-| **Complete when** | Rows, files, and meshes are classified and representative snapshots are measured. |
-
-## Rows, files, and meshes solve different problems {#placement}
-
-### Rows: convergent working state
-
-Use rows for structured application state that must remain readable and writable from the local store. Row changes queue durably and merge when transport returns.
-
-### Files: exact remote objects
-
-Use durable files for documents, media, and other path-addressed bytes that do not need CRDT merge. Core calls the remote adapter directly; it does not provide an offline file cache or upload queue.
-
-### Meshes: replication and trust boundaries
-
-Every endpoint in a mesh can receive its complete row database when it holds the key. Separate meshes when data needs different readers, keys, retention, ownership, or failure scope.
-
-## Availability follows placement {#availability}
-
-| Operation         | Rows                                       | Durable files                                                |
-| ----------------- | ------------------------------------------ | ------------------------------------------------------------ |
-| Read              | Local store                                | Remote adapter                                               |
-| Write             | Local store plus outbox                    | Remote adapter                                               |
-| Offline behavior  | Continues after local-store initialization | Fails unless the application supplies its own cache or queue |
-| Conflict behavior | Schema-defined CRDT merge                  | Same-path overwrite semantics                                |
-| Remote lifetime   | Changes may be compacted into snapshots    | Remains until overwritten or deleted                         |
-
-Do not represent a file as a row merely to imply unlimited local scale. A row snapshot still contains the mesh’s full row state, while large binary values make compaction and new-device catch-up expensive.
-
-## Bound the full-copy database deliberately {#scale}
-
-There is no universal row-count limit. Practical capacity depends on serialized row size, local-store implementation, snapshot size, device memory, change rate, and how quickly new or returning endpoints must catch up.
-
-Measure at least:
-
-- a representative complete snapshot, including tombstones;
-- the largest expected uncompacted change tail;
-- initialization and rehydration on the weakest supported device;
-- local storage quotas and fallback behavior;
-- remote transfer time under expected network conditions.
-
-> A mesh is an availability, replication, and confidentiality unit at the same time. Split it only when the product can own the resulting cross-mesh workflow.
-
-## Classify the application’s data {#checklist}
-
-- Put collaborative metadata, status, indexes, and coordination rows in the local database.
-- Put large documents and media in durable files, with row references where needed.
-- Give directly remote files an honest online requirement or add an application-owned cache.
-- Use separate meshes for tenants or workflows that require different readers or keys.
-- Keep sensitive meaning out of filenames and paths when remote metadata exposure matters.
-- Test compaction and rehydration with production-shaped data.
-
-## Continue with the exact contract {#continue}
-
-- [Rows and files](https://github.com/Machine-Garden/interocitor/tree/main/packages/core#keep-rows-and-files-distinct) — API-level behavior and guarantees.
-- [Sync completeness](https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/sync-completeness.md) — what a completed pull establishes.
-- [Compaction](https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/compaction.md) — snapshot coverage, coordination, and retention.
-- [Tainted files](https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/tainted-files.md) — application-owned file-key scopes.
+|            |                                                                   |
+| ---------- | ----------------------------------------------------------------- |
+| **Rows**   | Full local, mergeable working state.                              |
+| **Files**  | Directly remote bytes with application-owned caching if required. |
+| **Meshes** | Whole-database reader, key, retention, and failure boundaries.    |

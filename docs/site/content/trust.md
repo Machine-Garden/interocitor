@@ -1,59 +1,58 @@
 ---
-title: Designing a trusted Interocitor mesh
-description: Decide which endpoints may read a mesh, where its key may exist, and how access, recovery, and compromise will be handled.
-kicker: Architecture decision 01 · Trust and keys
-heading: Design the mesh around who may read it.
-lede: Encryption can keep protected payloads away from the remote mailbox. It cannot keep plaintext away from an endpoint that holds the mesh key. Decide endpoint authority, key custody, recovery, and compromise response together.
+title: Who is trusted inside an Interocitor mesh?
+description: Decide which endpoints may derive the mesh key, where key material may persist, and how loss differs from compromise.
+kicker: Trust · Key custody
+heading: Possession of the mesh key defines the trust boundary.
+lede: Any browser, phone, server, or agent that can derive the key can read the mesh. Runtime labels and query filters do not reduce that authority.
 ---
+
+## Let the key define trust {#invitation}
+
+A protected mesh is encrypted before remote storage receives it. The endpoints must hold or derive the mesh key because they perform the actual reads, writes, and merges.
+
+That makes every key-bearing runtime a **trusted endpoint**. A background worker has the same decryption authority as a user’s phone: it can read the complete row database and any ordinary durable file it can fetch.
+
+> Trust follows key material.
+
+Use separate meshes and keys when two groups must not receive one another’s rows.
+
+## Choose a custody model {#custody}
+
+Key custody determines what survives a reload and what an attacker must compromise:
+
+| Choice                               | Suitable when                                | Main cost                                                                    |
+| ------------------------------------ | -------------------------------------------- | ---------------------------------------------------------------------------- |
+| Persist on this device               | Low-friction return matters                  | Stolen device storage exposes more key material to attack.                   |
+| Keep only for the session            | Shared or sensitive clients should forget it | The user must unlock, pair, or recover again.                                |
+| Wrap with stronger device protection | Local key theft is a material threat         | The host must design passkey, biometric, native, or server-assisted release. |
+
+Credential storage protects key material at rest. Endpoint security protects plaintext and usable keys while the application is running. No storage mode makes a key harmless after it has been resolved.
+
+## Separate loss from compromise {#lost}
+
+- **A device is lost, but its key is still trusted:** another paired endpoint or a recovery phrase prepared earlier can restore access.
+- **The last usable key is lost:** protected data is unreadable. The remote has no master key.
+- **A key may have been copied:** create a new mesh and key, migrate from an endpoint still trusted, and retire the old remote location.
+
+Recovery must exist before the last key disappears. A 12-word recovery phrase can restore portable credentials; it does not revoke copied keys or restore application login. [Authentication and recovery are separate capabilities](/auth#recovery).
+
+## Record the endpoint trust policy {#circle}
+
+Before launch, identify:
+
+1. every device and service allowed to hold plaintext;
+2. whether each credential is persistent, session-only, or wrapped;
+3. who may pair or recover an endpoint;
+4. how recovery is tested;
+5. how the deployment migrates after key compromise;
+6. which reader groups require separate meshes.
+
+Then read [what a remote compromise reveals](/security) and [how authentication fits around the mesh](/auth).
 
 ## Decision summary {#summary}
 
-|                   |                                                                                   |
-| ----------------- | --------------------------------------------------------------------------------- |
-| **Decision**      | Define the confidentiality boundary, not merely whether encryption is enabled.    |
-| **Core boundary** | Every authorized runtime that resolves the mesh key can read the row database.    |
-| **Complete when** | Trusted endpoints, key sources, recovery owners, and the rotation path are named. |
-
-## A key is a read capability {#authority}
-
-A phone, browser tab, native app, worker, or agent becomes a trusted endpoint when it receives usable mesh key material. Runtime labels do not narrow that authority. Separate meshes and keys create the meaningful isolation boundary.
-
-### Trusted endpoint
-
-May decrypt rows and files, apply application policy, and publish changes. Device security and application isolation protect the local plaintext copy.
-
-### Remote mailbox
-
-Stores and returns protected artifacts without the final key. It still observes routing and operational metadata and can affect availability.
-
-### Deployment owner
-
-Controls admission, storage access, retention, backup, and restore. Those controls complement payload encryption; they do not replace it.
-
-## Choose how an endpoint earns the key {#custody}
-
-| Choice                   | Useful when                                                                                    | Boundary to preserve                                        |
-| ------------------------ | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| Portable key             | Trusted clients must open the mesh offline and the capability can be transferred intentionally | Anyone who copies it can read the mesh                      |
-| Application-bound source | The application can reliably supply additional material or policy                              | Isolation depends on the actual derivation and input owners |
-| Separate mesh and key    | A runtime must not read another group’s complete row state                                     | Moving data later is an explicit cross-boundary operation   |
-
-Credential storage changes where a portable key rests; it does not make that capability less powerful after an endpoint opens it.
-
-> Removing storage access does not erase a copied key. After compromise, create a new mesh and key, move data from a still-trusted endpoint, and retire the old location.
-
-## Prepare failure paths before launch {#lifecycle}
-
-- Name every runtime allowed to receive plaintext and mesh key material.
-- Choose portable or application-bound derivation and record every input owner.
-- Protect local plaintext with platform storage, device locks, and application isolation.
-- Prepare recovery on another trusted device or publish a recovery wrapper before loss.
-- Use opaque durable-file paths when filenames are sensitive.
-- Document the new-mesh migration used after key compromise.
-
-## Continue with the exact contract {#continue}
-
-- [Security model](https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/security-model.md) — threat model, integrity, and metadata exposure.
-- [Shared-key scenarios](https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/shared-key-scenarios.md) — portable and bound source comparison.
-- [Recovery guide](https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/recovery.md) — prepare and use a recovery phrase.
-- [Browser credential custody](https://github.com/Machine-Garden/interocitor/tree/main/packages/web#credential-storage-choices) — choose where browser keys rest.
+|                    |                                                          |
+| ------------------ | -------------------------------------------------------- |
+| **Trust boundary** | Every endpoint that can resolve the mesh key.            |
+| **Isolation**      | Separate meshes and keys for separate row audiences.     |
+| **Preparedness**   | Test recovery for loss and migration for key compromise. |

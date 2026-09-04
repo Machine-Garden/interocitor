@@ -1,77 +1,71 @@
 ---
-title: Choose and operate an Interocitor mailbox
-description: Compare mailbox placements and name the owner of access, availability, limits, retention, backup, and recovery.
-kicker: Architecture decision 03 · Mailbox operations
-heading: Put the mailbox where its risks can be owned.
-lede: A mailbox can remain blind to protected payloads and still determine whether devices can exchange them. Choose a backend by access policy, durability, limits, evidence, and recovery—not only by where bytes fit.
+title: Where should the Interocitor mailbox live?
+description: Choose remote storage by access control, availability, limits, observability, backup, and operational ownership.
+kicker: Mailbox · Operational boundary
+heading: Encrypted storage is still an operational dependency.
+lede: The remote may not read protected contents, but it can still delay, reject, delete, or roll back the artifacts every endpoint needs.
 ---
+
+## Define the mailbox boundary {#depot}
+
+The **remote mailbox** stores row-change artifacts, snapshots, control records, and durable files. With protection configured, it receives encrypted payloads rather than plaintext application data.
+
+Confidentiality does not make the service passive. Its owner still controls:
+
+- authorization at each mesh route;
+- storage quotas and request-size limits;
+- retention and compaction scheduling;
+- logs and audit evidence;
+- backup and restore;
+- incident response and availability.
+
+The mailbox is intentionally simple, but it remains part of the product’s security and recovery model.
+
+## Choose a backend by ownership {#choices}
+
+| Backend                 | Choose it when                                      | Responsibility that remains                                               |
+| ----------------------- | --------------------------------------------------- | ------------------------------------------------------------------------- |
+| Cloudflare + R2         | You need a programmable protocol-aware remote       | Identity integration, limits, D1/R2 bindings, backups, and operations.    |
+| Cloudflare + S3         | File bodies need an S3-compatible placement         | Everything above, plus S3 credentials, residency, migration, and restore. |
+| WebDAV server           | You need a portable file-oriented remote            | Server login, overwrite behavior, quotas, logs, and backups.              |
+| Google Drive            | The user should own the storage account             | Consent, tokens, provider availability, and the user’s storage decisions. |
+| Custom adapter          | The mailbox must fit an existing platform           | Faithful adapter semantics and an explicit account of missing guarantees. |
+
+No backend is universally best. Choose the failure modes and operational owner the product can support.
+
+The [complete storage model](/storage#backends) shows what is local, what is remote, and exactly how WebDAV, Google Drive, Cloudflare + R2, and Cloudflare + S3 place the mailbox artifacts. In particular, S3 is a durable-file body destination behind the Worker, not a standalone row-sync mailbox; D1 still contains row history, control state, and durable-file metadata.
+
+## Treat addresses as routing, not credentials {#door}
+
+An address such as `main` selects a mesh namespace. It is not a secret and does not authenticate a requester.
+
+For an ordinary multi-user deployment, use the application’s existing identity and current resource policy to [authorize mesh requests through middleware](/auth). Apply per-mesh quotas and request limits so one faulty or hostile client cannot exhaust shared storage.
+
+Encryption hides protected payload contents. The remote still observes routes, object paths, sizes, timing, request identity, and other operating metadata.
+
+## Test failure and restore {#operations}
+
+Exercise the conditions the deployment must survive:
+
+1. deny an unauthorized request;
+2. exceed a quota and return a usable error;
+3. interrupt snapshot cleanup and verify that it retries safely;
+4. restore every mailbox store from backup;
+5. reconnect a trusted endpoint without silently accepting stale state;
+6. investigate damaged protected data without logging plaintext or keys.
+
+A backup is credible only after a complete restore test. Include every store required by the mailbox, not only the largest object bucket.
+
+## Publish an operational owner {#card}
+
+Record the service owner, incident contact, storage limits, backup schedule, restore procedure, compaction owner, acceptable outage, and user-visible failure behavior.
+
+Continue with [the security model](/security), [compaction](/compaction), or [authentication](/auth).
 
 ## Decision summary {#summary}
 
-|                   |                                                                                              |
-| ----------------- | -------------------------------------------------------------------------------------------- |
-| **Decision**      | Select a remote adapter and accept its operational responsibility.                           |
-| **Core boundary** | Client-side protection does not make the remote available, monotonic, or correctly retained. |
-| **Complete when** | Admission, quotas, backups, restore tests, audit evidence, and incident owners are explicit. |
-
-## The mailbox is simple, not unimportant {#role}
-
-The remote stores row-sync artifacts and durable-file bodies. It does not query records or merge conflicts, but it controls a critical availability path and observes operational metadata.
-
-A deployment owner must account for:
-
-- who may list, read, write, and delete a mesh;
-- object names, paths, sizes, request timing, and request identity;
-- capacity, body-size, and durable-file quotas;
-- stale writes, overwrite behavior, and retention;
-- backup, restore, rollback, and evidence after an incident.
-
-## Choose the policy surface you need {#choices}
-
-| Backend           | Strength                                                                                            | Operational consequence                                                                                          |
-| ----------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Cloudflare Worker | Protocol-aware D1/R2 handling, request authorization, typed limits, audit events, maintenance hooks | The deployment owner operates schema, bindings, policy, quotas, backup, and restore                              |
-| WebDAV            | Portable file operations across hosted servers and home infrastructure                              | Authentication, overwrite behavior, logging, quotas, and retention belong to the chosen host                     |
-| Google Drive      | User-owned storage through an application-authorized account                                        | Availability and access inherit Drive and OAuth behavior; application consent and token handling remain in scope |
-| Custom adapter    | Fits an existing storage or deployment boundary                                                     | The implementation must preserve the adapter contract and document every backend-specific guarantee              |
-
-Protocol awareness can add guardrails without receiving plaintext. It does not remove the host from the availability boundary.
-
-## Operate for failure, not only steady state {#operations}
-
-### Admission
-
-A predictable route such as `main` is a namespace, not a credential. Enforce application authentication and explicit mesh authorization unless the deployment is intentionally public.
-
-Use the host application's current resource policy for ordinary multi-user access. See [Access and identity](/auth) before introducing subject-specific routes or an application-managed grant chain.
-
-### Capacity and abuse
-
-Apply request body limits and per-mesh durable-file quotas. Monitor object growth, uncompacted change history, rejected writes, and maintenance backlog.
-
-### Retention
-
-Keep row history long enough for observation and safe compaction. Treat durable files separately: they remain until the application overwrites or deletes them.
-
-### Backup and restore
-
-Back up all state required to reconstruct the mailbox. Restore tests must cover the D1/R2 split or equivalent store layout and verify that clients can reconnect without silently moving backward.
-
-> Encryption makes a stolen storage copy less revealing. It does not make deletion, rollback, corruption, or prolonged unavailability harmless.
-
-## Record the runbook {#checklist}
-
-- Name the deployment owner and incident contact.
-- Define mesh admission and any read-only policy.
-- Configure body, quota, and retention limits.
-- Decide who may run compaction and maintenance.
-- Capture structured audit evidence without logging secrets or payload plaintext.
-- Back up the complete mailbox and rehearse restore.
-- Document what clients see during withholding, rollback, and quota failure.
-
-## Continue with the exact contract {#continue}
-
-- [Worker runtime options](https://github.com/Machine-Garden/interocitor/blob/main/packages/workers/docs/runtime-options.md) — bindings, defaults, and limits.
-- [Security guardrails](https://github.com/Machine-Garden/interocitor/blob/main/packages/workers/docs/security-guardrails.md) — request policy and threat boundaries.
-- [Maintenance](https://github.com/Machine-Garden/interocitor/blob/main/packages/workers/docs/maintenance.md) — retention and operational procedures.
-- [Adapter contract](https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/adapter-contract.md) — requirements for custom storage.
+|                       |                                                                 |
+| --------------------- | --------------------------------------------------------------- |
+| **Choose by**         | Access, failure, limits, evidence, backup, and ownership.       |
+| **Encryption cannot** | Guarantee availability, freshness, or protection from deletion. |
+| **Ready when**        | The owning team can restore the complete mailbox under test.    |

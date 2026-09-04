@@ -15,6 +15,15 @@ package-local material.
 
 ## Documentation goals and standards
 
+- Use three deliberate levels. The public site is a high-school textbook:
+  self-contained, compact, plain, lively, and intellectually respectful.
+  Deeper documentation is university level: precise concepts, terminology,
+  trade-offs, and worked explanations. Internal documentation is
+  research-institute level: complete mechanisms, protocols, proofs, failure
+  modes, and operational detail; keep it out of the ordinary visitor path.
+- Across every level, assume no supplied context and little spare attention,
+  but never infer low intelligence from either. Use metaphor to introduce a
+  precise concept, then retain the concept's real name and consequences.
 - Before creating or substantially reworking a reader-facing surface, use the
   [content-persona cast](.context-docs/CONTENT-PERSONAS.md). Select by the
   decision the entrant controls, keep the task as an episode, and keep the

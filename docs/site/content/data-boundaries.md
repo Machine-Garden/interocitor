@@ -13,7 +13,7 @@ Consider a field-response application with map markers, team status, photos, and
 Classify it instead:
 
 - **Rows:** marker positions, captions, status, and file references. They are structured state that should remain useful offline and merge across endpoints.
-- **Durable files:** photos, PDFs, audio, and video. Their exact bytes stay remote and are fetched when needed.
+- **Durable files:** photos, PDFs, audio, and video, and any structured result that is produced once and read by one screen. Their exact bytes stay remote and are fetched when needed.
 - **Meshes:** separate full-copy row databases for groups with different readers, keys, retention, or failure boundaries.
 - **Another system:** data that needs server-side plaintext queries, strict central transactions, or another guarantee Interocitor does not provide.
 
@@ -27,6 +27,30 @@ Classify it instead:
 | Resolve concurrent work | Apply the field’s CRDT merge rule | A same-path write replaces bytes by adapter semantics |
 
 A row can retain a file reference and enough metadata to render the interface while offline. The file bytes remain unavailable until transport returns unless the application implements a cache.
+
+## Point a row at a file {#file-ref}
+
+Declare the pointer as a column, and the row becomes the index for content that loads on demand:
+
+```ts
+const schema = {
+  tables: {
+    reports: { fields: { title: types.string, body: types.file } },
+  },
+} satisfies DatabaseSchemaDefinition;
+
+const meta = await db.putFile("reports/r1/body.json", JSON.stringify(result), "application/json");
+await db.table("reports").add({ title: "Q4", body: toFileRef("reports/r1/body.json", meta) });
+
+const report = await db.table("reports").row(id);
+const body = JSON.parse(new TextDecoder().decode(await db.getFile(report.body)));
+```
+
+The reference is `{ path, digest, size, contentType?, taint? }`. The digest is the SHA-256 of the plaintext, which makes the reference immutable even though the path is not. Overwriting the path produces a new digest; a screen holding the old reference is refused with `FileIntegrityError` rather than shown the wrong bytes.
+
+Immutable references are what make local copies safe. Bytes keyed by digest never go stale, so an application can keep them in memory, in IndexedDB, or in the browser’s Cache API and serve them before asking the network, with no invalidation logic and no service worker. The row database stays small because every endpoint replicates the pointer, not the content.
+
+Use this shape for anything produced once by one writer and read by the screen that asked for it: a converted document, an extraction result, a rendered export. Use rows for what several parties edit or what must answer before the network does. A big thing of the first kind, pointed at by a small thing of the second kind, is the normal case.
 
 ## Use a mesh as a trust and failure boundary {#mesh}
 
@@ -58,8 +82,8 @@ Then follow [the data flows](/flows) and [how snapshots bound catch-up](/compact
 
 ## Decision summary {#summary}
 
-|            |                                                                   |
-| ---------- | ----------------------------------------------------------------- |
-| **Rows**   | Full local, mergeable working state.                              |
-| **Files**  | Directly remote bytes with application-owned caching if required. |
-| **Meshes** | Whole-database reader, key, retention, and failure boundaries.    |
+|            |                                                                              |
+| ---------- | ---------------------------------------------------------------------------- |
+| **Rows**   | Full local, mergeable working state.                                         |
+| **Files**  | Directly remote bytes, named from rows by `types.file`, cacheable by digest. |
+| **Meshes** | Whole-database reader, key, retention, and failure boundaries.               |

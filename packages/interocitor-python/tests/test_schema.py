@@ -42,6 +42,7 @@ class SchemaDeclarationTests(unittest.TestCase):
                         "attempt": types.index(types.number),
                         "externalId": types.unique(types.string),
                         "metadata": types.typed("json"),
+                        "report": types.file.optional,
                     },
                     indexes=(TableIndex("by-state", "state"),),
                     merge=TableMergeConfig(
@@ -66,6 +67,7 @@ class SchemaDeclarationTests(unittest.TestCase):
                             "attempt": {"kind": "number", "index": True},
                             "externalId": {"kind": "string", "index": True, "unique": True},
                             "metadata": {"kind": "json"},
+                            "report": {"kind": "file", "optional": True},
                         },
                         "indexes": [{"name": "by-state", "field": "state"}],
                         "merge": {
@@ -147,6 +149,8 @@ class SchemaDeclarationTests(unittest.TestCase):
             types.index(types.string.optional)
         with self.assertRaises(SchemaError):
             types.unique(types.json)
+        with self.assertRaises(SchemaError):
+            types.index(types.file)
         with self.assertRaises(SchemaError):
             Schema(tables={"tasks": TableSchema(merge="not-a-strategy")})
         with self.assertRaises(SchemaError):

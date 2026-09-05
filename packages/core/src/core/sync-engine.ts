@@ -43,6 +43,7 @@ import type {
   RemoteInvalidationPayload,
   RemoteInvalidationStorageAdapter,
   StoredFileMetadata,
+  FileRef,
   FileSeal,
   SealedFile,
   RetentionPolicy,
@@ -68,7 +69,13 @@ import {
   passphraseToKey,
 } from "../crypto/encryption.ts";
 import type { MeshKeySource } from "../crypto/key-source.ts";
-import { MeshCredentialMismatchError, RemoteAccessError, isRemoteAccessError } from "./errors.ts";
+import {
+  FileIntegrityError,
+  MeshCredentialMismatchError,
+  RemoteAccessError,
+  isRemoteAccessError,
+} from "./errors.ts";
+import { expectedFileDigest, fileTargetPath, sha256Hex } from "./file-ref.ts";
 import {
   ConnectStageTimeoutError,
   DEFAULT_CONNECT_STAGE_TIMEOUT_MS,
@@ -976,11 +983,16 @@ export class Interocitor<
   private async encodeStoredFile(
     data: Uint8Array | string,
     key?: CryptoKey,
-  ): Promise<{ stored: Uint8Array; plaintextSize: number }> {
+  ): Promise<{ stored: Uint8Array; plaintextSize: number; digest: string }> {
     const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
+    const digest = await sha256Hex(bytes);
     const resolvedKey = await this.resolveStoredFileKey(key);
-    if (!resolvedKey) return { stored: bytes, plaintextSize: bytes.byteLength };
-    return { stored: await encryptBytes(resolvedKey, bytes), plaintextSize: bytes.byteLength };
+    if (!resolvedKey) return { stored: bytes, plaintextSize: bytes.byteLength, digest };
+    return {
+      stored: await encryptBytes(resolvedKey, bytes),
+      plaintextSize: bytes.byteLength,
+      digest,
+    };
   }
 
   private async decodeStoredFile(data: Uint8Array, key?: CryptoKey): Promise<Uint8Array> {
@@ -3449,7 +3461,9 @@ export class Interocitor<
    *
    * Files share the same mesh and encryption boundary as row data, but they do
    * not participate in CRDT merge or compaction. Writing the same path later
-   * overwrites it.
+   * overwrites it. The returned metadata always carries `digest`, the SHA-256
+   * of the plaintext; pass it through `toFileRef` to store an immutable
+   * reference in a `types.file` row column.
    */
   async putFile(
     path: string,
@@ -3470,14 +3484,17 @@ export class Interocitor<
     const adapter = this.requireAdapter("putFile()");
     const filePath = this.storedFilePath(path);
     if (seal && !seal.taint.trim()) throw new Error("Object seal taint must not be empty");
-    const { stored, plaintextSize } = await this.encodeStoredFile(data, seal?.key);
+    const { stored, plaintextSize, digest } = await this.encodeStoredFile(data, seal?.key);
     const options = {
       uploadedByDeviceId: this.deviceId,
       plaintextSize,
       contentType,
       taint: seal?.taint,
     };
-    if (adapter.putStoredFile) return adapter.putStoredFile(filePath, stored, options);
+    if (adapter.putStoredFile) {
+      const meta = await adapter.putStoredFile(filePath, stored, options);
+      return { ...meta, digest };
+    }
     await adapter.ensureFolder(`${this.requireRemotePath("putFile()").replace(/\/$/, "")}/files`);
     await adapter.writeFile(filePath, stored);
     const meta = await adapter.getFileMetadata(filePath);
@@ -3492,17 +3509,23 @@ export class Interocitor<
       storedSize: stored.byteLength,
       contentType,
       taint: seal?.taint,
+      digest,
     };
   }
 
   /**
    * Read and decrypt an untainted durable application file with the mesh key.
    *
+   * Accepts a path or a `FileRef` from a `types.file` column. Given a
+   * reference, the opened bytes are verified against `ref.digest` and a
+   * mismatch rejects with `FileIntegrityError`.
+   *
    * If the stored file is tainted/sealed under another key, call `openFile()`
    * and provide the matching key explicitly.
    */
-  async getFile(path: string): Promise<Uint8Array> {
-    const sealed = await this.openFile(path);
+  async getFile(target: string | FileRef): Promise<Uint8Array> {
+    const path = fileTargetPath(target);
+    const sealed = await this.openFile(target);
     if (sealed.taint)
       throw new Error(
         `Object ${path} is tainted with ${sealed.taint}; unlock the matching key and call openFile().open(key)`,
@@ -3517,11 +3540,11 @@ export class Interocitor<
    * caller, not the engine, decides when and with which key plaintext should
    * be opened.
    */
-  async openFile(path: string): Promise<SealedFile> {
-    return this.fileAccess(this.openFileImpl(path));
+  async openFile(target: string | FileRef): Promise<SealedFile> {
+    return this.fileAccess(this.openFileImpl(fileTargetPath(target), expectedFileDigest(target)));
   }
 
-  private async openFileImpl(path: string): Promise<SealedFile> {
+  private async openFileImpl(path: string, expectedDigest?: string): Promise<SealedFile> {
     await this.ensureReady();
     const adapter = this.requireAdapter("openFile()");
     const filePath = this.storedFilePath(path);
@@ -3550,14 +3573,19 @@ export class Interocitor<
       open: async (key?: CryptoKey) => {
         if (taint && !key)
           throw new Error(`Object ${path} is tainted with ${taint}; a matching key is required`);
-        return this.decodeStoredFile(stored, key);
+        const plaintext = await this.decodeStoredFile(stored, key);
+        if (expectedDigest) {
+          const actual = await sha256Hex(plaintext);
+          if (actual !== expectedDigest) throw new FileIntegrityError(path, expectedDigest, actual);
+        }
+        return plaintext;
       },
     };
   }
 
   /** Delete a durable application file. Missing files are treated as already deleted. */
-  async deleteFile(path: string): Promise<void> {
-    return this.fileAccess(this.deleteFileImpl(path));
+  async deleteFile(target: string | FileRef): Promise<void> {
+    return this.fileAccess(this.deleteFileImpl(fileTargetPath(target)));
   }
 
   private async deleteFileImpl(path: string): Promise<void> {
@@ -3569,8 +3597,8 @@ export class Interocitor<
   }
 
   /** Return metadata for a durable application file without downloading content. */
-  async getFileMetadata(path: string): Promise<StoredFileMetadata | null> {
-    return this.fileAccess(this.getFileMetadataImpl(path));
+  async getFileMetadata(target: string | FileRef): Promise<StoredFileMetadata | null> {
+    return this.fileAccess(this.getFileMetadataImpl(fileTargetPath(target)));
   }
 
   private async getFileMetadataImpl(path: string): Promise<StoredFileMetadata | null> {

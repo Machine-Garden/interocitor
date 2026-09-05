@@ -128,13 +128,13 @@ disconnect().
 The Python schema has the same logical shape as core's
 DatabaseSchemaDefinition:
 
-| Python declaration                                   | Purpose                                                                                                                    |
-| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Schema(tables=...)                                   | Names logical collections and optionally sets version and a database-wide merge_strategy.                                  |
-| TableSchema(fields=..., merge=...)                   | Declares intended fields and a table-wide merge policy.                                                                    |
-| TableMergeConfig(strategy=..., fields=...)           | Sets a table default plus field-specific merge overrides.                                                                  |
-| types.string, number, boolean, date, json, enum(...) | Field descriptors matching core's vocabulary. .optional, types.index(...), and types.unique(...) create matching metadata. |
-| TableIndex(...)                                      | Explicit index metadata accepted in a core-shaped schema.                                                                  |
+| Python declaration                                         | Purpose                                                                                                                    |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Schema(tables=...)                                         | Names logical collections and optionally sets version and a database-wide merge_strategy.                                  |
+| TableSchema(fields=..., merge=...)                         | Declares intended fields and a table-wide merge policy.                                                                    |
+| TableMergeConfig(strategy=..., fields=...)                 | Sets a table default plus field-specific merge overrides.                                                                  |
+| types.string, number, boolean, date, json, file, enum(...) | Field descriptors matching core's vocabulary. .optional, types.index(...), and types.unique(...) create matching metadata. |
+| TableIndex(...)                                            | Explicit index metadata accepted in a core-shaped schema.                                                                  |
 
 The recommended Schema builder validates the declaration early. A raw
 core-shaped mapping is also accepted when an application shares configuration

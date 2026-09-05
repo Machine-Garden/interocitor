@@ -32,7 +32,7 @@ A unit of structured application state that lives locally and merges with change
 
 ## Durable file {#durable-file}
 
-A remotely stored byte object such as a document, image, audio file, or export. It is fetched directly and does not inherit the row database’s offline queue or merge behavior.
+A remotely stored byte object such as a document, image, audio file, or export. It is fetched directly and does not inherit the row database’s offline queue or merge behavior. A row names it with a file reference: its path plus the SHA-256 of its plaintext, which keeps the reference immutable and makes cached copies safe.
 
 ## Taint {#taint}
 

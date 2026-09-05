@@ -75,18 +75,35 @@ only copy makes a protected mesh unreadable.
 | CRDT rows     | Structured, queryable state that must remain useful offline | Reads and writes use `LocalStore`; encrypted changes and snapshots synchronize when transport is available.   |
 | Durable files | Exact byte payloads such as documents, images, and exports  | File calls use the remote adapter directly; there is no core file cache, offline queue, merge, or compaction. |
 
-Store file metadata and paths in rows when the reference must be available
-offline. Store the bytes with `putFile`, then retry transfer failures in
-application code.
+Point a row at a file with a `types.file` column. The row is the offline
+index: it says which file exists, how big it is, and what its bytes hash to.
+The bytes stay in durable storage and load when a screen asks for them.
 
 ```ts
-await db.putFile("tasks/task-1/report.pdf", bytes, "application/pdf");
-const copy = await db.getFile("tasks/task-1/report.pdf");
-await db.deleteFile("tasks/task-1/report.pdf");
+const schema = {
+  tables: {
+    tasks: { fields: { title: types.string, report: types.file.optional } },
+  },
+} satisfies DatabaseSchemaDefinition;
+
+const meta = await db.putFile("tasks/task-1/report.pdf", bytes, "application/pdf");
+await db.table("tasks").patch(taskId, { report: toFileRef("tasks/task-1/report.pdf", meta) });
+
+const task = await db.table("tasks").row(taskId);
+const copy = await db.getFile(task.report); // verified against report.digest
 ```
 
+A `FileRef` is `{ path, digest, size, contentType?, taint? }`. The digest is the
+SHA-256 of the plaintext, so the reference is immutable even though the path is
+not: overwriting the path changes the digest, `getFile(ref)` rejects the stale
+reference with `FileIntegrityError`, and any cache keyed by digest, in memory,
+IndexedDB, or the Cache API, can serve the bytes locally without ever going
+stale. Store JSON the same way when it is produced once and read by one screen;
+`types.typed<T>("json")` is for values that merge per row.
+
 Deleting a row does not delete its referenced files. Writing the same file
-path replaces the remote object according to adapter semantics.
+path replaces the remote object according to adapter semantics; retry transfer
+failures in application code.
 
 ## Compose the runtime
 

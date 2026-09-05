@@ -11,10 +11,15 @@ That split defines where access labels belong.
 
 A taint is a human-readable label for a non-default file key, such as `group1`.
 
-Applications should store the authoritative taint in the CRDT row that references the file:
+Applications should store the authoritative taint in the CRDT row that references the file. A `types.file` column carries it as part of the `FileRef`:
 
 ```ts
-const fileRef = { path: "docs/q4.pdf", taint: "group1" };
+const meta = await db.putFile("docs/q4.pdf", bytes, "application/pdf", {
+  taint: "group1",
+  key: groupKey,
+});
+await db.table("docs").patch(docId, { file: toFileRef("docs/q4.pdf", meta) });
+// → file: { path: "docs/q4.pdf", digest: "…", size: 81920, contentType: "application/pdf", taint: "group1" }
 ```
 
 That row is the offline-legible access surface. Clients can list files, show lock badges, and decide which key to unlock without downloading the object.

@@ -68,6 +68,89 @@ test.describe("durable file storage", () => {
     expect(result.afterDelete).toBeNull();
   });
 
+  test("a types.file column stores an immutable reference that getFile verifies", async ({
+    page,
+  }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, types, toFileRef, FileIntegrityError } =
+        await import("/packages/core/dist/index.js");
+      const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
+      const { generateKey, keyToPassphrase } = await import("/packages/core/dist/crypto/keys.js");
+      const { MemoryLocalStore } = await import("/packages/core/dist/storage/memory-store.js");
+      const { PortablePassphraseKeySource } =
+        await import("/packages/core/dist/crypto/key-source.js");
+
+      const schema = {
+        tables: {
+          readings: {
+            fields: { label: types.string, entities: types.file },
+          },
+        },
+      };
+
+      const passphrase = await keyToPassphrase(await generateKey());
+      const engine = new Interocitor({
+        appName: "FileRefTest",
+        dbName: "file-ref-test",
+        schema,
+        remotePath: "/mesh",
+        keySource: new PortablePassphraseKeySource({ portableKey: passphrase }),
+        localStore: new MemoryLocalStore(),
+      });
+      await engine.init();
+      await engine.setRemoteStorage(new MemoryAdapter());
+      await engine.connect();
+
+      const first = JSON.stringify([{ name: "Aya", kind: "person" }]);
+      const meta = await engine.putFile("readings/f3/entities.json", first, "application/json");
+      const ref = toFileRef("readings/f3/entities.json", meta);
+      const readings = engine.table("readings");
+      const id = await readings.add({ label: "f3", entities: ref });
+      const row = await readings.row(id);
+
+      const viaRef = new TextDecoder().decode(await engine.getFile(row!.entities));
+      const metaViaRef = await engine.getFileMetadata(row!.entities);
+
+      // Overwrite the path: the old reference must now be refused, not served.
+      const second = JSON.stringify([{ name: "Bo", kind: "person" }]);
+      const meta2 = await engine.putFile("readings/f3/entities.json", second, "application/json");
+      let staleError: unknown = null;
+      try {
+        await engine.getFile(row!.entities);
+      } catch (err) {
+        staleError = err;
+      }
+      const viaPath = new TextDecoder().decode(await engine.getFile("readings/f3/entities.json"));
+
+      return {
+        digestLength: meta.digest?.length,
+        ref,
+        rowRef: row!.entities,
+        viaRef,
+        metaPath: metaViaRef?.path,
+        digestChanged: meta2.digest !== meta.digest,
+        staleIsIntegrityError: staleError instanceof FileIntegrityError,
+        staleCode: (staleError as { code?: string } | null)?.code,
+        viaPath,
+      };
+    });
+
+    expect(result.digestLength).toBe(64);
+    expect(result.ref).toEqual({
+      path: "readings/f3/entities.json",
+      digest: expect.stringMatching(/^[0-9a-f]{64}$/),
+      size: JSON.stringify([{ name: "Aya", kind: "person" }]).length,
+      contentType: "application/json",
+    });
+    expect(result.rowRef).toEqual(result.ref);
+    expect(result.viaRef).toBe(JSON.stringify([{ name: "Aya", kind: "person" }]));
+    expect(result.metaPath).toBe("/mesh/files/readings/f3/entities.json");
+    expect(result.digestChanged).toBe(true);
+    expect(result.staleIsIntegrityError).toBe(true);
+    expect(result.staleCode).toBe("FILE_INTEGRITY");
+    expect(result.viaPath).toBe(JSON.stringify([{ name: "Bo", kind: "person" }]));
+  });
+
   test("sealed files expose taint and defer decryption until caller opens with the extra key", async ({
     page,
   }) => {

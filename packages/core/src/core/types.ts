@@ -210,9 +210,10 @@ export interface TableMergeConfig {
 
 // ─── Schema / Field Types ─────────────────────────────────────────────
 
-export type SchemaFieldKind = "string" | "number" | "boolean" | "date" | "json" | "enum";
+export type SchemaFieldKind = "string" | "number" | "boolean" | "date" | "json" | "enum" | "file";
 
-export type IndexableSchemaFieldKind = Exclude<SchemaFieldKind, "json">;
+/** Kinds a local index can key on. `json` is opaque and `file` is a reference object. */
+export type IndexableSchemaFieldKind = Exclude<SchemaFieldKind, "json" | "file">;
 
 /** A field descriptor — carries kind, optional index flags, and a phantom TS type. */
 export interface SchemaField<T = unknown, K extends SchemaFieldKind = SchemaFieldKind> {
@@ -302,7 +303,10 @@ export type InferFieldType<F> = F extends SchemaField<infer T> ? T : unknown;
  * @internal
  */
 type OptionalFieldKeys<F> = {
-  [K in keyof F]-?: F[K] extends { optional: true } ? K : never;
+  // `__optional` is the brand only `.optional` descriptors carry. Testing
+  // `optional: true` would match every `types.*` helper, because each one
+  // exposes its `.optional` variant under that same property name.
+  [K in keyof F]-?: F[K] extends { __optional: true } ? K : never;
 }[keyof F];
 
 type RequiredFieldKeys<F> = Exclude<keyof F, OptionalFieldKeys<F>>;
@@ -619,6 +623,36 @@ export interface StoredFileMetadata extends FileEntry {
   /** Application content type, if provided by the uploader. */
   contentType?: string;
   /** Optional human-readable label for bytes sealed with an extra key. */
+  taint?: string;
+  /**
+   * Lowercase hex SHA-256 of the plaintext bytes. Always present on the
+   * metadata `putFile` returns; present on later metadata reads only when the
+   * backend persisted it.
+   */
+  digest?: string;
+}
+
+/**
+ * A row column that names a durable file.
+ *
+ * The row is the offline-readable index; the bytes stay in durable file
+ * storage and are fetched on demand. `digest` is what makes the reference
+ * immutable: a later `putFile` to the same path yields a different digest, so
+ * any cache keyed by `digest` (memory, IndexedDB, Cache API) never serves
+ * stale bytes, and `getFile(ref)` verifies the bytes it opened against it.
+ * Build one from a `putFile` result with `toFileRef`, and declare the column
+ * with `types.file`.
+ */
+export interface FileRef {
+  /** Durable file path as passed to `putFile`. */
+  path: string;
+  /** Lowercase hex SHA-256 of the plaintext bytes. */
+  digest: string;
+  /** Plaintext byte length. */
+  size: number;
+  /** Application content type, when the uploader supplied one. */
+  contentType?: string;
+  /** Taint label when the bytes are sealed with an extra key. */
   taint?: string;
 }
 

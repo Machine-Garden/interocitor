@@ -206,3 +206,31 @@ export function isRemoteAccessError(err: unknown): err is RemoteAccessError {
       typeof (err as { status?: unknown }).status === "number")
   );
 }
+
+/**
+ * Thrown by `getFile(ref)` and `openFile(ref).open()` when the plaintext
+ * opened for a `FileRef` does not hash to the digest the reference carries.
+ *
+ * The row said one thing and storage returned another: the path was
+ * overwritten after the reference was taken, or the remote returned the wrong
+ * object. Treat the bytes as untrusted. Recovery: re-read the row for a newer
+ * reference, or re-upload and store a fresh `toFileRef` result.
+ */
+export class FileIntegrityError extends Error {
+  readonly code = "FILE_INTEGRITY" as const;
+  readonly path: string;
+  readonly expectedDigest: string;
+  readonly actualDigest: string;
+
+  constructor(path: string, expectedDigest: string, actualDigest: string) {
+    super(
+      `Durable file ${path} does not match its reference: expected sha256 ${expectedDigest}, ` +
+        `opened bytes hash to ${actualDigest}. The path was overwritten after the reference ` +
+        `was taken, or the remote returned the wrong object.`,
+    );
+    this.name = "FileIntegrityError";
+    this.path = path;
+    this.expectedDigest = expectedDigest;
+    this.actualDigest = actualDigest;
+  }
+}

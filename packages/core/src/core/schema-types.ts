@@ -1,6 +1,6 @@
 // compass: interocitor.rows.table-api
 
-import type { IndexableSchemaField, OptionalSchemaField, SchemaField } from "./types.ts";
+import type { FileRef, IndexableSchemaField, OptionalSchemaField, SchemaField } from "./types.ts";
 
 type BaseField<T, K extends import("./types.ts").SchemaFieldKind> = SchemaField<T, K> & {
   readonly optional: OptionalSchemaField<T, K>;
@@ -36,6 +36,14 @@ export const types = {
   date: withOptional({ kind: "date" } as IndexableSchemaField<Date>) as BaseIndexableField<Date>,
   Date: withOptional({ kind: "date" } as IndexableSchemaField<Date>) as BaseIndexableField<Date>,
   json: withOptional({ kind: "json" } as SchemaField<unknown>) as BaseField<unknown, "json">,
+  /**
+   * A reference to a durable file: `{ path, digest, size, contentType?, taint? }`.
+   * The row carries the pointer; the bytes are fetched with `getFile(ref)`.
+   */
+  file: withOptional({ kind: "file" } as SchemaField<FileRef, "file">) as BaseField<
+    FileRef,
+    "file"
+  >,
 
   /** Type a JSON field explicitly: `types.typed<MyType[]>('json')` */
   typed<T>(kind: "json"): BaseField<T, "json"> {

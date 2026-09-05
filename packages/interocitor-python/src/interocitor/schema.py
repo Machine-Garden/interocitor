@@ -22,10 +22,10 @@ if TYPE_CHECKING:
 BuiltinMergeStrategy: TypeAlias = Literal["lww"]
 MergeFunction: TypeAlias = Callable[["ColumnEntry", "ColumnEntry", Mapping[str, str]], "ColumnEntry"]
 MergeStrategy: TypeAlias = BuiltinMergeStrategy | MergeFunction
-SchemaFieldKind: TypeAlias = Literal["string", "number", "boolean", "date", "json", "enum"]
+SchemaFieldKind: TypeAlias = Literal["string", "number", "boolean", "date", "json", "enum", "file"]
 
-_FIELD_KINDS = frozenset({"string", "number", "boolean", "date", "json", "enum"})
-_INDEXABLE_FIELD_KINDS = _FIELD_KINDS - {"json"}
+_FIELD_KINDS = frozenset({"string", "number", "boolean", "date", "json", "enum", "file"})
+_INDEXABLE_FIELD_KINDS = _FIELD_KINDS - {"json", "file"}
 _BUILTIN_MERGE_STRATEGIES = frozenset({"lww"})
 
 
@@ -142,6 +142,9 @@ class _SchemaTypes:
     date = SchemaField("date")
     Date = date
     json = SchemaField("json")
+    # A durable-file reference: {"path", "digest", "size", "contentType"?, "taint"?}.
+    # The row carries the pointer; the bytes stay in durable file storage.
+    file = SchemaField("file")
 
     def typed(self, kind: Literal["json"]) -> SchemaField:
         """Return a JSON descriptor for application-managed typed values."""

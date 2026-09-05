@@ -178,7 +178,8 @@ const schema = {
 `types.index(...)` adds a local index used by `where` and `orderBy`; indexed
 and unique fields cannot be optional. `types.typed<T>("json")` describes a
 caller-owned structured value without making its runtime shape part of the
-manifest.
+manifest. `types.file` declares a `FileRef` column, the row-side pointer to a
+[durable file](#durable-files); it cannot be indexed.
 
 ## Query and row caches
 
@@ -220,15 +221,21 @@ for deletion guarantees and automatic scheduling.
 File operations use the remote adapter directly. They are not cached in the
 local row store, queued in its outbox, merged, or compacted.
 
-| API                                        | Contract                                                                                                |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `putFile(path, data, contentType?, seal?)` | Encrypt and upload; a later write to the same path replaces the object.                                 |
-| `getFile(path)`                            | Download/decrypt an untainted file with the mesh key.                                                   |
-| `openFile(path)`                           | Download metadata/ciphertext and return a `SealedFile`; the caller supplies an extra key when required. |
-| `getFileMetadata(path)`                    | Read metadata without downloading plaintext; returns `null` when missing.                               |
-| `deleteFile(path)`                         | Delete the object; a missing object is already deleted.                                                 |
+| API                                        | Contract                                                                                                                         |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `putFile(path, data, contentType?, seal?)` | Encrypt and upload; a later write to the same path replaces the object. The returned metadata carries the plaintext `digest`.    |
+| `toFileRef(path, metadata)`                | Build the `FileRef` for a `types.file` column from a `putFile` result: `{ path, digest, size, contentType?, taint? }`.           |
+| `getFile(path \| ref)`                     | Download/decrypt an untainted file with the mesh key. Given a `FileRef`, verify the bytes against `ref.digest`.                  |
+| `openFile(path \| ref)`                    | Download metadata/ciphertext and return a `SealedFile`; the caller supplies an extra key when required. `open()` verifies a ref. |
+| `getFileMetadata(path \| ref)`             | Read metadata without downloading plaintext; returns `null` when missing.                                                        |
+| `deleteFile(path \| ref)`                  | Delete the object; a missing object is already deleted.                                                                          |
 
-Use a row for offline-readable file references and policy labels. See
+A `FileRef` is immutable where a path is not: overwriting the path changes the
+digest, so a stale reference is refused with `FileIntegrityError` instead of
+served. That is what makes a digest-keyed cache correct at every layer, from a
+memory map to IndexedDB or the Cache API, with no invalidation and no service
+worker. Core does not ship the cache; it ships the reference that makes one
+safe. Keep policy labels such as taints on the row as well. See
 [Tainted files](tainted-files.md).
 
 ## `SyncConfig`
@@ -427,6 +434,7 @@ the adapter unauthenticated so the next `connect()` re-verifies.
 | `MeshEncryptionMismatchError` | Configured encrypted/unencrypted mode differs from the manifest.                  | Construct a new engine with the expected mode and matching key material.                                                          |
 | `ConnectStageTimeoutError`    | `withDeadline` expires; also supplied as the error for a timed-out connect stage. | Treat a handled connect-stage timeout as offline-ready and retry later; the underlying operation is not cancelled.                |
 | `RemoteAccessError`           | The remote rejected a request with 401, 403, a mesh-level 404, 429, or 503.       | Inspect `kind`; sign in, show read-only state, or leave the mesh, then give the adapter the new credential and call `connect()`.  |
+| `FileIntegrityError`          | Bytes opened for a `FileRef` do not hash to `ref.digest`.                         | Treat the bytes as untrusted; re-read the row for a newer reference, or re-upload and store a fresh `toFileRef` result.           |
 
 Other adapter, storage, crypto, and validation failures reject with ordinary
 `Error` values; their message text is not a stable programmatic contract.

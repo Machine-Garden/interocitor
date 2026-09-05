@@ -1,5 +1,6 @@
 import type {
   DatabaseSchemaDefinition,
+  FileRef,
   IndexableSchemaField,
   SchemaField,
   TableSchemaDefinition,
@@ -66,6 +67,46 @@ void indexedDate;
 // @ts-expect-error — IndexableSchemaField<string> is not IndexableSchemaField<number>
 const _wrongGeneric: IndexableSchemaField<number> = types.index(types.string);
 void _wrongGeneric;
+
+// ─── file carries FileRef and is not indexable ──────────────────────
+
+const _f: SchemaField<FileRef> = types.file;
+const _fOptional: SchemaField<FileRef> = types.file.optional;
+void _f;
+void _fOptional;
+
+// @ts-expect-error — SchemaField<FileRef> (file) is not IndexableSchemaField
+types.index(types.file);
+
+// @ts-expect-error — SchemaField<FileRef> (file) is not IndexableSchemaField
+types.unique(types.file);
+
+const fileSchema = {
+  tables: {
+    readings: {
+      fields: {
+        label: types.string,
+        entities: types.file,
+        source: types.file.optional,
+      },
+    },
+  },
+} satisfies DatabaseSchemaDefinition;
+
+type ReadingRow = InferTableType<typeof fileSchema, "readings">;
+const _readingOk: ReadingRow = {
+  label: "f3",
+  entities: { path: "readings/f3/entities.json", digest: "ab".repeat(32), size: 12 },
+};
+void _readingOk;
+declare const _readingRow: ReadingRow;
+const _entitiesPath: string = _readingRow.entities.path;
+const _sourceDigest: string | undefined = _readingRow.source?.digest;
+void _entitiesPath;
+void _sourceDigest;
+// @ts-expect-error — a bare path is not a FileRef
+const _readingBad: ReadingRow = { label: "f3", entities: "readings/f3/entities.json" };
+void _readingBad;
 
 // ─── json is not indexable ──────────────────────────────────────────
 
@@ -214,7 +255,9 @@ const _replaceOk: _ReplaceArg = { title: "x", status: "open", priority: 1 };
 // @ts-expect-error — missing required field priority
 const _replaceBad: _ReplaceArg = { title: "x", status: "open" };
 void _addOk;
+void _addBad;
 void _replaceOk;
+void _replaceBad;
 
 // table() returns Table<TaskRow> and concrete row typing propagates through
 // methods. row() is the single-row handle (replaces the old `get`).

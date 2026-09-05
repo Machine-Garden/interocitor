@@ -122,6 +122,7 @@ export {
 export { type CredentialStore, type StoredCredentials } from "./storage/credential-store.ts";
 export { Table, QueryResult, RowResult } from "./core/table.ts";
 export { types } from "./core/schema-types.ts";
+export { toFileRef, sha256Hex } from "./core/file-ref.ts";
 export {
   LocalStoreConnectedStoresApi,
   type ConnectedStoresApi,
@@ -134,6 +135,7 @@ export {
 export {
   MeshEncryptionMismatchError,
   MeshCredentialMismatchError,
+  FileIntegrityError,
   RemoteAccessError,
   isRemoteAccessError,
   type RemoteAccessKind,
@@ -163,6 +165,7 @@ export type {
   FileEntry,
   StoredFileMetadata,
   StoredFileWriteOptions,
+  FileRef,
   FileSeal,
   SealedFile,
 

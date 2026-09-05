@@ -473,8 +473,9 @@ export function HomeLanding() {
                 <p className="card-type">Durable files</p>
                 <h3>Exact remote objects for documents and media</h3>
                 <p>
-                  Use files for PDFs, photos, audio, and video. They are encrypted before storage
-                  and fetched when needed, but their bytes do not merge like rows.
+                  Use files for PDFs, photos, audio, video, and any result produced once. A row
+                  points at one by content, so the bytes are fetched when a screen needs them and
+                  cached safely, but they do not merge like rows.
                 </p>
               </article>
             </div>

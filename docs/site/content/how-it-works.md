@@ -159,7 +159,7 @@ The story so far applies to structured rows. Durable files share the protection 
 | **CRDT rows**     | Structured state must remain useful and mergeable while endpoints are apart. | Reads and writes use the local store; protected changes synchronize later and merge by field.                              |
 | **Durable files** | Exact bytes should remain one application-addressed object.                  | Put, get, overwrite, and delete call the remote adapter directly; Core adds no offline queue, cache, merge, or compaction. |
 
-An application can keep a file’s path and metadata in a row, so the reference remains available offline, while fetching the bytes only when transport is available. It must add its own file cache or retry policy when the product needs a different experience. Deleting a row does not automatically delete the file it references.
+A row names a file with a [file reference](/data-boundaries#file-ref): its path plus the SHA-256 of its plaintext. The reference is ordinary row data, so it merges and remains available offline, while the bytes are fetched only when transport is available and verified against the digest on arrival. Because the reference names content, an application may cache the bytes on any layer, from memory to the browser’s own storage, without ever invalidating them. Core adds no cache or retry policy of its own, and deleting a row does not delete the file it references.
 
 [Rows, files, and meshes](/data-boundaries) helps choose the correct surface before implementation.
 

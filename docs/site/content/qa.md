@@ -68,10 +68,12 @@ Read [the automation guide](/automation).
 
 The complete row database must fit every endpoint that opens the mesh. Measure a realistic snapshot, the weakest supported device, catch-up time, local storage, memory, and query behavior.
 
+Rows are the part that always travels, so keep them an index. Bulky content, and anything only one screen reads, belongs in a durable file that a row [points at with a file reference](/data-boundaries#file-ref). The bytes are then fetched by the screen that needs them and cached by digest, and the row set every endpoint carries stays small.
+
 Split a mesh only when the application can also own the resulting trust and workflow boundary.
 
 ## When should I choose something else? {#not-fit}
 
-Choose another foundation when the server must query plaintext, when many small groups need different row visibility, when strict central transactions define the product, or when durable files must work offline without an application-owned cache.
+Choose another foundation when the server must query plaintext, when many small groups need different row visibility, when strict central transactions define the product, or when durable files must work offline before the application has cached them.
 
 Interocitor is strongest when trusted endpoints own row semantics and remote infrastructure can remain a protected mailbox.

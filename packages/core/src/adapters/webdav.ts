@@ -16,6 +16,7 @@ import type {
   StoredFileMetadata,
   StoredFileWriteOptions,
 } from "../core/types.ts";
+import { httpFailure, throwIfAccessDenied } from "./http-status.ts";
 
 export interface WebDAVConfig {
   /** Base URL of the WebDAV endpoint, e.g. "https://cloud.example.com/remote.php/dav/files/username" */
@@ -51,6 +52,20 @@ export class WebDAVAdapter implements StorageAdapter {
     this.config = config;
   }
 
+  /**
+   * Replace the credential after the application re-authenticated, typically
+   * in reaction to a `remote:access` event with kind `unauthenticated`. Marks
+   * the adapter unauthenticated so the next `connect()` re-verifies.
+   */
+  setAuth(auth: WebDAVConfig["auth"]): void {
+    this.config = { ...this.config, auth };
+    this.authenticated = false;
+  }
+
+  private ctx(operation: string, path?: string) {
+    return { adapter: this.name, operation, path };
+  }
+
   private url(path: string): string {
     const base = this.config.baseUrl.replace(/\/$/, "");
     const clean = path.startsWith("/") ? path : "/" + path;
@@ -81,10 +96,8 @@ export class WebDAVAdapter implements StorageAdapter {
 
     if (res.status === 207 || res.ok) {
       this.authenticated = true;
-    } else if (res.status === 401) {
-      throw new Error("WebDAV authentication failed");
     } else {
-      throw new Error(`WebDAV error: ${res.status}`);
+      throw httpFailure(res, this.ctx("authenticate"), "WebDAV error");
     }
   }
 
@@ -116,7 +129,11 @@ export class WebDAVAdapter implements StorageAdapter {
       });
       // 201 Created, 405 Already Exists — both fine
       if (!res.ok && res.status !== 405) {
-        throw new Error(`Failed to create folder ${current}: ${res.status}`);
+        throw httpFailure(
+          res,
+          this.ctx("ensureFolder", current),
+          `Failed to create folder ${current}`,
+        );
       }
       this.ensuredFolders.add(current);
     }
@@ -149,7 +166,7 @@ export class WebDAVAdapter implements StorageAdapter {
     });
 
     if (res.status !== 207) {
-      throw new Error(`PROPFIND failed: ${res.status}`);
+      throw httpFailure(res, this.ctx("listFiles", folderPath), "PROPFIND failed");
     }
 
     const xml = await res.text();
@@ -204,6 +221,7 @@ export class WebDAVAdapter implements StorageAdapter {
         </d:propfind>`,
     });
 
+    throwIfAccessDenied(res, this.ctx("listFolders"));
     if (res.status !== 207) return [];
 
     const xml = await res.text();
@@ -227,7 +245,7 @@ export class WebDAVAdapter implements StorageAdapter {
       headers: this.headers(),
     });
 
-    if (!res.ok) throw new Error(`Failed to read ${path}: ${res.status}`);
+    if (!res.ok) throw httpFailure(res, this.ctx("readFile", path), `Failed to read ${path}`);
 
     const buffer = await res.arrayBuffer();
     return new Uint8Array(buffer);
@@ -243,7 +261,7 @@ export class WebDAVAdapter implements StorageAdapter {
     });
 
     if (!res.ok && res.status !== 201 && res.status !== 204) {
-      throw new Error(`Failed to write ${path}: ${res.status}`);
+      throw httpFailure(res, this.ctx("writeFile", path), `Failed to write ${path}`);
     }
   }
 
@@ -255,7 +273,7 @@ export class WebDAVAdapter implements StorageAdapter {
 
     // 204 No Content or 404 Not Found — both acceptable
     if (!res.ok && res.status !== 404) {
-      throw new Error(`Failed to delete ${path}: ${res.status}`);
+      throw httpFailure(res, this.ctx("deleteFile", path), `Failed to delete ${path}`);
     }
   }
 
@@ -348,6 +366,7 @@ export class WebDAVAdapter implements StorageAdapter {
     });
 
     if (res.status === 404) return null;
+    throwIfAccessDenied(res, this.ctx("getFileMetadata", path));
     if (res.status !== 207) return null;
 
     const xml = await res.text();

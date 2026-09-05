@@ -23,6 +23,7 @@ import { paths, textDecoder, log } from "./internals.ts";
 import { decodeChangePayload } from "./codec.ts";
 import type { CodecState } from "./codec.ts";
 import { readJsonIfExists } from "./manifest.ts";
+import { isRemoteAccessError } from "./errors.ts";
 import {
   ChangeObservationLedger,
   changeFileHlc,
@@ -93,7 +94,11 @@ export async function pull(ctx: PullContext): Promise<HLC> {
     let files;
     try {
       files = await adapter.listFiles(p.changesFolder);
-    } catch {
+    } catch (err) {
+      // An access decision from the remote must reach the application with
+      // its status intact; only a genuinely missing folder is "nothing to
+      // merge".
+      if (isRemoteAccessError(err)) throw err;
       log("debug", "pull() — changes folder not found, nothing to merge");
       emit({ type: "sync:complete", entriesMerged: 0 });
       return hlc;

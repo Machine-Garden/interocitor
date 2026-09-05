@@ -194,8 +194,16 @@ initialized local row operations available for a later retry.
 - When it returns false, the engine emits `auth:required`, calls
   `authenticate()` as a deadline-wrapped connect stage, then emits
   `auth:complete` on success.
-- Core does not automatically retry a failed operation after a 401, and it
-  does not re-check primary-adapter authentication before every pull or flush.
+- Core never retries a request the remote denied. Throw a `RemoteAccessError`
+  (from `core/errors.ts`, or use `httpFailure()` / `throwIfAccessDenied()` from
+  `adapters/http-status.ts`) for 401, 403, 429, and 503, and for 404 only when
+  the route addresses the mesh itself rather than one file. The engine turns a
+  denial into a `remote:access` event, pauses the remote session, and waits for
+  the application to fix the credential and call `connect()` again. Rate limits
+  and policy outages are reported without pausing and back polling off.
+- Core does not re-check primary-adapter authentication before every pull or
+  flush. Expose a setter (`setToken`, `setAuth`, `setAccessToken`) that swaps the
+  credential and resets `isAuthenticated()` to false.
 - Write-only replica adapters are checked and authenticated before their
   individual replica flush.
 - Storing credentials is the adapter's problem. The engine does not
@@ -204,7 +212,8 @@ initialized local row operations available for a later retry.
 ### `getFileMetadata(path)`
 
 - Returns `null` if missing, otherwise size + modifiedTime (+ etag if
-  the backend exposes one).
+  the backend exposes one). A 401/403 must still throw a `RemoteAccessError`;
+  only a genuinely missing file is `null`.
 - Used by maintenance code to make eviction decisions; safe to be
   best‑effort.
 

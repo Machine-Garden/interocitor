@@ -11,6 +11,7 @@
  */
 
 import type { StorageAdapter, FileEntry } from "../core/types.ts";
+import { httpFailure, throwIfAccessDenied } from "./http-status.ts";
 
 const SCOPES = "https://www.googleapis.com/auth/drive.file";
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
@@ -67,9 +68,16 @@ export class GoogleDriveAdapter implements StorageAdapter {
     if (!this.accessToken) {
       throw new Error(`GoogleDriveAdapter requires an OAuth bearer token with ${SCOPES} scope`);
     }
-    if (!(await this.verifyToken())) {
+    const verify = await this.verifyToken();
+    if (verify !== true) {
+      if (verify)
+        throw httpFailure(verify, this.ctx("authenticate"), "Google Drive authentication failed");
       throw new Error("Google Drive authentication failed");
     }
+  }
+
+  private ctx(operation: string, path?: string) {
+    return { adapter: this.name, operation, path };
   }
 
   /** Set token directly after the runtime obtains or refreshes it. */
@@ -90,12 +98,13 @@ export class GoogleDriveAdapter implements StorageAdapter {
     return this.accessToken !== null;
   }
 
-  private async verifyToken(): Promise<boolean> {
+  /** `true` when the token works, the failed response when Drive rejected it, `false` on network failure. */
+  private async verifyToken(): Promise<true | Response | false> {
     try {
       const res = await fetch(`${DRIVE_API}/about?fields=user`, {
         headers: { Authorization: `Bearer ${this.accessToken}` },
       });
-      return res.ok;
+      return res.ok ? true : res;
     } catch {
       return false;
     }
@@ -137,6 +146,7 @@ export class GoogleDriveAdapter implements StorageAdapter {
         `${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id,name)`,
         { headers: this.headers() },
       );
+      throwIfAccessDenied(res, this.ctx("resolveFileId", path));
       const data = await res.json();
 
       if (!data.files || data.files.length === 0) return null;
@@ -172,6 +182,7 @@ export class GoogleDriveAdapter implements StorageAdapter {
       const res = await fetch(`${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id)`, {
         headers: this.headers(),
       });
+      throwIfAccessDenied(res, this.ctx("resolveFolderId", path));
       const data = await res.json();
 
       if (!data.files || data.files.length === 0) return null;
@@ -203,6 +214,7 @@ export class GoogleDriveAdapter implements StorageAdapter {
       const res = await fetch(`${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=files(id)`, {
         headers: this.headers(),
       });
+      throwIfAccessDenied(res, this.ctx("ensureFolder", path));
       const data = await res.json();
 
       if (data.files && data.files.length > 0) {
@@ -221,6 +233,13 @@ export class GoogleDriveAdapter implements StorageAdapter {
             parents: [parentId],
           }),
         });
+        if (!createRes.ok) {
+          throw httpFailure(
+            createRes,
+            this.ctx("ensureFolder", path),
+            `Failed to create folder ${name}`,
+          );
+        }
         const created = await createRes.json();
         parentId = created.id;
       }
@@ -238,6 +257,8 @@ export class GoogleDriveAdapter implements StorageAdapter {
     const res = await fetch(`${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=${fields}`, {
       headers: this.headers(),
     });
+    if (!res.ok)
+      throw httpFailure(res, this.ctx("listFiles", folderPath), `Failed to list ${folderPath}`);
     const data = await res.json();
 
     return (data.files || []).map((f: any) => {
@@ -261,6 +282,7 @@ export class GoogleDriveAdapter implements StorageAdapter {
     const res = await fetch(`${DRIVE_API}/files?q=${encodeURIComponent(q)}&fields=${fields}`, {
       headers: this.headers(),
     });
+    throwIfAccessDenied(res, this.ctx("listFolders", folderPath));
     const data = await res.json();
     return (data.files || []).map((f: any) => f.name as string);
   }
@@ -270,7 +292,7 @@ export class GoogleDriveAdapter implements StorageAdapter {
     if (!fileId) throw new Error(`Drive object not found: ${path}`);
 
     const res = await fetch(`${DRIVE_API}/files/${fileId}?alt=media`, { headers: this.headers() });
-    if (!res.ok) throw new Error(`Failed to read ${path}: ${res.status}`);
+    if (!res.ok) throw httpFailure(res, this.ctx("readFile", path), `Failed to read ${path}`);
 
     const buffer = await res.arrayBuffer();
     return new Uint8Array(buffer);
@@ -291,7 +313,7 @@ export class GoogleDriveAdapter implements StorageAdapter {
         },
         body: bytes as unknown as BodyInit,
       });
-      if (!res.ok) throw new Error(`Failed to write ${path}: ${res.status}`);
+      if (!res.ok) throw httpFailure(res, this.ctx("writeFile", path), `Failed to write ${path}`);
     } else {
       // Create new file
       const parts = path.split("/").filter(Boolean);
@@ -337,7 +359,7 @@ export class GoogleDriveAdapter implements StorageAdapter {
         body: combined as unknown as BodyInit,
       });
 
-      if (!res.ok) throw new Error(`Failed to create ${path}: ${res.status}`);
+      if (!res.ok) throw httpFailure(res, this.ctx("writeFile", path), `Failed to create ${path}`);
 
       const created = await res.json();
       this.fileIdCache.set(path, created.id);
@@ -348,10 +370,11 @@ export class GoogleDriveAdapter implements StorageAdapter {
     const fileId = await this.resolveFileId(path);
     if (!fileId) return;
 
-    await fetch(`${DRIVE_API}/files/${fileId}`, {
+    const res = await fetch(`${DRIVE_API}/files/${fileId}`, {
       method: "DELETE",
       headers: this.headers(),
     });
+    throwIfAccessDenied(res, this.ctx("deleteFile", path));
 
     this.fileIdCache.delete(path);
   }
@@ -363,6 +386,7 @@ export class GoogleDriveAdapter implements StorageAdapter {
     const res = await fetch(`${DRIVE_API}/files/${fileId}?fields=id,name,size,modifiedTime`, {
       headers: this.headers(),
     });
+    throwIfAccessDenied(res, this.ctx("getFileMetadata", path));
     if (!res.ok) return null;
 
     const data = await res.json();

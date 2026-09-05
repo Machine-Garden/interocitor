@@ -345,20 +345,21 @@ inheritance is not intended.
 
 ## Important events
 
-| Event family                                                                                                               | Meaning                                                                       |
-| -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `connection:status`, `connect:state`, `connect:noop`, `connect:error`, `transport:teardown`                                | Remote-session state and transitions.                                         |
-| `join:existing-mesh`                                                                                                       | Different existing mesh detected; includes policy and local row/queue counts. |
-| `sync:start`, `sync:complete`, `sync:error`                                                                                | Pull lifecycle.                                                               |
-| `flush:start`, `flush:complete`, `flush:error`                                                                             | Primary outbox publication.                                                   |
-| `change`, `delete`                                                                                                         | Applied row events.                                                           |
-| `rehydrate:start`, `rehydrate:complete`                                                                                    | Snapshot replacement.                                                         |
-| `auth:required`, `auth:complete`                                                                                           | Connect-time adapter authentication.                                          |
-| `relay:subscribe`, `relay:ready`, `relay:message`, `relay:error`, `relay:closed`, `relay:unavailable`                      | Optional invalidation transport.                                              |
-| `credentials:restored`, `credentials:persisted`, `credentials:conflict`, `credentials:meshMismatch`, `encryption:resolved` | Credential and encryption lifecycle.                                          |
-| `decode:error`, `remote:poisoned`                                                                                          | Remote bytes failed validation/decryption; stop normal sync and investigate.  |
-| `replica:error`                                                                                                            | A replica write failed after the primary path continued.                      |
-| `schema:mismatch`                                                                                                          | Local logical schema version differs from the manifest.                       |
+| Event family                                                                                                               | Meaning                                                                                 |
+| -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `connection:status`, `connect:state`, `connect:noop`, `connect:error`, `transport:teardown`                                | Remote-session state and transitions.                                                   |
+| `join:existing-mesh`                                                                                                       | Different existing mesh detected; includes policy and local row/queue counts.           |
+| `sync:start`, `sync:complete`, `sync:error`                                                                                | Pull lifecycle.                                                                         |
+| `flush:start`, `flush:complete`, `flush:error`                                                                             | Primary outbox publication.                                                             |
+| `change`, `delete`                                                                                                         | Applied row events.                                                                     |
+| `rehydrate:start`, `rehydrate:complete`                                                                                    | Snapshot replacement.                                                                   |
+| `auth:required`, `auth:complete`                                                                                           | Connect-time adapter authentication.                                                    |
+| `remote:access`, `remote:access:restored`                                                                                  | The remote answered 401/403/404/429/503; see [Remote access decisions](#remote-access). |
+| `relay:subscribe`, `relay:ready`, `relay:message`, `relay:error`, `relay:closed`, `relay:unavailable`                      | Optional invalidation transport.                                                        |
+| `credentials:restored`, `credentials:persisted`, `credentials:conflict`, `credentials:meshMismatch`, `encryption:resolved` | Credential and encryption lifecycle.                                                    |
+| `decode:error`, `remote:poisoned`                                                                                          | Remote bytes failed validation/decryption; stop normal sync and investigate.            |
+| `replica:error`                                                                                                            | A replica write failed after the primary path continued.                                |
+| `schema:mismatch`                                                                                                          | Local logical schema version differs from the manifest.                                 |
 
 Compaction events are listed in [Compaction](compaction.md#events). High-volume
 `trace:manifest` and `trace:head` events are diagnostics for tests/devtools,
@@ -369,6 +370,55 @@ failed superseded-snapshot deletions. A healthy remote has one mainline
 snapshot; storage failures may temporarily leave more until a managed
 retention check or later compaction retries cleanup.
 
+## Remote access decisions {#remote-access}
+
+Interocitor manages encrypted data. Deciding who may reach a mesh belongs to
+the host and its identity provider. The engine's job is to understand that
+decision when it arrives as an HTTP status and give the application a clear
+moment to react. The built-in Cloudflare, WebDAV, and Google Drive adapters
+turn these statuses into a `RemoteAccessError` instead of a generic failure:
+
+| Status | `kind`               | Effect on the engine                                                    |
+| ------ | -------------------- | ----------------------------------------------------------------------- |
+| 401    | `unauthenticated`    | Pauses the remote session. The provider wants a sign-in.                |
+| 403    | `forbidden`          | Pauses the remote session. Identified, but this mesh/write is denied.   |
+| 404    | `not-found`          | Pauses the remote session. Only on mesh-level routes (health, listing). |
+| 429    | `rate-limited`       | Reported only. Polling backs off, honouring `Retry-After`.              |
+| 503    | `policy-unavailable` | Reported only. The decision is unknown, not negative.                   |
+
+A missing file (404 on `readFile`, `getFileMetadata`, or a WebDAV/Drive path)
+is never an access decision; those keep their existing null/plain-error
+behaviour.
+
+When a request is denied (`error.denied` is true) the engine stops polling,
+relay subscriptions, scheduled flushes, and compaction; sets `connected` to
+false and the status to `offline`; and emits `remote:access` with
+`paused: true`. It never retries the denied request on its own. Local reads and
+writes continue and queue in the outbox. Temporary conditions emit the same
+event with `paused: false` and leave the session connected.
+
+```ts
+db.on((event) => {
+  if (event.type !== "remote:access" || !event.paused) return;
+  switch (event.kind) {
+    case "unauthenticated":
+      return startSignIn(); // afterwards: adapter.setToken(token); await db.connect();
+    case "forbidden":
+      return showReadOnlyBanner(event.error);
+    case "not-found":
+      return leaveMesh(); // the alias was revoked or never existed for this subject
+  }
+});
+```
+
+The current decision is available synchronously through
+`db.getRemoteAccessError()` and `db.getConnectionStatusDetails().remoteAccess`,
+and in React through `useRemoteAccess(db)`. A successful `connect()` clears it
+and emits `remote:access:restored`; `disconnect()` and `setRemoteStorage()`
+clear it silently. `CloudflareAdapter.setToken()`, `WebDAVAdapter.setAuth()`, and
+`GoogleDriveAdapter.setAccessToken()` accept the refreshed credential and mark
+the adapter unauthenticated so the next `connect()` re-verifies.
+
 ## Typed errors
 
 | Error                         | When                                                                              | Recovery                                                                                                                          |
@@ -376,6 +426,7 @@ retention check or later compaction retries cleanup.
 | `MeshCredentialMismatchError` | Persisted credential `meshId` differs from the live manifest.                     | Confirm the intended mesh, disconnect, clear credentials, and construct a new engine with the correct key source and join policy. |
 | `MeshEncryptionMismatchError` | Configured encrypted/unencrypted mode differs from the manifest.                  | Construct a new engine with the expected mode and matching key material.                                                          |
 | `ConnectStageTimeoutError`    | `withDeadline` expires; also supplied as the error for a timed-out connect stage. | Treat a handled connect-stage timeout as offline-ready and retry later; the underlying operation is not cancelled.                |
+| `RemoteAccessError`           | The remote rejected a request with 401, 403, a mesh-level 404, 429, or 503.       | Inspect `kind`; sign in, show read-only state, or leave the mesh, then give the adapter the new credential and call `connect()`.  |
 
 Other adapter, storage, crypto, and validation failures reject with ordinary
 `Error` values; their message text is not a stable programmatic contract.

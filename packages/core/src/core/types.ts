@@ -5,6 +5,7 @@
  */
 
 import type { PairingCapabilities } from "../handshake/capabilities.ts";
+import type { RemoteAccessError, RemoteAccessKind } from "./errors.ts";
 
 // ─── Device & Identity ───────────────────────────────────────────────
 
@@ -790,6 +791,12 @@ export interface ConnectionStatusDetails {
   ready: boolean;
   /** Remote sync is connected and polling/listening. */
   connected: boolean;
+  /**
+   * The access decision that paused remote sync, or `null`. Set when the
+   * remote answered 401, 403, or a mesh-level 404; cleared by a successful
+   * `connect()`, `disconnect()`, or `setRemoteStorage()`.
+   */
+  remoteAccess: RemoteAccessError | null;
   /** Current remote path, if configured. */
   remotePath?: string;
   /** Current mesh id, once known. */
@@ -1185,6 +1192,32 @@ export type SyncEvent =
   | { type: "rehydrate:complete"; rowCount: number }
   | { type: "auth:required" }
   | { type: "auth:complete" }
+  | {
+      /**
+       * The remote answered a request with an access decision. When `paused`
+       * is true the decision was negative (401, 403, mesh-level 404): the
+       * engine stopped polling, relay, and publishing for this mesh and set
+       * `connected` to false. Local reads and writes continue. The
+       * application reacts (sign in, read-only view, leave the mesh) and then
+       * calls `connect()` again. When `paused` is false the condition is
+       * temporary (429, 503) and polling backs off without stopping.
+       */
+      type: "remote:access";
+      error: RemoteAccessError;
+      kind: RemoteAccessKind;
+      status: number;
+      adapter: string;
+      operation: string;
+      path?: string;
+      stage: "connect" | "pull" | "flush" | "file" | "compact";
+      paused: boolean;
+    }
+  | {
+      /** `connect()` succeeded after a `remote:access` pause. */
+      type: "remote:access:restored";
+      adapter: string;
+      previous: RemoteAccessError;
+    }
   | { type: "schema:mismatch"; local: number; remote: number }
   | { type: "replica:error"; adapter: string; error: Error }
   // ── Trace events ───────────────────────────────────────────────

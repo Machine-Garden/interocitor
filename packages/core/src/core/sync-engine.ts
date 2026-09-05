@@ -68,7 +68,7 @@ import {
   passphraseToKey,
 } from "../crypto/encryption.ts";
 import type { MeshKeySource } from "../crypto/key-source.ts";
-import { MeshCredentialMismatchError } from "./errors.ts";
+import { MeshCredentialMismatchError, RemoteAccessError, isRemoteAccessError } from "./errors.ts";
 import {
   ConnectStageTimeoutError,
   DEFAULT_CONNECT_STAGE_TIMEOUT_MS,
@@ -254,6 +254,8 @@ export class Interocitor<
   private tables: Record<string, Record<string, Row>> = {};
   private manifest: Manifest | null = null;
   private remotePoisonError: Error | null = null;
+  // Negative access decision (401/403/mesh 404) that paused remote sync.
+  private remoteAccessError: RemoteAccessError | null = null;
 
   // Known table names (populated from the local store on init, updated on writes)
   private knownTables: Set<string> = new Set();
@@ -586,6 +588,7 @@ export class Interocitor<
       solo,
       ready: this.initialized,
       connected: this.connected,
+      remoteAccess: this.remoteAccessError,
       remotePath: this.config.remotePath,
       meshId: this.manifest?.meshId,
       deviceId: this.deviceId,
@@ -599,6 +602,86 @@ export class Interocitor<
     }
     this.connectionStatus = status;
     this.emit({ type: "connection:status", status: this.getConnectionStatus() });
+  }
+
+  /**
+   * The negative access decision that paused remote sync, or `null`.
+   * See the `remote:access` event. Cleared by a successful `connect()`,
+   * `disconnect()`, or `setRemoteStorage()`.
+   */
+  getRemoteAccessError(): RemoteAccessError | null {
+    return this.remoteAccessError;
+  }
+
+  /**
+   * Classify a remote failure. Returns true when `err` is a
+   * {@link RemoteAccessError} and has been reported through `remote:access`.
+   *
+   * A negative decision (401, 403, mesh-level 404) pauses the remote session:
+   * polling, relay, and publishing stop, `connected` flips to false, and the
+   * status becomes `offline`. Local reads and writes continue. The
+   * application reacts (sign in, read-only view, leave the mesh) and calls
+   * `connect()` again. Interocitor never retries a denied request on its own.
+   *
+   * A temporary condition (429, 503) is reported without pausing; polling
+   * backs off, honouring `Retry-After` when supplied.
+   */
+  private handleRemoteAccessError(
+    err: unknown,
+    stage: "connect" | "pull" | "flush" | "file" | "compact",
+  ): boolean {
+    if (!isRemoteAccessError(err)) return false;
+    const paused = err.denied;
+    if (paused) {
+      const wasPaused = this.remoteAccessError !== null;
+      this.remoteAccessError = err;
+      this.stopPolling();
+      this.stopRemoteInvalidations();
+      this.clearScheduledFlush();
+      this.clearCompactTimers();
+      this.connected = false;
+      this.log("warn", "remote access denied — remote sync paused until connect()", {
+        stage,
+        kind: err.kind,
+        status: err.status,
+        adapter: err.adapter,
+        operation: err.operation,
+        path: err.path,
+      });
+      if (!wasPaused || this.connectionStatus !== "offline") this.setConnectionStatus("offline");
+    } else if (this.pollBaseIntervalMs) {
+      const MAX_ACCESS_BACKOFF_MS = 300_000;
+      const doubled = Math.max(this.pollCurrentIntervalMs * 2, this.pollBaseIntervalMs);
+      this.pollCurrentIntervalMs = Math.min(
+        Math.max(doubled, err.retryAfterMs ?? 0),
+        MAX_ACCESS_BACKOFF_MS,
+      );
+      this.log("warn", "remote access temporarily unavailable — polling backed off", {
+        stage,
+        kind: err.kind,
+        status: err.status,
+        pollIntervalMs: this.pollCurrentIntervalMs,
+      });
+    }
+    this.emit({
+      type: "remote:access",
+      error: err,
+      kind: err.kind,
+      status: err.status,
+      adapter: err.adapter,
+      operation: err.operation,
+      path: err.path,
+      stage,
+      paused,
+    });
+    return true;
+  }
+
+  private clearRemoteAccessPause(adapterName: string): void {
+    const previous = this.remoteAccessError;
+    if (!previous) return;
+    this.remoteAccessError = null;
+    this.emit({ type: "remote:access:restored", adapter: adapterName, previous });
   }
 
   /** Stable cache key for a descriptor. Owned by core. */
@@ -2083,6 +2166,7 @@ export class Interocitor<
         this.startPolling(this.config.pollInterval);
         this.startRemoteInvalidations(adapter);
         this.connected = true;
+        this.clearRemoteAccessPause(adapter.name);
         await this.markSuccessfulRemoteSync();
         this.scheduleRetentionCompactionCheck(0);
         this.setConnectionStatus("idle");
@@ -2145,6 +2229,7 @@ export class Interocitor<
     });
     const stage = (s: string, err: unknown): Error => {
       const e = err instanceof Error ? err : new Error(String(err));
+      this.handleRemoteAccessError(e, "connect");
       console.log("[interocitor:connect] doConnect() — STAGE FAIL", {
         stage: s,
         dbName: this.dbName,
@@ -2346,6 +2431,7 @@ export class Interocitor<
     this.startPolling(this.config.pollInterval);
     this.startRemoteInvalidations(adapter);
     this.connected = true;
+    this.clearRemoteAccessPause(adapter.name);
     await this.markSuccessfulRemoteSync();
     this.scheduleRetentionCompactionCheck(0);
     this.setConnectionStatus("idle");
@@ -2387,6 +2473,7 @@ export class Interocitor<
     this.initPromise = null;
     this.connectPromise = null;
     this.remotePoisonError = null;
+    this.remoteAccessError = null;
   }
 
   /**
@@ -2484,6 +2571,7 @@ export class Interocitor<
 
     this.adapter = adapter;
     this.remotePoisonError = null;
+    this.remoteAccessError = null;
 
     if (wasConnected && adapter) await this.connect();
   }
@@ -3153,6 +3241,16 @@ export class Interocitor<
       this.clearScheduledFlush();
       return 0;
     }
+    if (this.remoteAccessError) {
+      // The remote denied access. Retrying will not change the provider's
+      // decision; keep the outbox durable and wait for connect().
+      this.clearScheduledFlush();
+      this.log("debug", "flush() — skipped, remote access paused", {
+        kind: this.remoteAccessError.kind,
+        status: this.remoteAccessError.status,
+      });
+      return 0;
+    }
 
     const triggerQueuedChangeCount = this.pendingCount;
     // Keep entries durable until authoritative publication succeeds. An empty
@@ -3204,6 +3302,7 @@ export class Interocitor<
       if (this.connected) this.setConnectionStatus("idle");
       return triggerQueuedChangeCount;
     } catch (err) {
+      this.handleRemoteAccessError(err, "flush");
       if (this.connected) this.setConnectionStatus("idle");
       this.log("error", "flush() — failed, durable entries remain queued", err);
       this.pendingCount = entries.length;
@@ -3249,6 +3348,9 @@ export class Interocitor<
         this.scheduleRetentionCompactionCheck();
       }
       await this.acknowledgeManifest();
+    } catch (err) {
+      this.handleRemoteAccessError(err, "pull");
+      throw err;
     } finally {
       if (this.connected) this.setConnectionStatus("idle");
     }
@@ -3355,6 +3457,15 @@ export class Interocitor<
     contentType?: string,
     seal?: FileSeal,
   ): Promise<StoredFileMetadata> {
+    return this.fileAccess(this.putFileImpl(path, data, contentType, seal));
+  }
+
+  private async putFileImpl(
+    path: string,
+    data: Uint8Array | string,
+    contentType?: string,
+    seal?: FileSeal,
+  ): Promise<StoredFileMetadata> {
     await this.ensureReady();
     const adapter = this.requireAdapter("putFile()");
     const filePath = this.storedFilePath(path);
@@ -3407,6 +3518,10 @@ export class Interocitor<
    * be opened.
    */
   async openFile(path: string): Promise<SealedFile> {
+    return this.fileAccess(this.openFileImpl(path));
+  }
+
+  private async openFileImpl(path: string): Promise<SealedFile> {
     await this.ensureReady();
     const adapter = this.requireAdapter("openFile()");
     const filePath = this.storedFilePath(path);
@@ -3442,6 +3557,10 @@ export class Interocitor<
 
   /** Delete a durable application file. Missing files are treated as already deleted. */
   async deleteFile(path: string): Promise<void> {
+    return this.fileAccess(this.deleteFileImpl(path));
+  }
+
+  private async deleteFileImpl(path: string): Promise<void> {
     await this.ensureReady();
     const adapter = this.requireAdapter("deleteFile()");
     const filePath = this.storedFilePath(path);
@@ -3451,12 +3570,30 @@ export class Interocitor<
 
   /** Return metadata for a durable application file without downloading content. */
   async getFileMetadata(path: string): Promise<StoredFileMetadata | null> {
+    return this.fileAccess(this.getFileMetadataImpl(path));
+  }
+
+  private async getFileMetadataImpl(path: string): Promise<StoredFileMetadata | null> {
     await this.ensureReady();
     const adapter = this.requireAdapter("getFileMetadata()");
     const filePath = this.storedFilePath(path);
     if (adapter.getStoredFileMetadata) return adapter.getStoredFileMetadata(filePath);
     const meta = await adapter.getFileMetadata(filePath);
     return meta ? { ...meta, storedSize: meta.size } : null;
+  }
+
+  /**
+   * Durable-file operations share the mesh's access decision: a 401/403 on a
+   * file route pauses the remote session exactly like one on a sync route,
+   * and reaches the caller as a `RemoteAccessError`.
+   */
+  private async fileAccess<T>(op: Promise<T>): Promise<T> {
+    try {
+      return await op;
+    } catch (err) {
+      this.handleRemoteAccessError(err, "file");
+      throw err;
+    }
   }
 
   // ── Mesh management ────────────────────────────────────────────────

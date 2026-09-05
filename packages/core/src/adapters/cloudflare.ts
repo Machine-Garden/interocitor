@@ -22,6 +22,7 @@ import type {
   StoredFileWriteOptions,
 } from "../core/types.ts";
 import type { PairingCapabilities } from "../handshake/capabilities.ts";
+import { httpFailure, throwIfAccessDenied } from "./http-status.ts";
 
 export interface CloudflareAdapterConfig {
   /** Worker IO base URL that includes a mesh address, e.g. https://worker/io/main */
@@ -80,7 +81,7 @@ export interface CloudflareHandshakeConfig {
 export class CloudflareAdapter implements StorageAdapter {
   readonly name = "cloudflare";
 
-  private readonly config: CloudflareAdapterConfig;
+  private config: CloudflareAdapterConfig;
   private authenticated = false;
   // Per-session cache of folders we have already ensured. Cloudflare's
   // /ensure-folder is idempotent but a POST per folder per connect is
@@ -95,6 +96,21 @@ export class CloudflareAdapter implements StorageAdapter {
       baseUrl: config.baseUrl.replace(/\/$/, ""),
       relayEnabled: config.relayEnabled ?? true,
     };
+  }
+
+  /**
+   * Replace the bearer token after the application re-authenticated with its
+   * identity provider, typically in reaction to a `remote:access` event with
+   * kind `unauthenticated`. Marks the adapter unauthenticated so the next
+   * `connect()` re-verifies against the Worker. Pass `undefined` to clear.
+   */
+  setToken(token: string | undefined): void {
+    this.config.token = token;
+    this.authenticated = false;
+  }
+
+  private ctx(operation: string, path?: string, notFoundIsAccess = false) {
+    return { adapter: this.name, operation, path, notFoundIsAccess };
   }
 
   private headers(extra?: Record<string, string>): Record<string, string> {
@@ -180,11 +196,11 @@ export class CloudflareAdapter implements StorageAdapter {
       return;
     }
 
-    if (res.status === 401 || res.status === 403) {
-      throw new Error("Cloudflare Worker auth failed — check your access token");
-    }
-
-    throw new Error(`Cloudflare Worker unreachable: HTTP ${res.status}`);
+    throw httpFailure(
+      res,
+      this.ctx("authenticate", undefined, true),
+      "Cloudflare Worker unreachable",
+    );
   }
 
   /**
@@ -312,7 +328,11 @@ export class CloudflareAdapter implements StorageAdapter {
     });
 
     if (!res.ok && res.status !== 405) {
-      throw new Error(`Failed to ensure folder ${path}: HTTP ${res.status}`);
+      throw httpFailure(
+        res,
+        this.ctx("ensureFolder", path, true),
+        `Failed to ensure folder ${path}`,
+      );
     }
     this.ensuredFolders.add(path);
   }
@@ -332,7 +352,7 @@ export class CloudflareAdapter implements StorageAdapter {
     });
 
     if (!res.ok) {
-      throw new Error(`Failed to list files for ${path}: HTTP ${res.status}`);
+      throw httpFailure(res, this.ctx("listFiles", path, true), `Failed to list files for ${path}`);
     }
 
     const payload = (await res.json()) as { files?: IoFileMeta[] };
@@ -353,7 +373,11 @@ export class CloudflareAdapter implements StorageAdapter {
     });
 
     if (!res.ok) {
-      throw new Error(`Failed to list folders for ${path}: HTTP ${res.status}`);
+      throw httpFailure(
+        res,
+        this.ctx("listFolders", path, true),
+        `Failed to list folders for ${path}`,
+      );
     }
 
     const payload = (await res.json()) as { folders?: string[] };
@@ -367,7 +391,7 @@ export class CloudflareAdapter implements StorageAdapter {
     });
 
     if (!res.ok) {
-      throw new Error(`Failed to read ${path}: HTTP ${res.status}`);
+      throw httpFailure(res, this.ctx("readFile", path), `Failed to read ${path}`);
     }
 
     return new Uint8Array(await res.arrayBuffer());
@@ -383,7 +407,7 @@ export class CloudflareAdapter implements StorageAdapter {
     });
 
     if (!res.ok && res.status !== 201 && res.status !== 204) {
-      throw new Error(`Failed to write ${path}: HTTP ${res.status}`);
+      throw httpFailure(res, this.ctx("writeFile", path), `Failed to write ${path}`);
     }
   }
 
@@ -394,7 +418,7 @@ export class CloudflareAdapter implements StorageAdapter {
     });
 
     if (!res.ok && res.status !== 404 && res.status !== 405) {
-      throw new Error(`Failed to delete ${path}: HTTP ${res.status}`);
+      throw httpFailure(res, this.ctx("deleteFile", path), `Failed to delete ${path}`);
     }
   }
 
@@ -406,6 +430,7 @@ export class CloudflareAdapter implements StorageAdapter {
     });
 
     if (res.status === 404) return null;
+    throwIfAccessDenied(res, this.ctx("getFileMetadata", path));
     if (!res.ok) return null;
 
     const payload = (await res.json()) as { file?: IoFileMeta | null };
@@ -430,7 +455,9 @@ export class CloudflareAdapter implements StorageAdapter {
       method: "GET",
       headers: this.recoveryHeaders(),
     });
-    if (!res.ok) throw new Error(`Failed to read recovery wrapper: HTTP ${res.status}`);
+    if (!res.ok) {
+      throw httpFailure(res, this.ctx("readRecoveryWrapper"), "Failed to read recovery wrapper");
+    }
     return new Uint8Array(await res.arrayBuffer());
   }
 
@@ -445,7 +472,9 @@ export class CloudflareAdapter implements StorageAdapter {
       headers: this.recoveryHeaders(),
       body: data as unknown as BodyInit,
     });
-    if (!res.ok) throw new Error(`Failed to write recovery wrapper: HTTP ${res.status}`);
+    if (!res.ok) {
+      throw httpFailure(res, this.ctx("writeRecoveryWrapper"), "Failed to write recovery wrapper");
+    }
   }
 
   async putStoredFile(
@@ -464,14 +493,22 @@ export class CloudflareAdapter implements StorageAdapter {
       }),
       body: bytes as unknown as BodyInit,
     });
-    if (!res.ok) throw new Error(`Failed to upload stored file ${path}: HTTP ${res.status}`);
+    if (!res.ok) {
+      throw httpFailure(
+        res,
+        this.ctx("putStoredFile", path),
+        `Failed to upload stored file ${path}`,
+      );
+    }
     const payload = (await res.json()) as { file: StoredFileMetadata };
     return payload.file;
   }
 
   async getStoredFile(path: string): Promise<Uint8Array> {
     const res = await fetch(this.storedFileUrl(path), { method: "GET", headers: this.headers() });
-    if (!res.ok) throw new Error(`Failed to read stored file ${path}: HTTP ${res.status}`);
+    if (!res.ok) {
+      throw httpFailure(res, this.ctx("getStoredFile", path), `Failed to read stored file ${path}`);
+    }
     return new Uint8Array(await res.arrayBuffer());
   }
 
@@ -480,8 +517,13 @@ export class CloudflareAdapter implements StorageAdapter {
       method: "DELETE",
       headers: this.headers(),
     });
-    if (!res.ok && res.status !== 404)
-      throw new Error(`Failed to delete stored file ${path}: HTTP ${res.status}`);
+    if (!res.ok && res.status !== 404) {
+      throw httpFailure(
+        res,
+        this.ctx("deleteStoredFile", path),
+        `Failed to delete stored file ${path}`,
+      );
+    }
   }
 
   async getStoredFileMetadata(path: string): Promise<StoredFileMetadata | null> {
@@ -491,6 +533,7 @@ export class CloudflareAdapter implements StorageAdapter {
       body: JSON.stringify({ path }),
     });
     if (res.status === 404) return null;
+    throwIfAccessDenied(res, this.ctx("getStoredFileMetadata", path));
     if (!res.ok) return null;
     const payload = (await res.json()) as { file?: StoredFileMetadata | null };
     return payload.file ?? null;

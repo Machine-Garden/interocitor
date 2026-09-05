@@ -131,7 +131,14 @@ export {
 
 // ─── Typed errors ─────────────────────────────────────────────────────
 
-export { MeshEncryptionMismatchError, MeshCredentialMismatchError } from "./core/errors.ts";
+export {
+  MeshEncryptionMismatchError,
+  MeshCredentialMismatchError,
+  RemoteAccessError,
+  isRemoteAccessError,
+  type RemoteAccessKind,
+  type RemoteAccessErrorInit,
+} from "./core/errors.ts";
 
 // ─── Row utilities ────────────────────────────────────────────────────
 

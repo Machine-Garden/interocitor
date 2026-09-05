@@ -18,3 +18,5 @@ export { useConnectedStores, useConnectedStore } from "./use-connected-stores.ts
 export type { UseConnectedStoresResult, UseConnectedStoreResult } from "./use-connected-stores.ts";
 export { useConnectionStatus, useIsSolo } from "./use-connection-status.ts";
 export type { ConnectionStatus, ConnectionStatusDetails } from "./use-connection-status.ts";
+export { useRemoteAccess } from "./use-remote-access.ts";
+export type { RemoteAccessError, RemoteAccessKind } from "./use-remote-access.ts";

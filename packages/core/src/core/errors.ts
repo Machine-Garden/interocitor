@@ -73,3 +73,136 @@ export class MeshEncryptionMismatchError extends Error {
     this.actualMode = actualMode;
   }
 }
+
+// ─── Remote access ────────────────────────────────────────────────────
+
+/**
+ * Classification of an HTTP access outcome returned by a mailbox remote.
+ *
+ * - `unauthenticated` (401): the remote wants a sign-in.
+ * - `forbidden` (403): the identity is known but this mesh or this write is
+ *   not allowed.
+ * - `not-found` (404 on a mesh-level route): the address is unknown, or the
+ *   remote deliberately conceals a denial as 404.
+ * - `rate-limited` (429): quota or rate limit; not an access change.
+ * - `policy-unavailable` (503): the remote's authorization service failed;
+ *   the decision is unknown, not negative.
+ */
+export type RemoteAccessKind =
+  | "unauthenticated"
+  | "forbidden"
+  | "not-found"
+  | "rate-limited"
+  | "policy-unavailable";
+
+export interface RemoteAccessErrorInit {
+  /** HTTP status returned by the remote. */
+  status: number;
+  /** Adapter name, e.g. `cloudflare`, `webdav`, `google-drive`. */
+  adapter: string;
+  /** Adapter operation that was rejected, e.g. `listFiles`. */
+  operation: string;
+  /** Remote path or address involved, when known. */
+  path?: string;
+  /** Parsed `Retry-After`, in milliseconds, when the remote supplied one. */
+  retryAfterMs?: number;
+  /** Override the classification derived from `status`. */
+  kind?: RemoteAccessKind;
+}
+
+const REMOTE_ACCESS_HINTS: Record<RemoteAccessKind, string> = {
+  unauthenticated:
+    "The remote wants a sign-in. Re-authenticate with the identity provider, " +
+    "give the adapter the new credential, then call connect() again.",
+  forbidden:
+    "The identity is known but this mesh or this write is not allowed. " +
+    "Access was removed or is read-only; retrying without a policy change will not help.",
+  "not-found":
+    "The mesh address is unknown, or access is concealed. " +
+    "Replace the address or alias, then call connect() again.",
+  "rate-limited": "Quota or rate limit. Back off; this is not an access change.",
+  "policy-unavailable":
+    "The remote's policy service failed. Retry later; the access decision is unknown.",
+};
+
+/**
+ * Thrown by storage adapters when the remote answers with an HTTP status that
+ * expresses an access decision rather than a transport or storage fault.
+ *
+ * The engine recognises this error wherever it talks to the remote. A
+ * negative decision (`denied === true`) pauses remote sync for the mesh and
+ * emits a `remote:access` event so the application can prompt for sign-in,
+ * switch to a read-only view, or leave the mesh. A temporary condition
+ * (`rate-limited`, `policy-unavailable`) is reported without pausing and
+ * backs off polling. Interocitor never performs a login flow itself.
+ */
+export class RemoteAccessError extends Error {
+  readonly code = "REMOTE_ACCESS" as const;
+  readonly status: number;
+  readonly kind: RemoteAccessKind;
+  readonly adapter: string;
+  readonly operation: string;
+  readonly path?: string;
+  readonly retryAfterMs?: number;
+
+  constructor(init: RemoteAccessErrorInit) {
+    const kind = init.kind ?? RemoteAccessError.kindForStatus(init.status) ?? "forbidden";
+    const where = init.path ? ` ${init.path}` : "";
+    super(
+      `${init.adapter} ${init.operation}${where} rejected with HTTP ${init.status} (${kind}). ` +
+        REMOTE_ACCESS_HINTS[kind],
+    );
+    this.name = "RemoteAccessError";
+    this.status = init.status;
+    this.kind = kind;
+    this.adapter = init.adapter;
+    this.operation = init.operation;
+    this.path = init.path;
+    this.retryAfterMs = init.retryAfterMs;
+  }
+
+  /**
+   * True when the remote made a negative access decision (401, 403, 404).
+   * Retrying without a change on the host or provider side is pointless.
+   * False for temporary conditions (429, 503) where a later retry may succeed.
+   */
+  get denied(): boolean {
+    return (
+      this.kind === "unauthenticated" || this.kind === "forbidden" || this.kind === "not-found"
+    );
+  }
+
+  /**
+   * Map an HTTP status to an access classification, or `null` when the
+   * status is not an access outcome. `404` is included only when
+   * `notFoundIsAccess` is set, because a missing file is ordinary for a
+   * mailbox while a missing mesh address is an access outcome.
+   */
+  static kindForStatus(status: number, notFoundIsAccess = false): RemoteAccessKind | null {
+    switch (status) {
+      case 401:
+        return "unauthenticated";
+      case 403:
+        return "forbidden";
+      case 404:
+        return notFoundIsAccess ? "not-found" : null;
+      case 429:
+        return "rate-limited";
+      case 503:
+        return "policy-unavailable";
+      default:
+        return null;
+    }
+  }
+}
+
+/** Narrow an unknown rejection to {@link RemoteAccessError}. */
+export function isRemoteAccessError(err: unknown): err is RemoteAccessError {
+  return (
+    err instanceof RemoteAccessError ||
+    (typeof err === "object" &&
+      err !== null &&
+      (err as { code?: unknown }).code === "REMOTE_ACCESS" &&
+      typeof (err as { status?: unknown }).status === "number")
+  );
+}

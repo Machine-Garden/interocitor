@@ -67,6 +67,25 @@ Three rules follow from this table:
 
 This is the contract that keeps the boundary honest. The provider decides. The Worker enforces. The client understands the answer and gives the application a clear moment to respond.
 
+In code, the moment is the `remote:access` event. The Cloudflare, WebDAV, and Google Drive adapters turn the statuses above into a `RemoteAccessError` with `status`, `kind` (`unauthenticated`, `forbidden`, `not-found`, `rate-limited`, `policy-unavailable`), the adapter, the operation, and the path. When the decision is a denial, the engine pauses polling and publishing for that mesh, flips `connected` to false, and emits the event with `paused: true`. Local reads and writes continue.
+
+```ts
+db.on((event) => {
+  if (event.type !== "remote:access" || !event.paused) return;
+  if (event.kind === "unauthenticated") {
+    const token = await signInWithProvider(); // Zero Trust, Google, GitHub: your flow
+    adapter.setToken(token);
+    await db.connect(); // emits remote:access:restored on success
+  } else if (event.kind === "forbidden") {
+    showReadOnlyBanner();
+  } else if (event.kind === "not-found") {
+    leaveMesh(); // the alias was revoked or never existed for this subject
+  }
+});
+```
+
+The current decision is also available synchronously through `db.getRemoteAccessError()`, in `db.getConnectionStatusDetails().remoteAccess`, and in React through `useRemoteAccess(db)`. Rate limits and policy outages arrive through the same event with `paused: false`; the engine backs polling off and stays connected.
+
 ## Name the four locks {#model}
 
 An Interocitor **mesh** is one shared row database and its remote history. In a Cloudflare deployment, a **Worker** is the HTTP gate in front of that remote mailbox.

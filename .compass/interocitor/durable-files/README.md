@@ -3,7 +3,8 @@
 ## Responsibility
 
 The path-addressed byte surface of a **mesh** — written and read whole, and
-deliberately exempt from convergence.
+deliberately exempt from convergence. A **row** names a file by **file
+reference**, which is the only way a file appears in row state.
 
 ## Logical role
 
@@ -15,7 +16,9 @@ photo is never told its photo was merged.
 
 Does not queue, cache, batch, retry, or reconcile. A file operation that cannot
 reach the mailbox fails rather than appearing to succeed, and nothing about a
-file ever enters row history.
+file ever enters row history. A **file reference** names content, so anything
+outside this block may cache what it resolves to; this block verifies the bytes
+and keeps no copy.
 
 ## Technology
 

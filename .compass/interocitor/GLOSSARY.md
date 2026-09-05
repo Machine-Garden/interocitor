@@ -252,6 +252,27 @@ CRDT-merged.
 
 Images and attachments an application puts, gets, opens, and deletes.
 
+## **File reference**
+
+### Meaning
+
+A row's name for a durable file: its path plus the SHA-256 of its plaintext. It
+identifies content, so a stale reference fails rather than returning other
+bytes, and any copy of the bytes may be cached against it on any layer.
+
+### Bounded context
+
+[**Durable Files**](./DOMAIN.md#durable-files)
+
+### Product appearance
+
+A file-typed column in a table schema; what an application stores when it
+points a row at a document.
+
+### Implementation aliases
+
+`FileRef`, `types.file`, `toFileRef`
+
 ## **Sealed file**
 
 ### Meaning

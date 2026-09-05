@@ -148,6 +148,8 @@ changes without a shared clock or a coordinator.
 - → [Artifact Exchange](#artifact-exchange) — upstream; convergence defines what
   exchange must carry and what it may safely discard.
 - → [Mesh](#mesh) — shared kernel.
+- → [Durable Files](#durable-files) — shared kernel; a row may name a file by
+  **file reference**, never carry its bytes.
 
 ---
 
@@ -308,9 +310,41 @@ mesh membership alone does not open it.
 - The seal is an honest label, not a guard: whoever opens the file must supply
   the matching key, and nothing in the mesh can supply it for them.
 
+#### File reference
+
+##### What it is
+
+The way a **row** names a **durable file**: the file's path together with a
+digest of its plaintext, so that the name identifies content rather than only a
+location.
+
+##### Invariants
+
+- A file reference is a column of a row and converges like one. Pointing a row
+  at a different file is a column change; the file's bytes never enter row
+  history.
+- A reference names content. Resolving it against a path whose content has since
+  changed fails and says so; it never quietly returns other bytes.
+- Because a reference names content, any copy of those bytes may be kept and
+  served without asking the mailbox again. Caching is the application's choice,
+  on any layer it likes, and correctness never depends on it.
+- Overwriting a path changes no reference to its previous content. It only makes
+  those references unresolvable until the row points elsewhere.
+
+##### Lifecycle
+
+Issued when a file is written → held in a row column → resolved, and verified,
+on each read → retired when no row carries it.
+
+##### Domain events
+
+File referenced. Reference found stale.
+
 ### Relationships
 
 - → [Mesh](#mesh) — shared kernel; files are part of the space.
+- → [Row Convergence](#row-convergence) — shared kernel; a **file reference** is
+  a row column, and it is the only way a file appears in a row.
 - → [Trust and Custody](#trust-and-custody) — customer/supplier.
 - → [Artifact Exchange](#artifact-exchange) — separate path; files deliberately
   do not travel as change files, and this asymmetry is a product decision rather
@@ -533,5 +567,6 @@ graph TB
   TRUST -->|"makes unreadable"| FILES
   TRUST -->|"protects"| MESH
   ACCESS -->|"admits or refuses"| EXCH
+  ROWS -->|"names files by reference"| FILES
   FILES -.->|"deliberately not merged"| EXCH
 ```

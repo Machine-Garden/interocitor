@@ -4,8 +4,9 @@
 
 ## Responsibility
 
-Put, get, open, and delete a **durable file** at a path, including sealing one to
-a key the caller supplies instead of the **mesh key**.
+Put, get, open, and delete a **durable file** at a path or at a **file
+reference**, including sealing one to a key the caller supplies instead of the
+**mesh key**.
 
 ## Bounded context
 
@@ -13,8 +14,10 @@ a key the caller supplies instead of the **mesh key**.
 
 ## Inputs and outputs
 
-In: a path, bytes, and optionally an explicit key. Out: bytes, or a failure —
-never a queued promise. Sealing marks the stored object as a **sealed file** so a
+In: a path or a file reference, bytes, and optionally an explicit key. Out:
+bytes, or a failure — never a queued promise. A write yields the reference a row
+may hold; a read through a reference verifies the bytes against it and fails
+when they differ. Sealing marks the stored object as a **sealed file** so a
 later reader knows it needs a key nobody else can supply.
 
 ## Depends on
@@ -33,13 +36,16 @@ later reader knows it needs a key nobody else can supply.
 
 Does not queue, cache, batch, retry, or merge. With the mailbox unreachable, a
 call fails and says so; nothing is written locally to be reconciled later, and
-nothing about a file enters row history.
+nothing about a file enters row history. It keeps no copy of what it reads; a
+reference makes caching correct elsewhere.
 
 ## Implementation coordinates
 
 - Durable-file APIs in `packages/core/src/core/sync-engine.ts` —
   `putFile`, `getFile`, `openFile`, `deleteFile`, and the sealed-file variants
   (`tainted` in code)
+- `packages/core/src/core/file-ref.ts` — building a file reference from a
+  write, and verifying bytes against one
 
 That file carries two coordinates. It also holds
 [`sync-lifecycle`](../../mailbox-sync/sync-lifecycle/README.md)'s connect and

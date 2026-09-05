@@ -1,3 +1,5 @@
+// compass: interocitor.rows.local-store
+
 /**
  * IndexedSQLiteStore — SQLite-backed LocalStoreAdapter
  *

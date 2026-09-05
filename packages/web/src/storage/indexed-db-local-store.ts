@@ -1,3 +1,5 @@
+// compass: interocitor.rows.local-store
+
 /**
  * Local storage layer — IndexedDB
  *

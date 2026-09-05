@@ -1,3 +1,5 @@
+// compass: interocitor.trust.credential-custody
+
 /**
  * Connected Stores — credentials for derived sub-stores of this Interocitor.
  *

@@ -1,3 +1,5 @@
+// compass: interocitor.rows.table-api
+
 /**
  * Stable client-side row ID generator.
  *

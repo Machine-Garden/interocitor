@@ -1,3 +1,5 @@
+// compass: interocitor.rows.crdt-merge
+
 /**
  * CRDT Merge Engine — configurable per-column merge strategy.
  *

@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-sync.change-transfer
+
 /**
  * Flush — push queued local outbox entries to remote cloud.
  *

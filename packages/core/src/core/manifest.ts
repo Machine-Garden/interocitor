@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-sync.manifest
+
 /**
  * Manifest — reading, writing, creating, and validating cloud manifests.
  *

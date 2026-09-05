@@ -1,3 +1,5 @@
+# compass: interocitor.trust.recovery
+
 """Recovery-wrapper primitives compatible with ``@interocitor/core``.
 
 Recovery phrases derive an opaque locator and an AES-GCM key-encryption key.

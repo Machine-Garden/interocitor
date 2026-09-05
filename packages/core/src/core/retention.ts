@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-sync.compaction
+
 import type { RetentionPolicy, RetentionPolicyInput } from "./types.ts";
 
 export const DAY_MS: number = 24 * 60 * 60 * 1_000;

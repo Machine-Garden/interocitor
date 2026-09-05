@@ -1,3 +1,5 @@
+// compass: interocitor.trust.signing
+
 /**
  * Signing layer — ECDSA P-256 / SHA-256 via Web Crypto API.
  *

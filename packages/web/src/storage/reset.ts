@@ -1,3 +1,5 @@
+// compass: interocitor.rows.local-store
+
 /**
  * Delete an Interocitor IndexedDB database after callers have disconnected
  * and cleared credentials.

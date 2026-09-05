@@ -1,3 +1,5 @@
+// compass: interocitor.rows.table-api
+
 import { useDebugValue, useMemo, useRef, useSyncExternalStore } from "react";
 import type { QueryDescriptor, QueryResult, WhereClause, WherePrimitive } from "@interocitor/core";
 

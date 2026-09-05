@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-sync.change-transfer
+
 /**
  * Pull — download remote changes and merge into local state.
  *

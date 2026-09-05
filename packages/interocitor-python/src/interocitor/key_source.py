@@ -1,3 +1,5 @@
+# compass: interocitor.trust.key-sources
+
 """Client-owned mesh-key sources.
 
 The portable source intentionally keeps no state outside the object.  A caller

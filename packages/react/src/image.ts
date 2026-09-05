@@ -1,3 +1,5 @@
+// compass: interocitor.durable-files.image-helpers
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Interocitor } from "@interocitor/core";
 import { getImageBlobUrl, type StoredImageMetadata } from "@interocitor/web";

@@ -1,3 +1,5 @@
+// compass: interocitor.rows.table-api
+
 import type { IndexableSchemaField, OptionalSchemaField, SchemaField } from "./types.ts";
 
 type BaseField<T, K extends import("./types.ts").SchemaFieldKind> = SchemaField<T, K> & {

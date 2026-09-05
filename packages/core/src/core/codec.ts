@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-sync.change-transfer
+
 /**
  * Codec — encryption/decryption of change and snapshot payloads.
  *

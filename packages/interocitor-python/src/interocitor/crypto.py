@@ -1,3 +1,5 @@
+# compass: interocitor.trust.encryption
+
 """Portable mesh-key and encrypted-envelope primitives.
 
 The functions in this module deliberately mirror ``@interocitor/core``'s

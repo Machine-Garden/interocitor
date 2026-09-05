@@ -1,3 +1,5 @@
+// compass: interocitor.rows.crdt-merge
+
 /**
  * Hybrid Logical Clock
  *

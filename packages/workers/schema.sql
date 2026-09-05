@@ -1,3 +1,5 @@
+-- compass: interocitor.mailbox-host.row-store-backend
+
 CREATE TABLE IF NOT EXISTS files (
   prefix         TEXT    NOT NULL,
   path           TEXT    NOT NULL,

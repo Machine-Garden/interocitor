@@ -1,3 +1,5 @@
+// compass: interocitor.trust.credential-custody
+
 import {
   WebAuthnBlobStore,
   type WebAuthnBlobStoreOptions,

@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-sync.sync-lifecycle
+
 import { useDebugValue, useMemo, useSyncExternalStore } from "react";
 import type { ConnectionStatus, Interocitor } from "@interocitor/core";
 

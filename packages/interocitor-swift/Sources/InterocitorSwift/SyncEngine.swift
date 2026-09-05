@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-sync.sync-lifecycle
+
 /**
  * Interocitor — Swift native Interocitor sync orchestrator
  *

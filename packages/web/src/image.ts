@@ -1,3 +1,5 @@
+// compass: interocitor.durable-files.image-helpers
+
 import type { Interocitor, StoredFileMetadata } from "@interocitor/core";
 
 export type ImageInput = Blob | ArrayBuffer | Uint8Array | string;

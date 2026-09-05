@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-sync.storage-adapters
+
 /**
  * In-Memory Storage Adapter
  *

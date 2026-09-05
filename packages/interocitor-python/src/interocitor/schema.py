@@ -1,3 +1,5 @@
+# compass: interocitor.rows.table-api
+
 """Python schema declarations for an Interocitor mesh.
 
 Schemas describe a mesh's logical collections, merge policy, and optional

@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-sync.storage-adapters
+
 /**
  * Cloudflare Worker + D1 Storage Adapter (Interocitor-native protocol)
  *

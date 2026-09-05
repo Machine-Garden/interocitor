@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-host.mesh-routing
+
 /**
  * All recognised Interocitor path types.
  *

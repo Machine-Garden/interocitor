@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-host.file-body-stores
+
 import type {
   FileBody,
   FileBodyStore,

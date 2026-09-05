@@ -1,3 +1,5 @@
+// compass: interocitor.trust.encryption
+
 /**
  * @interocitor/core/crypto/keys
  *

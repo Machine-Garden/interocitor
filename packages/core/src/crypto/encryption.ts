@@ -1,3 +1,5 @@
+// compass: interocitor.trust.encryption
+
 /**
  * Encryption layer — AES-256-GCM via Web Crypto API
  *

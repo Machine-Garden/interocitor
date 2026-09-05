@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-host.row-store-backend
+
 import { classifyPath, meshRootForPath, cacheKeyFor, listingCacheKeyFor } from "./paths.ts";
 import type { PathType } from "./paths.ts";
 import type { D1Database, D1PreparedStatement, QueryRow } from "./types.ts";

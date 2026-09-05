@@ -1,3 +1,5 @@
+// compass: interocitor.rows.local-store
+
 import { MemoryLocalStore } from "@interocitor/core";
 import { IndexedDbLocalStore } from "./indexed-db-local-store.ts";
 import { createResilientLocalStore } from "./resilient-store.ts";

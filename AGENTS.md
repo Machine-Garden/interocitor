@@ -13,6 +13,12 @@ package-local material.
 - Treat files marked historical/planning/archive as non-authoritative. Prefer current READMEs and `packages/core/docs/*`.
 - Use targeted tests for the package you change. Relevant root scripts are in `package.json`.
 
+## Compass chart
+
+For non-local work—crossing a boundary, changing a rule or invariant, adding a party, asking whether something belongs, or building any capability—search first: `python3 "$HOME/.claude/skills/compass/scripts/compass_search.py" --chart-root ".compass" "{task terms}"`.
+Consult the matched owning sections, then follow Compass's Consume route through every chart level present; BM25-related results are leads, not semantic proof.
+For a local one-file fix, rename, or line-specific bug, read code directly; Consume never authorizes chart edits.
+
 ## Documentation goals and standards
 
 - Use three deliberate levels. The public site is a high-school textbook:

@@ -1,3 +1,5 @@
+// compass: interocitor.trust.credential-custody
+
 /**
  * Low-level WebAuthn `largeBlob` custody helpers for arbitrary application
  * secrets.

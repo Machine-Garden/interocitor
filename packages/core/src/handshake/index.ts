@@ -1,3 +1,5 @@
+// compass: interocitor.trust.pairing
+
 /**
  * @interocitor/core handshake API
  *

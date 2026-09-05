@@ -1,3 +1,5 @@
+// compass: interocitor.trust.credential-custody
+
 /**
  * Credential Store — pluggable persistence for key material.
  *

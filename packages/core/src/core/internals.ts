@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-sync.manifest
+
 /**
  * Internal helpers shared across sync-engine modules.
  *

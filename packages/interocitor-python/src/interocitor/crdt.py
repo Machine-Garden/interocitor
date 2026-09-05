@@ -1,3 +1,5 @@
+# compass: interocitor.rows.crdt-merge
+
 """Per-column CRDT merge rules used by Interocitor change entries."""
 
 from __future__ import annotations

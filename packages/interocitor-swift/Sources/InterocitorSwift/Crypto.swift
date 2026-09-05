@@ -1,3 +1,5 @@
+// compass: interocitor.trust.encryption
+
 /**
  * Crypto — AES-256-GCM encryption, key management, and transfer formats
  *

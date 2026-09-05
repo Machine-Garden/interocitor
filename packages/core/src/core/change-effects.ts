@@ -1,3 +1,5 @@
+// compass: interocitor.rows.crdt-merge
+
 /**
  * Endpoint-relative row effects for live change observation.
  *

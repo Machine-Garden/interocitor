@@ -1,3 +1,5 @@
+// compass: interocitor.trust.credential-custody
+
 export interface StoredCredentials {
   /** Portable high-entropy base58 key material for the mesh. */
   portableKey: string;

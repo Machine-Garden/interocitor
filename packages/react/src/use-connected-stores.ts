@@ -1,3 +1,5 @@
+// compass: interocitor.trust.credential-custody
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectedStoreCredentials, Interocitor } from "@interocitor/core";
 

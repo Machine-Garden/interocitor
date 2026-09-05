@@ -1,3 +1,5 @@
+// compass: interocitor.rows.local-store
+
 /**
  * Resilient local store wrapper.
  *

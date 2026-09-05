@@ -1,3 +1,10 @@
+// compass: interocitor.mailbox-sync.sync-lifecycle
+// compass: interocitor.durable-files.file-api
+//
+// Two coordinates by design: this file holds the connect/pull/flush lifecycle
+// and the durable-file API, which belong to different blocks. Disposition
+// recorded in .compass/interocitor/durable-files/file-api/README.md.
+
 /**
  * Sync Engine
  *

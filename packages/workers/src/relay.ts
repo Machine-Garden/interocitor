@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-host.relay
+
 import type {
   DurableObjectNamespace,
   DurableObjectStateLike,

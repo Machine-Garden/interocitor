@@ -1,3 +1,5 @@
+// compass: interocitor.trust.recovery
+
 /**
  * Recovery-key protocol for portable-key meshes.
  *

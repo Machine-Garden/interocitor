@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-host.row-store-backend
+
 import type { D1Database } from "./types.ts";
 
 const SCHEMA_SQL = [

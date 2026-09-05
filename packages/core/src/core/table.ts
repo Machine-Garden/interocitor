@@ -1,3 +1,5 @@
+// compass: interocitor.rows.table-api
+
 /**
  * Table<T> — typed handle for a named collection within a Interocitor.
  *

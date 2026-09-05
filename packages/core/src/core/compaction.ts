@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-sync.compaction
+
 /**
  * Compaction — snapshot publication and manifest rotation.
  *

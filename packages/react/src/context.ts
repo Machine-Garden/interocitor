@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-sync.sync-lifecycle
+
 import { createContext, useContext } from "react";
 import type { Interocitor } from "@interocitor/core";
 

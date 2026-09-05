@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-sync.storage-adapters
+
 /**
  * StorageAdapter — Remote backend protocol
  *

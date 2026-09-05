@@ -1,3 +1,5 @@
+# compass: interocitor.mailbox-sync.storage-adapters
+
 """Remote storage adapters used by the Python Interocitor core.
 
 The adapter contract deliberately mirrors ``@interocitor/core``: sync objects

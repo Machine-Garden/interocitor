@@ -1,3 +1,5 @@
+// compass: interocitor.trust.key-sources
+
 import type { CredentialStore, StoredCredentials } from "../storage/credential-store.ts";
 
 export interface MeshKeyContext {

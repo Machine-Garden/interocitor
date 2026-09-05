@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-host.mesh-routing
+
 import { createDatabaseAdapter } from "./db-adapter.ts";
 import { uuidv7 } from "./ids.ts";
 import {

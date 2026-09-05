@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-sync.sync-lifecycle
+
 /**
  * Bounded-progress helper for cloud-side work performed during connect().
  *

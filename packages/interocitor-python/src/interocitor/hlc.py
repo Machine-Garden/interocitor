@@ -1,3 +1,5 @@
+# compass: interocitor.rows.crdt-merge
+
 """Hybrid logical clock compatible with ``@interocitor/core``."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-host.mesh-routing
+
 /**
  * UUIDv7 generator for worker-issued mesh IDs.
  * Standalone copy — workers package has no dependency on @interocitor/core.

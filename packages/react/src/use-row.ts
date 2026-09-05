@@ -1,3 +1,5 @@
+// compass: interocitor.rows.table-api
+
 import { useMemo, useRef, useSyncExternalStore } from "react";
 import type { RowResult, Table } from "@interocitor/core";
 

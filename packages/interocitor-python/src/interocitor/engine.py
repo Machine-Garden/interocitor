@@ -1,3 +1,5 @@
+# compass: interocitor.mailbox-sync.sync-lifecycle
+
 """Async Python implementation of Interocitor's encrypted mesh core.
 
 This is intentionally a core library, not a task-queue abstraction.  A worker

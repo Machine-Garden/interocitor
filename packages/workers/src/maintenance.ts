@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-host.maintenance
+
 import type { DatabaseAdapter, QueryRow } from "./types.ts";
 
 // ─── Internal row types ──────────────────────────────────────────────────────

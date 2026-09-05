@@ -1,3 +1,5 @@
+# compass: interocitor.rows.local-store
+
 """Volatile local store matching core's ``MemoryLocalStore`` lifecycle."""
 
 from __future__ import annotations

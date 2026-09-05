@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-host.access-control
+
 import { createMeshAuthorizationMiddleware } from "./worker.ts";
 import type { MeshAuthorization, MeshMiddleware, MeshRequestContext } from "./types.ts";
 

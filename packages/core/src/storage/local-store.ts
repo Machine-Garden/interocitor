@@ -1,3 +1,5 @@
+// compass: interocitor.rows.local-store
+
 import type { ChangeEntry, Row, WhereClause } from "../core/types.ts";
 
 /**

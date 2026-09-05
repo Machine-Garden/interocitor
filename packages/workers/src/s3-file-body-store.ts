@@ -1,3 +1,5 @@
+// compass: interocitor.mailbox-host.file-body-stores
+
 import type { FileBody, FileBodyStore, FileBodyValue, FileBodyWriteOptions } from "./types.ts";
 
 const encoder = new TextEncoder();

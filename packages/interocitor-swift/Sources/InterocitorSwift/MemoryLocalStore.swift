@@ -1,3 +1,5 @@
+// compass: interocitor.rows.local-store
+
 /**
  * MemoryLocalStore — In-memory implementation of LocalStoreAdapter
  *

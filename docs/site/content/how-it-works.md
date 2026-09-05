@@ -195,6 +195,8 @@ A mesh address selects a namespace; it is not a credential. Possessing a mesh ke
 
 Neither boundary creates a built-in per-row or per-file ACL. Use separate meshes when row audiences differ, or an application-owned tainted-file key when one file needs a narrower audience. [Authentication and access explains how host identity, middleware, recovery, grants, and keys compose](/auth).
 
+Access control itself is not Interocitor’s job. It belongs to the user and their identity provider, exactly as Drive access belongs to the user and Google. Interocitor enforces that decision, can hand each user a [virtual mesh alias](/auth#aliases), and makes the client [understand a 401 or 403 as an event the application reacts to](/auth#client).
+
 ## Keep backend choice behind one storage contract {#adapter-title}
 
 WebDAV, Google Drive, and a protocol-aware Cloudflare Worker all perform the same fundamental mailbox role: store and return artifacts without merging rows or receiving the mesh key. They differ in physical placement, account ownership, availability, recovery, and the guardrails they can enforce.

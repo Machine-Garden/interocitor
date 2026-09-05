@@ -1,10 +1,71 @@
 ---
 title: Authentication is not one thing
-description: See how host identity, Worker middleware, recovery words, mesh keys, grants, and tainted files fit together.
+description: Interocitor manages encrypted data. Your identity provider controls access. See how per-user mesh aliases, 4xx handling, recovery words, mesh keys, grants, and tainted files fit together.
 kicker: Access · Four boundaries
 heading: Four locks guard one mesh.
-lede: Your identity system, Worker middleware, the mesh key, and tainted-file keys answer different questions. Interocitor connects them without pretending they are the same authority.
+lede: Interocitor manages encrypted data. Deciding who may reach that data is between you and your identity provider, exactly as it is with Google Drive. Interocitor enforces the decision, strengthens it with per-user mesh aliases, and tells the client plainly when access fails.
 ---
+
+## Interocitor manages encrypted data, not access {#job}
+
+Interocitor has one job: keep application data encrypted on trusted endpoints, exchange it through a mailbox, and merge it back into a consistent local database. Controlling **who** may reach that mailbox is not its job.
+
+That is the same arrangement you already accept with Google Drive. Google decides which account may open a folder. The files inside know nothing about it. Interocitor keeps the same separation for every storage medium it supports:
+
+| Mailbox               | Who controls access                            | Interocitor’s part                                                          |
+| --------------------- | ---------------------------------------------- | --------------------------------------------------------------------------- |
+| **Google Drive**      | The user and their Google account              | Uses the OAuth token the application obtained; never asks for the password. |
+| **WebDAV / NAS**      | The user and the server’s login                | Sends the credential the application configured.                            |
+| **Cloudflare Worker** | The host application and its identity provider | Runs the host’s middleware decision before the mailbox route.               |
+
+An application can sit behind any provider it already trusts:
+
+- **Cloudflare Zero Trust.** Cloudflare Access authenticates the person and the device before the request reaches the Worker. The Worker verifies the Access JWT and maps the identity to a mesh. Interocitor sees an admitted or rejected request, nothing more.
+- **Google account.** A Drive mailbox is protected by Google sign-in and the scope the user granted. A Worker deployment can verify a Google ID token in the host’s middleware instead.
+- **GitHub.** A host using a GitHub App can authenticate the person with a user-to-server token and map current repository, organization, or team membership to a mesh.
+
+In each case the provider owns login, sessions, membership, and revocation. The host translates that into a decision. Interocitor enforces the decision and keeps the data encrypted regardless of how it came out.
+
+## Strengthen access with per-user mesh aliases {#aliases}
+
+Access control stays with the provider, but Interocitor can make the host’s job easier. A Worker can hand each user a **virtual mesh alias**: an opaque, user-specific address that resolves in one hop to the real mesh.
+
+```mermaid
+flowchart LR
+    U1[Alice’s client<br/>/io/9f2c…] --> R[Route resolver<br/>one hop]
+    U2[Bob’s client<br/>/io/b71e…] --> R
+    R --> M[Canonical mesh<br/>main]
+```
+
+The canonical mesh, its D1 rows, file bodies, and relay never move. Only the alias is personal:
+
+- Revoking Bob means deleting Bob’s alias binding. Alice’s address, the mesh name, and the mesh key are untouched.
+- A leaked alias identifies one user, not the whole mesh, and can be replaced without re-keying.
+- Aliases combine with middleware. The resolver maps the alias to a mesh; the host’s authorization still decides whether this request may use it now.
+
+An alias is still routing, not authentication. It does not replace the identity provider, and it does not prove who is holding it. [Protected grants](#grants) below and the [Worker mesh-control guide](https://github.com/Machine-Garden/interocitor/blob/main/packages/workers/docs/mesh-control.md) describe the route resolver and the control store the host owns.
+
+## Let the client understand 4xx and react {#client}
+
+Because access lives outside Interocitor, the client must recognise an access decision when it arrives. A denied request is not transport noise to retry. It is an event the application needs to hear.
+
+The Worker answers with ordinary HTTP status codes, and the client treats each one as a distinct outcome:
+
+| Status  | Meaning                                                   | What the application should be able to do                   |
+| ------- | --------------------------------------------------------- | ----------------------------------------------------------- |
+| **401** | No valid identity. The provider wants a sign-in.          | Open the provider’s login flow, then reconnect.             |
+| **403** | Identified, but this mesh or this write is not allowed.   | Show read-only state, or explain that access was removed.   |
+| **404** | The address is unknown, or denial is deliberately hidden. | Treat as “no such mesh for you”; drop or replace the alias. |
+| **429** | Quota or rate limit.                                      | Back off; this is not an access change.                     |
+| **503** | The host’s policy service failed.                         | Retry later; the decision is unknown, not negative.         |
+
+Three rules follow from this table:
+
+1. **Classify, do not swallow.** A `401` or `403` must surface with its code intact, not collapse into a generic sync failure that the application cannot act on.
+2. **Stop blind retries on 4xx.** Retrying a denied request will not make the provider change its mind. The client pauses publishing and collecting for that mesh until the application reacts.
+3. **Emit an event the host can react to.** Local-first work continues; the application subscribes to the engine’s event stream, prompts for sign-in, switches to a read-only view, or leaves the mesh. Interocitor performs none of those steps itself. It has no login page, no token refresh, and no redirect.
+
+This is the contract that keeps the boundary honest. The provider decides. The Worker enforces. The client understands the answer and gives the application a clear moment to respond.
 
 ## Name the four locks {#model}
 
@@ -90,9 +151,11 @@ Continue with [key custody and recovery](/trust), [tainted files](/tainted-files
 
 ## Decision summary {#summary}
 
-| Need                         | Recommended composition                                                                   |
-| ---------------------------- | ----------------------------------------------------------------------------------------- |
-| **Ordinary multi-user auth** | Stable mesh + host identity and current resource policy enforced through mesh middleware. |
-| **Lost-device recovery**     | High-entropy recovery phrase; twelve BIP-39 words are an application choice, not a login. |
-| **One file, fewer readers**  | Taint label + additional application-managed file key.                                    |
-| **Delegated mesh authority** | Host authentication + grant middleware + host-owned, server-readable control state.       |
+| Need                         | Recommended composition                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------ |
+| **Ordinary multi-user auth** | Stable mesh + host identity and current resource policy enforced through mesh middleware.  |
+| **Per-user revocation**      | Virtual mesh alias per user, resolved in one hop; delete the binding to revoke.            |
+| **Sign-in and denial UX**    | Client surfaces 401/403/404 as distinct events; the application reacts, Interocitor waits. |
+| **Lost-device recovery**     | High-entropy recovery phrase; twelve BIP-39 words are an application choice, not a login.  |
+| **One file, fewer readers**  | Taint label + additional application-managed file key.                                     |
+| **Delegated mesh authority** | Host authentication + grant middleware + host-owned, server-readable control state.        |

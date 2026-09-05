@@ -625,8 +625,8 @@ export function HomeLanding() {
                 <div>
                   <strong>How does authentication fit?</strong>
                   <p>
-                    Keep host identity, mesh middleware, recovery words, and decryption keys in
-                    separate roles.
+                    Interocitor manages encrypted data; your identity provider controls access.
+                    Aliases and clear 4xx events connect the two.
                   </p>
                 </div>
                 <span aria-hidden="true">↗</span>

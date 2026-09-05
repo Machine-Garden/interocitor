@@ -161,8 +161,11 @@ can roam between them, or each database can use a different secret for stronger
 isolation.
 
 You can also keep a small directory database containing the locations and
-secrets of the other databases. That directory becomes a master key: anyone
-who can read it can open every database listed in it.
+secrets of the other databases. `db.connectedStores` exists for exactly this:
+it persists credential records for related databases inside the parent's local
+store and does nothing else; the application constructs the child engine from a
+record. That directory becomes a master key: anyone who can read it can open
+every database listed in it.
 
 Interocitor does not choose shards, route requests, or join data across them.
 Each shard is a normal database and becomes a full local copy when opened; the

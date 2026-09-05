@@ -70,6 +70,8 @@ The complete row database must fit every endpoint that opens the mesh. Measure a
 
 Rows are the part that always travels, so keep them an index. Bulky content, and anything only one screen reads, belongs in a durable file that a row [points at with a file reference](/data-boundaries#file-ref). The bytes are then fetched by the screen that needs them and cached by digest, and the row set every endpoint carries stays small.
 
+When the product has many independent units of work, give each its own mesh and [open only the ones a session needs](/data-boundaries#many-meshes). One key can open them all, and a parent mesh can hold their credentials; the application assembles the rest from those primitives.
+
 Split a mesh only when the application can also own the resulting trust and workflow boundary.
 
 ## When should I choose something else? {#not-fit}

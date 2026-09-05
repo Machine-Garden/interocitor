@@ -3,7 +3,7 @@ title: Interocitor glossary
 description: Concise definitions for the terms that establish Interocitor’s data, trust, and availability boundaries.
 kicker: Reference · Core terms
 heading: Use the terms that define the system.
-lede: Trusted endpoint, remote mailbox, mesh, key, row, durable file, taint, change, snapshot, compaction, CRDT, adapter, and recovery each name a distinct contract.
+lede: Trusted endpoint, remote mailbox, mesh, key, row, durable file, taint, connected store, change, snapshot, compaction, CRDT, adapter, and recovery each name a distinct contract.
 ---
 
 ## Trusted endpoint {#trusted-endpoint}
@@ -17,6 +17,10 @@ The online storage used to exchange protected row artifacts and hold durable fil
 ## Mesh {#mesh}
 
 A group of endpoints sharing one complete row database, one remote history, and usually one mesh key. Every key-bearing endpoint can eventually receive every row.
+
+## Connected store {#connected-store}
+
+A record kept inside one mesh holding the credentials of another: remote path, key, local namespace, and adapter pointer. Interocitor stores and returns the record; the application opens the other mesh from it.
 
 ## Mesh key {#mesh-key}
 

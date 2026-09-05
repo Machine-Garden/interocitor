@@ -14,7 +14,7 @@ Classify it instead:
 
 - **Rows:** marker positions, captions, status, and file references. They are structured state that should remain useful offline and merge across endpoints.
 - **Durable files:** photos, PDFs, audio, and video, and any structured result that is produced once and read by one screen. Their exact bytes stay remote and are fetched when needed.
-- **Meshes:** separate full-copy row databases for groups with different readers, keys, retention, or failure boundaries.
+- **Meshes:** separate full-copy row databases for groups with different readers, keys, retention, or failure boundaries, or for units of work an endpoint opens one at a time.
 - **Another system:** data that needs server-side plaintext queries, strict central transactions, or another guarantee Interocitor does not provide.
 
 ## Compare availability and update semantics {#offline}
@@ -56,7 +56,7 @@ Use this shape for anything produced once by one writer and read by the screen t
 
 A mesh combines three decisions: who eventually receives the complete row database, who can derive its key, and which remote history is backed up, retained, or lost together.
 
-Split a mesh when readers, ownership, retention, or failure impact genuinely differ. Do not split merely to reduce a query. Once split, the application must own any trusted process that moves information across the boundary.
+Split a mesh when readers, ownership, retention, or failure impact genuinely differ, or when the product has natural units of work that nobody needs all at once. Do not split merely to speed up one query inside a set everyone loads anyway. Once split, the application must own any trusted process that moves information across the boundary.
 
 If rows may remain shared but one attachment needs fewer readers, keep the mesh and [seal that durable file with a tainted-file key](/tainted-files).
 
@@ -74,6 +74,18 @@ Measure:
 
 Move large byte payloads to durable files first. Split the mesh only when the product can also own the resulting trust and workflow boundary.
 
+## Open meshes on demand {#many-meshes}
+
+A product with many projects, boards, or cases rarely needs all of them on one device at once. Give each unit of work its own mesh and open only the ones a session needs. Each open mesh is still a complete local copy, but of that unit alone.
+
+Interocitor supplies the primitives and leaves the assembly to the application:
+
+- **One key, many meshes.** A portable key is not tied to a mesh, so one secret can open every mesh at every remote path. The bound key source receives the remote path and mesh ID when it derives, so one organisation secret can also yield a distinct key per mesh.
+- **A directory.** `db.connectedStores` keeps credentials for related meshes inside a parent mesh: remote path, key, local namespace, and an adapter pointer. It stores records and nothing else. The application reads a record and constructs a second engine from it.
+- **An index.** Summary rows in the parent mesh play the role a file reference plays for bytes: a small thing that always travels, pointing at a large thing loaded when asked for.
+
+The application owns the rest: which meshes to open, when to close them, moving a record between two meshes, and any search across meshes. Whoever can read the parent mesh can read every credential it holds, so the directory is a trust boundary in its own right.
+
 ## Write the first data map {#pack}
 
 Create four lists: local rows, directly remote files, separate-reader meshes, and data that belongs elsewhere. For each list, state its offline, privacy, and recovery guarantee in one sentence.
@@ -82,8 +94,8 @@ Then follow [the data flows](/flows) and [how snapshots bound catch-up](/compact
 
 ## Decision summary {#summary}
 
-|            |                                                                              |
-| ---------- | ---------------------------------------------------------------------------- |
-| **Rows**   | Full local, mergeable working state.                                         |
-| **Files**  | Directly remote bytes, named from rows by `types.file`, cacheable by digest. |
-| **Meshes** | Whole-database reader, key, retention, and failure boundaries.               |
+|            |                                                                                                                                           |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rows**   | Full local, mergeable working state.                                                                                                      |
+| **Files**  | Directly remote bytes, named from rows by `types.file`, cacheable by digest.                                                              |
+| **Meshes** | Whole-database reader, key, retention, and failure boundaries; opened on demand per unit of work, with credentials kept in a parent mesh. |

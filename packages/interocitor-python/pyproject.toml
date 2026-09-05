@@ -16,3 +16,9 @@ test = ["pytest>=8.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+# Import the package from the source tree so `yarn preflight:python` and plain
+# `pytest` work without `pip install -e .`. An editable install is what writes
+# the (git-ignored) src/interocitor.egg-info directory; it is not needed here.
+pythonpath = ["src"]

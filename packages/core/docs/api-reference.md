@@ -344,6 +344,12 @@ meshes in the parent engine's local metadata. It does not create, connect, or
 run child engines. The relationship is one-way: an application reads a record
 and constructs a separate `Interocitor` instance itself.
 
+This is the primitive for a product with many independent units of work, such
+as projects, boards, or cases. Give each its own mesh, keep its credentials
+here, and open only the meshes a session needs; the parent's own rows can carry
+a summary per child as the index. Which meshes to open, when to close them,
+moving a record between two, and search across them stay with the application.
+
 `put(credentials)` upserts by `id`, preserves an existing `createdAt`, and sets
 `updatedAt` to the current time. `list()` and `get(id)` read records, and
 `remove(id)` deletes one. Anyone who can read the parent's local store inherits

@@ -220,6 +220,10 @@ typed errors, use the [Core API reference](docs/api-reference.md).
   modified ciphertext but cannot force availability or freshness.
 - Every endpoint with the mesh key can read the whole row database. Isolate
   smaller trust domains into separate meshes and keys.
+- Every endpoint opening a mesh holds all of its rows. Keep bulk in files
+  named by `types.file`, and give independent units of work their own meshes
+  so a session opens only the ones it needs; `db.connectedStores` holds their
+  credentials and the application opens them.
 - Rows are not an exactly-once job queue. Side effects need an
   application-owned claim, lease, or idempotency rule.
 - Compaction has no cross-device CAS. Use one authorized managed writer or

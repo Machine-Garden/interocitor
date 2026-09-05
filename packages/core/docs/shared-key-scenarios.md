@@ -36,6 +36,12 @@ value to 32 bytes; it is not a human password and is not strengthened with a
 password KDF. Generate it with Interocitor or another cryptographically secure
 source.
 
+A portable key is not bound to a mesh. One key may open many meshes at many
+remote paths, which suits a product that splits its work into meshes opened on
+demand; the cost is that one leaked key opens all of them. The bound contract
+below receives the remote path and mesh ID when it derives, so it can yield a
+distinct key per mesh from one application secret.
+
 | Attacker has                    | Can decrypt a protected dump? | Reason                                                                                                      |
 | ------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Database dump only              | No                            | Payloads are encrypted and the portable key is absent.                                                      |

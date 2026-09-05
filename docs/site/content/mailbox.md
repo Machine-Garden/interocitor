@@ -23,13 +23,13 @@ The mailbox is intentionally simple, but it remains part of the product’s secu
 
 ## Choose a backend by ownership {#choices}
 
-| Backend                 | Choose it when                                      | Responsibility that remains                                               |
-| ----------------------- | --------------------------------------------------- | ------------------------------------------------------------------------- |
-| Cloudflare + R2         | You need a programmable protocol-aware remote       | Identity integration, limits, D1/R2 bindings, backups, and operations.    |
-| Cloudflare + S3         | File bodies need an S3-compatible placement         | Everything above, plus S3 credentials, residency, migration, and restore. |
-| WebDAV server           | You need a portable file-oriented remote            | Server login, overwrite behavior, quotas, logs, and backups.              |
-| Google Drive            | The user should own the storage account             | Consent, tokens, provider availability, and the user’s storage decisions. |
-| Custom adapter          | The mailbox must fit an existing platform           | Faithful adapter semantics and an explicit account of missing guarantees. |
+| Backend         | Choose it when                                | Responsibility that remains                                               |
+| --------------- | --------------------------------------------- | ------------------------------------------------------------------------- |
+| Cloudflare + R2 | You need a programmable protocol-aware remote | Identity integration, limits, D1/R2 bindings, backups, and operations.    |
+| Cloudflare + S3 | File bodies need an S3-compatible placement   | Everything above, plus S3 credentials, residency, migration, and restore. |
+| WebDAV server   | You need a portable file-oriented remote      | Server login, overwrite behavior, quotas, logs, and backups.              |
+| Google Drive    | The user should own the storage account       | Consent, tokens, provider availability, and the user’s storage decisions. |
+| Custom adapter  | The mailbox must fit an existing platform     | Faithful adapter semantics and an explicit account of missing guarantees. |
 
 No backend is universally best. Choose the failure modes and operational owner the product can support.
 

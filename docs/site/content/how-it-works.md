@@ -39,11 +39,11 @@ Interocitor publishes the two edits under distinct identities instead. Neither c
 
 The design works because no component is pretending to be another one:
 
-| Component                             | What it owns                                                                                                           | What it does not own                                      |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| **Application on a trusted endpoint** | Gives rows meaning, applies product policy, and decides which people and devices may participate.                     | Remote storage, synchronization, or generic merge logic.  |
-| **Interocitor runtime**               | Commits local row changes, records pending work, protects artifacts, and applies the schema’s deterministic merge rules. | The application UI, identity system, or product policy.   |
-| **Remote mailbox**                    | Stores and returns change artifacts, snapshots, control records, and durable files.                                   | Row queries, application policy, or conflict resolution.  |
+| Component                             | What it owns                                                                                                             | What it does not own                                     |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| **Application on a trusted endpoint** | Gives rows meaning, applies product policy, and decides which people and devices may participate.                        | Remote storage, synchronization, or generic merge logic. |
+| **Interocitor runtime**               | Commits local row changes, records pending work, protects artifacts, and applies the schema’s deterministic merge rules. | The application UI, identity system, or product policy.  |
+| **Remote mailbox**                    | Stores and returns change artifacts, snapshots, control records, and durable files.                                      | Row queries, application policy, or conflict resolution. |
 
 Every participating endpoint has its own runtime and local row store. With a non-null key source, each key-bearing endpoint is trusted with the complete mesh: it may hold plaintext and can decrypt the rows and ordinary files it obtains. The mailbox is a rendezvous point for protected artifacts, not the database engine.
 
@@ -154,10 +154,10 @@ Compaction changes the cost of joining, not the meaning of the rows. A snapshot 
 
 The story so far applies to structured rows. Durable files share the protection boundary but deliberately use a different availability model:
 
-| Surface           | Why it exists                                                                 | Availability and change model                                                                  |
-| ----------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| **CRDT rows**     | Structured state must remain useful and mergeable while endpoints are apart. | Reads and writes use the local store; protected changes synchronize later and merge by field. |
-| **Durable files** | Exact bytes should remain one application-addressed object.                   | Put, get, overwrite, and delete call the remote adapter directly; Core adds no offline queue, cache, merge, or compaction. |
+| Surface           | Why it exists                                                                | Availability and change model                                                                                              |
+| ----------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **CRDT rows**     | Structured state must remain useful and mergeable while endpoints are apart. | Reads and writes use the local store; protected changes synchronize later and merge by field.                              |
+| **Durable files** | Exact bytes should remain one application-addressed object.                  | Put, get, overwrite, and delete call the remote adapter directly; Core adds no offline queue, cache, merge, or compaction. |
 
 An application can keep a file’s path and metadata in a row, so the reference remains available offline, while fetching the bytes only when transport is available. It must add its own file cache or retry policy when the product needs a different experience. Deleting a row does not automatically delete the file it references.
 
@@ -185,11 +185,11 @@ Interocitor protects confidentiality and per-object integrity across the adapter
 
 Encryption and authorization work together, but answer different questions:
 
-| Boundary               | Question                                                                    |
-| ---------------------- | --------------------------------------------------------------------------- |
-| **Mesh key**           | Can this endpoint decrypt the mesh’s protected rows and ordinary files?     |
-| **Mesh authorization** | May this authenticated subject reach this remote mesh now?                  |
-| **Application policy** | Should this person or workflow perform this product action?                 |
+| Boundary               | Question                                                                |
+| ---------------------- | ----------------------------------------------------------------------- |
+| **Mesh key**           | Can this endpoint decrypt the mesh’s protected rows and ordinary files? |
+| **Mesh authorization** | May this authenticated subject reach this remote mesh now?              |
+| **Application policy** | Should this person or workflow perform this product action?             |
 
 A mesh address selects a namespace; it is not a credential. Possessing a mesh key is a decryption capability; it is not proof that a current network request should be admitted. Conversely, passing Worker authorization does not give the Worker the mesh key or plaintext.
 
@@ -205,13 +205,13 @@ The [storage chapter](/storage) explains those layouts, including Cloudflare wit
 
 Interocitor repeats one idea at every scale: preserve independently created facts, interpret them only where the schema and keys live, and replace long history only with a complete baseline whose exact coverage is known.
 
-| Stage                     | Why it exists                                                                      |
-| ------------------------- | ---------------------------------------------------------------------------------- |
-| **Change locally**        | Keep the application responsive and useful without a remote round trip.            |
-| **Queue locally**         | Preserve accepted work according to the local store’s durability until publication succeeds. |
-| **Protect and publish**   | Let ordinary storage carry independent artifacts without receiving row plaintext.  |
-| **Pull and merge**        | Let trusted endpoints resolve field intent and converge independently of arrival.  |
-| **Compact carefully**     | Bound future catch-up without deleting late or unobserved work.                     |
+| Stage                   | Why it exists                                                                                |
+| ----------------------- | -------------------------------------------------------------------------------------------- |
+| **Change locally**      | Keep the application responsive and useful without a remote round trip.                      |
+| **Queue locally**       | Preserve accepted work according to the local store’s durability until publication succeeds. |
+| **Protect and publish** | Let ordinary storage carry independent artifacts without receiving row plaintext.            |
+| **Pull and merge**      | Let trusted endpoints resolve field intent and converge independently of arrival.            |
+| **Compact carefully**   | Bound future catch-up without deleting late or unobserved work.                              |
 
 This is a fit when trusted endpoints may hold a complete local row replica, offline progress matters, and the product can own endpoint admission, key custody, mailbox operations, and any coordination for side effects. It is not a server-side query engine, selective row-sharing system, exactly-once job queue, or guarantee that an untrusted remote stays available.
 

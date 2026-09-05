@@ -154,4 +154,5 @@ examples/todo-webdav/webdav-data/*
 
 __pycache__/
 *.py[cod]
+*.egg-info/
 .venv/

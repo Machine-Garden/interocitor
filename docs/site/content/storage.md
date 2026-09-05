@@ -20,11 +20,11 @@ This is an application-layer promise. It does not depend on how the storage plat
 
 Interocitor does not move one live database between machines. It gives storage three deliberately different jobs:
 
-| Storage surface                 | What rests there                                                                 | How it behaves                                                                 |
-| ------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| **Local row store and outbox**  | Materialized rows, pending operations, and exact observations on one endpoint.   | The application reads and changes rows locally, including while disconnected. |
-| **Remote sync mailbox**         | Protected changes and snapshots, plus the visible control envelope used to find them. | Endpoints publish and collect artifacts; the mailbox does not query or merge rows. |
-| **Remote durable-file storage** | Protected file bodies and the visible paths and metadata used to retrieve them.  | File operations call the remote directly; Core adds no offline queue, cache, merge, or compaction. |
+| Storage surface                 | What rests there                                                                      | How it behaves                                                                                     |
+| ------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| **Local row store and outbox**  | Materialized rows, pending operations, and exact observations on one endpoint.        | The application reads and changes rows locally, including while disconnected.                      |
+| **Remote sync mailbox**         | Protected changes and snapshots, plus the visible control envelope used to find them. | Endpoints publish and collect artifacts; the mailbox does not query or merge rows.                 |
+| **Remote durable-file storage** | Protected file bodies and the visible paths and metadata used to retrieve them.       | File operations call the remote directly; Core adds no offline queue, cache, merge, or compaction. |
 
 The local row store is inside the trusted endpoint. Its rows are plaintext while the application uses them. Interocitor’s remote-payload protection does not encrypt that local database; device protection and local-store encryption remain application and platform responsibilities.
 
@@ -95,12 +95,12 @@ These profiles answer “where should it live?” [Mailbox operations](/mailbox)
 
 The adapter preserves the same Interocitor storage contract while mapping it to a different physical backend:
 
-| Configuration          | Row history and control state                                  | Durable file bodies                                      |
-| ---------------------- | -------------------------------------------------------------- | -------------------------------------------------------- |
-| **WebDAV**             | Files beneath the configured remote path on the WebDAV server. | Beneath the same remote path through the same adapter.   |
-| **Google Drive**       | Files in the Interocitor folder hierarchy in the user’s Drive. | In the same Drive hierarchy through the same adapter.    |
-| **Cloudflare + R2**    | D1 stores changes, snapshots, control state, and file metadata. | R2 stores the durable file bodies.                       |
-| **Cloudflare + S3**    | D1 still stores changes, snapshots, control state, and file metadata. | The configured S3-compatible bucket stores only the durable file bodies. |
+| Configuration       | Row history and control state                                         | Durable file bodies                                                      |
+| ------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| **WebDAV**          | Files beneath the configured remote path on the WebDAV server.        | Beneath the same remote path through the same adapter.                   |
+| **Google Drive**    | Files in the Interocitor folder hierarchy in the user’s Drive.        | In the same Drive hierarchy through the same adapter.                    |
+| **Cloudflare + R2** | D1 stores changes, snapshots, control state, and file metadata.       | R2 stores the durable file bodies.                                       |
+| **Cloudflare + S3** | D1 still stores changes, snapshots, control state, and file metadata. | The configured S3-compatible bucket stores only the durable file bodies. |
 
 ### WebDAV keeps one remote file tree
 
@@ -126,11 +126,11 @@ S3 is therefore not a built-in whole-mailbox adapter. Selecting S3 does not move
 
 Encryption protects the payload, not everything needed to operate storage:
 
-| Interocitor protects                                | The remote still sees or controls                                       |
-| --------------------------------------------------- | ----------------------------------------------------------------------- |
-| Row values inside changes and snapshots.            | Mesh routes, object paths and names, sizes, timing, and request identity. |
-| Ordinary durable-file bytes.                        | File metadata, device records, control records, and activity patterns.  |
-| Integrity of each authenticated encrypted payload.  | Whether artifacts are returned, delayed, deleted, or replaced with an older valid copy. |
+| Interocitor protects                               | The remote still sees or controls                                                       |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Row values inside changes and snapshots.           | Mesh routes, object paths and names, sizes, timing, and request identity.               |
+| Ordinary durable-file bytes.                       | File metadata, device records, control records, and activity patterns.                  |
+| Integrity of each authenticated encrypted payload. | Whether artifacts are returned, delayed, deleted, or replaced with an older valid copy. |
 
 A filename such as `medical-report-alex.pdf` can reveal meaning even when its bytes are protected. Use opaque application paths when names themselves are sensitive.
 
@@ -146,26 +146,26 @@ For WebDAV and Google Drive, backup the complete Interocitor hierarchy. For Clou
 
 ## Decision summary {#summary}
 
-|                         |                                                                                         |
-| ----------------------- | --------------------------------------------------------------------------------------- |
-| **Interocitor protects** | Application payloads before a remote adapter receives them.                             |
-| **Trusted endpoints hold** | Plaintext local rows and the keys needed to interpret protected remote contents.      |
-| **Remote storage holds** | Protected artifacts plus the visible envelope required to store and retrieve them.      |
-| **Start with**           | A local NAS, private WebDAV service, family-owned Drive account, or Cloudflare Free deployment according to reach and ownership. |
-| **Use advanced Cloudflare when** | The mailbox must apply application authorization, limits, audits, maintenance, or realtime invalidation. |
-| **Backend choice changes** | Physical placement, access, operations, availability, and recovery—not the protection point. |
-| **S3 changes**          | The Cloudflare durable-file body destination; D1 remains the sync and metadata store.   |
+|                                  |                                                                                                                                  |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **Interocitor protects**         | Application payloads before a remote adapter receives them.                                                                      |
+| **Trusted endpoints hold**       | Plaintext local rows and the keys needed to interpret protected remote contents.                                                 |
+| **Remote storage holds**         | Protected artifacts plus the visible envelope required to store and retrieve them.                                               |
+| **Start with**                   | A local NAS, private WebDAV service, family-owned Drive account, or Cloudflare Free deployment according to reach and ownership. |
+| **Use advanced Cloudflare when** | The mailbox must apply application authorization, limits, audits, maintenance, or realtime invalidation.                         |
+| **Backend choice changes**       | Physical placement, access, operations, availability, and recovery—not the protection point.                                     |
+| **S3 changes**                   | The Cloudflare durable-file body destination; D1 remains the sync and metadata store.                                            |
 
 ## Annex: Cloudflare Free numbers {#cloudflare-free-numbers}
 
 These are external service limits, not Interocitor’s conceptual storage model. They are collected here because they can change independently. As of September 2026:
 
-| Part | Free allowance | What happens at the boundary |
-| ---- | -------------- | ---------------------------- |
-| [Workers](https://developers.cloudflare.com/workers/platform/limits/) | 100,000 Worker requests per UTC day and 10 ms of CPU time per request. | The daily count resets at midnight UTC. A fail-closed Worker returns error 1027 after the request allowance is exhausted; a request that consistently exceeds its CPU allowance is terminated. |
-| [D1](https://developers.cloudflare.com/d1/platform/pricing/) | 5 million rows read and 100,000 rows written per UTC day; 500 MB per database and 5 GB across the account. | Daily read or write exhaustion makes D1 queries fail until midnight UTC. Reaching the storage limit prevents new data and schema writes until space is reclaimed or the account is upgraded. |
-| [R2 Standard](https://developers.cloudflare.com/r2/pricing/) | 10 GB-month of storage, 1 million Class A operations, and 10 million Class B operations per month. | Going beyond the included R2 amounts is a billing boundary, not the same daily hard stop as Workers or D1. Egress remains free. |
-| [Durable Objects](https://developers.cloudflare.com/durable-objects/platform/pricing/) | With the SQLite-backed namespace required on the Free plan: 100,000 requests and 13,000 GB-seconds of active duration per UTC day. | Further operations of an exhausted type fail until the daily reset. Interocitor uses the WebSocket Hibernation API, so an idle connected relay does not keep accumulating duration. |
+| Part                                                                                   | Free allowance                                                                                                                     | What happens at the boundary                                                                                                                                                                   |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Workers](https://developers.cloudflare.com/workers/platform/limits/)                  | 100,000 Worker requests per UTC day and 10 ms of CPU time per request.                                                             | The daily count resets at midnight UTC. A fail-closed Worker returns error 1027 after the request allowance is exhausted; a request that consistently exceeds its CPU allowance is terminated. |
+| [D1](https://developers.cloudflare.com/d1/platform/pricing/)                           | 5 million rows read and 100,000 rows written per UTC day; 500 MB per database and 5 GB across the account.                         | Daily read or write exhaustion makes D1 queries fail until midnight UTC. Reaching the storage limit prevents new data and schema writes until space is reclaimed or the account is upgraded.   |
+| [R2 Standard](https://developers.cloudflare.com/r2/pricing/)                           | 10 GB-month of storage, 1 million Class A operations, and 10 million Class B operations per month.                                 | Going beyond the included R2 amounts is a billing boundary, not the same daily hard stop as Workers or D1. Egress remains free.                                                                |
+| [Durable Objects](https://developers.cloudflare.com/durable-objects/platform/pricing/) | With the SQLite-backed namespace required on the Free plan: 100,000 requests and 13,000 GB-seconds of active duration per UTC day. | Further operations of an exhausted type fail until the daily reset. Interocitor uses the WebSocket Hibernation API, so an idle connected relay does not keep accumulating duration.            |
 
 ### How Interocitor changes the arithmetic
 

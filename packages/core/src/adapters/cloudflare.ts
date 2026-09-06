@@ -18,6 +18,7 @@ import type {
   FileEntry,
   RemoteInvalidationPayload,
   RemoteInvalidationHooks,
+  StoredFileDeleteOptions,
   StoredFileMetadata,
   StoredFileWriteOptions,
 } from "../core/types.ts";
@@ -52,10 +53,11 @@ interface IoFileMeta {
   uploadedAt?: string;
   lastAccessedAt?: string;
   useCount?: number;
-  plaintextSize?: number;
   storedSize?: number;
-  contentType?: string;
-  taint?: string;
+}
+
+function sealGuardHeader(guard: string | undefined): Record<string, string> {
+  return guard ? { "X-Interocitor-Seal-Guard": guard } : {};
 }
 
 /** Config shape embedded in QR payloads for CloudflareAdapter. Credentials excluded. */
@@ -486,10 +488,9 @@ export class CloudflareAdapter implements StorageAdapter {
     const res = await fetch(this.storedFileUrl(path), {
       method: "PUT",
       headers: this.headers({
-        "Content-Type": options.contentType || "application/octet-stream",
+        "Content-Type": "application/octet-stream",
         "X-Interocitor-Device-Id": options.uploadedByDeviceId || "",
-        "X-Interocitor-Plaintext-Size": String(options.plaintextSize ?? bytes.byteLength),
-        ...(options.taint ? { "X-Interocitor-Taint": options.taint } : {}),
+        ...sealGuardHeader(options.sealGuard),
       }),
       body: bytes as unknown as BodyInit,
     });
@@ -512,10 +513,10 @@ export class CloudflareAdapter implements StorageAdapter {
     return new Uint8Array(await res.arrayBuffer());
   }
 
-  async deleteStoredFile(path: string): Promise<void> {
+  async deleteStoredFile(path: string, options: StoredFileDeleteOptions = {}): Promise<void> {
     const res = await fetch(this.storedFileUrl(path), {
       method: "DELETE",
-      headers: this.headers(),
+      headers: this.headers(sealGuardHeader(options.sealGuard)),
     });
     if (!res.ok && res.status !== 404) {
       throw httpFailure(

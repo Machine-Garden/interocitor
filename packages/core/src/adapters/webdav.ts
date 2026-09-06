@@ -305,10 +305,7 @@ export class WebDAVAdapter implements StorageAdapter {
       etag: file?.etag,
       uploadedAt: now,
       uploadedByDeviceId: options.uploadedByDeviceId,
-      plaintextSize: options.plaintextSize,
       storedSize: bytes.byteLength,
-      contentType: options.contentType,
-      taint: options.taint,
       useCount: 0,
     };
     await this.writeFile(this.storedMetaPath(path), JSON.stringify(meta));

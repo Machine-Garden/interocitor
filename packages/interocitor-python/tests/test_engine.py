@@ -180,9 +180,13 @@ class EngineTests(unittest.TestCase):
 
             remote = adapter.dump()
             self.assertIn("/worker-mesh/manifest.json", remote)
-            self.assertIn("/worker-mesh/files/tasks/task-1/result.bin", remote)
+            stored_paths = [key for key in remote if key.startswith("/worker-mesh/files/")]
+            self.assertEqual(len(stored_paths), 1)
+            self.assertRegex(stored_paths[0], r"^/worker-mesh/files/[0-9a-f]{64}$")
+            self.assertNotIn("result.bin", stored_paths[0])
+            self.assertNotIn(b"application/octet-stream", remote[stored_paths[0]])
             self.assertNotIn(b"queued", remote["/worker-mesh/changes/head.json"])
-            self.assertNotIn(b"queued", remote["/worker-mesh/files/tasks/task-1/result.bin"])
+            self.assertNotIn(b"queued", remote[stored_paths[0]])
             await first.disconnect()
 
             second = Interocitor(
@@ -211,6 +215,9 @@ class EngineTests(unittest.TestCase):
             metadata = await second.get_file_metadata("tasks/task-1/result.bin")
             self.assertIsNotNone(metadata)
             self.assertEqual(metadata.plaintext_size if metadata else None, 4)
+            self.assertEqual(metadata.content_type if metadata else None, "application/octet-stream")
+            self.assertEqual(metadata.digest if metadata else None, hashlib.sha256(bytes((0, 1, 2, 255))).hexdigest())
+            self.assertEqual(metadata.path if metadata else None, stored_paths[0])
             await second.disconnect()
 
         asyncio.run(scenario())

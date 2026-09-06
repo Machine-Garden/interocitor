@@ -131,9 +131,12 @@ export async function putImage<
 export async function getImage<
   S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>,
 >(db: Interocitor<S>, path: string): Promise<StoredImage> {
-  const metadata = await db.getFileMetadata(path);
-  const contentType = inferImageContentType(path, metadata?.contentType);
-  const data = await db.getFile(path);
+  // One download: the metadata lives inside the stored object, so opening the
+  // file already answers both questions.
+  const sealed = await db.openFile(path);
+  const metadata = sealed.metadata;
+  const contentType = inferImageContentType(path, metadata.contentType);
+  const data = await sealed.open();
   const blob = new Blob([data as BlobPart], { type: contentType });
   return {
     path,

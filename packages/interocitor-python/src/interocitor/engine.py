@@ -14,7 +14,7 @@ import asyncio
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from functools import cmp_to_key
 from typing import Any
@@ -34,6 +34,14 @@ from .ids import create_device_id, generate_id, uuidv7
 from .key_source import MeshKeyContext, MeshKeySource
 from .memory import MemoryLocalStore
 from .schema import SchemaInput, normalize_schema
+from .stored_file import (
+    StoredFileHeader,
+    clean_file_path,
+    decode_stored_frame,
+    derive_file_path_key,
+    encode_stored_frame,
+    hide_file_path,
+)
 from .types import (
     ChangeEntry,
     ChangesHead,
@@ -287,6 +295,7 @@ class Interocitor:
         self._connected = False
         self._encrypted = key_source is not None
         self._key: bytes | None = None
+        self._file_path_key: tuple[bytes, bytes] | None = None
         self._portable_key: str | None = None
         self._manifest: Manifest | None = None
         self._remote_poison_error: InterocitorError | None = None
@@ -645,51 +654,38 @@ class Interocitor:
         adapter = self._require_adapter("put_file")
         file_path = self._stored_file_path(path)
         plaintext = data.encode("utf-8") if isinstance(data, str) else bytes(data)
-        stored = self._encode_bytes(plaintext)
-        put_stored = getattr(adapter, "put_stored_file", None)
-        if callable(put_stored):
-            return await put_stored(
-                file_path,
-                stored,
-                uploaded_by_device_id=self._device_id,
-                plaintext_size=len(plaintext),
-                content_type=content_type,
-            )
-        await adapter.ensure_folder(f"{self._paths('put_file').root}/files")
-        await adapter.write_file(file_path, stored)
-        metadata = await adapter.get_file_metadata(file_path)
-        now = _now()
-        if metadata is None:
-            return StoredFileMetadata(
-                name=file_path.rsplit("/", 1)[-1],
-                path=file_path,
-                size=len(stored),
-                modified_time=now,
-                uploaded_by_device_id=self._device_id,
-                plaintext_size=len(plaintext),
-                stored_size=len(stored),
-                content_type=content_type,
-            )
-        return StoredFileMetadata(
-            name=metadata.name,
-            path=metadata.path,
-            size=metadata.size,
-            modified_time=metadata.modified_time,
-            etag=metadata.etag,
-            revision=metadata.revision,
-            uploaded_by_device_id=self._device_id,
-            plaintext_size=len(plaintext),
-            stored_size=len(stored),
+        header = StoredFileHeader(
+            size=len(plaintext),
+            digest=hashlib.sha256(plaintext).hexdigest(),
             content_type=content_type,
         )
+        stored = self._encode_bytes(encode_stored_frame(header, plaintext))
+        put_stored = getattr(adapter, "put_stored_file", None)
+        if callable(put_stored):
+            metadata = await put_stored(file_path, stored, uploaded_by_device_id=self._device_id)
+        else:
+            await adapter.ensure_folder(f"{self._paths('put_file').root}/files")
+            await adapter.write_file(file_path, stored)
+            entry = await adapter.get_file_metadata(file_path)
+            metadata = StoredFileMetadata(
+                name=entry.name if entry else file_path.rsplit("/", 1)[-1],
+                path=entry.path if entry else file_path,
+                size=entry.size if entry else len(stored),
+                modified_time=entry.modified_time if entry else _now(),
+                etag=entry.etag if entry else None,
+                revision=entry.revision if entry else None,
+                uploaded_by_device_id=self._device_id,
+            )
+        return self._describe_stored_file(metadata, header)
 
     async def get_file(self, path: str) -> bytes:
         await self.init()
-        adapter = self._require_adapter("get_file")
-        file_path = self._stored_file_path(path)
-        getter = getattr(adapter, "get_stored_file", None)
-        stored = await getter(file_path) if callable(getter) else await adapter.read_file(file_path)
-        return self._decode_bytes(stored)
+        _, header, body = await self._open_stored_file(path, "get_file")
+        if header.taint is not None:
+            raise ValueError(f"Stored file {path} is sealed under an extra key")
+        if hashlib.sha256(body).hexdigest() != header.digest:
+            raise ValueError(f"Stored file {path} failed its digest check")
+        return body
 
     async def delete_file(self, path: str) -> None:
         await self.init()
@@ -702,23 +698,48 @@ class Interocitor:
             await adapter.delete_file(file_path)
 
     async def get_file_metadata(self, path: str) -> StoredFileMetadata | None:
+        """Read the stored object; its description lives inside the frame."""
         await self.init()
         adapter = self._require_adapter("get_file_metadata")
         file_path = self._stored_file_path(path)
         getter = getattr(adapter, "get_stored_file_metadata", None)
-        if callable(getter):
-            return await getter(file_path)
-        metadata = await adapter.get_file_metadata(file_path)
-        if metadata is None:
+        entry = await getter(file_path) if callable(getter) else await adapter.get_file_metadata(file_path)
+        if entry is None:
             return None
-        return StoredFileMetadata(
-            name=metadata.name,
-            path=metadata.path,
-            size=metadata.size,
-            modified_time=metadata.modified_time,
-            etag=metadata.etag,
-            revision=metadata.revision,
+        metadata, header, _ = await self._open_stored_file(path, "get_file_metadata")
+        return self._describe_stored_file(metadata, header)
+
+    async def _open_stored_file(self, path: str, operation: str) -> tuple[StoredFileMetadata, StoredFileHeader, bytes]:
+        adapter = self._require_adapter(operation)
+        file_path = self._stored_file_path(path)
+        getter = getattr(adapter, "get_stored_file", None)
+        stored = await getter(file_path) if callable(getter) else await adapter.read_file(file_path)
+        header, body = decode_stored_frame(self._decode_bytes(stored))
+        meta_getter = getattr(adapter, "get_stored_file_metadata", None)
+        entry = await meta_getter(file_path) if callable(meta_getter) else await adapter.get_file_metadata(file_path)
+        metadata = (
+            entry
+            if isinstance(entry, StoredFileMetadata)
+            else StoredFileMetadata(
+                name=entry.name if entry else file_path.rsplit("/", 1)[-1],
+                path=entry.path if entry else file_path,
+                size=entry.size if entry else len(stored),
+                modified_time=entry.modified_time if entry else _now(),
+                etag=entry.etag if entry else None,
+                revision=entry.revision if entry else None,
+            )
+        )
+        return metadata, header, body
+
+    @staticmethod
+    def _describe_stored_file(metadata: StoredFileMetadata, header: StoredFileHeader) -> StoredFileMetadata:
+        return replace(
+            metadata,
+            plaintext_size=header.size,
             stored_size=metadata.size,
+            content_type=header.content_type,
+            taint=header.taint,
+            digest=header.digest,
         )
 
     # ── Core state inspection ────────────────────────────────────────
@@ -796,12 +817,22 @@ class Interocitor:
         return _Paths(root=root)
 
     def _stored_file_path(self, path: str) -> str:
-        if not isinstance(path, str):
-            raise TypeError("Stored file path must be a string")
-        clean = "/".join(part for part in path.split("/") if part)
-        if not clean:
-            raise ValueError("Stored file path must not be empty")
-        return f"{self._paths('file storage').root}/files/{clean}"
+        """Remote name for an application path.
+
+        Encrypted meshes address the object by a keyed hash of the path so
+        the remote never sees the client-facing name; unencrypted meshes keep
+        the plain path.
+        """
+        clean = clean_file_path(path)
+        name = hide_file_path(self._path_key(), clean) if self._key is not None else clean
+        return f"{self._paths('file storage').root}/files/{name}"
+
+    def _path_key(self) -> bytes:
+        if self._key is None:
+            raise InterocitorError("Object storage requires an encryption key")
+        if self._file_path_key is None or self._file_path_key[0] != self._key:
+            self._file_path_key = (self._key, derive_file_path_key(self._key))
+        return self._file_path_key[1]
 
     async def _load_tables_from_local(self) -> None:
         self._tables = {}

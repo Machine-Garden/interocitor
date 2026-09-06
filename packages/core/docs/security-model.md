@@ -50,10 +50,11 @@ plaintext on the remote.
 - **Protocol object names and durable-file paths.** Change files are named
   `<HLC>-chg_<id>.json`; the HLC encodes a wall-clock timestamp and a device
   id. Snapshot and manifest names have fixed protocol roles. These are not
-  client-facing filenames. A durable file path, however, comes from the path
-  supplied to `putFile()` and is visible to the remote. Use an opaque,
-  application-generated path rather than a real filename when that name is
-  sensitive.
+  client-facing filenames. A durable file is stored under a keyed hash of the
+  path supplied to `putFile()`, computed under a key derived from the mesh
+  key, so the remote sees neither the application path nor its folder
+  layout. The content type, plaintext size, and digest travel inside the
+  encrypted object. Only an unencrypted mesh stores the plain path.
 - **Folder layout.** The remote folder structure (`changes/`, `mainline/`,
   `devices/`, `files/`, `manifest.json`) is fixed and visible.
 - **Manifest contents.** `manifest.json` and `manifest-<gen>.json` are
@@ -100,7 +101,8 @@ Even with encryption on, a remote with full access to the bucket sees:
 | Mesh ID                  | `manifest.meshId`                                      | Logical identity recorded by the mesh manifest                                                               |
 | Worker presented address | `/io/<address>`                                        | Public route used by the client; it may be a per-subject opaque alias                                        |
 | Worker canonical address | D1 prefixes, file-body keys, and relay object name     | Stable storage namespace; in direct mode it is identical to the presented address                            |
-| Durable file path        | `files/<app path>`                                     | Application-supplied path; it reveals a real filename if the application puts one there                      |
+| Durable file path        | `files/<keyed hash>`                                   | HMAC of the application path under a key derived from the mesh key; plain path only on an unencrypted mesh   |
+| Seal guard               | Stored-file metadata on the worker                     | HMAC of the object name under the seal key; says only that the object is sealed, not by which key or label   |
 | Device IDs               | `devices/<id>.json`, change‑file names                 | One value per device joined to the mesh                                                                      |
 | Device metadata          | `devices/<id>.json`                                    | Plaintext device ID, optional `displayName`/type, last-seen time, and compaction acknowledgements            |
 | Schema version           | `manifest.schema`                                      | Optional logical compatibility marker when app code sets `schema.version`                                    |

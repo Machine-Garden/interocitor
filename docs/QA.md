@@ -10,7 +10,11 @@ changes, and where its guarantees stop.
 
 Yes—unless the app explicitly creates an unencrypted database. With encryption
 on, rows and files are encrypted before they leave the device. Only someone
-with the secret key can read them.
+with the secret key can read them. This is the same boundary Signal, Proton,
+iCloud Advanced Data Protection, and Bitwarden rely on: the operator stores what
+it cannot open. Interocitor uses one shared key per mesh rather than per-message
+ratcheting keys; an application that needs forward secrecy adds that layer on
+top.
 
 ### Can someone else read my data?
 
@@ -24,12 +28,12 @@ Yes. Row-sync objects use protocol names: for example, change names contain a
 timestamp and device identifier, while `manifest.json` and snapshot names have
 fixed protocol roles. They do not contain a client-facing filename.
 
-Durable files are different. Their storage path comes from the path passed to
-`putFile()`. Use an opaque path such as a random ID when the client-facing name
-is sensitive, and keep that display name in an encrypted row or the encrypted
-file content instead. The remote can also see sizes, device identifiers, and
-when activity happened. Encryption hides contents, not every operational trace
-of their existence.
+Durable files follow the same rule. The path passed to `putFile()` is
+replaced on the remote by a keyed hash under a key derived from the mesh key,
+and the content type, plaintext size, and digest travel inside the encrypted
+object. The remote can still see stored sizes, device identifiers, and when
+activity happened. Encryption hides contents and names, not every operational
+trace of their existence.
 
 ### What happens if someone changes the encrypted data?
 

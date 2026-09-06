@@ -228,7 +228,7 @@ local row store, queued in its outbox, merged, or compacted.
 | `getFile(path \| ref)`                     | Download/decrypt an untainted file with the mesh key. Given a `FileRef`, verify the bytes against `ref.digest`.                  |
 | `openFile(path \| ref)`                    | Download metadata/ciphertext and return a `SealedFile`; the caller supplies an extra key when required. `open()` verifies a ref. |
 | `getFileMetadata(path \| ref)`             | Read metadata without downloading plaintext; returns `null` when missing.                                                        |
-| `deleteFile(path \| ref)`                  | Delete the object; a missing object is already deleted.                                                                          |
+| `deleteFile(path \| ref, seal?)`           | Delete the object; a missing object is already deleted. A sealed file needs `{ key }` so the store accepts the delete.           |
 
 A `FileRef` is immutable where a path is not: overwriting the path changes the
 digest, so a stale reference is refused with `FileIntegrityError` instead of

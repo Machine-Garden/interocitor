@@ -42,7 +42,10 @@ test.describe("durable file storage", () => {
 
       const source = new TextEncoder().encode("hello encrypted file");
       const meta = await engine.putFile("docs/hello.txt", source, "text/plain");
-      const stored = adapter.dump()["/mesh/files/docs/hello.txt"];
+      const remotePaths = Object.keys(adapter.dump());
+      const storedPath = remotePaths.find((p) => p.startsWith("/mesh/files/"))!;
+      const stored = adapter.dump()[storedPath];
+      const remoteMeta = await adapter.getStoredFileMetadata(storedPath);
       const read = await engine.getFile("docs/hello.txt");
       const readMeta = await engine.getFileMetadata("docs/hello.txt");
       await engine.deleteFile("docs/hello.txt");
@@ -50,19 +53,37 @@ test.describe("durable file storage", () => {
 
       return {
         uploadedByDeviceId: meta.uploadedByDeviceId,
+        metaPath: meta.path,
+        storedPath,
+        remoteMetaKeys: Object.keys(remoteMeta ?? {}).filter(
+          (k) => remoteMeta?.[k as keyof typeof remoteMeta] !== undefined,
+        ),
         contentType: readMeta?.contentType,
         plaintextSize: readMeta?.plaintextSize,
         storedSize: readMeta?.storedSize,
+        digest: readMeta?.digest,
         readText: new TextDecoder().decode(read),
-        encryptedAtRest: !stored.includes("hello encrypted file"),
+        encryptedAtRest: !stored.includes("hello encrypted file") && !stored.includes("text/plain"),
         afterDelete,
+        remoteFiles: remotePaths.filter((p) => p.startsWith("/mesh/files/")).length,
       };
     });
 
     expect(result.uploadedByDeviceId).toBeTruthy();
+    // The remote sees a keyed hash, never the application path.
+    expect(result.remoteFiles).toBe(1);
+    expect(result.storedPath).toMatch(/^\/mesh\/files\/[0-9a-f]{64}$/);
+    expect(result.storedPath).not.toContain("hello");
+    expect(result.metaPath).toBe(result.storedPath);
+    // Adapter-held metadata carries nothing about the plaintext.
+    expect(result.remoteMetaKeys).not.toContain("contentType");
+    expect(result.remoteMetaKeys).not.toContain("taint");
+    expect(result.remoteMetaKeys).not.toContain("plaintextSize");
+    expect(result.remoteMetaKeys).not.toContain("digest");
     expect(result.contentType).toBe("text/plain");
     expect(result.plaintextSize).toBe("hello encrypted file".length);
     expect(result.storedSize).toBeGreaterThan(result.plaintextSize!);
+    expect(result.digest).toMatch(/^[0-9a-f]{64}$/);
     expect(result.readText).toBe("hello encrypted file");
     expect(result.encryptedAtRest).toBe(true);
     expect(result.afterDelete).toBeNull();
@@ -144,11 +165,166 @@ test.describe("durable file storage", () => {
     });
     expect(result.rowRef).toEqual(result.ref);
     expect(result.viaRef).toBe(JSON.stringify([{ name: "Aya", kind: "person" }]));
-    expect(result.metaPath).toBe("/mesh/files/readings/f3/entities.json");
+    expect(result.metaPath).toMatch(/^\/mesh\/files\/[0-9a-f]{64}$/);
     expect(result.digestChanged).toBe(true);
     expect(result.staleIsIntegrityError).toBe(true);
     expect(result.staleCode).toBe("FILE_INTEGRITY");
     expect(result.viaPath).toBe(JSON.stringify([{ name: "Bo", kind: "person" }]));
+  });
+
+  test("a second device with the same key resolves the same hidden path; another mesh key cannot", async ({
+    page,
+  }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, types } = await import("/packages/core/dist/index.js");
+      const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
+      const { generateKey, keyToPassphrase } = await import("/packages/core/dist/crypto/keys.js");
+      const { MemoryLocalStore } = await import("/packages/core/dist/storage/memory-store.js");
+      const { PortablePassphraseKeySource } =
+        await import("/packages/core/dist/crypto/key-source.js");
+
+      const schema = { tables: { notes: { fields: { text: types.string } } } };
+      const passphrase = await keyToPassphrase(await generateKey());
+      const adapter = new MemoryAdapter();
+      const open = async (dbName: string, portableKey: string) => {
+        const engine = new Interocitor({
+          appName: "HiddenPathTest",
+          dbName,
+          schema,
+          remotePath: "/mesh",
+          keySource: new PortablePassphraseKeySource({ portableKey }),
+          localStore: new MemoryLocalStore(),
+        });
+        await engine.init();
+        await engine.setRemoteStorage(adapter);
+        await engine.connect();
+        return engine;
+      };
+
+      const alice = await open("hidden-alice", passphrase);
+      await alice.putFile("photos/beach.jpg", new TextEncoder().encode("jpeg bytes"), "image/jpeg");
+      const bob = await open("hidden-bob", passphrase);
+      const viaBob = new TextDecoder().decode(await bob.getFile("photos/beach.jpg"));
+
+      const stranger = await open("hidden-stranger", await keyToPassphrase(await generateKey()));
+      const strangerSees = await stranger.getFileMetadata("photos/beach.jpg");
+
+      return {
+        viaBob,
+        strangerSees,
+        remoteFiles: Object.keys(adapter.dump()).filter((p) => p.includes("/files/")),
+      };
+    });
+
+    expect(result.viaBob).toBe("jpeg bytes");
+    expect(result.strangerSees).toBeNull();
+    expect(result.remoteFiles).toHaveLength(1);
+  });
+
+  test("an unencrypted mesh keeps plain paths and readable headers", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor, types } = await import("/packages/core/dist/index.js");
+      const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
+      const { MemoryLocalStore } = await import("/packages/core/dist/storage/memory-store.js");
+
+      const engine = new Interocitor({
+        appName: "PlainFileTest",
+        dbName: "plain-file-test",
+        schema: { tables: { notes: { fields: { text: types.string } } } },
+        remotePath: "/mesh",
+        keySource: null,
+        localStore: new MemoryLocalStore(),
+      });
+      await engine.init();
+      const adapter = new MemoryAdapter();
+      await engine.setRemoteStorage(adapter);
+      await engine.connect();
+
+      await engine.putFile("docs/plain.txt", "plain text", "text/plain");
+      const stored = adapter.dump()["/mesh/files/docs/plain.txt"];
+      const meta = await engine.getFileMetadata("docs/plain.txt");
+      return {
+        storedPresent: stored !== undefined,
+        storedHasText: stored?.includes("plain text") ?? false,
+        contentType: meta?.contentType,
+        readText: new TextDecoder().decode(await engine.getFile("docs/plain.txt")),
+      };
+    });
+
+    expect(result.storedPresent).toBe(true);
+    expect(result.storedHasText).toBe(true);
+    expect(result.contentType).toBe("text/plain");
+    expect(result.readText).toBe("plain text");
+  });
+
+  test("a sealed file cannot be replaced or deleted without its extra key", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { Interocitor } = await import("/packages/core/dist/index.js");
+      const { MemoryAdapter } = await import("/packages/core/dist/adapters/memory.js");
+      const { generateKey, keyToPassphrase } = await import("/packages/core/dist/crypto/keys.js");
+      const { MemoryLocalStore } = await import("/packages/core/dist/storage/memory-store.js");
+      const { PortablePassphraseKeySource } =
+        await import("/packages/core/dist/crypto/key-source.js");
+
+      const groupKey = await generateKey();
+      const wrongKey = await generateKey();
+      const engine = new Interocitor({
+        appName: "SealGuardTest",
+        dbName: "seal-guard-test",
+        schema: { tables: {} },
+        remotePath: "/mesh",
+        keySource: new PortablePassphraseKeySource({
+          portableKey: await keyToPassphrase(await generateKey()),
+        }),
+        localStore: new MemoryLocalStore(),
+      });
+      await engine.init();
+      const adapter = new MemoryAdapter();
+      await engine.setRemoteStorage(adapter);
+      await engine.connect();
+
+      const attempt = async (run: () => Promise<unknown>) => {
+        try {
+          await run();
+          return "ok";
+        } catch (err) {
+          return err instanceof Error ? err.message : String(err);
+        }
+      };
+      const seal = (key: CryptoKey) => ({ taint: "group1", key });
+      await engine.putFile("docs/sealed.txt", "v1", "text/plain", seal(groupKey));
+      const plainOverwrite = await attempt(() => engine.putFile("docs/sealed.txt", "v2"));
+      const wrongKeyOverwrite = await attempt(() =>
+        engine.putFile("docs/sealed.txt", "v2", "text/plain", seal(wrongKey)),
+      );
+      const plainDelete = await attempt(() => engine.deleteFile("docs/sealed.txt"));
+      const rightOverwrite = await attempt(() =>
+        engine.putFile("docs/sealed.txt", "v2", "text/plain", seal(groupKey)),
+      );
+      const stillThere = new TextDecoder().decode(
+        await (await engine.openFile("docs/sealed.txt")).open(groupKey),
+      );
+      const rightDelete = await attempt(() =>
+        engine.deleteFile("docs/sealed.txt", { key: groupKey }),
+      );
+      const remaining = Object.keys(adapter.dump()).filter((p) => p.startsWith("/mesh/files/"));
+      return {
+        plainOverwrite,
+        wrongKeyOverwrite,
+        plainDelete,
+        rightOverwrite,
+        stillThere,
+        rightDelete,
+        remaining,
+      };
+    });
+    expect(result.plainOverwrite).toContain("sealed");
+    expect(result.wrongKeyOverwrite).toContain("sealed");
+    expect(result.plainDelete).toContain("sealed");
+    expect(result.rightOverwrite).toBe("ok");
+    expect(result.stillThere).toBe("v2");
+    expect(result.rightDelete).toBe("ok");
+    expect(result.remaining).toEqual([]);
   });
 
   test("sealed files expose taint and defer decryption until caller opens with the extra key", async ({

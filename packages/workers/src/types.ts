@@ -182,12 +182,10 @@ export interface FileUploadAuthorizationRequest {
   uploadedByDeviceId: string;
   /** Stored request-body bytes. */
   size: number;
-  /** Optional client-supplied plaintext byte count. */
-  plaintextSize?: number;
-  /** Client-supplied content type, defaulting to `application/octet-stream`. */
-  contentType?: string;
-  /** Optional client-supplied opaque classification. */
-  taint?: string;
+  /** The write presents a seal guard: the client proved it holds the file's extra key. */
+  sealed: boolean;
+  /** The object being replaced is sealed; the presented guard already matched it. */
+  overwritesSealed: boolean;
   /** Durable-file bytes recorded for the mesh before this write. */
   currentMeshStoredBytes: number;
   /** Resolved durable-file quota for the mesh. */
@@ -356,8 +354,8 @@ export interface WorkerAuditEvent {
   outcome: WorkerAuditOutcome;
   /** Stored or transferred bytes, when measured. */
   bytes?: number;
-  /** Opaque durable-file classification, when supplied. */
-  taint?: string;
+  /** The object is sealed under an extra key the worker never sees. */
+  sealed?: boolean;
   /** `CF-Ray` or `X-Request-Id`, when supplied by the request. */
   requestId?: string;
 }

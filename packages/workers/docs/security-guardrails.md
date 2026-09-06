@@ -48,7 +48,7 @@ configuration. AWS can add a customer-managed KMS key through the AWS-specific
 adapter.
 
 The host constructs the store from trusted deployment configuration. Browser
-input, request headers, file metadata, and `taint` do not select an endpoint or
+input, request headers, and file metadata do not select an endpoint or
 supply shared provider credentials.
 
 S3-compatible selection changes only the durable body location. File paths, sizes,

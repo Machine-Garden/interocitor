@@ -58,6 +58,13 @@ export function HomeLanding() {
                 Many apps stop when the server disappears. Interocitor lets trusted devices keep
                 working with local rows, then use the network to exchange changes when it returns.
               </p>
+              <p>
+                Signal, Proton, iCloud Advanced Data Protection, Bitwarden, and Cryptomator already
+                made one expectation normal: the operator stores what it cannot read. Interocitor
+                brings that boundary to your own app&rsquo;s rows and files, on storage you choose.
+                Stronger properties, such as per-message keys, can be built on top when a product
+                needs them.
+              </p>
             </div>
           </div>
 
@@ -167,7 +174,9 @@ export function HomeLanding() {
                   <h3>Two clients. One mailbox that cannot read the conversation.</h3>
                   <p>
                     Alice and Bob share a key and exchange message rows through an inspectable
-                    in-page mailbox. The mailbox never receives their readable conversation.
+                    in-page mailbox. The mailbox never receives their readable conversation. One
+                    shared key protects the whole history; a Signal-style per-message ratchet is a
+                    layer an app adds on top.
                   </p>
                   <div className="example-outcome">
                     <strong>Inspect the actual ciphertext.</strong>

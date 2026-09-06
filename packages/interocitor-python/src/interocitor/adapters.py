@@ -73,6 +73,7 @@ class StoredFileMetadata(FileEntry):
     stored_size: int | None = None
     content_type: str | None = None
     taint: str | None = None
+    digest: str | None = None
 
     @classmethod
     def from_wire(cls, value: dict[str, Any]) -> "StoredFileMetadata":
@@ -91,6 +92,7 @@ class StoredFileMetadata(FileEntry):
             stored_size=int(value["storedSize"]) if value.get("storedSize") is not None else None,
             content_type=value.get("contentType"),
             taint=value.get("taint"),
+            digest=value.get("digest"),
         )
 
     def to_wire(self) -> dict[str, Any]:
@@ -104,6 +106,7 @@ class StoredFileMetadata(FileEntry):
             "storedSize": self.stored_size,
             "contentType": self.content_type,
             "taint": self.taint,
+            "digest": self.digest,
         }
         value.update({key: item for key, item in optional.items() if item is not None})
         return value
@@ -200,9 +203,6 @@ class MemoryAdapter:
         data: bytes | str,
         *,
         uploaded_by_device_id: str | None = None,
-        plaintext_size: int | None = None,
-        content_type: str | None = None,
-        taint: str | None = None,
     ) -> StoredFileMetadata:
         bytes_data = data.encode("utf-8") if isinstance(data, str) else bytes(data)
         await self.write_file(path, bytes_data)
@@ -215,10 +215,7 @@ class MemoryAdapter:
             uploaded_by_device_id=uploaded_by_device_id,
             uploaded_at=now,
             use_count=0,
-            plaintext_size=plaintext_size,
             stored_size=len(bytes_data),
-            content_type=content_type,
-            taint=taint,
         )
         self._stored[path] = metadata
         return metadata
@@ -404,20 +401,14 @@ class CloudflareAdapter:
         data: bytes | str,
         *,
         uploaded_by_device_id: str | None = None,
-        plaintext_size: int | None = None,
-        content_type: str | None = None,
-        taint: str | None = None,
     ) -> StoredFileMetadata:
         bytes_data = data.encode("utf-8") if isinstance(data, str) else bytes(data)
         headers = self._headers(
             {
-                "Content-Type": content_type or "application/octet-stream",
+                "Content-Type": "application/octet-stream",
                 "X-Interocitor-Device-Id": uploaded_by_device_id or "",
-                "X-Interocitor-Plaintext-Size": str(plaintext_size if plaintext_size is not None else len(bytes_data)),
             }
         )
-        if taint:
-            headers["X-Interocitor-Taint"] = taint
         response = await (await self._http()).put(self._file_url(path, stored=True), headers=headers, content=bytes_data)
         self._raise(response, f"PUT stored file {path}")
         return StoredFileMetadata.from_wire(response.json()["file"])

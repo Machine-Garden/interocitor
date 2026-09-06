@@ -163,8 +163,7 @@ database. Replace `<database-name>` and finish the Wrangler binding IDs first.
 Programmatic hosts can call `ensureSchema(db)` once per D1 binding object; it
 uses a `WeakSet` fast path and idempotent `CREATE ... IF NOT EXISTS`
 statements. `applySchema(db)` executes the idempotent statements every time.
-`SCHEMA_STATEMENTS` exposes the base statements for tooling; the functions
-also ensure the `stored_files.taint` column exists.
+`SCHEMA_STATEMENTS` exposes the base statements for tooling.
 
 ### Realtime relay
 
@@ -209,8 +208,8 @@ Durable app file bodies are stored in the `FileBodyStore` returned by `files`, w
 The `files` resolver receives the accepted canonical mesh address, so one
 deployment can keep ordinary meshes in R2 and place residency-sensitive meshes
 in S3. A canonical mesh address must always select the same store: changing the
-result later strands its existing file bodies. `taint` remains opaque metadata
-and does not select a store.
+result later strands its existing file bodies. Nothing about a file's content,
+name, or seal label reaches the worker, so none of it selects a store.
 
 The host deployment owns store construction, endpoint allowlisting, and
 provider credentials. The browser and request metadata cannot supply a shared
@@ -229,12 +228,16 @@ boundary, follow [Store durable file bodies in S3-compatible object storage](doc
 Worker metadata tracks:
 
 - uploader device id
-- stored byte size and optional plaintext byte size
-- content type
+- stored byte size
 - upload/modified time
 - last access time
 - total read count
-- `taint` — an opaque label set by the client for [sealed files](../core/docs/tainted-files.md). The worker stores and returns it but never interprets it; the bytes stay opaque to the server regardless.
+- an optional seal guard: proof that the uploader held the file's extra key. A guarded object is overwritten or deleted only by a request presenting the same `X-Interocitor-Seal-Guard`; anything else gets `403`. The guard says nothing about the key or the seal label.
+
+It never sees the application path, content type, plaintext size, or a
+[sealed-file](../core/docs/tainted-files.md) label: the client stores the
+object under a keyed hash of the path and keeps the rest inside the encrypted
+object.
 
 Uploads are guarded before the file-body-store write:
 
@@ -275,9 +278,9 @@ const mount = createInterocitorMount<Env>({
     meshIntegrityGates: [checksummedMeshIntegrityGate],
     meshMiddleware: [authorizeMesh],
     meshSecret: (env) => env.INTEROCITOR_MESH_SECRET,
-    authorizeFileUpload: async ({ address, path, size, contentType, taint, request }) => {
-      if (contentType?.startsWith("image/") && size > 8 * 1024 * 1024) {
-        return { allowed: false, status: 413, reason: "image too large" };
+    authorizeFileUpload: async ({ address, size, request }) => {
+      if (size > 8 * 1024 * 1024) {
+        return { allowed: false, status: 413, reason: "file too large" };
       }
       return true;
     },
@@ -372,14 +375,15 @@ const runtime = {
 The Worker does not persist events. Callback failures do not fail the request,
 while callback latency adds request latency. Each `WorkerAuditEvent` carries
 `op` (write, read, delete, list, metadata, recovery, or stored-file variants), `address`,
-`path`, `status`, `outcome`, optional `bytes`/`taint`, a `requestId`, and an
+`path`, `status`, `outcome`, optional `bytes`, a `requestId`, and an
 ISO `at` timestamp.
 
 It covers completed sync-object operations, recovery-wrapper operations, and
 stored-file upload/download/delete/metadata. Gate, middleware, validation,
 quota, and system-operation denials require request middleware audit.
-What it **cannot** see: CRDT row meaning (payloads are encrypted), the `taint`
-→ key mapping, and client-side unlock/decrypt of sealed files. Full event
+What it **cannot** see: CRDT row meaning (payloads are encrypted), durable-file
+names, content types, and seal labels (they live inside the encrypted object),
+and client-side unlock/decrypt of sealed files. Full event
 shape and boundaries: [Audit](docs/audit.md).
 
 ## Catch-up after absence

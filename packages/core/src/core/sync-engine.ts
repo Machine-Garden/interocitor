@@ -43,6 +43,7 @@ import type {
   RemoteInvalidationPayload,
   RemoteInvalidationStorageAdapter,
   StoredFileMetadata,
+  StoredFileWriteOptions,
   FileRef,
   FileSeal,
   SealedFile,
@@ -76,6 +77,17 @@ import {
   isRemoteAccessError,
 } from "./errors.ts";
 import { expectedFileDigest, fileTargetPath, sha256Hex } from "./file-ref.ts";
+import {
+  cleanFilePath,
+  decodeStoredFrame,
+  deriveFilePathKey,
+  encodeStoredFrame,
+  hideFilePath,
+  openStoredFrame,
+  sealStoredFrame,
+  type StoredFileHeader,
+  deriveFileGuard,
+} from "./stored-file.ts";
 import {
   ConnectStageTimeoutError,
   DEFAULT_CONNECT_STAGE_TIMEOUT_MS,
@@ -253,6 +265,8 @@ export class Interocitor<
   private deviceId: string;
   private hlc: HLC;
   private encryptionKey: CryptoKey | null = null;
+  /** HMAC key that hides durable-file paths, derived from `encryptionKey`. */
+  private filePathKey: { source: CryptoKey; key: CryptoKey } | null = null;
   private encrypted = false;
   private passphrase: string | null = null;
   private keySource: MeshKeySource | null = null;
@@ -965,40 +979,77 @@ export class Interocitor<
     return this.config.remotePath;
   }
 
-  private storedFilePath(path: string): string {
+  /**
+   * The remote object name for an application file path.
+   *
+   * On an encrypted mesh the name is a keyed hash of the path, so the remote
+   * stores the file without learning what the application calls it. An
+   * unencrypted mesh keeps the plain path.
+   */
+  private async storedFilePath(path: string): Promise<string> {
     const remotePath = this.requireRemotePath("file storage");
-    const clean = path.split("/").filter(Boolean).join("/");
-    if (!clean) throw new Error("Stored object path must not be empty");
-    return `${remotePath.replace(/\/$/, "")}/files/${clean}`;
+    const clean = cleanFilePath(path);
+    const meshKey = await this.meshFileKey();
+    const name = meshKey ? await hideFilePath(await this.pathKeyFor(meshKey), clean) : clean;
+    return `${remotePath.replace(/\/$/, "")}/files/${name}`;
   }
 
-  private async resolveStoredFileKey(key?: CryptoKey): Promise<CryptoKey | null> {
-    if (key) return key;
+  private async pathKeyFor(meshKey: CryptoKey): Promise<CryptoKey> {
+    if (this.filePathKey?.source !== meshKey) {
+      this.filePathKey = { source: meshKey, key: await deriveFilePathKey(meshKey) };
+    }
+    return this.filePathKey.key;
+  }
+
+  /** The mesh key that wraps stored frames, or null on an unencrypted mesh. */
+  private async meshFileKey(): Promise<CryptoKey | null> {
     if (!this.encrypted) return null;
     if (!this.encryptionKey) await this.resolveEncryption();
     if (!this.encryptionKey) throw new Error("Object storage requires an encryption key");
     return this.encryptionKey;
   }
 
+  /**
+   * Build the stored object: a header naming the file for its readers, then
+   * the body, framed and wrapped under the mesh key. A sealed file's body is
+   * first enveloped under the caller's extra key.
+   */
   private async encodeStoredFile(
     data: Uint8Array | string,
-    key?: CryptoKey,
-  ): Promise<{ stored: Uint8Array; plaintextSize: number; digest: string }> {
+    contentType?: string,
+    seal?: FileSeal,
+  ): Promise<{ stored: Uint8Array; header: StoredFileHeader }> {
     const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
-    const digest = await sha256Hex(bytes);
-    const resolvedKey = await this.resolveStoredFileKey(key);
-    if (!resolvedKey) return { stored: bytes, plaintextSize: bytes.byteLength, digest };
-    return {
-      stored: await encryptBytes(resolvedKey, bytes),
-      plaintextSize: bytes.byteLength,
-      digest,
+    const header: StoredFileHeader = {
+      size: bytes.byteLength,
+      digest: await sha256Hex(bytes),
+      ...(contentType ? { contentType } : {}),
+      ...(seal ? { taint: seal.taint } : {}),
     };
+    const body = seal ? await encryptBytes(seal.key, bytes) : bytes;
+    const stored = await sealStoredFrame(await this.meshFileKey(), encodeStoredFrame(header, body));
+    return { stored, header };
   }
 
-  private async decodeStoredFile(data: Uint8Array, key?: CryptoKey): Promise<Uint8Array> {
-    const resolvedKey = await this.resolveStoredFileKey(key);
-    if (!resolvedKey) return data;
-    return decryptBytes(resolvedKey, data);
+  private async decodeStoredFile(
+    stored: Uint8Array,
+  ): Promise<{ header: StoredFileHeader; body: Uint8Array }> {
+    return decodeStoredFrame(await openStoredFrame(await this.meshFileKey(), stored));
+  }
+
+  /** Merge what the frame header says about a file into adapter metadata. */
+  private describeStoredFile(
+    meta: StoredFileMetadata,
+    header: StoredFileHeader,
+  ): StoredFileMetadata {
+    return {
+      ...meta,
+      plaintextSize: header.size,
+      storedSize: meta.storedSize ?? meta.size,
+      contentType: header.contentType,
+      taint: header.taint,
+      digest: header.digest,
+    };
   }
 
   private async rebuildOutboxFromLocalState(): Promise<void> {
@@ -1808,6 +1859,7 @@ export class Interocitor<
       if (!state.encrypted) {
         this.passphrase = null;
         this.encryptionKey = null;
+        this.filePathKey = null;
       }
     }
     if (state.passphrase !== undefined) {
@@ -3482,35 +3534,34 @@ export class Interocitor<
   ): Promise<StoredFileMetadata> {
     await this.ensureReady();
     const adapter = this.requireAdapter("putFile()");
-    const filePath = this.storedFilePath(path);
     if (seal && !seal.taint.trim()) throw new Error("Object seal taint must not be empty");
-    const { stored, plaintextSize, digest } = await this.encodeStoredFile(data, seal?.key);
-    const options = {
+    const filePath = await this.storedFilePath(path);
+    const { stored, header } = await this.encodeStoredFile(data, contentType, seal);
+    const options: StoredFileWriteOptions = {
       uploadedByDeviceId: this.deviceId,
-      plaintextSize,
-      contentType,
-      taint: seal?.taint,
+      sealGuard: seal ? await this.fileGuard(seal.key, filePath) : undefined,
     };
     if (adapter.putStoredFile) {
-      const meta = await adapter.putStoredFile(filePath, stored, options);
-      return { ...meta, digest };
+      return this.describeStoredFile(
+        await adapter.putStoredFile(filePath, stored, options),
+        header,
+      );
     }
     await adapter.ensureFolder(`${this.requireRemotePath("putFile()").replace(/\/$/, "")}/files`);
     await adapter.writeFile(filePath, stored);
     const meta = await adapter.getFileMetadata(filePath);
-    return {
-      name: meta?.name ?? filePath.split("/").pop() ?? filePath,
-      path: filePath,
-      size: meta?.size ?? stored.byteLength,
-      modifiedTime: meta?.modifiedTime ?? new Date().toISOString(),
-      etag: meta?.etag,
-      uploadedByDeviceId: this.deviceId,
-      plaintextSize,
-      storedSize: stored.byteLength,
-      contentType,
-      taint: seal?.taint,
-      digest,
-    };
+    return this.describeStoredFile(
+      {
+        name: meta?.name ?? filePath.split("/").pop() ?? filePath,
+        path: filePath,
+        size: meta?.size ?? stored.byteLength,
+        modifiedTime: meta?.modifiedTime ?? new Date().toISOString(),
+        etag: meta?.etag,
+        uploadedByDeviceId: this.deviceId,
+        storedSize: stored.byteLength,
+      },
+      header,
+    );
   }
 
   /**
@@ -3547,7 +3598,7 @@ export class Interocitor<
   private async openFileImpl(path: string, expectedDigest?: string): Promise<SealedFile> {
     await this.ensureReady();
     const adapter = this.requireAdapter("openFile()");
-    const filePath = this.storedFilePath(path);
+    const filePath = await this.storedFilePath(path);
     const [stored, metadata] = await Promise.all([
       adapter.getStoredFile ? adapter.getStoredFile(filePath) : adapter.readFile(filePath),
       adapter.getStoredFileMetadata
@@ -3565,15 +3616,15 @@ export class Interocitor<
       modifiedTime: new Date().toISOString(),
       storedSize: stored.byteLength,
     };
-    const fileMetadata = metadata ?? fallbackMetadata;
-    const taint = fileMetadata.taint;
+    const { header, body } = await this.decodeStoredFile(stored);
+    const taint = header.taint;
     return {
-      metadata: fileMetadata,
+      metadata: this.describeStoredFile(metadata ?? fallbackMetadata, header),
       taint,
       open: async (key?: CryptoKey) => {
         if (taint && !key)
           throw new Error(`Object ${path} is tainted with ${taint}; a matching key is required`);
-        const plaintext = await this.decodeStoredFile(stored, key);
+        const plaintext = taint && key ? await decryptBytes(key, body) : body;
         if (expectedDigest) {
           const actual = await sha256Hex(plaintext);
           if (actual !== expectedDigest) throw new FileIntegrityError(path, expectedDigest, actual);
@@ -3584,19 +3635,39 @@ export class Interocitor<
   }
 
   /** Delete a durable application file. Missing files are treated as already deleted. */
-  async deleteFile(target: string | FileRef): Promise<void> {
-    return this.fileAccess(this.deleteFileImpl(fileTargetPath(target)));
+  /**
+   * Delete a durable file; a missing object is already deleted. A sealed file
+   * needs its extra key here as well, because a store that records seal
+   * guards refuses to delete without proof of that key.
+   */
+  async deleteFile(target: string | FileRef, seal?: Pick<FileSeal, "key">): Promise<void> {
+    return this.fileAccess(this.deleteFileImpl(fileTargetPath(target), seal));
   }
 
-  private async deleteFileImpl(path: string): Promise<void> {
+  private async deleteFileImpl(path: string, seal?: Pick<FileSeal, "key">): Promise<void> {
     await this.ensureReady();
     const adapter = this.requireAdapter("deleteFile()");
-    const filePath = this.storedFilePath(path);
-    if (adapter.deleteStoredFile) await adapter.deleteStoredFile(filePath);
-    else await adapter.deleteFile(filePath);
+    const filePath = await this.storedFilePath(path);
+    if (adapter.deleteStoredFile) {
+      await adapter.deleteStoredFile(filePath, {
+        sealGuard: seal ? await this.fileGuard(seal.key, filePath) : undefined,
+      });
+    } else await adapter.deleteFile(filePath);
   }
 
-  /** Return metadata for a durable application file without downloading content. */
+  /** The seal guard for an object, bound to its remote name. */
+  private fileGuard(sealKey: CryptoKey, filePath: string): Promise<string> {
+    return deriveFileGuard(sealKey, filePath.split("/").pop() ?? filePath);
+  }
+
+  /**
+   * Return metadata for a durable application file, or null when it does not
+   * exist.
+   *
+   * Content type, taint, plaintext size, and digest live inside the stored
+   * object, so this reads the object. A `FileRef` held in a row answers the
+   * same questions without a remote round trip.
+   */
   async getFileMetadata(target: string | FileRef): Promise<StoredFileMetadata | null> {
     return this.fileAccess(this.getFileMetadataImpl(fileTargetPath(target)));
   }
@@ -3604,10 +3675,14 @@ export class Interocitor<
   private async getFileMetadataImpl(path: string): Promise<StoredFileMetadata | null> {
     await this.ensureReady();
     const adapter = this.requireAdapter("getFileMetadata()");
-    const filePath = this.storedFilePath(path);
-    if (adapter.getStoredFileMetadata) return adapter.getStoredFileMetadata(filePath);
-    const meta = await adapter.getFileMetadata(filePath);
-    return meta ? { ...meta, storedSize: meta.size } : null;
+    const filePath = await this.storedFilePath(path);
+    const meta = adapter.getStoredFileMetadata
+      ? await adapter.getStoredFileMetadata(filePath)
+      : await adapter
+          .getFileMetadata(filePath)
+          .then((m) => (m ? { ...m, storedSize: m.size } : null));
+    if (!meta) return null;
+    return (await this.openFileImpl(path)).metadata;
   }
 
   /**

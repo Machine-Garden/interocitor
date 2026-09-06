@@ -49,7 +49,7 @@ interface WorkerAuditEvent {
   status: number;
   outcome: "ok" | "rejected" | "not-found";
   bytes?: number;
-  taint?: string;
+  sealed?: boolean;
   requestId?: string;
 }
 ```

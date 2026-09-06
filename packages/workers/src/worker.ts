@@ -815,15 +815,42 @@ interface StoredFileRow {
   path?: string;
   body_key?: string;
   size?: number;
-  plaintext_size?: number | null;
-  content_type?: string | null;
-  taint?: string | null;
+  seal_guard?: string | null;
   uploaded_by_device_id?: string;
   uploaded_at?: string;
   modified_time?: string;
   last_accessed_at?: string | null;
   use_count?: number;
   etag?: string | null;
+}
+
+const SEAL_GUARD_HEADER = "X-Interocitor-Seal-Guard";
+
+/**
+ * Read the seal guard a client presents: proof that it holds a sealed file's
+ * extra key. The worker compares it with the stored guard and never learns
+ * the key or the seal label.
+ */
+function presentedSealGuard(request: Request): string | null | Response {
+  const raw = String(request.headers.get(SEAL_GUARD_HEADER) || "").trim();
+  if (!raw) return null;
+  if (!/^[0-9a-f]{64}$/.test(raw))
+    return jsonResponse({ error: `Invalid ${SEAL_GUARD_HEADER}` }, 400);
+  return raw;
+}
+
+function sealGuardMatches(stored: string | null | undefined, presented: string | null): boolean {
+  if (!stored) return true;
+  if (!presented || presented.length !== stored.length) return false;
+  let diff = 0;
+  for (let i = 0; i < stored.length; i += 1) {
+    diff |= (stored.codePointAt(i) ?? 0) ^ (presented.codePointAt(i) ?? 0);
+  }
+  return diff === 0;
+}
+
+function sealedFileResponse(): Response {
+  return jsonResponse({ error: "Sealed file requires its key" }, 403);
 }
 
 function storedFileKey(prefix: string, path: string): string {
@@ -842,13 +869,7 @@ function storedFileMetadata(row: StoredFileRow): Record<string, unknown> {
     uploadedAt: String(row.uploaded_at || ""),
     lastAccessedAt: row.last_accessed_at || undefined,
     useCount: Number(row.use_count ?? 0),
-    plaintextSize:
-      row.plaintext_size === null || row.plaintext_size === undefined
-        ? undefined
-        : Number(row.plaintext_size),
     storedSize: Number(row.size ?? 0),
-    contentType: row.content_type || undefined,
-    taint: row.taint || undefined,
   };
 }
 
@@ -892,7 +913,6 @@ async function handleStoredFileMetadata<Env>(
     status: 200,
     outcome: "ok",
     bytes: Number(row.size ?? 0),
-    taint: row.taint || undefined,
     requestId: requestId(request),
   });
   return jsonResponse({ file: storedFileMetadata(row) }, 200);
@@ -933,7 +953,6 @@ async function handleGetStoredFile<Env>(
       path: normalized,
       status: 404,
       outcome: "not-found",
-      taint: row.taint || undefined,
       requestId: requestId(request),
     });
     return withCors(new Response("Not found", { status: 404 }));
@@ -952,11 +971,10 @@ async function handleGetStoredFile<Env>(
     status: 200,
     outcome: "ok",
     bytes: Number(row.size ?? object.size),
-    taint: row.taint || undefined,
     requestId: requestId(request),
   });
   const headers = new Headers({
-    "Content-Type": String(row.content_type || "application/octet-stream"),
+    "Content-Type": "application/octet-stream",
     "Content-Length": String(object.size),
   });
   if (object.etag || row.etag) headers.set("ETag", String(object.etag || row.etag));
@@ -1014,15 +1032,14 @@ async function handlePutStoredFile<Env>(
   const normalized = normalizePath(path);
   const uploadedByDeviceId = String(request.headers.get("X-Interocitor-Device-Id") || "").trim();
   if (!uploadedByDeviceId) return jsonResponse({ error: "Missing X-Interocitor-Device-Id" }, 401);
-  const contentType = request.headers.get("Content-Type") || "application/octet-stream";
-  const taint = String(request.headers.get("X-Interocitor-Taint") || "").trim() || null;
-  const plaintextSizeHeader = request.headers.get("X-Interocitor-Plaintext-Size");
-  const plaintextSize = plaintextSizeHeader ? Number.parseInt(plaintextSizeHeader, 10) : undefined;
+  const guard = presentedSealGuard(request);
+  if (guard instanceof Response) return guard;
   const existing = await db.first<StoredFileRow>(
-    "SELECT size, r2_key AS body_key FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1",
+    "SELECT size, seal_guard, r2_key AS body_key FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1",
     prefix,
     normalized,
   );
+  if (!sealGuardMatches(existing?.seal_guard, guard)) return sealedFileResponse();
   const current = await currentStoredBytes(db, prefix);
   const nextTotal = current - Number(existing?.size ?? 0) + bytes.byteLength;
   if (nextTotal > runtime.maxMeshStoredBytes)
@@ -1045,9 +1062,8 @@ async function handlePutStoredFile<Env>(
             path: normalized,
             uploadedByDeviceId,
             size: bytes.byteLength,
-            plaintextSize: Number.isFinite(plaintextSize) ? plaintextSize : undefined,
-            contentType,
-            taint: taint ?? undefined,
+            sealed: guard !== null,
+            overwritesSealed: Boolean(existing?.seal_guard),
             currentMeshStoredBytes: current,
             maxMeshStoredBytes: runtime.maxMeshStoredBytes,
             request,
@@ -1063,16 +1079,13 @@ async function handlePutStoredFile<Env>(
   }
   const key = String(existing?.body_key || storedFileKey(prefix, normalized));
   const now = new Date().toISOString();
-  await store.put(key, bytes, {
-    contentType,
-  });
+  await store.put(key, bytes, { contentType: "application/octet-stream" });
   const etag = crypto.randomUUID();
   await db.run(
-    `INSERT INTO stored_files (prefix,path,r2_key,size,plaintext_size,content_type,taint,uploaded_by_device_id,uploaded_at,modified_time,last_accessed_at,use_count,etag)
-     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,NULL,0,?10)
+    `INSERT INTO stored_files (prefix,path,r2_key,size,seal_guard,uploaded_by_device_id,uploaded_at,modified_time,last_accessed_at,use_count,etag)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,?7,NULL,0,?8)
      ON CONFLICT(prefix,path) DO UPDATE SET
-       r2_key=excluded.r2_key, size=excluded.size, plaintext_size=excluded.plaintext_size,
-       content_type=excluded.content_type, taint=excluded.taint,
+       r2_key=excluded.r2_key, size=excluded.size, seal_guard=excluded.seal_guard,
        uploaded_by_device_id=excluded.uploaded_by_device_id,
        uploaded_at=excluded.uploaded_at, modified_time=excluded.modified_time,
        last_accessed_at=NULL, use_count=0, etag=excluded.etag`,
@@ -1080,9 +1093,7 @@ async function handlePutStoredFile<Env>(
     normalized,
     key,
     bytes.byteLength,
-    Number.isFinite(plaintextSize) ? plaintextSize : null,
-    contentType,
-    taint,
+    guard,
     uploadedByDeviceId,
     now,
     etag,
@@ -1100,7 +1111,7 @@ async function handlePutStoredFile<Env>(
     status,
     outcome: "ok",
     bytes: bytes.byteLength,
-    taint: taint ?? undefined,
+    sealed: guard !== null || undefined,
     requestId: requestId(request),
   });
   return jsonResponse(
@@ -1113,7 +1124,6 @@ async function handlePutStoredFile<Env>(
           uploaded_at: now,
           modified_time: now,
           etag,
-          taint,
         },
       ),
     },
@@ -1133,7 +1143,7 @@ async function handleDeleteStoredFile<Env>(
   if (!store) return jsonResponse({ error: "File body store not configured" }, 501);
   const normalized = normalizePath(path);
   const row = await db.first<StoredFileRow>(
-    "SELECT r2_key AS body_key, size, taint FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1",
+    "SELECT r2_key AS body_key, size, seal_guard FROM stored_files WHERE prefix=?1 AND path=?2 LIMIT 1",
     prefix,
     normalized,
   );
@@ -1148,6 +1158,9 @@ async function handleDeleteStoredFile<Env>(
     });
     return emptyResponse(404);
   }
+  const guard = presentedSealGuard(request);
+  if (guard instanceof Response) return guard;
+  if (!sealGuardMatches(row.seal_guard, guard)) return sealedFileResponse();
   await store.delete(String(row.body_key));
   await db.run("DELETE FROM stored_files WHERE prefix=?1 AND path=?2", prefix, normalized);
   await emitAudit(runtime, env, {
@@ -1157,7 +1170,7 @@ async function handleDeleteStoredFile<Env>(
     status: 204,
     outcome: "ok",
     bytes: Number(row.size ?? 0),
-    taint: row.taint || undefined,
+    sealed: row.seal_guard ? true : undefined,
     requestId: requestId(request),
   });
   return emptyResponse(204);

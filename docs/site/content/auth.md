@@ -141,7 +141,7 @@ The mesh key opens the complete row database and ordinary durable files. When on
 
 The authoritative taint lives in the row that references the file. That lets an offline client show the file and its locked state before downloading the bytes. File metadata repeats the taint as a safety check.
 
-A taint is not an ACL. Interocitor does not decide what `legal` means or who receives that key. The host application owns the mapping from authenticated subject to taint group to wrapped key, plus the unlock experience and key rotation. Worker authorization can govern the download request; the extra key governs decryption after download.
+A taint is not an ACL. Interocitor does not decide what `legal` means or who receives that key. The host application owns the mapping from authenticated subject to taint group to wrapped key, plus the unlock experience and key rotation. Worker authorization can govern the download request; the extra key governs decryption after download, and the Worker refuses to overwrite or delete a sealed file for anyone who cannot prove they hold that key.
 
 Use a separate mesh when the rows also need a smaller audience. Use a taint when the rows may remain shared but one attachment cannot. [Read the tainted-file model](/tainted-files).
 

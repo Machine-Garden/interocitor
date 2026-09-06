@@ -250,9 +250,8 @@ The request includes:
 | `currentMeshStoredBytes` | Stored durable-file bytes before this write.                                             |
 | `maxMeshStoredBytes`     | Resolved quota for this mesh.                                                            |
 | `uploadedByDeviceId`     | Client-supplied `X-Interocitor-Device-Id`.                                               |
-| `plaintextSize`          | Optional client-supplied plaintext size.                                                 |
-| `contentType`            | Client-supplied content type, defaulting to `application/octet-stream`.                  |
-| `taint`                  | Optional client-supplied opaque classification.                                          |
+| `sealed`                 | The write presents a seal guard, proving the client holds the file's extra key.          |
+| `overwritesSealed`       | The object being replaced is sealed; the guard already matched before the hook ran.      |
 | `request`                | Incoming request after its body has been consumed; headers and cookies remain available. |
 
 The device ID and other client-supplied metadata are policy inputs, not

@@ -9,12 +9,12 @@ placement control, not a whole-mesh residency claim.
 
 ## Storage boundary
 
-| Surface                                                                                          | Storage after S3 is selected        |
-| ------------------------------------------------------------------------------------------------ | ----------------------------------- |
-| Changes, snapshots, manifests, device records, and recovery wrappers                             | Cloudflare D1                       |
-| Durable-file path, object key, size, content type, `taint`, uploader, timestamps, and read count | Cloudflare D1                       |
-| Durable file body                                                                                | The configured S3-compatible bucket |
-| Realtime invalidation                                                                            | Optional Cloudflare Durable Object  |
+| Surface                                                                   | Storage after S3 is selected        |
+| ------------------------------------------------------------------------- | ----------------------------------- |
+| Changes, snapshots, manifests, device records, and recovery wrappers      | Cloudflare D1                       |
+| Durable-file object name, key, size, uploader, timestamps, and read count | Cloudflare D1                       |
+| Durable file body                                                         | The configured S3-compatible bucket |
+| Realtime invalidation                                                     | Optional Cloudflare Durable Object  |
 
 With a non-null client `keySource`, Interocitor encrypts the durable body before
 the Worker receives it. S3 server-side encryption is an additional storage
@@ -102,7 +102,7 @@ const mount = createInterocitorMount<Env>({
 ```
 
 Every read, overwrite, and delete for a mesh must make the same selection. The
-resolver receives only the accepted mesh address; `taint`, file path, and
+resolver receives only the accepted mesh address; the object name and
 request headers do not choose the provider. Moving an existing mesh between R2
 and S3 requires an explicit body migration before changing the resolver.
 

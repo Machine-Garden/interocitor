@@ -64,13 +64,16 @@ interface StoredFileMetadata extends FileEntry {
   storedSize?: number;
   contentType?: string;
   taint?: string;
+  digest?: string;
 }
 
 interface StoredFileWriteOptions {
   uploadedByDeviceId?: string;
-  plaintextSize?: number;
-  contentType?: string;
-  taint?: string;
+  sealGuard?: string;
+}
+
+interface StoredFileDeleteOptions {
+  sealGuard?: string;
 }
 ```
 
@@ -158,10 +161,12 @@ Semantics:
 
 - They store opaque bytes at a mesh file path chosen by the engine.
 - They are not part of `changes/`, snapshots, or compaction.
-- `putStoredFile` may overwrite the current object at that path.
-- `deleteStoredFile` removes the object and any backend metadata used for quota/access tracking.
+- `putStoredFile` may overwrite the current object at that path, unless the object was stored with a `sealGuard` and the write does not present the same value.
+- `deleteStoredFile` applies the same rule: a guarded object is removed only with its guard. Stores without logic of their own, such as WebDAV, cannot enforce this.
+- `deleteStoredFile(path, options?)` removes the object and any backend metadata used for quota/access tracking.
 - `getStoredFile` should update `lastAccessedAt`/`useCount` when the backend tracks those fields.
-- Returned `size` should be the stored byte size; `plaintextSize` is supplied by the engine when known.
+- Returned `size` should be the stored byte size. `plaintextSize`, `contentType`, `taint`, and `digest` live inside the stored object; the engine fills them and adapters never see them.
+- The engine addresses each object by a keyed hash of the application path on encrypted meshes, so adapters never see client-facing names.
 
 If an adapter does not implement these methods, the engine falls back to `writeFile`/`readFile`/`deleteFile`/`getFileMetadata` under `<remotePath>/files/...`.
 

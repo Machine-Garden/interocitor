@@ -65,10 +65,10 @@ class MemoryD1 {
       }
       return { total };
     }
-    if (sql.includes("SELECT size, r2_key AS body_key FROM stored_files")) {
+    if (sql.includes("SELECT size, seal_guard, r2_key AS body_key FROM stored_files")) {
       const [prefix, path] = params;
       const row = this.storedFiles.get(this.key(prefix, path));
-      return row ? { size: row.size, body_key: row.r2_key } : null;
+      return row ? { size: row.size, seal_guard: row.seal_guard, body_key: row.r2_key } : null;
     }
     if (sql.includes("SELECT *, r2_key AS body_key FROM stored_files")) {
       const [prefix, path] = params;
@@ -82,7 +82,7 @@ class MemoryD1 {
     if (sql.includes("SELECT r2_key AS body_key") && sql.includes("FROM stored_files")) {
       const [prefix, path] = params;
       const row = this.storedFiles.get(this.key(prefix, path));
-      return row ? { body_key: row.r2_key, size: row.size, taint: row.taint } : null;
+      return row ? { body_key: row.r2_key, size: row.size, seal_guard: row.seal_guard } : null;
     }
     return null;
   }
@@ -110,26 +110,14 @@ class MemoryD1 {
       return { success: true, meta: { changes: 1 } };
     }
     if (sql.includes("INSERT INTO stored_files")) {
-      const [
-        prefix,
-        path,
-        r2_key,
-        size,
-        plaintext_size,
-        content_type,
-        taint,
-        uploaded_by_device_id,
-        uploaded_at,
-        etag,
-      ] = params;
+      const [prefix, path, r2_key, size, seal_guard, uploaded_by_device_id, uploaded_at, etag] =
+        params;
       this.storedFiles.set(this.key(prefix, path), {
         prefix,
         path,
         r2_key,
         size,
-        plaintext_size,
-        content_type,
-        taint,
+        seal_guard,
         uploaded_by_device_id,
         uploaded_at,
         modified_time: uploaded_at,
@@ -236,7 +224,6 @@ async function upload(mount, env, meshId, path, body, headers = {}) {
         headers: {
           "Content-Type": "text/plain",
           "X-Interocitor-Device-Id": "dev-a",
-          "X-Interocitor-Plaintext-Size": String(body.length),
           ...headers,
         },
         body,
@@ -251,15 +238,14 @@ test("durable file-body stores support PUT, GET, metadata, use count, and DELETE
   const { env, mount, system } = createHarness();
   const meshId = await issueMeshId(system, env);
 
-  const put = await upload(mount, env, meshId, "/docs/a.txt", "hello", {
-    "X-Interocitor-Taint": "group1",
-  });
+  const put = await upload(mount, env, meshId, "/docs/a.txt", "hello");
   assert.equal(put.status, 201);
   const putJson = await put.json();
   assert.equal(putJson.file.uploadedByDeviceId, "dev-a");
   assert.equal(putJson.file.size, 5);
-  assert.equal(putJson.file.plaintextSize, 5);
-  assert.equal(putJson.file.taint, "group1");
+  assert.equal(putJson.file.plaintextSize, undefined);
+  assert.equal(putJson.file.contentType, undefined);
+  assert.equal(putJson.file.taint, undefined);
 
   const get = await mount.fetch(
     new Request(
@@ -283,7 +269,7 @@ test("durable file-body stores support PUT, GET, metadata, use count, and DELETE
   assert.equal(metadata.status, 200);
   const metaJson = await metadata.json();
   assert.equal(metaJson.file.useCount, 1);
-  assert.equal(metaJson.file.taint, "group1");
+  assert.equal(metaJson.file.taint, undefined);
   assert.ok(metaJson.file.lastAccessedAt);
 
   const del = await mount.fetch(
@@ -930,6 +916,56 @@ test("system maintenance operations preserve the JSON body for mesh integrity ga
   ]);
 });
 
+test("a sealed file is replaced or deleted only with its seal guard", async () => {
+  const auditEvents = [];
+  const seen = [];
+  const { env, mount, system } = createHarness({
+    storageOperationAudit: (event) => auditEvents.push(event),
+    authorizeFileUpload: async ({ sealed, overwritesSealed }) => {
+      seen.push({ sealed, overwritesSealed });
+      return true;
+    },
+  });
+  const meshId = await issueMeshId(system, env);
+  const guard = "ab".repeat(32);
+  const other = "cd".repeat(32);
+  const url = `https://example.test/io/${encodeURIComponent(meshId)}/stored-file?path=%2Fsealed.bin`;
+  const put = (body, headers = {}) => upload(mount, env, meshId, "/sealed.bin", body, headers);
+  const del = (headers = {}) =>
+    mount.fetch(new Request(url, { method: "DELETE", headers }), env, createCtx());
+
+  assert.equal((await put("v1", { "X-Interocitor-Seal-Guard": "nope" })).status, 400);
+  assert.equal((await put("v1", { "X-Interocitor-Seal-Guard": guard })).status, 201);
+  assert.equal((await put("v2")).status, 403);
+  assert.equal((await put("v2", { "X-Interocitor-Seal-Guard": other })).status, 403);
+  assert.equal((await del()).status, 403);
+  assert.equal((await put("v2", { "X-Interocitor-Seal-Guard": guard })).status, 200);
+  assert.equal((await del({ "X-Interocitor-Seal-Guard": guard })).status, 204);
+  assert.equal((await del()).status, 404);
+
+  assert.deepEqual(seen, [
+    { sealed: true, overwritesSealed: false },
+    { sealed: true, overwritesSealed: true },
+  ]);
+  const writes = auditEvents.filter(
+    (event) => event.op === "stored-file-write" && event.path === "/sealed.bin",
+  );
+  assert.deepEqual(
+    writes.map((event) => event.sealed),
+    [true, true],
+  );
+  const deletes = auditEvents.filter(
+    (event) => event.op === "stored-file-delete" && event.outcome === "ok",
+  );
+  assert.deepEqual(
+    deletes.map((event) => event.sealed),
+    [true],
+  );
+  const plain = await upload(mount, env, meshId, "/plain.bin", "x");
+  assert.equal(plain.status, 201);
+  assert.equal(auditEvents.find((event) => event.path === "/plain.bin").sealed, undefined);
+});
+
 test("worker audit callback receives completed storage-operation events", async () => {
   const auditEvents = [];
   const { env, mount, system } = createHarness({
@@ -937,11 +973,7 @@ test("worker audit callback receives completed storage-operation events", async 
   });
   const meshId = await issueMeshId(system, env);
 
-  assert.equal(
-    (await upload(mount, env, meshId, "/audit.txt", "hello", { "X-Interocitor-Taint": "group-a" }))
-      .status,
-    201,
-  );
+  assert.equal((await upload(mount, env, meshId, "/audit.txt", "hello")).status, 201);
 
   const write = auditEvents.find(
     (event) => event.op === "stored-file-write" && event.path === "/audit.txt",
@@ -949,7 +981,7 @@ test("worker audit callback receives completed storage-operation events", async 
   assert.ok(write, "expected stored-file-write audit event");
   assert.equal(write.event, "interocitor.audit");
   assert.equal(write.address, meshId);
-  assert.equal(write.taint, "group-a");
+  assert.equal(write.taint, undefined);
   assert.equal(write.outcome, "ok");
   assert.ok(write.at, "expected timestamp");
 });
@@ -959,6 +991,7 @@ test("durable-file stores enforce device id, file size, mesh quota, callback rej
   const { env, mount, system } = createHarness({
     authorizeFileUpload: async (uploadRequest) => {
       rejected.push({ path: uploadRequest.path, taint: uploadRequest.taint });
+      assert.equal(uploadRequest.contentType, undefined);
       if (uploadRequest.path.includes("blocked"))
         return { allowed: false, status: 418, reason: "blocked" };
       return true;
@@ -975,11 +1008,7 @@ test("durable-file stores enforce device id, file size, mesh quota, callback rej
     401,
   );
   assert.equal((await upload(mount, env, meshId, "/too-large.txt", "01234567890")).status, 413);
-  assert.equal(
-    (await upload(mount, env, meshId, "/blocked.txt", "ok", { "X-Interocitor-Taint": "group2" }))
-      .status,
-    418,
-  );
+  assert.equal((await upload(mount, env, meshId, "/blocked.txt", "ok")).status, 418);
 
   assert.equal((await upload(mount, env, meshId, "/a.txt", "123456")).status, 201);
   assert.equal((await upload(mount, env, meshId, "/b.txt", "123456")).status, 201);
@@ -996,7 +1025,7 @@ test("durable-file stores enforce device id, file size, mesh quota, callback rej
   assert.equal((await upload(mount, env, meshId, "/c.txt", "1")).status, 201);
   assert.deepEqual(
     rejected.find((item) => item.path === "/blocked.txt"),
-    { path: "/blocked.txt", taint: "group2" },
+    { path: "/blocked.txt", taint: undefined },
   );
 });
 

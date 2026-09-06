@@ -616,19 +616,15 @@ export interface StoredFileMetadata extends FileEntry {
   lastAccessedAt?: string;
   /** Total successful reads, when tracked by the backend. */
   useCount?: number;
-  /** Original plaintext byte length, when known. */
+  /** Original plaintext byte length. Read from the stored object, never from the remote. */
   plaintextSize?: number;
   /** Stored ciphertext/transport byte length. Defaults to size. */
   storedSize?: number;
-  /** Application content type, if provided by the uploader. */
+  /** Application content type, if provided by the uploader. Read from the stored object. */
   contentType?: string;
-  /** Optional human-readable label for bytes sealed with an extra key. */
+  /** Seal label for bytes sealed with an extra key. Read from the stored object. */
   taint?: string;
-  /**
-   * Lowercase hex SHA-256 of the plaintext bytes. Always present on the
-   * metadata `putFile` returns; present on later metadata reads only when the
-   * backend persisted it.
-   */
+  /** Lowercase hex SHA-256 of the plaintext bytes. Read from the stored object. */
   digest?: string;
 }
 
@@ -672,15 +668,24 @@ export interface SealedFile {
   open(key?: CryptoKey): Promise<Uint8Array>;
 }
 
+/**
+ * What a storage adapter is told about a durable file at write time. Content
+ * type, taint, plaintext size, and digest stay inside the stored object, so
+ * the remote never receives them.
+ */
 export interface StoredFileWriteOptions {
   /** Device identity to persist for abuse controls/audit. */
   uploadedByDeviceId?: string;
-  /** Plaintext byte length before encryption. */
-  plaintextSize?: number;
-  /** Application content type. */
-  contentType?: string;
-  /** Optional human-readable label for bytes sealed with an extra key. */
-  taint?: string;
+  /**
+   * Proof that the writer holds the file's seal key. A store that records it
+   * refuses later overwrites and deletes that do not present the same value.
+   */
+  sealGuard?: string;
+}
+
+export interface StoredFileDeleteOptions {
+  /** Proof that the caller holds the seal key of the object being deleted. */
+  sealGuard?: string;
 }
 
 export interface RemoteInvalidationPayload {
@@ -736,7 +741,7 @@ export interface StorageAdapter {
     options?: StoredFileWriteOptions,
   ): Promise<StoredFileMetadata>;
   getStoredFile?(path: string): Promise<Uint8Array>;
-  deleteStoredFile?(path: string): Promise<void>;
+  deleteStoredFile?(path: string, options?: StoredFileDeleteOptions): Promise<void>;
   getStoredFileMetadata?(path: string): Promise<StoredFileMetadata | null>;
 
   /**

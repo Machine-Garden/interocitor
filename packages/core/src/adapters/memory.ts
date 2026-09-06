@@ -10,6 +10,7 @@
 import type {
   StorageAdapter,
   FileEntry,
+  StoredFileDeleteOptions,
   StoredFileMetadata,
   StoredFileWriteOptions,
 } from "../core/types.ts";
@@ -35,6 +36,7 @@ export class MemoryAdapter implements StorageAdapter {
 
   private files: Map<string, { data: Uint8Array; modifiedTime: string }> = new Map();
   private storedFileMetadata: Map<string, StoredFileMetadata> = new Map();
+  private sealGuards: Map<string, string> = new Map();
   private folders: Set<string> = new Set();
   private authenticated = false;
   // Mirrors the cloud-adapter convention: cache "ensured" paths so a
@@ -152,7 +154,10 @@ export class MemoryAdapter implements StorageAdapter {
     options: StoredFileWriteOptions = {},
   ): Promise<StoredFileMetadata> {
     const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
+    this.requireSealGuard(path, options.sealGuard);
     await this.writeFile(path, bytes);
+    if (options.sealGuard) this.sealGuards.set(path, options.sealGuard);
+    else this.sealGuards.delete(path);
     const now = new Date().toISOString();
     const meta: StoredFileMetadata = {
       name: path.split("/").pop() || path,
@@ -161,10 +166,7 @@ export class MemoryAdapter implements StorageAdapter {
       modifiedTime: now,
       uploadedAt: now,
       uploadedByDeviceId: options.uploadedByDeviceId,
-      plaintextSize: options.plaintextSize,
       storedSize: bytes.byteLength,
-      contentType: options.contentType,
-      taint: options.taint,
       lastAccessedAt: undefined,
       useCount: 0,
     };
@@ -186,9 +188,21 @@ export class MemoryAdapter implements StorageAdapter {
     return bytes;
   }
 
-  async deleteStoredFile(path: string): Promise<void> {
+  async deleteStoredFile(path: string, options: StoredFileDeleteOptions = {}): Promise<void> {
+    this.requireSealGuard(path, options.sealGuard);
     await this.deleteFile(path);
     this.storedFileMetadata.delete(path);
+    this.sealGuards.delete(path);
+  }
+
+  /** A sealed object is replaced or removed only with proof of its seal key. */
+  private requireSealGuard(path: string, presented: string | undefined): void {
+    const expected = this.sealGuards.get(path);
+    if (expected && presented !== expected) {
+      throw new Error(
+        `Stored file ${path} is sealed; its key is required to overwrite or delete it`,
+      );
+    }
   }
 
   async getStoredFileMetadata(path: string): Promise<StoredFileMetadata | null> {

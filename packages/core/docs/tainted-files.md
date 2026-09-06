@@ -53,3 +53,15 @@ const plaintext = await sealed.open(key);
 ```
 
 `getFile(path)` remains the simple mesh-key read path. It refuses tainted files with an explicit error so callers do not discover the extra-key requirement through a failed decrypt.
+
+## Override protection
+
+Mesh membership alone must not be enough to replace or remove a sealed file. When a file is sealed, core sends the store a **seal guard**: an HMAC of the object's remote name under a key derived from the seal key. The store keeps the guard and refuses a later overwrite or delete that does not present the same value. The guard reveals neither the key nor the label, and different objects give unrelated guards, so the store cannot group files by key.
+
+Deleting a sealed file therefore takes the key as well:
+
+```ts
+await db.deleteFile("docs/q4.pdf", { key: groupKey });
+```
+
+The worker and the in-memory adapter enforce the guard. A plain object store such as WebDAV has no logic to run, so there override protection is undefined and mesh membership is the only gate. Label-aware policy, such as which subjects may write `legal` files at all, is application-specific and belongs in the host's upload-authorization hook using the host's own credentials; the worker never sees the label.

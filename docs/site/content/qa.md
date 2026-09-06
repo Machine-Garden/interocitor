@@ -14,7 +14,7 @@ It fits applications that need offline row work and remote storage without plain
 
 ## Can the remote read my data? {#privacy}
 
-Not the protected payloads when a mesh key is configured. Row changes, snapshots, and ordinary durable files are encrypted before the remote receives them.
+Not the protected payloads when a mesh key is configured. Row changes, snapshots, and ordinary durable files are encrypted before the remote receives them. This is the boundary Signal, Proton, iCloud Advanced Data Protection, and Bitwarden already rely on: the operator stores what it cannot open. Interocitor uses one shared key per mesh rather than per-message ratcheting keys; an application that needs forward secrecy adds that layer on top.
 
 The remote still observes paths, sizes, timing, request identity, device activity, and control metadata. Read [the security model](/security) for the complete boundary.
 

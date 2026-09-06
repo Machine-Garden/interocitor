@@ -35,12 +35,16 @@ from .key_source import MeshKeyContext, MeshKeySource
 from .memory import MemoryLocalStore
 from .schema import SchemaInput, normalize_schema
 from .stored_file import (
+    FileSeal,
     StoredFileHeader,
     clean_file_path,
     decode_stored_frame,
+    derive_file_guard,
     derive_file_path_key,
     encode_stored_frame,
     hide_file_path,
+    open_stored_body,
+    seal_stored_body,
 )
 from .types import (
     ChangeEntry,
@@ -243,6 +247,38 @@ class Table:
 
     async def delete(self, row_id: str) -> None:
         await self._engine.delete(self.name, row_id)
+
+
+def _verified_body(path: str, header: StoredFileHeader, body: bytes) -> bytes:
+    if hashlib.sha256(body).hexdigest() != header.digest:
+        raise ValueError(f"Stored file {path} failed its digest check")
+    return body
+
+
+@dataclass(frozen=True)
+class SealedFile:
+    """A downloaded file whose body is opened on demand.
+
+    ``taint`` is ``None`` for plain files, which :meth:`open` returns as is;
+    a sealed file needs the matching extra key.
+    """
+
+    path: str
+    metadata: StoredFileMetadata
+    taint: str | None
+    _header: StoredFileHeader
+    _body: bytes
+
+    def open(self, key: bytes | None = None) -> bytes:
+        if self.taint is None:
+            return _verified_body(self.path, self._header, self._body)
+        if key is None:
+            raise ValueError(f"Stored file {self.path} is sealed under an extra key")
+        try:
+            plaintext = open_stored_body(key, self._body)
+        except Exception as error:
+            raise ValueError(f"Stored file {self.path} did not open with the presented key") from error
+        return _verified_body(self.path, self._header, plaintext)
 
 
 class Interocitor:
@@ -649,7 +685,9 @@ class Interocitor:
         path: str,
         data: bytes | bytearray | memoryview | str,
         content_type: str | None = None,
+        seal: FileSeal | None = None,
     ) -> StoredFileMetadata:
+        """Store bytes; with ``seal`` the body is wrapped under the extra key first."""
         await self.init()
         adapter = self._require_adapter("put_file")
         file_path = self._stored_file_path(path)
@@ -658,11 +696,16 @@ class Interocitor:
             size=len(plaintext),
             digest=hashlib.sha256(plaintext).hexdigest(),
             content_type=content_type,
+            taint=seal.taint if seal is not None else None,
         )
-        stored = self._encode_bytes(encode_stored_frame(header, plaintext))
+        body = seal_stored_body(seal, plaintext) if seal is not None else plaintext
+        stored = self._encode_bytes(encode_stored_frame(header, body))
+        seal_guard = self._file_guard(seal.key, file_path) if seal is not None else None
         put_stored = getattr(adapter, "put_stored_file", None)
         if callable(put_stored):
-            metadata = await put_stored(file_path, stored, uploaded_by_device_id=self._device_id)
+            metadata = await put_stored(
+                file_path, stored, uploaded_by_device_id=self._device_id, seal_guard=seal_guard
+            )
         else:
             await adapter.ensure_folder(f"{self._paths('put_file').root}/files")
             await adapter.write_file(file_path, stored)
@@ -679,23 +722,40 @@ class Interocitor:
         return self._describe_stored_file(metadata, header)
 
     async def get_file(self, path: str) -> bytes:
+        """Read an unsealed file; sealed files go through :meth:`open_file`."""
         await self.init()
         _, header, body = await self._open_stored_file(path, "get_file")
         if header.taint is not None:
             raise ValueError(f"Stored file {path} is sealed under an extra key")
-        if hashlib.sha256(body).hexdigest() != header.digest:
-            raise ValueError(f"Stored file {path} failed its digest check")
-        return body
+        return _verified_body(path, header, body)
 
-    async def delete_file(self, path: str) -> None:
+    async def open_file(self, path: str) -> SealedFile:
+        """Download a file once and open its body later, with the extra key if sealed."""
+        await self.init()
+        metadata, header, body = await self._open_stored_file(path, "open_file")
+        return SealedFile(
+            path=path,
+            metadata=self._describe_stored_file(metadata, header),
+            taint=header.taint,
+            _header=header,
+            _body=body,
+        )
+
+    async def delete_file(self, path: str, seal: FileSeal | None = None) -> None:
+        """Delete a file; a sealed file needs its seal so the remote's guard matches."""
         await self.init()
         adapter = self._require_adapter("delete_file")
         file_path = self._stored_file_path(path)
+        seal_guard = self._file_guard(seal.key, file_path) if seal is not None else None
         deleter = getattr(adapter, "delete_stored_file", None)
         if callable(deleter):
-            await deleter(file_path)
+            await deleter(file_path, seal_guard=seal_guard)
         else:
             await adapter.delete_file(file_path)
+
+    @staticmethod
+    def _file_guard(seal_key: bytes, file_path: str) -> str:
+        return derive_file_guard(seal_key, file_path.rsplit("/", 1)[-1])
 
     async def get_file_metadata(self, path: str) -> StoredFileMetadata | None:
         """Read the stored object; its description lives inside the frame."""

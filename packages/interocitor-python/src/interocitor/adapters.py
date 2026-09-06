@@ -9,6 +9,7 @@ backend's richer stored-file operations when it provides them.
 
 from __future__ import annotations
 
+import hmac
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -136,6 +137,7 @@ class MemoryAdapter:
     def __init__(self) -> None:
         self._files: dict[str, tuple[bytes, str]] = {}
         self._stored: dict[str, StoredFileMetadata] = {}
+        self._seal_guards: dict[str, str] = {}
         self._folders: set[str] = set()
         self._ensured: set[str] = set()
         self._authenticated = False
@@ -203,9 +205,15 @@ class MemoryAdapter:
         data: bytes | str,
         *,
         uploaded_by_device_id: str | None = None,
+        seal_guard: str | None = None,
     ) -> StoredFileMetadata:
         bytes_data = data.encode("utf-8") if isinstance(data, str) else bytes(data)
+        self._require_seal_guard(path, seal_guard)
         await self.write_file(path, bytes_data)
+        if seal_guard is None:
+            self._seal_guards.pop(path, None)
+        else:
+            self._seal_guards[path] = seal_guard
         now = _now()
         metadata = StoredFileMetadata(
             name=path.rsplit("/", 1)[-1],
@@ -229,8 +237,18 @@ class MemoryAdapter:
             )
         return data
 
-    async def delete_stored_file(self, path: str) -> None:
+    async def delete_stored_file(self, path: str, *, seal_guard: str | None = None) -> None:
+        self._require_seal_guard(path, seal_guard)
         await self.delete_file(path)
+        self._seal_guards.pop(path, None)
+        self._stored.pop(path, None)
+
+    def _require_seal_guard(self, path: str, presented: str | None) -> None:
+        stored = self._seal_guards.get(path)
+        if stored is None:
+            return
+        if presented is None or not hmac.compare_digest(stored, presented):
+            raise PermissionError(f"Stored file {path} is sealed; its key is required to overwrite or delete it")
 
     async def get_stored_file_metadata(self, path: str) -> StoredFileMetadata | None:
         if path in self._stored:
@@ -243,6 +261,11 @@ class MemoryAdapter:
     def dump(self) -> dict[str, bytes]:
         """Test helper returning a copy of the remote object namespace."""
         return {path: data for path, (data, _modified) in self._files.items()}
+
+
+def _seal_guard_header(seal_guard: str | None) -> dict[str, str]:
+    """The worker keeps this with the object and demands it on overwrite or delete."""
+    return {} if seal_guard is None else {"X-Interocitor-Seal-Guard": seal_guard}
 
 
 class CloudflareAdapter:
@@ -401,12 +424,14 @@ class CloudflareAdapter:
         data: bytes | str,
         *,
         uploaded_by_device_id: str | None = None,
+        seal_guard: str | None = None,
     ) -> StoredFileMetadata:
         bytes_data = data.encode("utf-8") if isinstance(data, str) else bytes(data)
         headers = self._headers(
             {
                 "Content-Type": "application/octet-stream",
                 "X-Interocitor-Device-Id": uploaded_by_device_id or "",
+                **_seal_guard_header(seal_guard),
             }
         )
         response = await (await self._http()).put(self._file_url(path, stored=True), headers=headers, content=bytes_data)
@@ -418,8 +443,10 @@ class CloudflareAdapter:
         self._raise(response, f"GET stored file {path}")
         return response.content
 
-    async def delete_stored_file(self, path: str) -> None:
-        response = await (await self._http()).delete(self._file_url(path, stored=True), headers=self._headers())
+    async def delete_stored_file(self, path: str, *, seal_guard: str | None = None) -> None:
+        response = await (await self._http()).delete(
+            self._file_url(path, stored=True), headers=self._headers(_seal_guard_header(seal_guard))
+        )
         if not response.is_success and response.status_code != 404:
             self._raise(response, f"DELETE stored file {path}")
 

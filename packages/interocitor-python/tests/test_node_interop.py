@@ -26,6 +26,15 @@ import unittest
 from typing import Any
 
 from interocitor.crypto import decrypt_bytes, decrypt_entry, encrypt_bytes, encrypt_entry
+from interocitor.stored_file import (
+    FileSeal,
+    StoredFileHeader,
+    derive_file_guard,
+    derive_file_path_key,
+    encode_stored_frame,
+    hide_file_path,
+    seal_stored_body,
+)
 from interocitor.types import Manifest, MeshChangePayload, MeshSnapshotPayload
 
 
@@ -197,6 +206,35 @@ process.stdout.write(JSON.stringify({
 """
 
 
+_NODE_OPEN_PYTHON_STORED_FILE = r"""
+import { readFileSync } from "node:fs";
+import { webcrypto } from "node:crypto";
+import { pathToFileURL } from "node:url";
+import path from "node:path";
+
+if (!globalThis.crypto) globalThis.crypto = webcrypto;
+
+const dist = process.env.INTEROCITOR_CORE_DIST;
+const encryption = await import(pathToFileURL(path.join(dist, "crypto/encryption.js")).href);
+const storedFile = await import(pathToFileURL(path.join(dist, "core/stored-file.js")).href);
+const input = JSON.parse(readFileSync(0, "utf8"));
+const meshKey = await encryption.importKeyRaw(Uint8Array.from(Buffer.from(input.meshKey, "base64")));
+const sealKey = await encryption.importKeyRaw(Uint8Array.from(Buffer.from(input.sealKey, "base64")));
+const pathKey = await storedFile.deriveFilePathKey(meshKey);
+const objectName = await storedFile.hideFilePath(pathKey, input.path);
+const frame = await storedFile.openStoredFrame(meshKey, Uint8Array.from(Buffer.from(input.stored, "base64")));
+const { header, body } = storedFile.decodeStoredFrame(frame);
+const plaintext = await encryption.decryptBytes(sealKey, body);
+
+process.stdout.write(JSON.stringify({
+  objectName,
+  guard: await storedFile.deriveFileGuard(sealKey, objectName),
+  header,
+  plaintext: Buffer.from(plaintext).toString("utf8"),
+}));
+"""
+
+
 def _compact_json(value: object) -> str:
     """Use the JSON spelling used by ``JSON.stringify`` for these vectors."""
 
@@ -288,6 +326,39 @@ class NodeCoreInteropTests(unittest.TestCase):
         manifest_body = {key: value for key, value in manifest_wire.items() if key != "contentHash"}
         expected_hash = "sha256:" + hashlib.sha256(_compact_json(manifest_body).encode("utf-8")).hexdigest()
         self.assertEqual(manifest_wire["contentHash"], expected_hash)
+
+    def test_node_core_opens_python_sealed_stored_file(self) -> None:
+        """Node finds, opens, and guards a durable file Python sealed and stored."""
+
+        seal = FileSeal(taint="project:alpha", key=bytes(range(32, 64)))
+        app_path = "reports/alpha.txt"
+        plaintext = b"sealed by python"
+        header = StoredFileHeader(
+            size=len(plaintext),
+            digest=hashlib.sha256(plaintext).hexdigest(),
+            content_type="text/plain",
+            taint=seal.taint,
+        )
+        stored = encrypt_bytes(_RAW_KEY, encode_stored_frame(header, seal_stored_body(seal, plaintext)))
+        object_name = hide_file_path(derive_file_path_key(_RAW_KEY), app_path)
+
+        opened = self._run_node(
+            _NODE_OPEN_PYTHON_STORED_FILE,
+            {
+                "meshKey": base64.b64encode(_RAW_KEY).decode("ascii"),
+                "sealKey": base64.b64encode(seal.key).decode("ascii"),
+                "path": app_path,
+                "stored": base64.b64encode(stored).decode("ascii"),
+            },
+        )
+
+        self.assertEqual(opened["objectName"], object_name)
+        self.assertEqual(opened["guard"], derive_file_guard(seal.key, object_name))
+        self.assertEqual(
+            opened["header"],
+            {"size": len(plaintext), "digest": header.digest, "contentType": "text/plain", "taint": seal.taint},
+        )
+        self.assertEqual(opened["plaintext"], plaintext.decode("utf-8"))
 
     def test_node_core_decrypts_python_protocol_artifacts(self) -> None:
         """Node accepts Python AES-GCM envelopes containing its own wire shapes."""

@@ -25,6 +25,7 @@ from .engine import (
     MeshEncryptionMismatchError,
     MeshMismatchError,
     MeshNotFoundError,
+    SealedFile,
     Table,
 )
 from .hlc import (
@@ -73,6 +74,7 @@ from .schema import (
     normalize_schema,
     types,
 )
+from .stored_file import FileSeal
 from .types import (
     ChangeEntry,
     ChangesHead,
@@ -100,6 +102,7 @@ __all__ = [
     "DatabaseSchema",
     "DeleteOp",
     "EncryptedEnvelope",
+    "FileSeal",
     "FileEntry",
     "HLC",
     "HLC_MAX_FUTURE_SKEW_MS",
@@ -135,6 +138,7 @@ __all__ = [
     "SchemaError",
     "SchemaField",
     "SchemaFieldKind",
+    "SealedFile",
     "Snapshot",
     "StorageAdapter",
     "StoredFileMetadata",

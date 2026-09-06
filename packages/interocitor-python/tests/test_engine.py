@@ -8,6 +8,7 @@ import json
 import unittest
 
 from interocitor import (
+    FileSeal,
     Interocitor,
     InterocitorError,
     MemoryAdapter,
@@ -219,6 +220,64 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(metadata.digest if metadata else None, hashlib.sha256(bytes((0, 1, 2, 255))).hexdigest())
             self.assertEqual(metadata.path if metadata else None, stored_paths[0])
             await second.disconnect()
+
+        asyncio.run(scenario())
+
+    def test_sealed_file_needs_its_extra_key_to_open_replace_or_delete(self) -> None:
+        async def scenario() -> None:
+            adapter = MemoryAdapter()
+            portable_key = generate_portable_key()
+            mesh = Interocitor(
+                adapter,
+                remote_path="/sealed-mesh",
+                key_source=PortablePassphraseKeySource(portable_key=portable_key, generate_if_missing=False),
+                schema=_SCHEMA,
+                device_id="019fa13e-cfab-7a91-b759-ca02e12e69d3",
+                require_encryption=True,
+            )
+            await mesh.connect()
+            seal = FileSeal(taint="project:alpha", key=bytes(range(32)))
+            other = FileSeal(taint="project:beta", key=bytes(range(32, 64)))
+            payload = b"sealed report"
+            metadata = await mesh.put_file("reports/alpha.txt", payload, "text/plain", seal=seal)
+            self.assertEqual(metadata.taint, "project:alpha")
+            self.assertEqual(metadata.plaintext_size, len(payload))
+
+            remote = adapter.dump()
+            stored_paths = [key for key in remote if key.startswith("/sealed-mesh/files/")]
+            self.assertEqual(len(stored_paths), 1)
+            self.assertNotIn(b"project:alpha", remote[stored_paths[0]])
+            self.assertNotIn(payload, remote[stored_paths[0]])
+
+            with self.assertRaisesRegex(ValueError, "sealed under an extra key"):
+                await mesh.get_file("reports/alpha.txt")
+            sealed = await mesh.open_file("reports/alpha.txt")
+            self.assertEqual(sealed.taint, "project:alpha")
+            self.assertEqual(sealed.metadata.content_type, "text/plain")
+            with self.assertRaisesRegex(ValueError, "sealed under an extra key"):
+                sealed.open()
+            with self.assertRaisesRegex(ValueError, "did not open"):
+                sealed.open(other.key)
+            self.assertEqual(sealed.open(seal.key), payload)
+
+            with self.assertRaisesRegex(PermissionError, "is sealed"):
+                await mesh.put_file("reports/alpha.txt", b"overwrite", "text/plain")
+            with self.assertRaisesRegex(PermissionError, "is sealed"):
+                await mesh.put_file("reports/alpha.txt", b"overwrite", "text/plain", seal=other)
+            with self.assertRaisesRegex(PermissionError, "is sealed"):
+                await mesh.delete_file("reports/alpha.txt")
+            self.assertEqual((await mesh.open_file("reports/alpha.txt")).open(seal.key), payload)
+
+            await mesh.put_file("reports/alpha.txt", b"second", "text/plain", seal=seal)
+            self.assertEqual((await mesh.open_file("reports/alpha.txt")).open(seal.key), b"second")
+            await mesh.delete_file("reports/alpha.txt", seal=seal)
+            self.assertIsNone(await mesh.get_file_metadata("reports/alpha.txt"))
+
+            plain = await mesh.put_file("reports/plain.txt", b"plain", "text/plain")
+            self.assertIsNone(plain.taint)
+            self.assertEqual((await mesh.open_file("reports/plain.txt")).open(), b"plain")
+            await mesh.delete_file("reports/plain.txt")
+            await mesh.disconnect()
 
         asyncio.run(scenario())
 

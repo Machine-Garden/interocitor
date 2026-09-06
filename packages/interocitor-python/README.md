@@ -289,7 +289,7 @@ cannot acknowledge a completed task on the application's behalf.
 | mesh.table(name)                                           | Returns a Table handle for row/get, query, where, put, patch, add, and delete.                                                                                |
 | await mesh.pull()                                          | Merges available remote row changes after a connection has been established.                                                                                  |
 | await mesh.flush()                                         | Uploads queued local row changes. Call it before an external success acknowledgement.                                                                         |
-| await mesh.put_file/get_file/delete_file/get_file_metadata | Reads or writes durable bytes directly through the adapter; a key source encrypts their contents.                                                             |
+| await mesh.put_file/get_file/open_file/delete_file/get_file_metadata | Reads or writes durable bytes directly through the adapter; a key source encrypts their contents, and a `FileSeal` wraps a file under an extra key with a guard the remote enforces. |
 | await mesh.compact()                                       | Publishes a snapshot, removes its exactly covered changes and superseded snapshots, and retains tombstones. Designate one checkpoint writer per managed mesh. |
 | await mesh.disconnect()                                    | Ends the session and clears the default volatile local store.                                                                                                 |
 
@@ -322,7 +322,7 @@ above deliberately match core. Its runtime scope is intentionally smaller:
 
 | Available here                                                                                                                           | Not provided by this package                                                                                                                                                                           |
 | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Memory and Cloudflare adapters, volatile local state, encrypted rows/files, explicit pull/flush, manual compaction, and phrase recovery. | Browser local stores, durable Python local storage, pairing, replica replication, background polling, relay invalidation, query caches/row handles, extra-key sealed files, and a task-claim protocol. |
+| Memory and Cloudflare adapters, volatile local state, encrypted rows/files, explicit pull/flush, manual compaction, and phrase recovery. | Browser local stores, durable Python local storage, pairing, replica replication, background polling, relay invalidation, query caches/row handles, and a task-claim protocol.                          |
 
 For remote adapter behavior, artifact layout, compaction rules, and the full
 metadata/security model, use the corresponding core documentation:

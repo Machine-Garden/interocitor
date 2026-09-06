@@ -282,16 +282,16 @@ cannot acknowledge a completed task on the application's behalf.
 
 ## Lifecycle, rows, and files
 
-| Call                                                       | Behavior                                                                                                                                                      |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| await mesh.init()                                          | Opens the local store and resolves the key source. It does not contact the adapter.                                                                           |
-| await mesh.connect() or async with mesh                    | Authenticates, loads or joins the mesh, pulls changes, and flushes the local outbox.                                                                          |
-| mesh.table(name)                                           | Returns a Table handle for row/get, query, where, put, patch, add, and delete.                                                                                |
-| await mesh.pull()                                          | Merges available remote row changes after a connection has been established.                                                                                  |
-| await mesh.flush()                                         | Uploads queued local row changes. Call it before an external success acknowledgement.                                                                         |
+| Call                                                                 | Behavior                                                                                                                                                                             |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| await mesh.init()                                                    | Opens the local store and resolves the key source. It does not contact the adapter.                                                                                                  |
+| await mesh.connect() or async with mesh                              | Authenticates, loads or joins the mesh, pulls changes, and flushes the local outbox.                                                                                                 |
+| mesh.table(name)                                                     | Returns a Table handle for row/get, query, where, put, patch, add, and delete.                                                                                                       |
+| await mesh.pull()                                                    | Merges available remote row changes after a connection has been established.                                                                                                         |
+| await mesh.flush()                                                   | Uploads queued local row changes. Call it before an external success acknowledgement.                                                                                                |
 | await mesh.put_file/get_file/open_file/delete_file/get_file_metadata | Reads or writes durable bytes directly through the adapter; a key source encrypts their contents, and a `FileSeal` wraps a file under an extra key with a guard the remote enforces. |
-| await mesh.compact()                                       | Publishes a snapshot, removes its exactly covered changes and superseded snapshots, and retains tombstones. Designate one checkpoint writer per managed mesh. |
-| await mesh.disconnect()                                    | Ends the session and clears the default volatile local store.                                                                                                 |
+| await mesh.compact()                                                 | Publishes a snapshot, removes its exactly covered changes and superseded snapshots, and retains tombstones. Designate one checkpoint writer per managed mesh.                        |
+| await mesh.disconnect()                                              | Ends the session and clears the default volatile local store.                                                                                                                        |
 
 Rows may be created or patched after init() and before connect(). Snapshot
 rehydration rebases that queued work. Every immutable change remains eligible
@@ -320,9 +320,9 @@ Python uses the version-3 manifest, change, snapshot, HLC, and AES-GCM envelope
 formats used by @interocitor/core. The public schema shape and merge defaults
 above deliberately match core. Its runtime scope is intentionally smaller:
 
-| Available here                                                                                                                           | Not provided by this package                                                                                                                                                                           |
-| ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Memory and Cloudflare adapters, volatile local state, encrypted rows/files, explicit pull/flush, manual compaction, and phrase recovery. | Browser local stores, durable Python local storage, pairing, replica replication, background polling, relay invalidation, query caches/row handles, and a task-claim protocol.                          |
+| Available here                                                                                                                           | Not provided by this package                                                                                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Memory and Cloudflare adapters, volatile local state, encrypted rows/files, explicit pull/flush, manual compaction, and phrase recovery. | Browser local stores, durable Python local storage, pairing, replica replication, background polling, relay invalidation, query caches/row handles, and a task-claim protocol. |
 
 For remote adapter behavior, artifact layout, compaction rules, and the full
 metadata/security model, use the corresponding core documentation:

@@ -123,8 +123,9 @@ export function HomeLanding() {
               <div>
                 <dt>Something like Linear</dt>
                 <dd>
-                  Every endpoint holds the whole row replica, so lists, filters, and edits are local
-                  reads. The network moves changes; it does not gate them.
+                  Speed. Every row is already on the device, so lists, filters, and keyboard-driven
+                  edits never wait on a round trip. Scale by giving each team or project its own
+                  mesh, kept as a connected store, so a session opens only what it needs.
                 </dd>
               </div>
               <div>
@@ -163,10 +164,11 @@ export function HomeLanding() {
                 </dd>
               </div>
               <div>
-                <dt>A worker fleet</dt>
+                <dt>Trusted automation</dt>
                 <dd>
-                  A Python worker reads a task row, does the work, and writes results back through
-                  the same encrypted mesh as the browser clients.
+                  A worker or agent is just another trusted endpoint. It holds the key, reads task
+                  rows, does the work, and writes results back, from a browser, a server, or a
+                  script.
                 </dd>
               </div>
               <div>
@@ -181,7 +183,8 @@ export function HomeLanding() {
             <p className="build-list-note">
               The wrong tool when the product needs server-side queries over plaintext, per-row
               access control inside one dataset, or central transactions. Every endpoint holds the
-              entire mesh, and the remote still sees sizes and timing.
+              entire mesh it opens, so big datasets are split into meshes rather than filtered per
+              row, and the remote still sees sizes and timing.
             </p>
           </div>
         </section>

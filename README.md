@@ -26,25 +26,25 @@ local copy of the rows, files stay byte-exact and digest-verified, and the
 remote stores what it cannot read. Those guarantees are enough for a family of
 products that people already trust today:
 
-| Build something like | Because                                                                                                                                                                               |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Linear               | Every endpoint holds the whole row replica, so lists, filters, and edits are local reads. The network moves changes; it does not gate them.                                           |
-| Obsidian             | The folder tree is rows that merge; note bodies are durable files named by a digest, so structure converges and content stays exact.                                                  |
-| Signal               | The mailbox stores and returns encrypted artifacts. With a mesh key it never receives message plaintext, and object names are keyed hashes.                                           |
-| Cryptomator          | Files are encrypted before the WebDAV, Google Drive, or iCloud folder adapter sees them, on storage the user already pays for and owns.                                               |
-| Bitwarden            | A portable key, device pairing, and recovery phrases are built in, so a vault syncs across devices without a custodial server.                                                        |
-| A field-data app     | Inspections and surveys are written offline and merged field by field later; two workers on one report keep both sets of edits.                                                       |
-| A worker fleet       | The Python package reads a task row, does the work, and writes results back through the same encrypted mesh as the browser clients.                                                   |
-| A case-file system   | A file sealed under an extra key lives inside a shared mesh: the rows stay shared, only the key holders open the bytes, and the seal guards the object against overwrite or deletion. |
+| Build something like | Because                                                                                                                                                                                                                                                                      |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linear               | Speed. Every row is already on the device, so lists, filters, and keyboard-driven edits never wait on a round trip. Scale by giving each team or project its own mesh and keeping its credentials as a connected store in the parent, so a session opens only what it needs. |
+| Obsidian             | The folder tree is rows that merge; note bodies are durable files named by a digest, so structure converges and content stays exact.                                                                                                                                         |
+| Signal               | The mailbox stores and returns encrypted artifacts. With a mesh key it never receives message plaintext, and object names are keyed hashes.                                                                                                                                  |
+| Cryptomator          | Files are encrypted before the WebDAV, Google Drive, or iCloud folder adapter sees them, on storage the user already pays for and owns.                                                                                                                                      |
+| Bitwarden            | A portable key, device pairing, and recovery phrases are built in, so a vault syncs across devices without a custodial server.                                                                                                                                               |
+| A field-data app     | Inspections and surveys are written offline and merged field by field later; two workers on one report keep both sets of edits.                                                                                                                                              |
+| Trusted automation   | A worker or agent is just another trusted endpoint. It holds the key, reads task rows, does the work, and writes results back, from a browser, a server process, or a script.                                                                                                |
+| A case-file system   | A file sealed under an extra key lives inside a shared mesh: the rows stay shared, only the key holders open the bytes, and the seal guards the object against overwrite or deletion.                                                                                        |
 
 The common thread: the users can each hold a full copy, the server should not
 be able to read it, and there is no server code to write, host, or defend.
 
 It is the wrong tool when the product needs server-side queries or reporting
 over plaintext, per-row access control inside one dataset, or central
-transactions. Every endpoint holds the entire mesh, so separate audiences need
-separate meshes, and the remote can still see sizes, timing, and request
-identity. See [data boundaries](docs/site/content/data-boundaries.md) before
+transactions. Every endpoint holds the entire mesh it opens, so large or
+many-audience datasets are split into meshes rather than filtered per row, and
+the remote can still see sizes, timing, and request identity. See [data boundaries](docs/site/content/data-boundaries.md) before
 deciding.
 
 ## Data surfaces

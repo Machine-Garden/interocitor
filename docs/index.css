@@ -2171,6 +2171,58 @@ h1 em {
   line-height: 1.68;
 }
 
+.home-page .build-list {
+  margin-top: 44px;
+}
+
+.home-page .build-list-heading {
+  max-width: 62ch;
+  margin-bottom: 26px;
+}
+
+.home-page .build-list-heading h3 {
+  margin-bottom: 10px;
+  color: var(--ink);
+}
+
+.home-page .build-list-heading p:last-child,
+.home-page .build-list dd,
+.home-page .build-list-note {
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 0.91rem;
+  line-height: 1.68;
+}
+
+.home-page .build-list dl {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin: 0;
+  border-top: 1px solid var(--line-strong);
+  border-left: 1px solid var(--line);
+}
+
+.home-page .build-list dl > div {
+  padding: 22px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.home-page .build-list dt {
+  margin-bottom: 8px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.home-page .build-list dd {
+  margin-left: 0;
+}
+
+.home-page .build-list-note {
+  max-width: 72ch;
+  margin-top: 22px;
+}
+
 .home-page .use-section,
 .home-page .surfaces-summary,
 .home-page .decision-section {
@@ -3029,6 +3081,10 @@ h1 em {
 }
 
 @media (max-width: 980px) {
+  .home-page .build-list dl {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
   .home-page .section-intro,
   .home-page .section-intro.compact-intro,
   .home-page .narrow-layout,
@@ -3066,6 +3122,7 @@ h1 em {
   }
 
   .home-page .reason-grid,
+  .home-page .build-list dl,
   .home-page .task-examples,
   .home-page .surface-cards,
   .home-page .remote-list,

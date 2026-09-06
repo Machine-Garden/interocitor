@@ -19,15 +19,43 @@ that policy does not merge or query protected application records.
 With a non-null key source, clients encrypt payloads before the remote receives
 them. The storage provider can make data available without receiving plaintext.
 
+## What you can build with it
+
+Interocitor is a small set of guarantees: every trusted device holds a full
+local copy of the rows, files stay byte-exact and digest-verified, and the
+remote stores what it cannot read. Those guarantees are enough for a family of
+products that people already trust today:
+
+| Build something like | Because                                                                                                                                                                               |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linear               | Every endpoint holds the whole row replica, so lists, filters, and edits are local reads. The network moves changes; it does not gate them.                                           |
+| Obsidian             | The folder tree is rows that merge; note bodies are durable files named by a digest, so structure converges and content stays exact.                                                  |
+| Signal               | The mailbox stores and returns encrypted artifacts. With a mesh key it never receives message plaintext, and object names are keyed hashes.                                           |
+| Cryptomator          | Files are encrypted before the WebDAV, Google Drive, or iCloud folder adapter sees them, on storage the user already pays for and owns.                                               |
+| Bitwarden            | A portable key, device pairing, and recovery phrases are built in, so a vault syncs across devices without a custodial server.                                                        |
+| A field-data app     | Inspections and surveys are written offline and merged field by field later; two workers on one report keep both sets of edits.                                                       |
+| A worker fleet       | The Python package reads a task row, does the work, and writes results back through the same encrypted mesh as the browser clients.                                                   |
+| A case-file system   | A file sealed under an extra key lives inside a shared mesh: the rows stay shared, only the key holders open the bytes, and the seal guards the object against overwrite or deletion. |
+
+The common thread: the users can each hold a full copy, the server should not
+be able to read it, and there is no server code to write, host, or defend.
+
+It is the wrong tool when the product needs server-side queries or reporting
+over plaintext, per-row access control inside one dataset, or central
+transactions. Every endpoint holds the entire mesh, so separate audiences need
+separate meshes, and the remote can still see sizes, timing, and request
+identity. See [data boundaries](docs/site/content/data-boundaries.md) before
+deciding.
+
 ## Data surfaces
 
 Interocitor exposes two related surfaces with different availability
 guarantees:
 
-| Surface       | Behavior                                                                                                                           | Remote storage                                                    |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| CRDT rows     | Reads and writes use a caller-supplied local store. An outbox carries encoded changes when transport is available.                 | Changes and snapshots are merged and compacted by clients.        |
-| Durable files | `putFile`, `getFile`, `openFile`, and `deleteFile` call the remote adapter directly. There is no core file cache or offline queue. | File bytes remain at their app path until overwritten or deleted. |
+| Surface       | Behavior                                                                                                                           | Remote storage                                                           |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| CRDT rows     | Reads and writes use a caller-supplied local store. An outbox carries encoded changes when transport is available.                 | Changes and snapshots are merged and compacted by clients.               |
+| Durable files | `putFile`, `getFile`, `openFile`, and `deleteFile` call the remote adapter directly. There is no core file cache or offline queue. | File bytes stay under a hidden object name until overwritten or deleted. |
 
 With a non-null key source, row payloads and file bytes are encrypted before
 upload. Storage still observes transport metadata such as object names, sizes,

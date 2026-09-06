@@ -109,6 +109,81 @@ export function HomeLanding() {
               </p>
             </article>
           </div>
+
+          <div className="shell build-list" aria-labelledby="build-title">
+            <div className="build-list-heading">
+              <p className="site-kicker">What you can build</p>
+              <h3 id="build-title">The same few guarantees carry products people already trust.</h3>
+              <p>
+                Every device holds a full local copy, files stay byte-exact, and the remote stores
+                what it cannot read. That is enough for a whole family of apps.
+              </p>
+            </div>
+            <dl>
+              <div>
+                <dt>Something like Linear</dt>
+                <dd>
+                  Every endpoint holds the whole row replica, so lists, filters, and edits are local
+                  reads. The network moves changes; it does not gate them.
+                </dd>
+              </div>
+              <div>
+                <dt>Something like Obsidian</dt>
+                <dd>
+                  The folder tree is rows that merge. Note bodies are durable files named by a
+                  digest, so structure converges and content stays exact.
+                </dd>
+              </div>
+              <div>
+                <dt>Something like Signal</dt>
+                <dd>
+                  The mailbox stores and returns encrypted artifacts. It never receives message
+                  plaintext, and even object names are keyed hashes.
+                </dd>
+              </div>
+              <div>
+                <dt>Something like Cryptomator</dt>
+                <dd>
+                  Files are encrypted before the WebDAV, Google Drive, or iCloud folder adapter sees
+                  them, on storage the user already pays for and owns.
+                </dd>
+              </div>
+              <div>
+                <dt>Something like Bitwarden</dt>
+                <dd>
+                  A portable key, device pairing, and recovery phrases are built in, so a vault
+                  syncs across devices without a custodial server.
+                </dd>
+              </div>
+              <div>
+                <dt>A field-data app</dt>
+                <dd>
+                  Inspections and surveys are written offline and merged field by field later. Two
+                  workers on one report keep both sets of edits.
+                </dd>
+              </div>
+              <div>
+                <dt>A worker fleet</dt>
+                <dd>
+                  A Python worker reads a task row, does the work, and writes results back through
+                  the same encrypted mesh as the browser clients.
+                </dd>
+              </div>
+              <div>
+                <dt>A case-file system</dt>
+                <dd>
+                  A file sealed under an extra key lives inside a shared mesh: rows stay shared,
+                  only the key holders open the bytes, and the seal guards the object against
+                  overwrite.
+                </dd>
+              </div>
+            </dl>
+            <p className="build-list-note">
+              The wrong tool when the product needs server-side queries over plaintext, per-row
+              access control inside one dataset, or central transactions. Every endpoint holds the
+              entire mesh, and the remote still sees sizes and timing.
+            </p>
+          </div>
         </section>
 
         <section id="use-cases" className="site-section use-section" aria-labelledby="use-title">

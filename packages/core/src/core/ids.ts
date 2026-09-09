@@ -7,6 +7,8 @@
  * Row IDs:    UUID v4/v7 with optional prefix — client-generated.
  */
 
+import { bytesToBase64Url } from "../crypto/base64.ts";
+
 // ─── UUIDv7 ──────────────────────────────────────────────────────────
 
 /**
@@ -132,11 +134,7 @@ async function computeTag(data: string, secret: CryptoKey): Promise<string> {
   return base64url(bytes);
 }
 
-function base64url(bytes: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCodePoint(bytes[i]!);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
-}
+const base64url = bytesToBase64Url;
 
 /** Constant-time string comparison to prevent timing attacks on tag. */
 function timingSafeEqual(a: string, b: string): boolean {

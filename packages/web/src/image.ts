@@ -61,6 +61,20 @@ function inferImageContentType(path: string, explicit?: string | null): string {
   }
 }
 
+/**
+ * Decode a data URL body without building a binary string one character at
+ * a time; a pasted photo can be megabytes of base64.
+ */
+function decodeBase64Payload(payload: string): Uint8Array {
+  const native = (Uint8Array as unknown as { fromBase64?: (text: string) => Uint8Array })
+    .fromBase64;
+  if (typeof native === "function") return native.call(Uint8Array, payload);
+  const binary = atob(payload);
+  const data = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) data[i] = binary.codePointAt(i)!;
+  return data;
+}
+
 function parseImageDataUrl(dataUrl: string): { data: Uint8Array; contentType?: string } | null {
   const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(dataUrl);
   if (!match) return null;
@@ -68,10 +82,7 @@ function parseImageDataUrl(dataUrl: string): { data: Uint8Array; contentType?: s
   const isBase64 = Boolean(match[2]);
   const payload = match[3] ?? "";
   if (isBase64) {
-    const binary = atob(payload.replaceAll(/\s+/g, ""));
-    const data = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i += 1) data[i] = binary.codePointAt(i)!;
-    return { data, contentType };
+    return { data: decodeBase64Payload(payload.replaceAll(/\s+/g, "")), contentType };
   }
   return { data: new TextEncoder().encode(decodeURIComponent(payload)), contentType };
 }

@@ -55,6 +55,7 @@
  *   https://yourapp.com/pair#hs=<base64url>
  */
 
+import { base64UrlToBytes, bytesToBase64Url } from "../crypto/base64.ts";
 import { snapshotPairingCapabilities, type PairingCapabilities } from "./capabilities.ts";
 import { assertValidHandshakeId } from "./handshake-id.ts";
 
@@ -158,26 +159,12 @@ export function encodeQRPayload(payload: HandshakeQRPayload): string {
     throw new Error("Invalid handshake QR payload");
   }
   const json = JSON.stringify(stablePayload);
-  const bytes = new TextEncoder().encode(json);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCodePoint(bytes[i]);
-  }
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+  return bytesToBase64Url(new TextEncoder().encode(json));
 }
 
 /** Decode a compact URL-safe base64 string back to HandshakeQRPayload. */
 export function decodeQRPayload(encoded: string): HandshakeQRPayload {
-  const padded = encoded.replaceAll("-", "+").replaceAll("_", "/");
-  const pad = (4 - (padded.length % 4)) % 4;
-  const b64 = padded + "=".repeat(pad);
-
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.codePointAt(i)!;
-  }
-  const json = new TextDecoder().decode(bytes);
+  const json = new TextDecoder().decode(base64UrlToBytes(encoded));
   const payload = JSON.parse(json) as unknown;
 
   try {

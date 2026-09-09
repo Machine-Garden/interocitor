@@ -8,6 +8,7 @@
  * lookup locator and derives a KEK for encrypted mesh credentials.
  */
 
+import { base64UrlToBytes, bytesToBase64Url } from "./base64.ts";
 import type { StorageAdapter } from "../core/types.ts";
 
 const encoder = new TextEncoder();
@@ -68,18 +69,8 @@ export interface RecoveryStorageAdapter {
   writeRecoveryWrapper(locator: string, data: Uint8Array): Promise<void>;
 }
 
-function toBase64Url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCodePoint(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-}
-
-function fromBase64Url(value: string): Uint8Array {
-  const padded =
-    value.replaceAll("-", "+").replaceAll("_", "/") + "=".repeat((4 - (value.length % 4)) % 4);
-  const binary = atob(padded);
-  return Uint8Array.from(binary, (char) => char.codePointAt(0)!);
-}
+const toBase64Url = bytesToBase64Url;
+const fromBase64Url = base64UrlToBytes;
 
 function asBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;

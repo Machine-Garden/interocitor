@@ -75,6 +75,7 @@
  *   short-lived capabilities.
  */
 
+import { base64UrlToBytes, bytesToBase64Url } from "../crypto/base64.ts";
 import type { StorageAdapter } from "../core/types.ts";
 import {
   assertPairingCapabilitiesCompatible,
@@ -99,21 +100,8 @@ const WRAP_ALGO = { name: "AES-GCM", length: 256 } as const;
 const IV_LEN = 12;
 const HKDF_INFO = "interocitor-handshake-v1";
 
-function uint8ToB64url(b: Uint8Array): string {
-  let s = "";
-  for (let i = 0; i < b.length; i++) s += String.fromCodePoint(b[i]!);
-  return btoa(s).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-}
-
-function b64urlToUint8(s: string): Uint8Array {
-  const p = s.replaceAll("-", "+").replaceAll("_", "/");
-
-  const pad = (4 - (p.length % 4)) % 4;
-  const bin = atob(p + "=".repeat(pad));
-  const b = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) b[i] = bin.codePointAt(i)!;
-  return b;
-}
+const uint8ToB64url = bytesToBase64Url;
+const b64urlToUint8 = base64UrlToBytes;
 
 function toBuffer(b: Uint8Array): ArrayBuffer {
   return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;

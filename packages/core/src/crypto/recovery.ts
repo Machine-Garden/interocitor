@@ -9,6 +9,7 @@
  */
 
 import { base64UrlToBytes, bytesToBase64Url } from "./base64.ts";
+import { asBufferSource } from "./bytes.ts";
 import type { StorageAdapter } from "../core/types.ts";
 
 const encoder = new TextEncoder();
@@ -72,9 +73,7 @@ export interface RecoveryStorageAdapter {
 const toBase64Url = bytesToBase64Url;
 const fromBase64Url = base64UrlToBytes;
 
-function asBuffer(bytes: Uint8Array): ArrayBuffer {
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-}
+const asBuffer = asBufferSource;
 
 function normalizePhrase(phrase: string): string {
   return phrase.normalize("NFKD").trim().replaceAll(/\s+/g, " ");

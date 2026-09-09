@@ -57,8 +57,26 @@ export function hlcCompare(a: HLC, b: HLC): number {
   return 0;
 }
 
-/** Compare two serialized HLC strings without parsing (fast path). */
+const DASH = 45; // "-"
+
+/**
+ * Compare two serialized HLC strings.
+ *
+ * {@link hlcSerialize} emits a fixed-width timestamp (15 digits) and counter
+ * (4 hex digits) before the node id, so canonical strings order the same way
+ * lexicographically as {@link hlcCompare} orders the parsed values. Strings
+ * that are not in that exact shape (e.g. a counter that overflowed four hex
+ * digits) fall back to parsing.
+ */
 export function hlcCompareStr(a: string, b: string): number {
+  if (
+    a.codePointAt(15) === DASH &&
+    a.codePointAt(20) === DASH &&
+    b.codePointAt(15) === DASH &&
+    b.codePointAt(20) === DASH
+  ) {
+    return a < b ? -1 : a > b ? 1 : 0;
+  }
   return hlcCompare(hlcParse(a), hlcParse(b));
 }
 

@@ -104,18 +104,14 @@ function hex(bytes: ArrayBuffer | Uint8Array): string {
   return Array.from(view, (value) => value.toString(16).padStart(2, "0")).join("");
 }
 
-function arrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-}
-
 async function sha256(data: Uint8Array): Promise<string> {
-  return hex(await crypto.subtle.digest("SHA-256", arrayBuffer(data)));
+  return hex(await crypto.subtle.digest("SHA-256", data as Uint8Array<ArrayBuffer>));
 }
 
 async function hmac(key: Uint8Array, value: string): Promise<Uint8Array> {
   const imported = await crypto.subtle.importKey(
     "raw",
-    arrayBuffer(key),
+    key as Uint8Array<ArrayBuffer>,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],

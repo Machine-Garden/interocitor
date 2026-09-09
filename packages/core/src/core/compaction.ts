@@ -246,10 +246,9 @@ export async function rehydrate(ctx: RehydrateContext): Promise<HLC> {
 
         for (const [tableName, rows] of Object.entries(snapshot.tables)) {
           ctx.knownTables.add(tableName);
-          for (const row of Object.values(rows)) {
-            await ctx.local.putRow(row);
-            rowCount++;
-          }
+          const tableRows = Object.values(rows);
+          await ctx.local.putRows(tableRows);
+          rowCount += tableRows.length;
         }
       },
     );

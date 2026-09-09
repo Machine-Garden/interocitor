@@ -182,8 +182,7 @@ async function importMeshSecretKey(secret?: string): Promise<CryptoKey> {
 async function computeMeshTag(uuid: string, secret: CryptoKey): Promise<string> {
   const sig = await crypto.subtle.sign("HMAC", secret, textEncoder.encode(uuid));
   const tagBytes = new Uint8Array(sig, 0, 8);
-  let binary = "";
-  for (let i = 0; i < tagBytes.length; i++) binary += String.fromCodePoint(tagBytes[i]);
+  const binary = String.fromCodePoint(...tagBytes);
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
@@ -1211,11 +1210,7 @@ async function handleSystemOperation<Env>(
     if (op === "issue-mesh-id") {
       const secret = await importMeshSecretKey(meshSecret);
       const id = uuidv7();
-      const sig = await crypto.subtle.sign("HMAC", secret, textEncoder.encode(id));
-      const tagBytes = new Uint8Array(sig, 0, 8);
-      let binary = "";
-      for (let i = 0; i < tagBytes.length; i++) binary += String.fromCodePoint(tagBytes[i]);
-      const tag = btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+      const tag = await computeMeshTag(id, secret);
       return jsonResponse({ meshId: `${id}.${tag}` });
     }
     if (op === "validate-mesh-id") {
@@ -1226,12 +1221,7 @@ async function handleSystemOperation<Env>(
       const uuid = meshId.slice(0, dot);
       const tag = meshId.slice(dot + 1);
       const secret = await importMeshSecretKey(meshSecret);
-      const sig = await crypto.subtle.sign("HMAC", secret, textEncoder.encode(uuid));
-      const expectedBytes = new Uint8Array(sig, 0, 8);
-      let binary = "";
-      for (let i = 0; i < expectedBytes.length; i++)
-        binary += String.fromCodePoint(expectedBytes[i]!);
-      const expected = btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+      const expected = await computeMeshTag(uuid, secret);
       let result = 0;
       if (tag.length !== expected.length) return jsonResponse({ valid: false });
       for (let i = 0; i < tag.length; i++) result |= tag.codePointAt(i)! ^ expected.codePointAt(i)!;

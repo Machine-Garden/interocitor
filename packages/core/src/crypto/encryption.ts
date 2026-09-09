@@ -18,6 +18,7 @@ import {
   base64UrlToBytes,
   bytesToBase64Url,
 } from "./base64.ts";
+import { asBufferSource } from "./bytes.ts";
 
 const IV_LENGTH = 12; // 96-bit IV for AES-GCM
 const ENVELOPE_VERSION = 1;
@@ -127,66 +128,55 @@ export interface EncryptedEnvelope {
   ct: string; // base64 (includes GCM auth tag)
 }
 
-/** Encrypt a single plaintext string. */
-export async function encryptEntry(key: CryptoKey, plaintext: string): Promise<string> {
+async function sealEnvelope(key: CryptoKey, plaintext: BufferSource): Promise<EncryptedEnvelope> {
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
-  const encoded = new TextEncoder().encode(plaintext);
-
-  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded);
-
-  const envelope: EncryptedEnvelope = {
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext);
+  return {
     v: ENVELOPE_VERSION,
     iv: uint8ToBase64(iv),
     ct: uint8ToBase64(new Uint8Array(ciphertext)),
   };
+}
 
+function parseEnvelope(text: string): EncryptedEnvelope {
+  const envelope: EncryptedEnvelope = JSON.parse(text);
+  if (envelope.v !== ENVELOPE_VERSION) {
+    throw new Error(`Unknown envelope version: ${envelope.v}`);
+  }
+  return envelope;
+}
+
+async function openEnvelope(
+  key: CryptoKey,
+  envelope: EncryptedEnvelope,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const iv = base64ToUint8(envelope.iv);
+  const ct = base64ToUint8(envelope.ct);
+  const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
+  return new Uint8Array(decrypted);
+}
+
+/** Encrypt a single plaintext string. */
+export async function encryptEntry(key: CryptoKey, plaintext: string): Promise<string> {
+  const envelope = await sealEnvelope(key, new TextEncoder().encode(plaintext));
   return JSON.stringify(envelope);
 }
 
 /** Decrypt a single encrypted envelope back to plaintext. */
 export async function decryptEntry(key: CryptoKey, envelopeStr: string): Promise<string> {
-  const bytes = await decryptBytes(key, new TextEncoder().encode(envelopeStr));
+  const bytes = await openEnvelope(key, parseEnvelope(envelopeStr));
   return new TextDecoder().decode(bytes);
 }
 
 /** Encrypt arbitrary binary data using the mesh AES-GCM key. */
 export async function encryptBytes(key: CryptoKey, plaintext: Uint8Array): Promise<Uint8Array> {
-  const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    key,
-    plaintext.buffer.slice(
-      plaintext.byteOffset,
-      plaintext.byteOffset + plaintext.byteLength,
-    ) as ArrayBuffer,
-  );
-
-  const envelope: EncryptedEnvelope = {
-    v: ENVELOPE_VERSION,
-    iv: uint8ToBase64(iv),
-    ct: uint8ToBase64(new Uint8Array(ciphertext)),
-  };
-
+  const envelope = await sealEnvelope(key, asBufferSource(plaintext));
   return new TextEncoder().encode(JSON.stringify(envelope));
 }
 
 /** Decrypt binary data produced by {@link encryptBytes}. */
 export async function decryptBytes(key: CryptoKey, envelopeBytes: Uint8Array): Promise<Uint8Array> {
-  const envelope: EncryptedEnvelope = JSON.parse(new TextDecoder().decode(envelopeBytes));
-  if (envelope.v !== ENVELOPE_VERSION) {
-    throw new Error(`Unknown envelope version: ${envelope.v}`);
-  }
-
-  const iv = base64ToUint8(envelope.iv);
-  const ct = base64ToUint8(envelope.ct);
-
-  const decrypted = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: iv.buffer as ArrayBuffer },
-    key,
-    ct.buffer.slice(ct.byteOffset, ct.byteOffset + ct.byteLength) as ArrayBuffer,
-  );
-
-  return new Uint8Array(decrypted);
+  return openEnvelope(key, parseEnvelope(new TextDecoder().decode(envelopeBytes)));
 }
 
 /**

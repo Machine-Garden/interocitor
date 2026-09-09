@@ -76,6 +76,7 @@
  */
 
 import { base64UrlToBytes, bytesToBase64Url } from "../crypto/base64.ts";
+import { asBufferSource } from "../crypto/bytes.ts";
 import type { StorageAdapter } from "../core/types.ts";
 import {
   assertPairingCapabilitiesCompatible,
@@ -103,9 +104,7 @@ const HKDF_INFO = "interocitor-handshake-v1";
 const uint8ToB64url = bytesToBase64Url;
 const b64urlToUint8 = base64UrlToBytes;
 
-function toBuffer(b: Uint8Array): ArrayBuffer {
-  return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
-}
+const toBuffer = asBufferSource;
 
 export async function generateECDHKeypair(): Promise<CryptoKeyPair> {
   return crypto.subtle.generateKey(ECDH_PARAMS, true, ["deriveKey", "deriveBits"]);

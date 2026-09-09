@@ -40,10 +40,9 @@ const ECDSA_PARAMS = { name: "ECDSA", namedCurve: "P-256" } as const;
 const SIGN_ALGO = { name: "ECDSA", hash: "SHA-256" } as const;
 
 import { base64UrlToBytes as b64urlToUint8, bytesToBase64Url as uint8ToB64url } from "./base64.ts";
+import { asBufferSource } from "./bytes.ts";
 
-function toBuffer(b: Uint8Array): ArrayBuffer {
-  return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
-}
+const toBuffer = asBufferSource;
 
 // ─── Key generation & transport ──────────────────────────────────────
 

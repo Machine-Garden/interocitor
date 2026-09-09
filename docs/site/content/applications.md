@@ -1,7 +1,7 @@
 ---
 title: What can you build with Interocitor?
 description: Products the guarantees already carry, the roles Interocitor plays in place of Dexie, TanStack DB, Firebase, or a distributed database, and when to reach for the original.
-kicker: Plan · Roles and products
+kicker: Plan · Applications
 heading: One library that stands in for several tools.
 lede: Interocitor keeps the local API you already know and takes the server out of the trust boundary. That is the whole difference, and it cuts both ways.
 ---

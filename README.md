@@ -97,7 +97,7 @@ plaintext rows on the remote, and deterministic convergence regardless of
 arrival order. Most of these choices are deployment policy the runtime cannot
 verify, with server-managed compaction as the one checked case.
 
-Both sections live on the docs site as [Roles it can play](docs/site/content/roles.md).
+Both sections live on the docs site as [Applications](docs/site/content/applications.md).
 
 ## Data surfaces
 

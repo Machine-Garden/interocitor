@@ -54,7 +54,7 @@ test("putImage/getImage/getImageBlobUrl handles data URLs and revokable blob URL
       metaType: meta.contentType,
       imageType: image.contentType,
       blobType: image.blob.type,
-      text: new TextDecoder().decode(image.data),
+      text: await image.blob.text(),
       urlBeforeRevoke,
       useCount: afterReads?.useCount,
     };

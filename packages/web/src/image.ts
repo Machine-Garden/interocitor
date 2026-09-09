@@ -13,9 +13,13 @@ export interface StoredImageMetadata extends StoredFileMetadata {
   contentType: string;
 }
 
+/**
+ * A decrypted image. The bytes live only in `blob` (read them with
+ * `blob.bytes()` or `blob.arrayBuffer()`), so a large image is held once, not
+ * once as a typed array and again inside the Blob.
+ */
 export interface StoredImage {
   path: string;
-  data: Uint8Array;
   blob: Blob;
   metadata: StoredImageMetadata | null;
   contentType: string;
@@ -151,7 +155,6 @@ export async function getImage<
   const blob = new Blob([data as BlobPart], { type: contentType });
   return {
     path,
-    data,
     blob,
     metadata: coerceImageMetadata(metadata, contentType),
     contentType,

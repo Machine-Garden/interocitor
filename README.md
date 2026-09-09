@@ -52,12 +52,17 @@ deciding.
 Interocitor keeps the local API you already know and takes the server out of
 the trust boundary. That is the whole difference, and it cuts both ways.
 
-| Tool                 | Great at                                                                         | Where Interocitor differs                                                                              | Pick it instead when                                                        |
-| -------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| Dexie                | Rich IndexedDB queries, compound indexes, migrations, maturity                   | Same shape of API, narrower queries, field-level CRDT merge, remote holds only ciphertext              | One device is enough, or a sync provider that reads plaintext is acceptable |
-| TanStack DB          | Reactive collections and live queries over a server-owned dataset                | The client replica is canonical and the remote is a mailbox that never sees the schema                 | A trusted backend already owns the data and you want it to feel local       |
-| Firebase / Firestore | Server queries, per-document rules, realtime fan-out, managed auth and functions | No server queries and no per-row rules; access is per mesh; the worker only admits, meters, and audits | The server must read, query, or report on the data                          |
-| Rust (an analogy)    | Guarantees bought with explicit ownership                                        | The same trade: you name keys, compactor, and meshes, and get convergence without a server             | Not a tool choice; the point is the trade                                   |
+It is not a browser library. The core runs wherever you give it a local store:
+IndexedDB in a browser, memory or your own store in a server process. Run it
+server-side over WebDAV, S3-compatible storage behind the worker, or a NAS, and
+a mesh behaves much like a small distributed database whose storage cannot
+read it.
+
+| Tool                 | Great at                                                                         | Where Interocitor differs                                                                              | Pick it instead when                                                  |
+| -------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| Dexie                | Rich IndexedDB queries, compound indexes, migrations, maturity                   | Same shape of API, narrower queries, field-level CRDT merge, remote holds only ciphertext              | You do not need to sync "own" data                                    |
+| TanStack DB          | Reactive collections and live queries over a server-owned dataset                | The client replica is canonical and the remote is a mailbox that never sees the schema                 | A trusted backend already owns the data and you want it to feel local |
+| Firebase / Firestore | Server queries, per-document rules, realtime fan-out, managed auth and functions | No server queries and no per-row rules; access is per mesh; the worker only admits, meters, and audits | The server must read, query, or report on the data                    |
 
 **Dexie.** `table`, `where`, `subscribe`, and `useLiveQuery` will feel
 familiar. Queries cover one indexed field with `equals`, ranges, `startsWith`,
@@ -82,14 +87,13 @@ pull. Auth is your host's identity provider. The Cloudflare worker sits where
 rules sit in the request path, but it decides only who may touch a mesh, how
 many bytes, and what gets logged. It never decides which rows.
 
-**Rust.** Rust makes you name ownership so the compiler can check it, and pays
-you back with guarantees no runtime provides. Interocitor makes you name trust:
-the key source, which endpoints hold the key, who compacts, which meshes a
-session opens, and which files carry a seal. It pays back with no server code,
-no plaintext rows on the remote, and deterministic convergence regardless of
-arrival order. One honest limit: the compiler checks Rust, while most of these
-choices are deployment policy the runtime cannot verify, with server-managed
-compaction as the one checked case.
+**On complexity.** Interocitor is lower level than any of the three, in the
+way Rust is lower level than a garbage-collected language. You name the key
+source, which endpoints hold the key, who compacts, which meshes a session
+opens, and which files carry a seal. That is the price of no server code, no
+plaintext rows on the remote, and deterministic convergence regardless of
+arrival order. Most of these choices are deployment policy the runtime cannot
+verify, with server-managed compaction as the one checked case.
 
 ## Data surfaces
 

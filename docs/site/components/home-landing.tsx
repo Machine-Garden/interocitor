@@ -194,7 +194,12 @@ export function HomeLanding() {
               <h3 id="compare-title">
                 The local API you know, with the server taken out of the trust boundary.
               </h3>
-              <p>That is the whole difference, and it cuts both ways.</p>
+              <p>
+                That is the whole difference, and it cuts both ways. It is not a browser library:
+                the core runs wherever you give it a local store, and server-side over WebDAV, S3,
+                or a NAS a mesh behaves much like a small distributed database that its storage
+                cannot read.
+              </p>
             </div>
             <dl>
               <div>
@@ -202,7 +207,8 @@ export function HomeLanding() {
                 <dd>
                   The table, where, subscribe, and live-query shape will feel familiar. Queries stay
                   on one indexed field, with no compound indexes or migrations. In exchange rows
-                  merge per field and the remote holds only ciphertext. Dexie Cloud reads plaintext.
+                  merge per field and the remote holds only ciphertext. Pick Dexie when you do not
+                  need to sync &ldquo;own&rdquo; data.
                 </dd>
               </div>
               <div>
@@ -222,16 +228,13 @@ export function HomeLanding() {
                   reads rows.
                 </dd>
               </div>
-              <div>
-                <dt>Rust, as an analogy</dt>
-                <dd>
-                  Rust makes you name ownership and pays you back with guarantees. Interocitor makes
-                  you name trust: key source, key holders, compactor, open meshes, sealed files. One
-                  limit: the compiler checks Rust, while most of these are policy the runtime cannot
-                  verify.
-                </dd>
-              </div>
             </dl>
+            <p className="build-list-note">
+              It is lower level than any of the three, the way Rust is lower level than a
+              garbage-collected language. You name the key source, the key holders, the compactor,
+              the open meshes, and the sealed files. That is the price of no server code and no
+              plaintext rows on the remote.
+            </p>
           </div>
         </section>
 

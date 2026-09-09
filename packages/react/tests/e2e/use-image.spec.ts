@@ -9,15 +9,21 @@ type Schema = Record<string, never>;
 function imageDatabase(
   read: (path: string) => Promise<Uint8Array> = async () => new Uint8Array([1, 2, 3]),
 ): Interocitor<Schema> {
+  // `getImage` opens the stored object once and reads the metadata from it,
+  // so the stub answers through `openFile` the way the engine does.
   return {
-    getFileMetadata: async (path: string) => ({
-      path,
-      size: 3,
-      storedSize: 3,
-      contentType: "image/webp",
-      uploadedByDeviceId: "image-writer",
+    openFile: async (path: string) => ({
+      metadata: {
+        name: path.split("/").pop() ?? path,
+        path,
+        size: 3,
+        storedSize: 3,
+        modifiedTime: new Date(0).toISOString(),
+        contentType: "image/webp",
+        uploadedByDeviceId: "image-writer",
+      },
+      open: () => read(path),
     }),
-    getFile: read,
   } as unknown as Interocitor<Schema>;
 }
 

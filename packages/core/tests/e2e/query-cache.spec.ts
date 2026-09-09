@@ -421,12 +421,11 @@ test.describe("Interocitor query cache", () => {
         }
 
         override async commitLocalMutation(row: any, change: any) {
-          const commitResult = await super.commitLocalMutation(row, change);
+          await super.commitLocalMutation(row, change);
           if (this.armAfterCommit) {
             this.armAfterCommit = false;
             this.blockNextRowRead = true;
           }
-          return commitResult;
         }
 
         override async getRow(table: string, rowId: string) {

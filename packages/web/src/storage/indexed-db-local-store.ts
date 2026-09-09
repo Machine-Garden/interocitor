@@ -8,6 +8,7 @@
  *
  * Stores:
  *  - rows: the current merged state of all tables
+ *  - pendingOps: ops of the implicit batch that has not been promoted yet
  *  - outbox: change entries pending upload
  *  - cursors: byte offsets into each device's change log
  *  - meta: device ID, last snapshot epoch, etc.
@@ -17,6 +18,7 @@ import type {
   Row,
   ChangeEntry,
   LocalStore,
+  RowRef,
   DatabaseSchemaDefinition,
   TableIndexDefinition,
   SchemaField,
@@ -25,7 +27,10 @@ import type {
 } from "@interocitor/core";
 
 const DEFAULT_DB_NAME = "interocitor";
-const DEFAULT_DB_VERSION = 1;
+// v2: adds the append-only pendingOps store and the outbox by_id index.
+const DEFAULT_DB_VERSION = 2;
+const PENDING_BATCH_META_KEY = "pendingBatch";
+const OUTBOX_ID_INDEX = "by_id";
 const CACHE_FINGERPRINT_META_KEY = "interocitor:cache:fingerprint";
 const fallbackLockTails = new Map<string, Promise<void>>();
 
@@ -47,7 +52,8 @@ async function withFallbackLock<T>(name: string, operation: () => Promise<T>): P
 
 const STORES = {
   rows: "rows", // key: "{table}/{rowId}"
-  outbox: "outbox", // key: auto-increment
+  pendingOps: "pendingOps", // key: auto-increment (append order)
+  outbox: "outbox", // key: auto-increment, unique index by_id on entry.id
   cursors: "cursors", // key: deviceId
   meta: "meta", // key: string
 } as const;
@@ -272,8 +278,15 @@ function openDB(
         const rows = db.createObjectStore(STORES.rows, { keyPath: "_meta.key" });
         rows.createIndex("by_table", "_meta.table", { unique: false });
       }
+      if (!db.objectStoreNames.contains(STORES.pendingOps)) {
+        db.createObjectStore(STORES.pendingOps, { autoIncrement: true });
+      }
       if (!db.objectStoreNames.contains(STORES.outbox)) {
         db.createObjectStore(STORES.outbox, { autoIncrement: true });
+      }
+      const outboxStore = req.transaction?.objectStore(STORES.outbox);
+      if (outboxStore && !outboxStore.indexNames.contains(OUTBOX_ID_INDEX)) {
+        outboxStore.createIndex(OUTBOX_ID_INDEX, "id", { unique: true });
       }
       if (!db.objectStoreNames.contains(STORES.cursors)) {
         db.createObjectStore(STORES.cursors);
@@ -336,6 +349,24 @@ function txComplete(transaction: IDBTransaction): Promise<void> {
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
+}
+
+/**
+ * Meta record describing the open implicit batch. Ops live in the
+ * append-only pendingOps store so each local write costs one `add` instead
+ * of rewriting the whole batch.
+ */
+type Op = ChangeEntry["ops"][number];
+type PendingBatchHeader = Omit<ChangeEntry, "ops"> & { ops?: Op[] };
+
+async function readPendingBatch(t: IDBTransaction): Promise<ChangeEntry | null> {
+  const header = (await reqToPromise(t.objectStore(STORES.meta).get(PENDING_BATCH_META_KEY))) as
+    | PendingBatchHeader
+    | undefined;
+  if (!header) return null;
+  const ops = (await reqToPromise(t.objectStore(STORES.pendingOps).getAll())) as Op[];
+  const { ops: legacyOps, ...rest } = header;
+  return { ...rest, ops: legacyOps ? [...legacyOps, ...ops] : ops };
 }
 
 // ─── Public API ──────────────────────────────────────────────────────
@@ -476,6 +507,16 @@ export class IndexedDbLocalStore implements LocalStore {
     return result as Row | undefined;
   }
 
+  async getRows(refs: readonly RowRef[]): Promise<(Row | undefined)[]> {
+    if (refs.length === 0) return [];
+    const db = this.ensureDB();
+    const t = tx(db, STORES.rows, "readonly");
+    const store = t.objectStore(STORES.rows);
+    const requests = refs.map((ref) => store.get(this.rowKey(ref.table, ref.rowId)));
+    await txComplete(t);
+    return requests.map((request) => request.result as Row | undefined);
+  }
+
   /** Stamp the composite IndexedDB key into row._meta.key. Pure. */
   private withKey(row: Row): Row {
     return {
@@ -582,36 +623,46 @@ export class IndexedDbLocalStore implements LocalStore {
 
   // ── Outbox ───────────────────────────────────────────────────────
 
-  async commitLocalMutation(row: Row, change: ChangeEntry): Promise<ChangeEntry> {
+  async commitLocalMutation(row: Row, change: ChangeEntry): Promise<void> {
     const db = this.ensureDB();
-    const t = tx(db, [STORES.rows, STORES.meta], "readwrite");
+    const t = tx(db, [STORES.rows, STORES.meta, STORES.pendingOps], "readwrite");
     const meta = t.objectStore(STORES.meta);
-    const current = (await reqToPromise(meta.get("pendingBatch"))) as ChangeEntry | undefined;
-    const pendingBatch = current
-      ? {
-          ...current,
-          hlc: current.hlc < change.hlc ? change.hlc : current.hlc,
-          ops: [...current.ops, ...change.ops],
-        }
-      : change;
+    const current = (await reqToPromise(meta.get(PENDING_BATCH_META_KEY))) as
+      | PendingBatchHeader
+      | undefined;
+    let hlc = change.hlc;
+    if (!current) {
+      const { ops: _ops, ...header } = change;
+      meta.put(header, PENDING_BATCH_META_KEY);
+    } else if (current.hlc < change.hlc) {
+      meta.put({ ...current, hlc: change.hlc }, PENDING_BATCH_META_KEY);
+    } else {
+      hlc = current.hlc;
+    }
+    const pendingOps = t.objectStore(STORES.pendingOps);
+    for (const op of change.ops) pendingOps.add(op);
     t.objectStore(STORES.rows).put(this.withKey(row));
-    meta.put(pendingBatch, "pendingBatch");
-    meta.put(pendingBatch.hlc, "hlc");
+    meta.put(hlc, "hlc");
     await txComplete(t);
-    return pendingBatch;
+  }
+
+  async peekPendingBatch(): Promise<ChangeEntry | null> {
+    const db = this.ensureDB();
+    const t = tx(db, [STORES.meta, STORES.pendingOps], "readonly");
+    return readPendingBatch(t);
   }
 
   async promotePendingBatch(): Promise<ChangeEntry | null> {
     const db = this.ensureDB();
-    const t = tx(db, [STORES.meta, STORES.outbox], "readwrite");
-    const meta = t.objectStore(STORES.meta);
-    const pending = (await reqToPromise(meta.get("pendingBatch"))) as ChangeEntry | undefined;
+    const t = tx(db, [STORES.meta, STORES.pendingOps, STORES.outbox], "readwrite");
+    const pending = await readPendingBatch(t);
     if (pending) {
       t.objectStore(STORES.outbox).add(pending);
-      meta.delete("pendingBatch");
+      t.objectStore(STORES.pendingOps).clear();
+      t.objectStore(STORES.meta).delete(PENDING_BATCH_META_KEY);
     }
     await txComplete(t);
-    return pending ?? null;
+    return pending;
   }
 
   async pushOutbox(entry: ChangeEntry): Promise<void> {
@@ -623,7 +674,15 @@ export class IndexedDbLocalStore implements LocalStore {
     const db = this.ensureDB();
     const t = tx(db, STORES.outbox, "readwrite");
     const store = t.objectStore(STORES.outbox);
-    for (const entry of entries) store.add(entry);
+    const byId = store.index(OUTBOX_ID_INDEX);
+    // Re-queueing an entry that is already durable must be a no-op, not a
+    // duplicate upload, so look each id up before appending.
+    await Promise.all(
+      entries.map(async (entry) => {
+        const existing = await reqToPromise(byId.getKey(entry.id));
+        if (existing === undefined) store.add(entry);
+      }),
+    );
     await txComplete(t);
   }
 
@@ -635,24 +694,16 @@ export class IndexedDbLocalStore implements LocalStore {
 
   async acknowledgeOutbox(entryIds: readonly string[]): Promise<void> {
     if (entryIds.length === 0) return;
-    const acknowledged = new Set(entryIds);
     const db = this.ensureDB();
     const t = tx(db, STORES.outbox, "readwrite");
     const store = t.objectStore(STORES.outbox);
-    await new Promise<void>((resolve, reject) => {
-      const request = store.openCursor();
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        const cursor = request.result;
-        if (!cursor) {
-          resolve();
-          return;
-        }
-        const entry = cursor.value as ChangeEntry;
-        if (acknowledged.has(entry.id)) cursor.delete();
-        cursor.continue();
-      };
-    });
+    const byId = store.index(OUTBOX_ID_INDEX);
+    await Promise.all(
+      entryIds.map(async (id) => {
+        const key = await reqToPromise(byId.getKey(id));
+        if (key !== undefined) store.delete(key);
+      }),
+    );
     await txComplete(t);
   }
 

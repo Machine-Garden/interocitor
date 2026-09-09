@@ -2954,7 +2954,7 @@ test.describe("Interocitor protocol (MemoryAdapter)", () => {
       await compactor.put("tasks", "canonical", { title: "snapshot state" });
       await compactor.flush();
       await compactor.compact();
-      const pendingBeforeRestart = await oldLocal.getMeta("pendingBatch");
+      const pendingBeforeRestart = await oldLocal.peekPendingBatch();
       const outboxBeforeRestart = await oldLocal.outboxSize();
       const localEpochBeforeRestart = await oldLocal.getMeta("epoch");
       const remoteEpochBeforeRestart = compactor.getManifest()?.epoch;

@@ -54,6 +54,7 @@ import type {
 } from "./types.ts";
 
 import type { HLC } from "./types.ts";
+import type { RowRef } from "../storage/local-store.ts";
 import { hlcInit, hlcNow, hlcSerialize, hlcParse, hlcCompareStr } from "./hlc.ts";
 import { Table, computeCacheKey } from "./table.ts";
 import { readColumn } from "./crdt.ts";
@@ -292,7 +293,8 @@ export class Interocitor<
   private compactRetentionTimer: ReturnType<typeof setTimeout> | null = null;
   private compactRetentionDueAt = 0;
   private batchTimer: ReturnType<typeof setTimeout> | null = null;
-  private pendingBatch: ChangeEntry | null = null;
+  /** True while the local store holds an unpromoted pending batch. */
+  private pendingBatch = false;
 
   // Poll / push invalidation management
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -550,13 +552,14 @@ export class Interocitor<
     before: Row | undefined,
   ): Promise<void> {
     try {
-      this.pendingBatch = await this.local.commitLocalMutation(row, {
+      await this.local.commitLocalMutation(row, {
         id: generateId("chg"),
         ts: Date.now(),
         device: this.deviceId,
         hlc,
         ops: [op],
       });
+      this.pendingBatch = true;
     } catch (error) {
       if (!this.pendingBatch) this.pendingLocalObservationListeners = null;
       throw error;
@@ -1363,11 +1366,7 @@ export class Interocitor<
     this.knownTables = new Set();
     this.pendingLocalEffects.clear();
     this.pendingLocalObservationListeners = null;
-    const pendingBatch = await this.local.getMeta("pendingBatch");
-    this.pendingBatch =
-      pendingBatch && typeof pendingBatch === "object"
-        ? { ...(pendingBatch as ChangeEntry), ops: [...(pendingBatch as ChangeEntry).ops] }
-        : null;
+    this.pendingBatch = (await this.local.peekPendingBatch()) !== null;
     const savedHlc = (await this.local.getMeta("hlc")) as string | undefined;
     if (savedHlc) {
       this.hlc = hlcParse(savedHlc);
@@ -1446,7 +1445,7 @@ export class Interocitor<
     await this.local.setMeta(QUARANTINED_OFFLINE_CHANGES_META, quarantine);
     await this.local.setMeta(OFFLINE_RETENTION_EXPIRED_AT_META, expiredAt);
     await this.local.acknowledgeOutbox(queued.map((entry) => entry.id));
-    this.pendingBatch = null;
+    this.pendingBatch = false;
     this.pendingCount = 0;
     this.clearScheduledFlush();
     this.resetCompactWarning();
@@ -1549,7 +1548,7 @@ export class Interocitor<
     );
     await this.local.withLock(SYNC_STATE_LOCK, async () => {
       this.clearBatchTimer();
-      this.pendingBatch = null;
+      this.pendingBatch = false;
       this.pendingLocalEffects.clear();
       this.pendingLocalObservationListeners = null;
       await ChangeObservationLedger.clearAll(this.local);
@@ -1563,13 +1562,19 @@ export class Interocitor<
   }
 
   private async ensureRowsCached(ops: Op[]): Promise<void> {
-    for (const op of ops) {
-      const existing = await this.local.getRow(op.table, op.rowId);
+    const refs = new Map<string, RowRef>();
+    for (const op of ops) refs.set(`${op.table}/${op.rowId}`, { table: op.table, rowId: op.rowId });
+    if (refs.size === 0) return;
+    const wanted = [...refs.values()];
+    const existingRows = await this.local.getRows(wanted);
+    for (let i = 0; i < wanted.length; i++) {
+      const { table, rowId } = wanted[i]!;
+      const existing = existingRows[i];
       if (existing) {
-        if (!this.tables[op.table]) this.tables[op.table] = {};
-        this.tables[op.table][op.rowId] = existing;
-      } else if (this.tables[op.table]) {
-        delete this.tables[op.table][op.rowId];
+        if (!this.tables[table]) this.tables[table] = {};
+        this.tables[table][rowId] = existing;
+      } else if (this.tables[table]) {
+        delete this.tables[table][rowId];
       }
     }
   }
@@ -2187,7 +2192,7 @@ export class Interocitor<
     if (!observation.hasExactObservationHistory) return false;
     if ((await this.offlineRetentionState()).expired) return false;
     if ((await this.local.outboxSize()) > 0) return false;
-    if (await this.local.getMeta("pendingBatch")) return false;
+    if ((await this.local.peekPendingBatch()) !== null) return false;
 
     const remotePath = this.requireRemotePath("connect() fast-path");
     const p = paths(remotePath);
@@ -2807,7 +2812,7 @@ export class Interocitor<
     this.clearBatchTimer();
     const pending = await this.local.promotePendingBatch();
     if (!pending) return;
-    this.pendingBatch = null;
+    this.pendingBatch = false;
     const effects = [...this.pendingLocalEffects.values()]
       .map(({ table, rowId, before, after }) => createRowChangeEffect(table, rowId, before, after))
       .filter((effect) => effect !== null);

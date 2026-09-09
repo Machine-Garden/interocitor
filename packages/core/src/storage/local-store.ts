@@ -2,6 +2,12 @@
 
 import type { ChangeEntry, Row, WhereClause } from "../core/types.ts";
 
+/** Identifies one row for batched reads. */
+export interface RowRef {
+  table: string;
+  rowId: string;
+}
+
 /**
  * Contract every local persistence implementation must satisfy.
  *
@@ -16,6 +22,8 @@ export interface LocalStore {
   close(): void;
 
   getRow(table: string, rowId: string): Promise<Row | undefined>;
+  /** Read many rows at once; the result is positionally aligned with `refs`. */
+  getRows(refs: readonly RowRef[]): Promise<(Row | undefined)[]>;
   putRow(row: Row): Promise<void>;
   putRows(rows: Row[]): Promise<void>;
   getTable(table: string): Promise<Row[]>;
@@ -24,7 +32,15 @@ export interface LocalStore {
   clearRows(): Promise<void>;
   getTableNames(): Promise<string[]>;
 
-  commitLocalMutation(row: Row, change: ChangeEntry): Promise<ChangeEntry>;
+  /**
+   * Durably write `row` and append `change.ops` to the pending batch in one
+   * atomic step. The first change of a batch fixes its id, ts, and device;
+   * later changes only advance the batch HLC and add ops.
+   */
+  commitLocalMutation(row: Row, change: ChangeEntry): Promise<void>;
+  /** Read the pending batch (if any) without promoting it. */
+  peekPendingBatch(): Promise<ChangeEntry | null>;
+  /** Move the pending batch to the outbox and return it. */
   promotePendingBatch(): Promise<ChangeEntry | null>;
   pushOutbox(entry: ChangeEntry): Promise<void>;
   pushOutboxEntries(entries: ChangeEntry[]): Promise<void>;

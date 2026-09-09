@@ -64,6 +64,9 @@ function emitAffectedRows(
 }
 
 /** Returns the updated HLC after pull. */
+/** How many change-file bodies to keep in flight ahead of the one being applied. */
+const PULL_PREFETCH_WINDOW = 4;
+
 export async function pull(ctx: PullContext): Promise<HLC> {
   const { adapter, local, remotePath, codecState, tables, knownTables, emit } = ctx;
   let hlc = ctx.hlc;
@@ -105,16 +108,34 @@ export async function pull(ctx: PullContext): Promise<HLC> {
     }
     files.sort(compareChangeFiles);
 
+    // Change files are applied strictly in order, but their bodies can be
+    // fetched ahead of time. Keep a few reads in flight so remote latency is
+    // paid once per group instead of once per file. A listing may repeat a
+    // name; each file is read and applied once.
+    const seenNames = new Set<string>();
+    const unseen = files.filter((file) => {
+      if (file.name === "head.json" || seenNames.has(file.name)) return false;
+      seenNames.add(file.name);
+      return changeFileHlc(file.name) !== null && observation.isUnseenChange(file.name);
+    });
+    const reads: (Promise<Uint8Array> | undefined)[] = [];
+    const prefetch = (index: number): void => {
+      if (index >= unseen.length || reads[index]) return;
+      const read = adapter.readFile(unseen[index]!.path);
+      // Failures surface when the file's turn comes; never as an unhandled rejection.
+      read.catch(() => {});
+      reads[index] = read;
+    };
+    for (let i = 0; i < PULL_PREFETCH_WINDOW; i++) prefetch(i);
+
     let totalMerged = 0;
-    for (const file of files) {
-      if (file.name === "head.json") continue;
+    for (let index = 0; index < unseen.length; index++) {
+      const file = unseen[index]!;
+      prefetch(index + PULL_PREFETCH_WINDOW);
 
       try {
-        const fileHlc = changeFileHlc(file.name);
-        if (fileHlc === null) continue;
-        if (!observation.isUnseenChange(file.name)) continue;
-
-        const raw = textDecoder.decode(await adapter.readFile(file.path));
+        const raw = textDecoder.decode(await reads[index]!);
+        reads[index] = undefined;
         const entry = await decodeChangePayload(codecState, local, raw, file.path);
 
         const remoteHlc = hlcParse(entry.hlc);

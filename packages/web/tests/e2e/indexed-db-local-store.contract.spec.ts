@@ -126,7 +126,7 @@ test("IndexedDbLocalStore atomically stages mutations and acknowledges only publ
     const reopened = new IndexedDbLocalStore(dbName);
     await reopened.open();
     const stagedRow = await reopened.getRow("tasks", "durable");
-    const stagedBatch = await reopened.getMeta("pendingBatch");
+    const stagedBatch = await reopened.peekPendingBatch();
     await reopened.promotePendingBatch();
     const publicationCut = await reopened.peekOutbox();
     await reopened.pushOutbox(second);

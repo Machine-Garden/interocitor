@@ -57,6 +57,22 @@ test("MemoryLocalStore contract: rows, tombstones, and queries", async () => {
   });
 });
 
+test("MemoryLocalStore contract: getRows aligns results with the requested refs", async () => {
+  await withStore(async (store) => {
+    await store.putRows([row("tasks", "a", { title: "A" }), row("tasks", "b", { title: "B" })]);
+    const rows = await store.getRows([
+      { table: "tasks", rowId: "b" },
+      { table: "tasks", rowId: "missing" },
+      { table: "tasks", rowId: "a" },
+    ]);
+    assert.deepEqual(
+      rows.map((r) => r?.payload.title.value),
+      ["B", undefined, "A"],
+    );
+    assert.deepEqual(await store.getRows([]), []);
+  });
+});
+
 test("MemoryLocalStore contract: outbox FIFO and drain", async () => {
   await withStore(async (store) => {
     const first = { id: "chg_1", ts: 1, device: "dev", hlc: "h1", ops: [] };
@@ -78,10 +94,11 @@ test("MemoryLocalStore contract: local mutation staging and exact acknowledgemen
 
     await store.commitLocalMutation(stagedRow, first);
     assert.equal((await store.getRow("tasks", "staged")).payload.title.value, "Durable");
-    assert.deepEqual(await store.getMeta("pendingBatch"), first);
+    assert.deepEqual(await store.peekPendingBatch(), first);
 
     assert.deepEqual(await store.promotePendingBatch(), first);
-    assert.equal(await store.getMeta("pendingBatch"), undefined);
+    assert.equal(await store.peekPendingBatch(), null);
+    assert.equal(await store.promotePendingBatch(), null);
     await store.pushOutbox(second);
 
     const publicationCut = await store.peekOutbox();
@@ -114,12 +131,16 @@ test("MemoryLocalStore contract: independent writers merge the durable pending b
     };
 
     await store.commitLocalMutation(row("tasks", "a", { title: "A" }), first);
-    const merged = await store.commitLocalMutation(row("tasks", "b", { title: "B" }), second);
+    await store.commitLocalMutation(row("tasks", "b", { title: "B" }), second);
+    const merged = await store.peekPendingBatch();
 
     assert.equal(merged.id, first.id);
+    assert.equal(merged.ts, first.ts);
     assert.equal(merged.hlc, second.hlc);
     assert.deepEqual(merged.ops, [...first.ops, ...second.ops]);
-    assert.deepEqual(await store.getMeta("pendingBatch"), merged);
+    assert.equal(await store.getMeta("hlc"), second.hlc);
+    assert.deepEqual(await store.promotePendingBatch(), merged);
+    assert.deepEqual(await store.peekOutbox(), [merged]);
   });
 });
 

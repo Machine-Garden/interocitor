@@ -10,7 +10,7 @@
  */
 
 import type { Row, ChangeEntry, WhereClause, WherePrimitive } from "../core/types.ts";
-import type { LocalStore } from "./local-store.ts";
+import type { LocalStore, RowRef } from "./local-store.ts";
 
 function compare(a: WherePrimitive, b: WherePrimitive): number {
   const av = a instanceof Date ? a.getTime() : a;
@@ -68,6 +68,7 @@ function rowKey(table: string, rowId: string): string {
 export class MemoryLocalStore implements LocalStore {
   private rows = new Map<string, Row>();
   private outbox: ChangeEntry[] = [];
+  private pendingBatch: ChangeEntry | null = null;
   private cursors = new Map<string, number>();
   private meta = new Map<string, unknown>();
   private readonly lockTails = new Map<string, Promise<void>>();
@@ -96,6 +97,7 @@ export class MemoryLocalStore implements LocalStore {
   close(): void {
     this.rows.clear();
     this.outbox = [];
+    this.pendingBatch = null;
     this.cursors.clear();
     this.meta.clear();
   }
@@ -104,6 +106,10 @@ export class MemoryLocalStore implements LocalStore {
 
   async getRow(table: string, rowId: string): Promise<Row | undefined> {
     return this.rows.get(rowKey(table, rowId));
+  }
+
+  async getRows(refs: readonly RowRef[]): Promise<(Row | undefined)[]> {
+    return refs.map((ref) => this.rows.get(rowKey(ref.table, ref.rowId)));
   }
 
   async putRow(row: Row): Promise<void> {
@@ -147,26 +153,28 @@ export class MemoryLocalStore implements LocalStore {
 
   // ── Outbox ───────────────────────────────────────────────────────
 
-  async commitLocalMutation(row: Row, change: ChangeEntry): Promise<ChangeEntry> {
-    const current = this.meta.get("pendingBatch") as ChangeEntry | undefined;
-    const pendingBatch = current
-      ? {
-          ...current,
-          hlc: current.hlc < change.hlc ? change.hlc : current.hlc,
-          ops: [...current.ops, ...change.ops],
-        }
-      : { ...change, ops: [...change.ops] };
+  async commitLocalMutation(row: Row, change: ChangeEntry): Promise<void> {
+    const pending = this.pendingBatch;
+    if (pending) {
+      if (pending.hlc < change.hlc) pending.hlc = change.hlc;
+      pending.ops.push(...change.ops);
+    } else {
+      this.pendingBatch = { ...change, ops: [...change.ops] };
+    }
     this.rows.set(rowKey(row._meta.table, row._meta.rowId), row);
-    this.meta.set("pendingBatch", { ...pendingBatch, ops: [...pendingBatch.ops] });
-    this.meta.set("hlc", pendingBatch.hlc);
-    return pendingBatch;
+    this.meta.set("hlc", this.pendingBatch!.hlc);
+  }
+
+  async peekPendingBatch(): Promise<ChangeEntry | null> {
+    const pending = this.pendingBatch;
+    return pending ? { ...pending, ops: [...pending.ops] } : null;
   }
 
   async promotePendingBatch(): Promise<ChangeEntry | null> {
-    const pending = this.meta.get("pendingBatch") as ChangeEntry | undefined;
+    const pending = this.pendingBatch;
     if (!pending) return null;
     this.outbox.push(pending);
-    this.meta.delete("pendingBatch");
+    this.pendingBatch = null;
     return pending;
   }
 
@@ -228,6 +236,7 @@ export class MemoryLocalStore implements LocalStore {
   async clearAll(): Promise<void> {
     this.rows.clear();
     this.outbox = [];
+    this.pendingBatch = null;
     this.cursors.clear();
     this.meta.clear();
   }

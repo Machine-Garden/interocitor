@@ -216,6 +216,7 @@ export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {})
     },
 
     getRow: (table, rowId) => runWithRecovery((store) => store.getRow(table, rowId)),
+    getRows: (refs) => runWithRecovery((store) => store.getRows(refs)),
     putRow: (row) => runWithRecovery((store) => store.putRow(row)),
     putRows: (rows) => runWithRecovery((store) => store.putRows(rows)),
     getTable: (table) => runWithRecovery((store) => store.getTable(table)),
@@ -224,8 +225,9 @@ export function createResilientLocalStore(opts: ResilientLocalStoreOptions = {})
     clearRows: () => runWithRecovery((store) => store.clearRows()),
     getTableNames: () => runWithRecovery((store) => store.getTableNames()),
 
-    commitLocalMutation: (row, pendingBatch) =>
-      runWithRecovery((store) => store.commitLocalMutation(row, pendingBatch)),
+    commitLocalMutation: (row, change) =>
+      runWithRecovery((store) => store.commitLocalMutation(row, change)),
+    peekPendingBatch: () => runWithRecovery((store) => store.peekPendingBatch()),
     promotePendingBatch: () => runWithRecovery((store) => store.promotePendingBatch()),
     pushOutbox: (entry) => runWithRecovery((store) => store.pushOutbox(entry)),
     pushOutboxEntries: (entries) => runWithRecovery((store) => store.pushOutboxEntries(entries)),

@@ -74,7 +74,7 @@ export type {
 // ─── Engine ───────────────────────────────────────────────────────────
 
 export { Interocitor, type InterocitorInitContext } from "./core/sync-engine.ts";
-export type { LocalStore } from "./storage/local-store.ts";
+export type { LocalStore, RowRef } from "./storage/local-store.ts";
 export { MemoryLocalStore } from "./storage/memory-store.ts";
 export {
   ConnectStageTimeoutError,

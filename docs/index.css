@@ -2202,10 +2202,6 @@ h1 em {
   border-left: 1px solid var(--line);
 }
 
-.home-page .compare-list dl {
-  grid-template-columns: repeat(3, 1fr);
-}
-
 .home-page .build-list dl > div {
   padding: 22px;
   border-right: 1px solid var(--line);

@@ -188,49 +188,56 @@ export function HomeLanding() {
             </p>
           </div>
 
-          <div className="shell build-list compare-list" aria-labelledby="compare-title">
+          <div className="shell build-list compare-list" aria-labelledby="roles-title">
             <div className="build-list-heading">
-              <p className="site-kicker">Compared with</p>
-              <h3 id="compare-title">
-                The local API you know, with the server taken out of the trust boundary.
-              </h3>
+              <p className="site-kicker">Roles it can play</p>
+              <h3 id="roles-title">One library that stands in for several tools.</h3>
               <p>
-                That is the whole difference, and it cuts both ways. It is not a browser library:
-                the core runs wherever you give it a local store, and server-side over WebDAV, S3,
-                or a NAS a mesh behaves much like a small distributed database that its storage
-                cannot read.
+                Each of them is a local store plus a way to move data. Interocitor keeps the local
+                API you know and takes the server out of the trust boundary. That is the whole
+                difference, and it cuts both ways.
               </p>
             </div>
             <dl>
               <div>
-                <dt>Dexie</dt>
+                <dt>As Dexie</dt>
                 <dd>
-                  The table, where, subscribe, and live-query shape will feel familiar. Queries stay
-                  on one indexed field, with no compound indexes or migrations. In exchange rows
-                  merge per field and the remote holds only ciphertext. Pick Dexie when you do not
-                  need to sync &ldquo;own&rdquo; data.
+                  A typed table store over IndexedDB with where, subscribe, and live queries.
+                  Queries stay on one indexed field, rows merge per field, and sync to a
+                  ciphertext-only remote is already there. Reach for Dexie when you do not need to
+                  sync &ldquo;own&rdquo; data.
                 </dd>
               </div>
               <div>
-                <dt>TanStack DB</dt>
+                <dt>As TanStack DB</dt>
                 <dd>
-                  Both give reactive collections and live queries. TanStack DB assumes a server owns
-                  the canonical data and can shape it. Here the client replica is canonical, the
-                  remote is a mailbox, and scale comes from splitting meshes.
+                  Reactive collections and live queries feeding React, with sync built in and no
+                  server that understands the schema. The client replica is canonical and scale
+                  comes from splitting meshes. Reach for TanStack DB when a trusted backend already
+                  owns the data.
                 </dd>
               </div>
               <div>
-                <dt>Firebase</dt>
+                <dt>As Firebase</dt>
                 <dd>
-                  Firestore understands your data: server queries, per-document rules, fan-out,
-                  auth. Interocitor gives those up because the remote cannot read. The unit of
-                  access is the mesh, not the row. The worker admits, meters, and audits; it never
-                  reads rows.
+                  A multi-device synced store, offline by default, with no backend to write. The
+                  remote holds ciphertext, the unit of access is the mesh, and the worker only
+                  admits, meters, and audits. Reach for Firestore when the server must query or
+                  report on the data.
+                </dd>
+              </div>
+              <div>
+                <dt>As a distributed database</dt>
+                <dd>
+                  Not a browser library: the core runs in a server process with a memory or custom
+                  local store. Over WebDAV, S3, or a NAS a mesh behaves like a small distributed
+                  database its storage cannot read. Reach for a real database when you need central
+                  transactions.
                 </dd>
               </div>
             </dl>
             <p className="build-list-note">
-              It is lower level than any of the three, the way Rust is lower level than a
+              It is lower level than any of these, the way Rust is lower level than a
               garbage-collected language. You name the key source, the key holders, the compactor,
               the open meshes, and the sealed files. That is the price of no server code and no
               plaintext rows on the remote.

@@ -47,48 +47,50 @@ many-audience datasets are split into meshes rather than filtered per row, and
 the remote can still see sizes, timing, and request identity. See [data boundaries](docs/site/content/data-boundaries.md) before
 deciding.
 
-## Compared with
+## Roles it can play
 
-Interocitor keeps the local API you already know and takes the server out of
-the trust boundary. That is the whole difference, and it cuts both ways.
+Interocitor is one library that can stand in for several tools, because each
+of them is a local store plus some way to move data. Interocitor keeps the
+local API you already know and takes the server out of the trust boundary.
+That is the whole difference, and it cuts both ways.
 
-It is not a browser library. The core runs wherever you give it a local store:
-IndexedDB in a browser, memory or your own store in a server process. Run it
-server-side over WebDAV, S3-compatible storage behind the worker, or a NAS, and
-a mesh behaves much like a small distributed database whose storage cannot
-read it.
+| Play the role of       | How Interocitor plays it                                                                                       | What is different                                                                           | Reach for the original when                          |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Dexie                  | A typed table store over IndexedDB with `where`, `subscribe`, and `useLiveQuery`                               | Narrower queries; rows merge per field; sync and encryption come with it                    | You do not need to sync "own" data                   |
+| TanStack DB            | Reactive collections and live queries feeding React, with sync built in                                        | No server that understands the schema; the remote is a mailbox; scale by splitting meshes   | A trusted backend already owns the data              |
+| Firebase / Firestore   | A multi-device synced store with offline as the default and no backend to write                                | The remote holds ciphertext; access is per mesh; the worker only admits, meters, and audits | The server must read, query, or report on the data   |
+| A distributed database | The core in a server process with a memory or custom local store, over WebDAV, S3-compatible storage, or a NAS | Storage cannot read it; clients merge and compact; no server-side queries                   | You need central transactions or plaintext reporting |
 
-| Tool                 | Great at                                                                         | Where Interocitor differs                                                                              | Pick it instead when                                                  |
-| -------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
-| Dexie                | Rich IndexedDB queries, compound indexes, migrations, maturity                   | Same shape of API, narrower queries, field-level CRDT merge, remote holds only ciphertext              | You do not need to sync "own" data                                    |
-| TanStack DB          | Reactive collections and live queries over a server-owned dataset                | The client replica is canonical and the remote is a mailbox that never sees the schema                 | A trusted backend already owns the data and you want it to feel local |
-| Firebase / Firestore | Server queries, per-document rules, realtime fan-out, managed auth and functions | No server queries and no per-row rules; access is per mesh; the worker only admits, meters, and audits | The server must read, query, or report on the data                    |
-
-**Dexie.** `table`, `where`, `subscribe`, and `useLiveQuery` will feel
+**As Dexie.** `table`, `where`, `subscribe`, and `useLiveQuery` will feel
 familiar. Queries cover one indexed field with `equals`, ranges, `startsWith`,
 `anyOf`, and `orderBy`. There are no compound or multi-entry indexes, no
 collection chaining, no bulk operations, and no versioned migrations. In
-exchange rows merge per field with hybrid logical clock ordering, and the
-remote holds only ciphertext. Dexie Cloud is a hosted sync service that reads
-plaintext rows, as far as we know.
+exchange rows merge per field with hybrid logical clock ordering, and syncing
+to a remote that holds only ciphertext is already there when you want it.
 
-**TanStack DB.** Both give you reactive collections and live queries. TanStack
-DB assumes a server owns the canonical data and can shape it, through Electric
-or your own API. Interocitor makes the client replica canonical and the remote
-a mailbox. Filtering runs on the endpoint, and scale comes from splitting
-meshes. Interocitor also owns the merge and a file surface. The two could
-stack, but they answer different questions.
+**As TanStack DB.** You get reactive collections and live queries without a
+server that owns the canonical data. The client replica is canonical and the
+remote is a mailbox. Filtering runs on the endpoint, and scale comes from
+splitting meshes and keeping their credentials as connected stores. The merge
+and a file surface are part of the library.
 
-**Firebase / Firestore.** Firestore is a database that understands your data:
-server queries, rules, realtime fan-out, auth, and functions. Interocitor gives
-those up because the remote cannot read. The unit of access is the mesh, not
-the row. Realtime is an optional invalidation signal that tells clients to
-pull. Auth is your host's identity provider. The Cloudflare worker sits where
-rules sit in the request path, but it decides only who may touch a mesh, how
-many bytes, and what gets logged. It never decides which rows.
+**As Firebase.** You get a store that syncs across devices, works offline by
+default, and needs no backend code. The remote cannot read it, so there are no
+server queries and the unit of access is the mesh, not the row. Realtime is an
+optional invalidation signal that tells clients to pull. Auth is your host's
+identity provider. The Cloudflare worker sits where rules sit in the request
+path, but it decides only who may touch a mesh, how many bytes, and what gets
+logged. It never decides which rows.
 
-**On complexity.** Interocitor is lower level than any of the three, in the
-way Rust is lower level than a garbage-collected language. You name the key
+**As a distributed database.** Interocitor is not a browser library. The core
+runs wherever you give it a local store: memory, or your own, in a server
+process. Point it at WebDAV, S3-compatible storage behind the worker, or a NAS,
+and a mesh behaves much like a small distributed database whose storage cannot
+read it. Trusted workers and agents join as endpoints and share the same rows
+and files as the browsers.
+
+**On complexity.** Interocitor is lower level than any of these, in the way
+Rust is lower level than a garbage-collected language. You name the key
 source, which endpoints hold the key, who compacts, which meshes a session
 opens, and which files carry a seal. That is the price of no server code, no
 plaintext rows on the remote, and deterministic convergence regardless of

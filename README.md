@@ -47,6 +47,50 @@ many-audience datasets are split into meshes rather than filtered per row, and
 the remote can still see sizes, timing, and request identity. See [data boundaries](docs/site/content/data-boundaries.md) before
 deciding.
 
+## Compared with
+
+Interocitor keeps the local API you already know and takes the server out of
+the trust boundary. That is the whole difference, and it cuts both ways.
+
+| Tool                 | Great at                                                                         | Where Interocitor differs                                                                              | Pick it instead when                                                        |
+| -------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| Dexie                | Rich IndexedDB queries, compound indexes, migrations, maturity                   | Same shape of API, narrower queries, field-level CRDT merge, remote holds only ciphertext              | One device is enough, or a sync provider that reads plaintext is acceptable |
+| TanStack DB          | Reactive collections and live queries over a server-owned dataset                | The client replica is canonical and the remote is a mailbox that never sees the schema                 | A trusted backend already owns the data and you want it to feel local       |
+| Firebase / Firestore | Server queries, per-document rules, realtime fan-out, managed auth and functions | No server queries and no per-row rules; access is per mesh; the worker only admits, meters, and audits | The server must read, query, or report on the data                          |
+| Rust (an analogy)    | Guarantees bought with explicit ownership                                        | The same trade: you name keys, compactor, and meshes, and get convergence without a server             | Not a tool choice; the point is the trade                                   |
+
+**Dexie.** `table`, `where`, `subscribe`, and `useLiveQuery` will feel
+familiar. Queries cover one indexed field with `equals`, ranges, `startsWith`,
+`anyOf`, and `orderBy`. There are no compound or multi-entry indexes, no
+collection chaining, no bulk operations, and no versioned migrations. In
+exchange rows merge per field with hybrid logical clock ordering, and the
+remote holds only ciphertext. Dexie Cloud is a hosted sync service that reads
+plaintext rows, as far as we know.
+
+**TanStack DB.** Both give you reactive collections and live queries. TanStack
+DB assumes a server owns the canonical data and can shape it, through Electric
+or your own API. Interocitor makes the client replica canonical and the remote
+a mailbox. Filtering runs on the endpoint, and scale comes from splitting
+meshes. Interocitor also owns the merge and a file surface. The two could
+stack, but they answer different questions.
+
+**Firebase / Firestore.** Firestore is a database that understands your data:
+server queries, rules, realtime fan-out, auth, and functions. Interocitor gives
+those up because the remote cannot read. The unit of access is the mesh, not
+the row. Realtime is an optional invalidation signal that tells clients to
+pull. Auth is your host's identity provider. The Cloudflare worker sits where
+rules sit in the request path, but it decides only who may touch a mesh, how
+many bytes, and what gets logged. It never decides which rows.
+
+**Rust.** Rust makes you name ownership so the compiler can check it, and pays
+you back with guarantees no runtime provides. Interocitor makes you name trust:
+the key source, which endpoints hold the key, who compacts, which meshes a
+session opens, and which files carry a seal. It pays back with no server code,
+no plaintext rows on the remote, and deterministic convergence regardless of
+arrival order. One honest limit: the compiler checks Rust, while most of these
+choices are deployment policy the runtime cannot verify, with server-managed
+compaction as the one checked case.
+
 ## Data surfaces
 
 Interocitor exposes two related surfaces with different availability

@@ -187,6 +187,52 @@ export function HomeLanding() {
               row, and the remote still sees sizes and timing.
             </p>
           </div>
+
+          <div className="shell build-list compare-list" aria-labelledby="compare-title">
+            <div className="build-list-heading">
+              <p className="site-kicker">Compared with</p>
+              <h3 id="compare-title">
+                The local API you know, with the server taken out of the trust boundary.
+              </h3>
+              <p>That is the whole difference, and it cuts both ways.</p>
+            </div>
+            <dl>
+              <div>
+                <dt>Dexie</dt>
+                <dd>
+                  The table, where, subscribe, and live-query shape will feel familiar. Queries stay
+                  on one indexed field, with no compound indexes or migrations. In exchange rows
+                  merge per field and the remote holds only ciphertext. Dexie Cloud reads plaintext.
+                </dd>
+              </div>
+              <div>
+                <dt>TanStack DB</dt>
+                <dd>
+                  Both give reactive collections and live queries. TanStack DB assumes a server owns
+                  the canonical data and can shape it. Here the client replica is canonical, the
+                  remote is a mailbox, and scale comes from splitting meshes.
+                </dd>
+              </div>
+              <div>
+                <dt>Firebase</dt>
+                <dd>
+                  Firestore understands your data: server queries, per-document rules, fan-out,
+                  auth. Interocitor gives those up because the remote cannot read. The unit of
+                  access is the mesh, not the row. The worker admits, meters, and audits; it never
+                  reads rows.
+                </dd>
+              </div>
+              <div>
+                <dt>Rust, as an analogy</dt>
+                <dd>
+                  Rust makes you name ownership and pays you back with guarantees. Interocitor makes
+                  you name trust: key source, key holders, compactor, open meshes, sealed files. One
+                  limit: the compiler checks Rust, while most of these are policy the runtime cannot
+                  verify.
+                </dd>
+              </div>
+            </dl>
+          </div>
         </section>
 
         <section id="use-cases" className="site-section use-section" aria-labelledby="use-title">

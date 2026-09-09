@@ -36,6 +36,14 @@ Credential storage protects key material at rest. Endpoint security protects pla
 
 Recovery must exist before the last key disappears. A 12-word recovery phrase can restore portable credentials; it does not revoke copied keys or restore application login. [Authentication and recovery are separate capabilities](/auth#recovery).
 
+## Build other recovery designs above the key {#other-recovery}
+
+Interocitor restores a key through another paired endpoint, a passkey the platform keeps, or a phrase the application generated at random. Each path carries as much entropy as the key it restores, and none of them asks a service to stand in for that entropy. That is the boundary.
+
+Everything else can be built on top of it, and nothing inside Interocitor has to change for that. Two seams carry the load. `BoundSharedKeySource` derives the mesh key from a portable component plus whatever the application supplies, so any service, secret, or ceremony the product wants in the recovery path becomes an input to that derivation. The recovery wrapper is the general shape of a stored secret: a locator and a ciphertext, both derived on the client from something the user holds, stored on a remote that learns neither. A product can seal a key to a public identity, release it through a service of its own, or gate it behind a secret of its own choosing. Interocitor sees only the derived key.
+
+What Interocitor does not provide, it also does not verify. The host owns the design, the parties it trusts, and the consequence that a failure there exposes the mesh.
+
 ## Record the endpoint trust policy {#circle}
 
 Before launch, identify:

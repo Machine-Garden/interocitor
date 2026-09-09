@@ -56,7 +56,10 @@ provider still decide who may connect, upload, download, or delete data.
 
 If every copy is lost, the encrypted data cannot be read. Another trusted
 device or a recovery phrase can help only if recovery was set up before the
-key was lost.
+key was lost. Every built-in path carries key-strength entropy. Any other
+recovery design derives the mesh key through `BoundSharedKeySource` from
+inputs the host supplies and is the host's to secure; see
+[shared-key scenarios](../packages/core/docs/shared-key-scenarios.md).
 
 ### What happens if someone steals the secret key?
 

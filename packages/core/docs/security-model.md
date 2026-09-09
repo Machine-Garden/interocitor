@@ -184,6 +184,12 @@ Drive).
 
 - Hiding write timing or device count from the remote.
 - Hiding who compacts (snapshot file names embed the device id).
+- Recovery designs beyond pairing, credential custody, and recovery phrases.
+  Every built-in path carries key-strength entropy. Any other design derives
+  the mesh key through `BoundSharedKeySource` from inputs the host supplies,
+  and may reuse the recovery wrapper's locator-plus-ciphertext shape. Not
+  providing a design is not a limit on building one; the host owns it, and
+  a failure there exposes the mesh.
 - Cryptographic erasure from a removed endpoint. Worker mesh control can block
   that subject's subsequent IO and new notify upgrades through the controlled
   Worker mount without changing the mesh key, but it cannot erase plaintext or

@@ -108,12 +108,13 @@ would change the mesh encryption contract.
 
 ## Choosing between them
 
-| Need                                                     | Key source                            | Important boundary                                                                                                   |
-| -------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Offline-capable sharing with one transferable secret     | `PortablePassphraseKeySource`         | Anyone who copies the portable key can decrypt the mesh.                                                             |
-| App-controlled derivation that requires another provider | `BoundSharedKeySource`                | Security and availability depend on the application's `derive` implementation.                                       |
-| Restore a lost portable key from a recorded phrase       | Portable source plus recovery wrapper | The remote wrapper permits offline phrase guesses and does not revoke recovered keys.                                |
-| Per-user, per-row, or per-file access enforcement        | Neither by itself                     | Use application policy and separate cryptographic/data models; one shared mesh key remains a shared read capability. |
+| Need                                                     | Key source                                       | Important boundary                                                                                                   |
+| -------------------------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| Offline-capable sharing with one transferable secret     | `PortablePassphraseKeySource`                    | Anyone who copies the portable key can decrypt the mesh.                                                             |
+| App-controlled derivation that requires another provider | `BoundSharedKeySource`                           | Security and availability depend on the application's `derive` implementation.                                       |
+| Restore a lost portable key from a recorded phrase       | Portable source plus recovery wrapper            | The remote wrapper permits offline phrase guesses and does not revoke recovered keys.                                |
+| Any other recovery design                                | `BoundSharedKeySource` plus host-supplied inputs | The host's inputs and their custodians are the entire defense; Interocitor does not provide or verify them.          |
+| Per-user, per-row, or per-file access enforcement        | Neither by itself                                | Use application policy and separate cryptographic/data models; one shared mesh key remains a shared read capability. |
 
 The credential-store choice is separate from the key-source choice. Browser
 memory, session storage, local storage, WebAuthn, and encrypted envelopes

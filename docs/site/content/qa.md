@@ -46,6 +46,8 @@ Read [the authentication model](/auth).
 
 Another trusted endpoint or recovery prepared earlier can restore portable credentials. Twelve random BIP-39 words are one application-level recovery format. If no key or recovery remains, protected data cannot be opened; the remote has no master key.
 
+Those are the built-in paths, and each carries key-strength entropy. Any other recovery design is [built above the key source](/trust#other-recovery) by the host.
+
 ## What if a key is stolen? {#stolen-key}
 
 Account revocation can stop later remote access but cannot erase a copied key. Create a new mesh and key, migrate from an endpoint that remains trusted, and retire the old location.

@@ -25,11 +25,7 @@ Core owns everything that makes a mesh a mesh: the row CRDT, the sync protocol, 
 Core asks for two things explicitly and refuses to guess either. A `localStore` says where plaintext rows live. A `keySource` says who holds the mesh key, and `null` is a deliberate answer that creates an unencrypted mesh. A remote adapter and `remotePath` are needed only for sync and files.
 
 ```ts
-import {
-  Interocitor,
-  MemoryLocalStore,
-  PortablePassphraseKeySource,
-} from "@interocitor/core";
+import { Interocitor, MemoryLocalStore, PortablePassphraseKeySource } from "@interocitor/core";
 import { MemoryAdapter } from "@interocitor/core/adapters/memory";
 
 const db = new Interocitor(new MemoryAdapter(), {
@@ -60,27 +56,21 @@ Web is where most browser applications start. It does not wrap the engine. It su
 ```ts
 import { Interocitor, PortablePassphraseKeySource } from "@interocitor/core";
 import { WebDAVAdapter } from "@interocitor/core/adapters/webdav";
-import {
-  IndexedDbLocalStore,
-  createWebCredentialStore,
-} from "@interocitor/web";
+import { IndexedDbLocalStore, createWebCredentialStore } from "@interocitor/web";
 
 const dbName = "case-vault";
 
-const db = new Interocitor(
-  new WebDAVAdapter({ baseUrl: "/webdav", auth: { token } }),
-  {
-    dbName,
-    remotePath: "/CaseVault",
-    localStore: new IndexedDbLocalStore(dbName),
-    keySource: new PortablePassphraseKeySource({
-      portableKey,
-      credentialStore: createWebCredentialStore(dbName, {
-        storage: "sessionStorage",
-      }),
+const db = new Interocitor(new WebDAVAdapter({ baseUrl: "/webdav", auth: { token } }), {
+  dbName,
+  remotePath: "/CaseVault",
+  localStore: new IndexedDbLocalStore(dbName),
+  keySource: new PortablePassphraseKeySource({
+    portableKey,
+    credentialStore: createWebCredentialStore(dbName, {
+      storage: "sessionStorage",
     }),
-  },
-);
+  }),
+});
 
 await db.init();
 await db.connect();
@@ -95,11 +85,7 @@ Stay on this rung when the app is a browser app that is not React, or when it us
 React is bindings only. It does not construct, initialize, configure, or connect the engine. App code still builds the engine from the two rungs below, calls `init()` and `connect()`, and then hands the initialized engine to a provider.
 
 ```tsx
-import {
-  createInterocitorContext,
-  useLiveQuery,
-  useRow,
-} from "@interocitor/react";
+import { createInterocitorContext, useLiveQuery, useRow } from "@interocitor/react";
 
 export const [InterocitorProvider, useDb] = createInterocitorContext<DB>();
 

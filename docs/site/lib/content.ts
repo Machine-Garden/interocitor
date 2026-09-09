@@ -27,10 +27,7 @@ export type PageRecord = {
   group: "Learn" | "Plan" | "Reference";
 };
 
-type Metadata = Pick<
-  PageRecord,
-  "title" | "description" | "kicker" | "heading" | "lede"
->;
+type Metadata = Pick<PageRecord, "title" | "description" | "kicker" | "heading" | "lede">;
 
 type SourceRecord = {
   slug: string;
@@ -141,20 +138,13 @@ function slugify(value: string): string {
     .replaceAll(/^-|-$/g, "");
 }
 
-function parse({
-  source,
-  slug,
-  navLabel,
-  group,
-  metadata,
-}: SourceRecord): PageRecord {
+function parse({ source, slug, navLabel, group, metadata }: SourceRecord): PageRecord {
   const match = source.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   const values: Record<string, string> = {};
   if (match) {
     for (const line of match[1].split("\n")) {
       const index = line.indexOf(":");
-      if (index > 0)
-        values[line.slice(0, index)] = line.slice(index + 1).trim();
+      if (index > 0) values[line.slice(0, index)] = line.slice(index + 1).trim();
     }
   }
 
@@ -185,10 +175,8 @@ export const shortRoutes: Record<string, string> = {
   github: "https://github.com/Machine-Garden/interocitor",
   core: "https://github.com/Machine-Garden/interocitor/tree/main/packages/core#readme",
   web: "https://github.com/Machine-Garden/interocitor/tree/main/packages/web#readme",
-  react:
-    "https://github.com/Machine-Garden/interocitor/tree/main/packages/react#readme",
-  workers:
-    "https://github.com/Machine-Garden/interocitor/tree/main/packages/workers#readme",
+  react: "https://github.com/Machine-Garden/interocitor/tree/main/packages/react#readme",
+  workers: "https://github.com/Machine-Garden/interocitor/tree/main/packages/workers#readme",
   examples: "https://github.com/Machine-Garden/interocitor/tree/main/examples",
   recovery: "/qa#lost-key",
   "mesh-access": "/auth",

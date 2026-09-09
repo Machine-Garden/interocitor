@@ -7,6 +7,7 @@ import flowsSource from "../content/flows.md";
 import howItWorksSource from "../content/how-it-works.md";
 import mailboxSource from "../content/mailbox.md";
 import qaSource from "../content/qa.md";
+import rolesSource from "../content/roles.md";
 import securitySource from "../content/security.md";
 import storageSource from "../content/storage.md";
 import taintedFilesSource from "../content/tainted-files.md";
@@ -65,6 +66,12 @@ const sources: SourceRecord[] = [
     navLabel: "Tainted files",
     source: taintedFilesSource,
     group: "Learn",
+  },
+  {
+    slug: "roles",
+    navLabel: "Roles it can play",
+    source: rolesSource,
+    group: "Plan",
   },
   { slug: "trust", navLabel: "Trust & key custody", source: trustSource, group: "Plan" },
   {

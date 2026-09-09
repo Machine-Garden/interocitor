@@ -31,6 +31,7 @@ test("the established landing page renders with deployment security headers", as
 
 test("Markdown documentation owns its content, outline, and metadata", async ({ page }) => {
   const documentation = new Map([
+    ["/roles", "What can you build with Interocitor?"],
     ["/trust", "Who is trusted inside an Interocitor mesh?"],
     ["/storage", "How Interocitor stores data"],
     ["/data-boundaries", "What belongs in Interocitor rows, files, and meshes?"],
@@ -160,6 +161,7 @@ test("documentation guides lead with their subject and close at the intended bou
   const guides = new Map([
     ["/how-it-works", "Let’s begin with the problem Interocitor solves"],
     ["/storage", "Start with Interocitor’s storage promise"],
+    ["/roles", "Start from the guarantees"],
     ["/trust", "Let the key define trust"],
     ["/data-boundaries", "Classify data by behavior"],
     ["/mailbox", "Define the mailbox boundary"],

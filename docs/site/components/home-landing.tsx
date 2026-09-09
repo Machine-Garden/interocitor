@@ -184,7 +184,8 @@ export function HomeLanding() {
               The wrong tool when the product needs server-side queries over plaintext, per-row
               access control inside one dataset, or central transactions. Every endpoint holds the
               entire mesh it opens, so big datasets are split into meshes rather than filtered per
-              row, and the remote still sees sizes and timing.
+              row, and the remote still sees sizes and timing.{" "}
+              <SpaLink href="roles.html">Read the full list.</SpaLink>
             </p>
           </div>
 
@@ -240,7 +241,8 @@ export function HomeLanding() {
               It is lower level than any of these, the way Rust is lower level than a
               garbage-collected language. You name the key source, the key holders, the compactor,
               the open meshes, and the sealed files. That is the price of no server code and no
-              plaintext rows on the remote.
+              plaintext rows on the remote.{" "}
+              <SpaLink href="roles.html">Read each role in full.</SpaLink>
             </p>
           </div>
         </section>
@@ -880,6 +882,7 @@ export function HomeLanding() {
             </section>
             <section>
               <h2>Plan your app</h2>
+              <SpaLink href="roles.html">Roles it can play</SpaLink>
               <SpaLink href="trust.html">Trust &amp; key custody</SpaLink>
               <SpaLink href="data-boundaries.html">Rows, files &amp; scale</SpaLink>
               <SpaLink href="mailbox.html">Mailbox operations</SpaLink>

@@ -59,8 +59,12 @@ test("Markdown documentation owns its content, outline, and metadata", async ({ 
       "href",
       "/how-it-works",
     );
+    // The old deep docs under /docs were folded into these guides; package
+    // documentation under packages/*/docs stays a legitimate target.
     await expect(
-      page.locator('.docs-content a[href*="github.com/Machine-Garden/interocitor/blob/main"]'),
+      page.locator(
+        '.docs-content a[href*="github.com/Machine-Garden/interocitor/blob/main/docs/"]',
+      ),
     ).toHaveCount(0);
   }
 
@@ -99,7 +103,9 @@ test("Markdown documentation owns its content, outline, and metadata", async ({ 
   await expect(page.locator(".docs-content")).toContainText("Family Google Drive");
   await expect(page.locator(".docs-content")).toContainText("Cloudflare Free");
   await expect(page.locator(".docs-content")).toContainText("100,000 Worker requests");
-  await expect(page.locator(".docs-content")).toContainText("2,880 requests per day");
+  await expect(page.locator(".docs-content")).toContainText(
+    "roughly 2,880 per continuously open endpoint per day",
+  );
   await expect(page.locator(".docs-content")).toContainText("512 MiB durable-file quota");
   await expect(page.locator("#cloudflare-free-numbers")).toBeVisible();
   await expect(page.locator(".docs-content")).toContainText("Durable Object relay");
@@ -129,10 +135,14 @@ test("planning links use client-side navigation", async ({ page }) => {
 test("the auth guide keeps independent access capabilities separate", async ({ page }) => {
   await page.goto("/auth");
 
-  await expect(page.locator("#middleware")).toContainText("meshMiddleware");
-  await expect(page.locator("#recovery")).toContainText("Twelve random BIP-39 words");
-  await expect(page.locator("#taints")).toContainText("A taint is not an ACL");
-  await expect(page.locator("#grants")).toContainText("Authentication still stays outside");
+  // Headings carry the ids; the section body is the prose that follows them.
+  const sectionText = (id: string, text: string) =>
+    page.locator(`${id} ~ p`).filter({ hasText: text }).first();
+  await expect(page.locator("#middleware")).toBeVisible();
+  await expect(sectionText("#middleware", "meshMiddleware")).toBeVisible();
+  await expect(sectionText("#recovery", "Twelve random BIP-39 words")).toBeVisible();
+  await expect(sectionText("#taints", "A taint is not an ACL")).toBeVisible();
+  await expect(sectionText("#grants", "Authentication still stays outside")).toBeVisible();
 });
 
 test("flow charts render as diagrams instead of source code", async ({ page }) => {
@@ -167,7 +177,7 @@ test("documentation guides lead with their subject and close at the intended bou
     ["/trust", "Let the key define trust"],
     ["/data-boundaries", "Classify data by behavior"],
     ["/mailbox", "Define the mailbox boundary"],
-    ["/auth", "Name the four locks"],
+    ["/auth", "Interocitor manages encrypted data, not access"],
     ["/automation", "Treat the agent as a trusted endpoint"],
     ["/security", "Trace the encryption boundary"],
     ["/compaction", "Explain why the change log grows"],

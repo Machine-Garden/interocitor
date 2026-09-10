@@ -11,6 +11,7 @@
     <meta name="theme-color" content="#f5f5f5" />
     <meta name="color-scheme" content="light" />
     <link rel="icon" href="../../assets/mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../demo-chrome.css" />
     <link rel="stylesheet" href="./app.css" />
     <link rel="stylesheet" href="../demo-code.css" />
   </head>
@@ -21,7 +22,12 @@
       <a href="/" class="brand" aria-label="Interocitor home">
         <img class="brand-logo" src="../../assets/hero.svg" alt="Interocitor" />
       </a>
-      <p><strong>Live local demo</strong> · nothing leaves this tab</p>
+      <nav class="example-nav" aria-label="Live examples">
+        <a href="/examples/todomvc/" aria-current="page">TodoMVC</a>
+        <a href="/examples/chat/">Chat</a>
+        <a href="/examples/board/">Board</a>
+        <a href="/examples/family-locator/">Family locator</a>
+      </nav>
       <a href="/" class="back-link">Overview <span aria-hidden="true">↗</span></a>
     </header>
 
@@ -275,6 +281,16 @@
           when its product needs them.
         </p>
       </section>
+      <section class="demo-standing" aria-label="Where it stands">
+        <div>
+          <span>Less convenient than Todoist</span>
+          <p>Todoist gives you an account, reminders, sharing by email, and search the server runs for you. None of that exists here; an application would own all of it.</p>
+        </div>
+        <div>
+          <span>More private than Todoist</span>
+          <p>Todoist’s servers read every task to sync it. These clients converge through files they wrote themselves, offline included. Encrypted before upload, the same files are what a real app hands to a remote that cannot read them.</p>
+        </div>
+      </section>
       <section class="demo-code" aria-labelledby="todo-code-title">
         <h2 id="todo-code-title">The minimal shape</h2>
         <p>
@@ -307,6 +323,12 @@ await peer.pull();</code></pre>
           >Read the full TodoMVC source →</a
         >
       </section>
+      <nav class="example-switch" aria-label="Other live examples">
+        <span>More live examples</span>
+        <a href="/examples/chat/">Chat</a>
+        <a href="/examples/board/">Board</a>
+        <a href="/examples/family-locator/">Family locator</a>
+      </nav>
     </main>
 
     <footer class="site-map-footer">

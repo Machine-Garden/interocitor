@@ -12,6 +12,7 @@
     <meta name="color-scheme" content="dark" />
     <link rel="icon" href="../../assets/mark-dark.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="../demo-base.css" />
+    <link rel="stylesheet" href="../demo-chrome.css" />
     <link rel="stylesheet" href="./app.css" />
     <link rel="stylesheet" href="../demo-code.css" />
   </head>
@@ -21,7 +22,12 @@
       <a href="/" class="brand" aria-label="Interocitor home">
         <img class="brand-logo" src="../../assets/hero-dark.svg" alt="Interocitor" />
       </a>
-      <p><strong>Protected-data demo</strong> · nothing leaves this tab</p>
+      <nav class="example-nav" aria-label="Live examples">
+        <a href="/examples/todomvc/">TodoMVC</a>
+        <a href="/examples/chat/">Chat</a>
+        <a href="/examples/board/">Board</a>
+        <a href="/examples/family-locator/" aria-current="page">Family locator</a>
+      </nav>
       <a href="/" class="back-link">Overview <span aria-hidden="true">↗</span></a>
     </header>
     <main>
@@ -154,6 +160,16 @@
           decisions.
         </p>
       </section>
+      <section class="demo-standing" aria-label="Where it stands">
+        <div>
+          <span>Less capable than Life360</span>
+          <p>Life360 runs in the background, delivers promptly, draws geofences, and can call for help. This demo does none of that and must not be used for safety decisions.</p>
+        </div>
+        <div>
+          <span>More private than Life360</span>
+          <p>Life360’s servers see every location in order to relay it. Here the mailbox never receives a place name or a coordinate; only devices holding the mesh key can read them.</p>
+        </div>
+      </section>
       <section class="demo-code" aria-labelledby="locator-code-title">
         <h2 id="locator-code-title">The minimal shape</h2>
         <p>
@@ -194,6 +210,12 @@ await locations.put("alex", {
           >Read the full locator source →</a
         >
       </section>
+      <nav class="example-switch" aria-label="Other live examples">
+        <span>More live examples</span>
+        <a href="/examples/todomvc/">TodoMVC</a>
+        <a href="/examples/chat/">Chat</a>
+        <a href="/examples/board/">Board</a>
+      </nav>
     </main>
     <footer class="site-map-footer">
       <div class="site-map-bottom">

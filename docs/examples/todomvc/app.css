@@ -71,56 +71,13 @@ a {
   transform: translateY(0);
 }
 
-.site-header,
 .intro,
 .mesh-control,
 .demo-stage,
 .change-journal,
-.explanation,
-.page-footer {
+.explanation {
   width: min(calc(100% - 40px), 1500px);
   margin-inline: auto;
-}
-
-.site-header {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  min-height: 64px;
-  border-bottom: 1px solid #dedede;
-  font-size: 0.78rem;
-}
-
-.brand {
-  justify-self: start;
-  display: inline-flex;
-  align-items: center;
-}
-
-.brand-logo {
-  display: block;
-  width: 160px;
-  height: auto;
-}
-
-.site-header p {
-  margin: 0;
-  color: var(--muted);
-}
-
-.site-header strong {
-  color: var(--green);
-}
-
-.back-link {
-  justify-self: end;
-  color: var(--muted);
-  font-weight: 650;
-}
-
-.back-link:hover,
-.page-footer a:hover {
-  color: var(--todo-red);
 }
 
 .intro {
@@ -890,42 +847,6 @@ code {
   font-size: 0.82em;
 }
 
-.page-footer {
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 24px 0 34px;
-  border-top: 1px solid #dedede;
-  color: #8b8b8b;
-  font-size: 0.7rem;
-}
-
-.site-map-footer {
-  width: 100%;
-  margin-top: 64px;
-  padding: 0 max(20px, calc((100% - 1500px) / 2));
-  border-top: 1px solid rgba(232, 248, 240, 0.16);
-  color: #f6f7f2;
-  background: #050b09;
-}
-
-.site-map-bottom {
-  padding-block: 20px 22px;
-  color: #73817a;
-  font-family: var(--mono);
-  font-size: 0.62rem;
-}
-
-.site-map-bottom a {
-  color: var(--muted);
-  text-decoration: underline;
-  text-underline-offset: 0.18em;
-}
-
-.site-map-bottom a:hover {
-  color: var(--mint);
-}
-
 [hidden] {
   display: none !important;
 }
@@ -973,14 +894,6 @@ code {
 }
 
 @media (max-width: 720px) {
-  .site-header {
-    grid-template-columns: 1fr auto;
-  }
-
-  .site-header p {
-    display: none;
-  }
-
   .demo-stage,
   .change-journal > header,
   .explanation {
@@ -1037,12 +950,10 @@ code {
 }
 
 @media (max-width: 500px) {
-  .site-header,
   .intro,
   .mesh-control,
   .demo-stage,
-  .explanation,
-  .page-footer {
+  .explanation {
     width: min(calc(100% - 24px), 1500px);
   }
 
@@ -1066,10 +977,5 @@ code {
     grid-column: 1 / -1;
     grid-row: 2;
     justify-self: center;
-  }
-
-  .page-footer {
-    align-items: flex-start;
-    flex-direction: column;
   }
 }

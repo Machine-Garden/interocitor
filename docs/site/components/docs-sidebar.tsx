@@ -32,8 +32,10 @@ export function DocsSidebar({ pages }: { pages: PageRecord[] }) {
       ))}
       <div>
         <p>Live examples</p>
-        <a href="/examples/todomvc/">Live TodoMVC ↗</a>
+        <a href="/examples/todomvc/">TodoMVC ↗</a>
         <a href="/examples/chat/">Encrypted chat ↗</a>
+        <a href="/examples/board/">Collaborative board ↗</a>
+        <a href="/examples/family-locator/">Family locator ↗</a>
       </div>
     </aside>
   );

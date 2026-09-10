@@ -46,6 +46,11 @@ export function HomeLanding() {
                 Stronger properties, such as per-message keys, can be built on top when a product
                 needs them.
               </p>
+              <p>
+                <SpaLink href="applications.html">
+                  What you can build, and where each product stands.
+                </SpaLink>
+              </p>
             </div>
           </div>
 
@@ -89,142 +94,6 @@ export function HomeLanding() {
                 one whose ownership and failure modes your product can explain.
               </p>
             </article>
-          </div>
-
-          <div className="shell build-list" aria-labelledby="build-title">
-            <div className="build-list-heading">
-              <p className="site-kicker">What you can build</p>
-              <h3 id="build-title">The same few guarantees carry products people already trust.</h3>
-              <p>
-                Every device holds a full local copy, files stay byte-exact, and the remote stores
-                what it cannot read. That is enough for a whole family of apps.
-              </p>
-            </div>
-            <dl>
-              <div>
-                <dt>Something like Linear</dt>
-                <dd>
-                  Speed. Every row is already on the device, so lists, filters, and keyboard-driven
-                  edits never wait on a round trip. Scale by giving each team or project its own
-                  mesh, kept as a connected store, so a session opens only what it needs.
-                </dd>
-              </div>
-              <div>
-                <dt>Something like Obsidian</dt>
-                <dd>
-                  The folder tree is rows that merge. Note bodies are durable files named by a
-                  digest, so structure converges and content stays exact.
-                </dd>
-              </div>
-              <div>
-                <dt>Something like Signal</dt>
-                <dd>
-                  The mailbox stores and returns encrypted artifacts. It never receives message
-                  plaintext, and even object names are keyed hashes.
-                </dd>
-              </div>
-              <div>
-                <dt>Something like Cryptomator</dt>
-                <dd>
-                  Files are encrypted before the WebDAV, Google Drive, or iCloud folder adapter sees
-                  them, on storage the user already pays for and owns.
-                </dd>
-              </div>
-              <div>
-                <dt>Something like Bitwarden</dt>
-                <dd>
-                  A portable key, device pairing, and recovery phrases are built in, so a vault
-                  syncs across devices without a custodial server.
-                </dd>
-              </div>
-              <div>
-                <dt>A field-data app</dt>
-                <dd>
-                  Inspections and surveys are written offline and merged field by field later. Two
-                  workers on one report keep both sets of edits.
-                </dd>
-              </div>
-              <div>
-                <dt>Trusted automation</dt>
-                <dd>
-                  A worker or agent is just another trusted endpoint. It holds the key, reads task
-                  rows, does the work, and writes results back, from a browser, a server, or a
-                  script.
-                </dd>
-              </div>
-              <div>
-                <dt>A case-file system</dt>
-                <dd>
-                  A file sealed under an extra key lives inside a shared mesh: rows stay shared,
-                  only the key holders open the bytes, and the seal guards the object against
-                  overwrite.
-                </dd>
-              </div>
-            </dl>
-            <p className="build-list-note">
-              The wrong tool when the product needs server-side queries over plaintext, per-row
-              access control inside one dataset, or central transactions. Every endpoint holds the
-              entire mesh it opens, so big datasets are split into meshes rather than filtered per
-              row, and the remote still sees sizes and timing.{" "}
-              <SpaLink href="applications.html">Read the full list.</SpaLink>
-            </p>
-          </div>
-
-          <div className="shell build-list compare-list" aria-labelledby="roles-title">
-            <div className="build-list-heading">
-              <p className="site-kicker">Roles it can play</p>
-              <h3 id="roles-title">One library that stands in for several tools.</h3>
-              <p>
-                Each of them is a local store plus a way to move data. Interocitor keeps the local
-                API you know and takes the server out of the trust boundary. That is the whole
-                difference, and it cuts both ways.
-              </p>
-            </div>
-            <dl>
-              <div>
-                <dt>As Dexie</dt>
-                <dd>
-                  A typed table store over IndexedDB with where, subscribe, and live queries.
-                  Queries stay on one indexed field, rows merge per field, and sync to a
-                  ciphertext-only remote is already there. Reach for Dexie when you do not need to
-                  sync &ldquo;own&rdquo; data.
-                </dd>
-              </div>
-              <div>
-                <dt>As TanStack DB</dt>
-                <dd>
-                  Reactive collections and live queries feeding React, with sync built in and no
-                  server that understands the schema. The client replica is canonical and scale
-                  comes from splitting meshes. Reach for TanStack DB when a trusted backend already
-                  owns the data.
-                </dd>
-              </div>
-              <div>
-                <dt>As Firebase</dt>
-                <dd>
-                  A multi-device synced store, offline by default, with no backend to write. The
-                  remote holds ciphertext, the unit of access is the mesh, and the worker only
-                  admits, meters, and audits. Reach for Firestore when the server must query or
-                  report on the data.
-                </dd>
-              </div>
-              <div>
-                <dt>As a distributed database</dt>
-                <dd>
-                  Not a browser library: the core runs in a server process with a memory or custom
-                  local store. Over WebDAV, S3, or a NAS a mesh behaves like a small distributed
-                  database its storage cannot read. Reach for a real database when you need central
-                  transactions.
-                </dd>
-              </div>
-            </dl>
-            <p className="build-list-note">
-              It is lower level than any of these, the way Rust is lower level than a
-              garbage-collected language. You name the key source, the key holders, the compactor,
-              the open meshes, and the sealed files. That is the price of no server code and no
-              plaintext rows on the remote.{" "}
-              <SpaLink href="applications.html">Read each role in full.</SpaLink>
-            </p>
           </div>
 
           <div className="shell build-list ladder-list" aria-labelledby="ladder-title">

@@ -10,7 +10,7 @@ export function SiteHeader() {
         <nav className="nav-links" aria-label="Primary navigation">
           <Link href="/">Overview</Link>
           <Link href="/qa">Q&amp;A</Link>
-          <a href="/examples/todomvc/">Live TodoMVC</a>
+          <Link href="/#use-cases">Live examples</Link>
           <a href="https://github.com/Machine-Garden/interocitor">GitHub ↗</a>
         </nav>
         <Link className="nav-cta" href="/how-it-works">

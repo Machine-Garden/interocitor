@@ -1453,89 +1453,28 @@ h1 em {
 }
 
 .site-map-footer {
-  padding: clamp(54px, 7vw, 82px) 0 24px;
+  padding: 0;
   border-top: 1px solid var(--line);
   background:
     radial-gradient(circle at 12% 0, rgba(113, 245, 189, 0.07), transparent 24rem), #050b09;
 }
 
-.site-map-footer-grid {
-  display: grid;
-  grid-template-columns: minmax(240px, 0.72fr) minmax(0, 1.28fr);
-  gap: clamp(52px, 9vw, 130px);
-}
-
-.site-map-brand {
-  display: flex;
-  align-items: flex-start;
-  flex-direction: column;
-}
-
-.site-map-brand p {
-  max-width: 290px;
-  margin: 22px 0 25px;
-  color: var(--muted);
-  font-size: 0.86rem;
-}
-
-.footer-demo-link {
-  display: inline-flex;
-  gap: 8px;
-  padding-bottom: 3px;
-  border-bottom: 1px solid rgba(214, 255, 103, 0.48);
-  color: var(--lime);
-  font-size: 0.79rem;
-  font-weight: 760;
-}
-
-.footer-demo-link:hover {
-  border-color: var(--lime);
-}
-
-.site-map-nav {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: clamp(28px, 5vw, 70px);
-}
-
-.site-map-nav section {
-  display: flex;
-  align-items: flex-start;
-  flex-direction: column;
-  gap: 9px;
-}
-
-.site-map-nav h2 {
-  margin: 0 0 9px;
-  color: var(--faint);
-  font-family: var(--mono);
-  font-size: 0.65rem;
-  font-weight: 750;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-}
-
-.site-map-nav a {
-  color: #c4cec9;
-  font-size: 0.81rem;
-  font-weight: 650;
-}
-
-.site-map-nav a:hover {
-  color: var(--mint);
-}
-
 .site-map-bottom {
-  display: flex;
-  justify-content: space-between;
-  gap: 24px;
-  margin-top: clamp(48px, 7vw, 78px);
-  padding-top: 20px;
-  border-top: 1px solid var(--line);
+  padding-block: 20px 24px;
   color: var(--faint);
   font-family: var(--mono);
   font-size: 0.62rem;
   letter-spacing: 0.04em;
+}
+
+.site-map-bottom a {
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.site-map-bottom a:hover {
+  color: var(--mint);
 }
 
 @media (max-width: 1120px) {
@@ -1703,11 +1642,6 @@ h1 em {
   .footer nav {
     justify-content: flex-start;
   }
-
-  .site-map-footer-grid {
-    grid-template-columns: 1fr;
-    gap: 44px;
-  }
 }
 
 @media (max-width: 580px) {
@@ -1717,19 +1651,6 @@ h1 em {
 
   .site-header .brand {
     width: 148px;
-  }
-
-  .site-map-nav {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .site-map-nav section:last-child {
-    grid-column: 1 / -1;
-  }
-
-  .site-map-bottom {
-    align-items: flex-start;
-    flex-direction: column;
   }
 
   .site-header .brand-logo {

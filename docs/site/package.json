@@ -8,7 +8,8 @@
     "dev": "yarn prepare-public && WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
     "build": "yarn prepare-public && WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
     "check": "tsc --noEmit",
-    "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start"
+    "start": "wrangler dev --config dist/server/wrangler.json",
+    "deploy": "vinext-cloudflare deploy --config dist/server/wrangler.json"
   },
   "dependencies": {
     "mermaid": "^11.17.2",
@@ -18,18 +19,19 @@
     "remark-gfm": "4.0.1"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.37.1",
+    "@cloudflare/vite-plugin": "1.53.1",
     "@openai/sites-vite-plugin": "0.1.0",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
-    "@vitejs/plugin-react": "6.0.2",
-    "@vitejs/plugin-rsc": "0.5.26",
+    "@vinext/cloudflare": "1.0.0-beta.6",
+    "@vitejs/plugin-react": "6.1.0",
+    "@vitejs/plugin-rsc": "0.5.34",
     "react-server-dom-webpack": "19.2.6",
     "typescript": "5.9.3",
-    "vinext": "1.0.0-beta.2",
-    "vite": "8.0.13",
-    "wrangler": "4.92.0"
+    "vinext": "1.0.0-beta.8",
+    "vite": "8.2.2",
+    "wrangler": "4.125.0"
   },
   "engines": {
     "node": ">=22.13.0"

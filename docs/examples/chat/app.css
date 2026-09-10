@@ -101,8 +101,7 @@ a {
   color: var(--muted);
 }
 
-.site-header strong,
-.footer-demo-note {
+.site-header strong {
   color: var(--mint);
 }
 
@@ -112,8 +111,7 @@ a {
   font-weight: 650;
 }
 
-.back-link:hover,
-.site-map-nav a:hover {
+.back-link:hover {
   color: var(--mint);
 }
 
@@ -442,77 +440,27 @@ a {
 .site-map-footer {
   width: 100%;
   margin-top: 32px;
-  padding: clamp(48px, 7vw, 76px) max(20px, calc((100% - 1420px) / 2)) 22px;
+  padding: 0 max(20px, calc((100% - 1420px) / 2));
+  border-top: 1px solid var(--line);
   color: #f6f7f2;
   background: #030706;
 }
 
-.site-map-footer-grid {
-  display: grid;
-  grid-template-columns: minmax(240px, 0.72fr) minmax(0, 1.28fr);
-  gap: clamp(52px, 9vw, 130px);
-}
-
-.site-map-brand {
-  display: flex;
-  align-items: flex-start;
-  flex-direction: column;
-}
-
-.site-map-brand .brand-logo {
-  width: 172px;
-}
-
-.site-map-brand p {
-  max-width: 290px;
-  margin: 22px 0 25px;
-  color: var(--muted);
-  font-size: 0.86rem;
-}
-
-.footer-demo-note {
-  font-size: 0.76rem;
-  font-weight: 720;
-}
-
-.site-map-nav {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: clamp(28px, 5vw, 70px);
-}
-
-.site-map-nav section {
-  display: flex;
-  align-items: flex-start;
-  flex-direction: column;
-  gap: 9px;
-}
-
-.site-map-nav h2 {
-  margin: 0 0 9px;
-  color: var(--faint);
-  font-family: var(--mono);
-  font-size: 0.65rem;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-}
-
-.site-map-nav a {
-  color: #c4cec9;
-  font-size: 0.81rem;
-  font-weight: 650;
-}
-
 .site-map-bottom {
-  display: flex;
-  justify-content: space-between;
-  gap: 24px;
-  margin-top: clamp(48px, 7vw, 78px);
-  padding-top: 20px;
-  border-top: 1px solid var(--line);
+  padding-block: 20px 22px;
   color: var(--faint);
   font-family: var(--mono);
   font-size: 0.62rem;
+}
+
+.site-map-bottom a {
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.site-map-bottom a:hover {
+  color: var(--mint);
 }
 
 @media (max-width: 1040px) {
@@ -523,11 +471,6 @@ a {
   .mailbox {
     grid-column: 1 / -1;
     grid-row: 2;
-  }
-
-  .site-map-footer-grid {
-    grid-template-columns: 1fr;
-    gap: 44px;
   }
 }
 
@@ -546,8 +489,7 @@ a {
 
   .boundary,
   .demo-stage,
-  .explanation,
-  .site-map-nav {
+  .explanation {
     grid-template-columns: 1fr;
   }
 
@@ -568,11 +510,6 @@ a {
   .message-list {
     min-height: 300px;
     max-height: 300px;
-  }
-
-  .site-map-bottom {
-    align-items: flex-start;
-    flex-direction: column;
   }
 }
 

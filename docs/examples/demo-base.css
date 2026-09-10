@@ -90,8 +90,7 @@ a {
   margin: 0;
   color: var(--muted);
 }
-.site-header strong,
-.footer-demo-note {
+.site-header strong {
   color: var(--mint);
 }
 .back-link {
@@ -99,8 +98,7 @@ a {
   color: var(--muted);
   font-weight: 650;
 }
-.back-link:hover,
-.site-map-nav a:hover {
+.back-link:hover {
   color: var(--mint);
 }
 .demo-intro {
@@ -294,51 +292,21 @@ a {
   border-top: 1px solid var(--line);
   background: #050b0a;
 }
-.site-map-footer-grid {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.8fr) minmax(520px, 1.4fr);
-  gap: 70px;
-  width: min(calc(100% - 40px), 1420px);
-  margin: 0 auto;
-  padding: 56px 0 46px;
-}
-.site-map-brand p {
-  max-width: 280px;
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-.site-map-nav {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 28px;
-}
-.site-map-nav section {
-  display: grid;
-  align-content: start;
-  gap: 9px;
-}
-.site-map-nav h2 {
-  margin: 0 0 5px;
-  color: var(--faint);
-  font-family: var(--mono);
-  font-size: 0.62rem;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-}
-.site-map-nav a {
-  color: var(--muted);
-  font-size: 0.8rem;
-}
 .site-map-bottom {
-  display: flex;
-  justify-content: space-between;
   width: min(calc(100% - 40px), 1420px);
   margin: 0 auto;
   padding: 18px 0 24px;
-  border-top: 1px solid var(--line);
   color: var(--faint);
   font-family: var(--mono);
   font-size: 0.62rem;
+}
+.site-map-bottom a {
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+.site-map-bottom a:hover {
+  color: var(--mint);
 }
 @media (max-width: 820px) {
   .site-header {
@@ -347,8 +315,7 @@ a {
   .site-header p {
     display: none;
   }
-  .boundary-strip,
-  .site-map-footer-grid {
+  .boundary-strip {
     grid-template-columns: 1fr;
   }
   .boundary-strip > div {
@@ -357,9 +324,6 @@ a {
   }
   .boundary-strip > div:last-child {
     border-bottom: 0;
-  }
-  .site-map-footer-grid {
-    gap: 40px;
   }
 }
 @media (max-width: 580px) {
@@ -375,15 +339,11 @@ a {
   .brand-logo {
     width: 136px;
   }
-  .demo-toolbar,
-  .site-map-bottom {
+  .demo-toolbar {
     align-items: flex-start;
     flex-direction: column;
   }
   .primary-action {
     width: 100%;
-  }
-  .site-map-nav {
-    grid-template-columns: 1fr 1fr;
   }
 }

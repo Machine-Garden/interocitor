@@ -161,15 +161,9 @@ export function SiteShell({ page, pages }: { page: PageRecord; pages: PageRecord
       </div>
 
       <footer className="docs-footer">
-        <div>
-          <img src="/assets/hero-dark.svg" alt="Interocitor" />
-          <p>Trusted endpoints · protected mailbox.</p>
-        </div>
-        <nav aria-label="Site links">
-          <Link href="/">Overview</Link>
-          <Link href="/how-it-works">How it works</Link>
-          <a href="https://github.com/Machine-Garden/interocitor">Source on GitHub</a>
-        </nav>
+        <p>
+          interocitor by <a href="http://machine-garden.com/">machine-garden</a>
+        </p>
       </footer>
     </div>
   );

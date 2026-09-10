@@ -1,3 +1,4 @@
+import { cloudflare } from "@cloudflare/vite-plugin";
 import { sites } from "@openai/sites-vite-plugin";
 import vinext from "vinext";
 import { defineConfig, type Plugin } from "vite";
@@ -13,12 +14,10 @@ const markdownContent = {
   },
 } satisfies Plugin;
 
-export default defineConfig(async () => {
+export default defineConfig(() => {
   process.env.WRANGLER_WRITE_LOGS ??= "false";
   process.env.WRANGLER_LOG_PATH ??= ".wrangler/logs";
   process.env.MINIFLARE_REGISTRY_PATH ??= ".wrangler/registry";
-
-  const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
     server: isCodexSeatbeltSandbox

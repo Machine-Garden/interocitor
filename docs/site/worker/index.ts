@@ -45,9 +45,9 @@ function withSecurityHeaders(response: Response): Response {
 const worker = {
   async fetch(request: Request, env: Env, context: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    const demo = url.pathname.match(/^\/examples\/(todomvc|chat|board|family-locator)\/?$/);
+    const demo = url.pathname.match(/^\/examples\/(todomvc|chat|board|family-locator)$/);
     if (demo) {
-      return Response.redirect(new URL(`/examples/${demo[1]}/index.html`, url), 302);
+      return Response.redirect(new URL(`/examples/${demo[1]}/`, url), 308);
     }
 
     if (/^\/examples\/(todomvc|chat|board|family-locator)\//.test(url.pathname)) {

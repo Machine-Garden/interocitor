@@ -905,61 +905,10 @@ export function HomeLanding() {
         </section>
       </main>
       <footer className="site-map-footer">
-        <div className="shell site-map-footer-grid">
-          <div className="site-map-brand">
-            <SpaLink className="brand" href="index.html" aria-label="Interocitor home">
-              <img className="brand-logo" src="/assets/hero-dark.svg" alt="Interocitor" />
-            </SpaLink>
-            <p>Local-first application data without remote plaintext.</p>
-            <SpaLink className="footer-demo-link" href="examples/todomvc/">
-              Try the live TodoMVC <span aria-hidden="true">↗</span>
-            </SpaLink>
-          </div>
-          <nav className="site-map-nav" aria-label="Interocitor site map">
-            <section>
-              <h2>Explore</h2>
-              <SpaLink href="index.html">Overview</SpaLink>
-              <SpaLink href="how-it-works.html">How it works</SpaLink>
-              <SpaLink href="storage.html">Storage model</SpaLink>
-              <SpaLink href="flows.html">Core flows</SpaLink>
-              <SpaLink href="security.html">Security model</SpaLink>
-              <SpaLink href="compaction.html">Compaction</SpaLink>
-              <SpaLink href="tainted-files.html">Tainted files</SpaLink>
-              <SpaLink href="examples/todomvc/">Live TodoMVC</SpaLink>
-              <SpaLink href="examples/chat/">Live encrypted chat</SpaLink>
-              <SpaLink href="examples/board/">Live shared board</SpaLink>
-              <SpaLink href="examples/family-locator/">Protected family locator</SpaLink>
-            </section>
-            <section>
-              <h2>Plan your app</h2>
-              <SpaLink href="applications.html">Applications</SpaLink>
-              <SpaLink href="integrations.html">Integrations</SpaLink>
-              <SpaLink href="trust.html">Trust &amp; key custody</SpaLink>
-              <SpaLink href="data-boundaries.html">Rows, files &amp; scale</SpaLink>
-              <SpaLink href="mailbox.html">Mailbox operations</SpaLink>
-              <SpaLink href="auth.html">Access &amp; identity</SpaLink>
-              <SpaLink href="automation.html">Trusted automation</SpaLink>
-            </section>
-            <section>
-              <h2>Build</h2>
-              <SpaLink href="https://github.com/Machine-Garden/interocitor/tree/main/packages/web#readme">
-                Browser apps
-              </SpaLink>
-              <SpaLink href="https://github.com/Machine-Garden/interocitor/tree/main/packages/workers#readme">
-                Cloudflare mailbox
-              </SpaLink>
-              <SpaLink href="https://github.com/Machine-Garden/interocitor/tree/main/examples">
-                Examples
-              </SpaLink>
-              <SpaLink href="https://github.com/Machine-Garden/interocitor">
-                Source on GitHub
-              </SpaLink>
-            </section>
-          </nav>
-        </div>
         <div className="shell site-map-bottom">
-          <span>Interocitor · MIT licensed</span>
-          <span>Trusted endpoints · protected mailbox</span>
+          <span>
+            interocitor by <SpaLink href="http://machine-garden.com/">machine-garden</SpaLink>
+          </span>
         </div>
       </footer>
     </div>

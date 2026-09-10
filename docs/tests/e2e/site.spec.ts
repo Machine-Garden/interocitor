@@ -262,6 +262,40 @@ test("landing and documentation stay usable at a narrow viewport", async ({ page
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
+test("site footers use one machine-garden attribution block", async ({ page }) => {
+  for (const route of [
+    "/",
+    "/examples/todomvc/",
+    "/examples/chat/",
+    "/examples/board/",
+    "/examples/family-locator/",
+  ]) {
+    await page.goto(route);
+    const footer = page.locator(".site-map-footer");
+    await expect(footer.locator(":scope > *"), route).toHaveCount(1);
+    await expect(footer.locator(".site-map-footer-grid"), route).toHaveCount(0);
+    expect((await footer.boundingBox())?.height, route).toBeLessThan(120);
+    const attribution = footer.locator(".site-map-bottom");
+    await expect(attribution, route).toHaveText("interocitor by machine-garden");
+    await expect(attribution.locator(":scope > *"), route).toHaveCount(1);
+    await expect(attribution.getByRole("link", { name: "machine-garden" }), route).toHaveAttribute(
+      "href",
+      "http://machine-garden.com/",
+    );
+  }
+
+  await page.goto("/how-it-works");
+  const docsFooter = page.locator(".docs-footer");
+  await expect(docsFooter.locator(":scope > *")).toHaveCount(1);
+  expect((await docsFooter.boundingBox())?.height).toBeLessThan(120);
+  const docsAttribution = docsFooter.locator("p");
+  await expect(docsAttribution).toHaveText("interocitor by machine-garden");
+  await expect(docsAttribution.getByRole("link", { name: "machine-garden" })).toHaveAttribute(
+    "href",
+    "http://machine-garden.com/",
+  );
+});
+
 test("live examples remain reachable from the SPA", async ({ page }) => {
   const routes = [
     "/examples/todomvc/",
@@ -278,9 +312,5 @@ test("live examples remain reachable from the SPA", async ({ page }) => {
     await expect(example.locator("code"), route).toContainText("const schema = {");
     await expect(example.locator("code"), route).toContainText('db.table("');
     await expect(page.locator(".site-map-footer"), route).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: "Source on GitHub", exact: true }),
-      route,
-    ).toHaveAttribute("href", "https://github.com/Machine-Garden/interocitor");
   }
 });

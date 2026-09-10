@@ -48,14 +48,21 @@ test("authenticate throws on unauthorized response", async ({ page }) => {
 
     try {
       await adapter.authenticate();
-      return { threw: false, message: "" };
+      return { threw: false, kind: null, status: null, message: "" };
     } catch (error: any) {
-      return { threw: true, message: String(error?.message ?? error) };
+      return {
+        threw: true,
+        kind: error?.kind ?? null,
+        status: error?.status ?? null,
+        message: String(error?.message ?? error),
+      };
     }
   });
 
   expect(result.threw).toBe(true);
-  expect(result.message).toContain("authentication failed");
+  expect(result.kind).toBe("unauthenticated");
+  expect(result.status).toBe(401);
+  expect(result.message).toContain("authenticate");
 });
 
 test("ensureFolder is idempotent for existing paths", async ({ page }) => {

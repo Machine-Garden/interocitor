@@ -283,6 +283,8 @@ test.describe("durable file storage", () => {
       await engine.setRemoteStorage(adapter);
       await engine.connect();
 
+      // These helpers run inside page.evaluate, so they cannot live at module scope.
+      // eslint-disable-next-line unicorn/consistent-function-scoping
       const attempt = async (run: () => Promise<unknown>) => {
         try {
           await run();
@@ -291,6 +293,7 @@ test.describe("durable file storage", () => {
           return err instanceof Error ? err.message : String(err);
         }
       };
+      // eslint-disable-next-line unicorn/consistent-function-scoping
       const seal = (key: CryptoKey) => ({ taint: "group1", key });
       await engine.putFile("docs/sealed.txt", "v1", "text/plain", seal(groupKey));
       const plainOverwrite = await attempt(() => engine.putFile("docs/sealed.txt", "v2"));

@@ -107,7 +107,7 @@ a {
   top: 0;
   z-index: 30;
   border-bottom: 1px solid var(--line);
-  background: rgba(7, 17, 15, 0.84);
+  background: rgba(7, 17, 15, 0.92);
   backdrop-filter: blur(20px);
 }
 
@@ -1891,10 +1891,6 @@ h1 em {
 
 .home-page main {
   overflow: hidden;
-}
-
-.home-page .site-header {
-  background: rgba(7, 17, 15, 0.92);
 }
 
 .home-page .site-hero {

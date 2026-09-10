@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { SiteShell } from "@/components/site-shell";
+import { DocsArticle } from "@/components/docs-article";
 import { getPage, pages, shortRoutes } from "@/lib/content";
 
 type Props = { params: Promise<{ slug: string }> };
@@ -34,5 +34,5 @@ export default async function DocumentationPage({ params }: Props) {
 
   const page = getPage(cleanSlug);
   if (!page) notFound();
-  return <SiteShell page={page} pages={pages} />;
+  return <DocsArticle page={page} />;
 }

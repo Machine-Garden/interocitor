@@ -2,53 +2,13 @@
 @import "../../chooser.css";
 
 .docs-page {
-  min-height: 100vh;
+  min-height: calc(100vh - 70px);
   color: #17201c;
   background: #f0eee4;
 }
 
 .docs-page a {
   text-underline-offset: 3px;
-}
-
-.docs-header {
-  position: sticky;
-  top: 0;
-  z-index: 40;
-  border-bottom: 1px solid rgba(232, 248, 240, 0.16);
-  background: rgba(7, 17, 15, 0.92);
-  backdrop-filter: blur(20px);
-}
-
-.docs-header-inner {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  gap: 36px;
-  align-items: center;
-  width: min(calc(100% - 48px), 1240px);
-  min-height: 70px;
-  margin-inline: auto;
-}
-
-.docs-header nav {
-  display: flex;
-  gap: 30px;
-}
-
-.docs-header nav a,
-.docs-github {
-  color: #a9b5af;
-  font-size: 0.8rem;
-  font-weight: 720;
-}
-
-.docs-header nav a:hover,
-.docs-github:hover {
-  color: #f6f7f2;
-}
-
-.docs-github {
-  justify-self: end;
 }
 
 .docs-hero-band {
@@ -415,14 +375,6 @@
 }
 
 @media (max-width: 760px) {
-  .docs-header-inner {
-    grid-template-columns: 1fr auto;
-  }
-
-  .docs-header nav {
-    display: none;
-  }
-
   .docs-workspace {
     display: flex;
     width: 100%;
@@ -513,14 +465,9 @@
 }
 
 @media (max-width: 520px) {
-  .docs-header-inner,
   .docs-hero,
   .docs-reading-grid,
   .docs-footer {
     width: min(calc(100% - 32px), 1240px);
-  }
-
-  .docs-header .brand-logo {
-    width: 148px;
   }
 }

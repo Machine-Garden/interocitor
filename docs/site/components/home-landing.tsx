@@ -3,25 +3,6 @@ import { SpaLink } from "./spa-link";
 export function HomeLanding() {
   return (
     <div className="home-page">
-      <SpaLink className="skip-link" href="#main">
-        Skip to content
-      </SpaLink>
-      <header className="site-header">
-        <div className="shell nav">
-          <SpaLink className="brand" href="#top" aria-label="Interocitor home">
-            <img className="brand-logo" src="/assets/hero-dark.svg" alt="Interocitor" />
-          </SpaLink>
-          <nav className="nav-links" aria-label="Primary navigation">
-            <SpaLink href="#why">Why Interocitor</SpaLink>
-            <SpaLink href="examples/todomvc/">Live TodoMVC</SpaLink>
-            <SpaLink href="#decisions">Choose a path</SpaLink>
-            <SpaLink href="#security">Security model</SpaLink>
-          </nav>
-          <SpaLink className="nav-cta" href="how-it-works.html">
-            Docs <span aria-hidden="true">↗</span>
-          </SpaLink>
-        </div>
-      </header>
       <main id="main">
         <section id="top" className="site-hero" aria-labelledby="hero-title">
           <div className="shell site-hero-inner">

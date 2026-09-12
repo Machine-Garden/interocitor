@@ -122,6 +122,10 @@ export interface FileBodyWriteOptions {
  *
  * The Worker owns authorization, mesh routing, quotas, and D1 metadata. A
  * store implementation owns only body persistence and provider credentials.
+ *
+ * @see {@link ../docs/security-guardrails.md | Cloudflare security guardrails}
+ *   — what the body store sees for a protected mesh, and what a custom store
+ *   then owns at the provider level.
  */
 export interface FileBodyStore {
   /** Return the exact body stored at `key`, or `null` when it is absent. */
@@ -239,7 +243,13 @@ export interface MeshRouteResolution {
   canonicalAddress: string;
 }
 
-/** Resolve a public address to its canonical storage namespace. */
+/**
+ * Resolve a public address to its canonical storage namespace.
+ *
+ * @see {@link ../docs/mesh-access.md | Mesh addresses and access}
+ *   — when a presented address should be the namespace and when it should be
+ *   mapped, and what route resolution does not decide.
+ */
 export type MeshRouteResolver<Env = unknown> = (
   context: MeshRouteContext,
   env: Env,
@@ -331,7 +341,13 @@ export interface MeshAuthorizationMiddlewareOptions {
 /** Outcome recorded after a storage operation completes. */
 export type WorkerAuditOutcome = "ok" | "rejected" | "not-found";
 
-/** Completed sync-storage, durable-file, or recovery operation. */
+/**
+ * Completed sync-storage, durable-file, or recovery operation.
+ *
+ * @see {@link ../docs/audit.md | Worker audit}
+ *   — which operations emit an event, what each field can and cannot tell you,
+ *   and the identity the Worker does not supply.
+ */
 export interface WorkerAuditEvent {
   /** Stable event discriminator. */
   event: "interocitor.audit";
@@ -392,22 +408,38 @@ export interface DatabaseAdapter {
 /**
  * Runtime behavior accepted by {@link createInterocitorMount} and
  * {@link withInterocitor}.
+ *
+ * @see {@link ../docs/runtime-options.md | Worker configuration reference}
+ *   — every option with its default, and the smaller set a system handler
+ *   accepts.
  */
 export interface InterocitorRuntimeOptions<Env = unknown> {
   /**
    * Optional authoritative one-hop mapping for public IO/notify addresses.
    * When configured, returning `null` rejects with `404`; the runtime never
    * falls back to using the presented address directly.
+   *
+   * @see {@link ../docs/mesh-access.md | Mesh addresses and access}
+   *   — direct mode against resolved mode, and why a resolver is the way to
+   *   keep one opaque address stable while its namespace changes.
    */
   resolveMeshRoute?: MeshRouteResolver<Env>;
   /**
    * Rules defining which mesh addresses exist. Required for mesh IO/notify:
    * the default empty list rejects every address with `404`.
+   *
+   * @see {@link ../docs/mesh-access.md | Mesh addresses and access}
+   *   — named addresses against checksummed IDs, and what each admits.
    */
   meshIntegrityGates?: readonly MeshIntegrityGate<Env>[];
   /**
    * Ordered application layers around accepted `/io` and `/notify` requests.
    * The default empty list applies no additional request policy.
+   *
+   * @see {@link ../docs/mesh-access.md | Mesh addresses and access}
+   *   — where per-request authorization belongs relative to the integrity gate.
+   * @see {@link ../docs/mesh-control.md | Protected mesh control}
+   *   — when to issue your own revocable, delegable grants instead.
    */
   meshMiddleware?: readonly MeshMiddleware<Env>[];
   /**
@@ -458,6 +490,10 @@ export interface InterocitorRuntimeOptions<Env = unknown> {
   /**
    * Awaited instrumentation for completed storage operations. Callback errors
    * are isolated from the request; callback latency is request latency.
+   *
+   * @see {@link ../docs/audit.md | Worker audit}
+   *   — what an event establishes, and the request-identity context the host
+   *   has to add itself.
    */
   storageOperationAudit?: (event: WorkerAuditEvent, env: Env) => void | Promise<void>;
   /**
@@ -543,7 +579,13 @@ export interface InterocitorMount<Env = unknown> {
   fetch(request: Request, env: Env, ctx: ExecutionContextLike): Promise<Response>;
 }
 
-/** Options consumed by {@link createInterocitorSystemHandler}. */
+/**
+ * Options consumed by {@link createInterocitorSystemHandler}.
+ *
+ * @see {@link ../docs/maintenance.md | Maintenance and system operations}
+ *   — what TTL maintenance deletes, and why this handler sits behind the
+ *   host's own administrative policy.
+ */
 export interface InterocitorSystemHandlerOptions<Env = unknown> {
   /** URL prefix shared with the mesh mount. */
   mountPrefix?: string | null;

@@ -15,6 +15,15 @@ export interface MeshKeyMaterial {
   portableKey?: string | null;
 }
 
+/**
+ * How an engine obtains the mesh key it encrypts with.
+ *
+ * @see {@link ../../docs/security-model.md | Security model}
+ *   — what the key protects, and what remains visible to the remote whatever
+ *   the source.
+ * @see {@link ../../docs/shared-key-scenarios.md | Shared key scenarios}
+ *   — the portable and bound contracts, and who holds each key component.
+ */
 export interface MeshKeySource {
   load(context: MeshKeyContext): Promise<MeshKeyMaterial>;
   persist(context: MeshKeyContext, credentials: StoredCredentials): Promise<void>;
@@ -33,6 +42,13 @@ export interface BoundSharedKeySourceOptions {
   portableKey?: string | null;
 }
 
+/**
+ * One portable key, held by every device in the mesh.
+ *
+ * @see {@link ../../docs/shared-key-scenarios.md | Shared key scenarios}
+ *   — what this custody choice exposes in a database dump, and when the bound
+ *   contract is the better trade.
+ */
 export class PortablePassphraseKeySource implements MeshKeySource {
   private portableKey: string | null;
   private readonly credentialStore: CredentialStore | null;
@@ -74,6 +90,13 @@ export class PortablePassphraseKeySource implements MeshKeySource {
   }
 }
 
+/**
+ * A portable component plus an application-supplied `derive`, so no single
+ * stored component is the mesh key.
+ *
+ * @see {@link ../../docs/shared-key-scenarios.md | Shared key scenarios}
+ *   — what `derive` must guarantee, and the exposure this contract removes.
+ */
 export class BoundSharedKeySource implements MeshKeySource {
   private portableKey: string | null;
   private readonly credentialStore: CredentialStore | null;

@@ -210,6 +210,9 @@ async function isValidChecksummedMesh(prefix: string, meshSecret?: string): Prom
  * Accept `<UUIDv7>.<tag>` addresses issued with the configured `meshSecret`.
  * The tag is the first eight HMAC-SHA-256 bytes encoded as base64url. This
  * establishes address integrity; caller access remains a middleware decision.
+ *
+ * @see {@link ../docs/mesh-access.md | Mesh addresses and access}
+ *   — what a checksummed ID buys over a named address, and how to issue one.
  */
 export const checksummedMeshIntegrityGate: MeshIntegrityGate = async ({ verifyChecksum }) =>
   verifyChecksum();
@@ -236,6 +239,10 @@ function fileSizeLimitForPathType(pathType: string, runtime: ResolvedRuntimeConf
  * `none` and `full` continue, `readonly` rejects writes, and `deny` rejects
  * every admitted IO/notify request. Authorizer failures and invalid decisions
  * return `503`.
+ *
+ * @see {@link ../docs/mesh-access.md | Mesh addresses and access}
+ *   — the ordinary multi-user shape: one stable address, every request
+ *   authorized here against the host's own identity provider.
  */
 export function createMeshAuthorizationMiddleware<Env>(
   authorizer: MeshAuthorizer<Env>,
@@ -1475,6 +1482,12 @@ async function handleRecoveryRequest<Env>(
  * Use this when Interocitor should be one routed subsystem inside a larger
  * Worker. The returned object owns path matching plus request handling for the
  * claimed prefix, while your app worker keeps ownership of everything else.
+ *
+ * @see {@link ../docs/runtime-options.md | Worker configuration reference}
+ *   — every mount and runtime option, with its default.
+ * @see {@link ../docs/catch-up.md | Catch-up after absence}
+ *   — what this mount guarantees about serving a change file a device has
+ *   never seen, and which decisions stay with the engine.
  */
 export function createInterocitorMount<Env = unknown>(
   options: InterocitorMountOptions<Env>,
@@ -1533,6 +1546,10 @@ export function createInterocitorMount<Env = unknown>(
  * Route this handler from the host Worker after the host's administrative
  * policy. Its `fetch()` method executes matched mesh-ID and maintenance
  * operations.
+ *
+ * @see {@link ../docs/maintenance.md | Maintenance and system operations}
+ *   — the operations it exposes, what TTL deletion destroys, and the
+ *   scheduled alternative.
  */
 export function createInterocitorSystemHandler<Env = unknown>(
   options: InterocitorSystemHandlerOptions<Env>,
@@ -1584,6 +1601,12 @@ const EMPTY_WORKER: WorkerLike = {};
  * Non-matching requests fall through to the wrapped worker. When scheduled
  * maintenance is enabled, the wrapped worker's `scheduled()` runs first and
  * Interocitor maintenance runs after it.
+ *
+ * @see {@link ../docs/runtime-options.md | Worker configuration reference}
+ *   — every mount and runtime option, with its default.
+ * @see {@link ../docs/maintenance.md | Maintenance and system operations}
+ *   — what the scheduled sweep deletes once `enableScheduledMaintenance` and
+ *   `pathTtlHours` are both set.
  */
 export function withInterocitor<Env = unknown>(
   worker: WorkerLike<Env> | undefined,

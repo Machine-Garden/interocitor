@@ -64,6 +64,10 @@ function rowKey(table: string, rowId: string): string {
  *
  * No schema awareness, no indexes — `queryWhere` is a linear scan.
  * That's fine: this store exists for fallback paths, not happy paths.
+ *
+ * @see {@link ../../docs/testing.md | Test an Interocitor product}
+ *   — the local-only engine most tests want, and when a test genuinely needs
+ *   to cross the mailbox boundary instead.
  */
 export class MemoryLocalStore implements LocalStore {
   private rows = new Map<string, Row>();

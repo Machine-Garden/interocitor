@@ -16,6 +16,10 @@
  * JSON object the caller controls; this module only adds/checks `iat`/`exp`
  * when asked.
  *
+ * @see {@link ../../docs/signing.md | Signing (identity without identity)}
+ *   — what a signature proves without accounts or an authority, and where key
+ *   custody has to live.
+ *
  * @example
  * ```ts
  * import {

@@ -272,6 +272,10 @@ export interface TableSchemaDefinition<
  *   },
  * } satisfies DatabaseSchemaDefinition;
  * // → DatabaseSchemaDefinition<{ tasks: { title: string; status: 'open' | 'done' } }>
+ *
+ * @see {@link ../../docs/data-migrations.md | Migrate application data}
+ *   — changing this shape after devices already hold rows: the application
+ *   owns the version marker, the coordination, and the cleanup.
  */
 export interface DatabaseSchemaDefinition<
   S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>,
@@ -535,7 +539,13 @@ export interface Manifest {
   retention?: RetentionPolicy;
 }
 
-/** User-controlled retention durations. Both values must be positive and finite. */
+/**
+ * User-controlled retention durations. Both values must be positive and finite.
+ *
+ * @see {@link ../../docs/compaction.md | Compaction}
+ *   — when `compactAfterMs` makes compaction mandatory, and what happens to a
+ *   device that stays away past `maxOfflineDurationMs`.
+ */
 export interface RetentionPolicyInput {
   /** Oldest uploaded change age before compaction becomes mandatory. Default: 7 days. */
   compactAfterMs?: number;
@@ -587,7 +597,13 @@ export interface DeviceHead {
   fileCount: number;
 }
 
-/** Global change-folder head — monotonic diagnostic hint, never coverage proof. */
+/**
+ * Global change-folder head — monotonic diagnostic hint, never coverage proof.
+ *
+ * @see {@link ../../docs/sync-completeness.md | Sync completeness, convergence, and integrity}
+ *   — why a logical timestamp cannot establish that a device has seen every
+ *   change file, and what does.
+ */
 export interface ChangesHead {
   latestHlc: string;
 }
@@ -638,6 +654,10 @@ export interface StoredFileMetadata extends FileEntry {
  * stale bytes, and `getFile(ref)` verifies the bytes it opened against it.
  * Build one from a `putFile` result with `toFileRef`, and declare the column
  * with `types.file`.
+ *
+ * @see {@link ../../docs/tainted-files.md | Tainted files}
+ *   — why rows are offline-first and file bytes are not, and what a reference
+ *   to a file you can no longer open should do in the UI.
  */
 export interface FileRef {
   /** Durable file path as passed to `putFile`. */
@@ -712,6 +732,10 @@ export interface RemoteInvalidationStorageAdapter {
 /**
  * Contract implemented by remote backends such as WebDAV, S3, Google Drive,
  * Cloudflare, or in-memory test adapters.
+ *
+ * @see {@link ../../docs/adapter-contract.md | Adapter contract}
+ *   — what the engine expects of each method, and the mailbox semantics a new
+ *   adapter has to honour.
  */
 export interface StorageAdapter {
   readonly name: string;
@@ -846,6 +870,12 @@ export interface ConnectionStatusDetails {
 
 export type LogLevel = import("./internals.ts").LogLevel;
 
+/**
+ * Engine configuration supplied once, at construction.
+ *
+ * @see {@link ../../docs/api-reference.md | Core API reference}
+ *   — every consequential option and lifecycle boundary in one place.
+ */
 export interface SyncConfig<
   S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>,
 > {
@@ -856,6 +886,10 @@ export interface SyncConfig<
    *
    * Use a `MeshKeySource` to describe how the final mesh key is obtained:
    * portable shared key, bound shared key, or another runtime-owned strategy.
+   *
+   * @see {@link ../../docs/security-model.md | Security model}
+   *   — what a non-null key source encrypts, what stays visible to the remote
+   *   either way, and what `null` gives up.
    */
   keySource: import("../crypto/key-source.ts").MeshKeySource | null;
   /**
@@ -886,7 +920,13 @@ export interface SyncConfig<
   flushThreshold?: number;
   /** Warn once queued local changes reach this count (default 50). */
   compactWarnThreshold?: number;
-  /** Consider auto-compaction once queued local changes reach this count (default 50). */
+  /**
+   * Consider auto-compaction once queued local changes reach this count (default 50).
+   *
+   * @see {@link ../../docs/compaction.md | Compaction}
+   *   — what a compaction publishes and deletes, and why only one compactor
+   *   may run at a time.
+   */
   compactAutoThreshold?: number;
   /** Sampling numerator for the immediate auto-compact path. Chance = numerator / estimated device count. Default 10. */
   compactAutoSampleNumerator?: number;

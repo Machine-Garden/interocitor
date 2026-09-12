@@ -14,6 +14,10 @@ const RELAY_BROADCAST_BATCH_DELAY_MS = 1_000;
  * Export this class from the Worker entry, bind it under any environment name,
  * and pass that binding through the mount's `relay` getter. Sync correctness
  * remains polling-based when the relay is absent or unavailable.
+ *
+ * @see {@link ../docs/relay.md | Realtime invalidation relay}
+ *   — the wrangler binding, what the relay carries, and what it deliberately
+ *   does not make authoritative.
  */
 export class InterocitorRelayDurableObject {
   private readonly ctx: DurableObjectStateLike;
@@ -142,6 +146,9 @@ export interface BroadcastDiagnostics {
  *
  * This is intentionally fire-and-forget. Delivery success or failure is
  * reported only through the optional diagnostics logger and `waitUntil`.
+ *
+ * @see {@link ../docs/relay.md | Realtime invalidation relay}
+ *   — why a dropped broadcast costs a poll interval rather than correctness.
  */
 export function broadcast(
   relay: DurableObjectNamespace | undefined,

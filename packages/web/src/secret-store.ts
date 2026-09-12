@@ -18,6 +18,9 @@ export type WebSecretCustody = "browserStorage" | "webauthnPlatform" | "webauthn
  * This is for app secrets such as signing-key bundles, record-seal keys, or
  * wrapped group keys. Mesh credential custody remains owned by
  * `createWebCredentialStore`.
+ *
+ * @see {@link ../docs/multiple-biometric-keys.md | How to use multiple browser-custodied keys}
+ *   — what each custody primitive protects against, and what it does not.
  */
 export interface WebSecretStore {
   readonly custody: WebSecretCustody;
@@ -180,6 +183,10 @@ export function createWebSecretStore(
  * - `browserStorage`: localStorage, no WebAuthn prompt
  * - `webauthnPlatform`: platform authenticator / same-device passkey
  * - `webauthnCrossPlatform`: cross-platform WebAuthn credential
+ *
+ * @see {@link ../docs/multiple-biometric-keys.md | How to use multiple browser-custodied keys}
+ *   — mapping your own custody labels onto these primitives, and keeping
+ *   several protected secrets apart by namespace.
  */
 export function createWebSecretStore(
   namespace: string,

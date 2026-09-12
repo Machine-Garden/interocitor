@@ -97,6 +97,10 @@ function resolveAttachmentPreference(
  * Create multiple stores with different namespaces when the app needs separate
  * protected blobs, for example one mesh credential record and one signing-key
  * blob.
+ *
+ * @see {@link ../docs/webauthn-blob-store.md | WebAuthn blob store reference}
+ *   — the `largeBlob` support a browser has to have, what each attachment
+ *   preference asks of the user, and the failure modes worth handling.
  */
 export class WebAuthnBlobStore {
   private static readonly CRED_ID_KEY_PREFIX = "interocitor-cred:";

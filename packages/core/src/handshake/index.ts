@@ -222,6 +222,10 @@ export interface GenerateShareQRResult {
 /**
  * Generate a "share" QR code. Call this on a device that already belongs
  * to a mesh and wants to invite another device.
+ *
+ * @see {@link ../../docs/pairing.md | Pair devices}
+ *   — what crosses the relay, what stays on the two devices, and the
+ *   capability negotiation both sides have to agree on.
  */
 export async function generateShareQR(
   options: GenerateShareQROptions,
@@ -394,6 +398,10 @@ export interface HandleScannedQROptions {
  *
  * Returns the received credentials when intent === 'share' (null otherwise,
  * because the scanner already has credentials when intent === 'join').
+ *
+ * @see {@link ../../docs/pairing.md | Pair devices}
+ *   — both intents side by side, and the URL-fragment form of the same
+ *   payload.
  */
 export async function handleScannedQR(
   options: HandleScannedQROptions,

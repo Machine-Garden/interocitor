@@ -187,6 +187,10 @@ class S3ObjectBody implements FileBody {
  *
  * It deliberately implements only exact-key GET, PUT, and DELETE. CRDT sync
  * objects, recovery wrappers, quotas, and durable-file metadata remain in D1.
+ *
+ * @see {@link ../docs/s3-file-storage.md | Store durable file bodies in S3-compatible object storage}
+ *   — the credentials, addressing style and bucket policy this expects, and
+ *   what stays on Cloudflare.
  */
 export class S3FileBodyStore implements FileBodyStore {
   protected readonly config: S3FileBodyStoreConfig;
@@ -316,6 +320,9 @@ export class S3FileBodyStore implements FileBodyStore {
  *
  * `S3FileBodyStore` remains the provider-neutral implementation and defaults
  * to the same AWS regional endpoint when `endpoint` is omitted.
+ *
+ * @see {@link ../docs/s3-file-storage.md | Store durable file bodies in S3-compatible object storage}
+ *   — when the AWS-oriented subclass is worth it, and what `kmsKeyId` adds.
  */
 export class AwsS3FileBodyStore extends S3FileBodyStore {
   private readonly kmsKeyId?: string;

@@ -255,6 +255,15 @@ type PendingLocalRowEffect = {
   after: Row;
 };
 
+/**
+ * The local-first engine: rows, durable files, and one mailbox.
+ *
+ * @see {@link ../../docs/api-reference.md | Core API reference}
+ *   — the whole public surface with its lifecycle and configuration
+ *   boundaries.
+ * @see {@link ../../docs/testing.md | Test an Interocitor product}
+ *   — running an engine in a test without a server.
+ */
 export class Interocitor<
   S extends Record<string, Record<string, unknown>>,
 > implements ReadinessAwareQueryExecutor {
@@ -3469,6 +3478,10 @@ export class Interocitor<
    * the exact covered changes and every superseded mainline snapshot. Callers
    * must serialize compaction across engine instances because adapters provide
    * no distributed lease or compare-and-swap publication primitive.
+   *
+   * @see {@link ../../docs/compaction.md | Compaction}
+   *   — when to call it, what a healthy remote looks like afterwards, and how
+   *   an absent device catches up across a compaction.
    */
   async compact(): Promise<void> {
     await this.ensureReady();

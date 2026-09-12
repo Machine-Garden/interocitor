@@ -6,6 +6,12 @@
  * An application-provided recovery phrase never leaves the client. It is
  * converted into a recovery root, which deterministically produces an opaque
  * lookup locator and derives a KEK for encrypted mesh credentials.
+ *
+ * @see {@link ../../docs/recovery.md | Recovery phrases}
+ *   — the flow end to end, and the parts the application owns: generating,
+ *   displaying, and validating the phrase.
+ * @see {@link ../../docs/recovery-reference.md | Recovery API reference}
+ *   — wrapper shape, publication, lookup, restoration, and deletion.
  */
 
 import { base64UrlToBytes, bytesToBase64Url } from "./base64.ts";

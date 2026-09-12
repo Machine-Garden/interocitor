@@ -8,7 +8,12 @@ import type {
   R2Bucket,
 } from "./types.ts";
 
-/** Cloudflare R2 binding exposed through the provider-neutral file-body boundary. */
+/**
+ * Cloudflare R2 binding exposed through the provider-neutral file-body boundary.
+ *
+ * @see {@link ../docs/security-guardrails.md | Cloudflare security guardrails}
+ *   — what R2 holds for a protected mesh, and what it encrypts on its own.
+ */
 export class R2FileBodyStore implements FileBodyStore {
   constructor(private readonly bucket: R2Bucket) {}
 

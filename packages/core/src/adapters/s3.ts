@@ -242,6 +242,10 @@ function isoTime(value: string | null): string {
  *   credentials: async () => fetch('/api/s3-session').then((res) => res.json()),
  * });
  * ```
+ *
+ * @see {@link ../../docs/s3-browser.md | Use an S3 mailbox from a browser}
+ *   — the bucket CORS and prefix policy this needs, and how to hand a browser
+ *   short-lived credentials.
  */
 export class S3Adapter implements StorageAdapter {
   readonly name = "s3";

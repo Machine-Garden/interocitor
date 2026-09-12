@@ -20,6 +20,10 @@ export interface StoredCredentials {
  *
  * Core never creates a default implementation. Browser, Node, and application
  * packages decide where portable key material and device anchors are stored.
+ *
+ * @see {@link ../../docs/credential-store.md | Credential store}
+ *   — what a mesh loses without one, what each field anchors, and the
+ *   browser-side implementations to reach for.
  */
 export interface CredentialStore {
   save(creds: StoredCredentials): Promise<void>;

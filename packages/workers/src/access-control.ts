@@ -9,7 +9,13 @@ export interface MeshGrantPrincipal {
   subjectId: string;
 }
 
-/** Plaintext, server-protected grant for one canonical mesh namespace. */
+/**
+ * Plaintext, server-protected grant for one canonical mesh namespace.
+ *
+ * @see {@link ../docs/mesh-control.md | Protected mesh control}
+ *   — when grants are the right shape at all, what a chain has to carry, and
+ *   how revocation and delegation are expected to be stored.
+ */
 export interface MeshAccessGrant {
   /** Immutable grant identifier. */
   grantId: string;
@@ -264,6 +270,10 @@ function validateGrantChain(
  * plaintext grants. The helper handles attenuation, validity, ancestor
  * revocation, and access classification for each admitted request;
  * authentication and persistence remain application-owned.
+ *
+ * @see {@link ../docs/mesh-control.md | Protected mesh control}
+ *   — the parts the application still owns, and the simpler alternative for
+ *   ordinary multi-user access.
  */
 export function createMeshGrantAuthorizationMiddleware<Env = unknown>(
   options: MeshGrantAuthorizationOptions<Env>,

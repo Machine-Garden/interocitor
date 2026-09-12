@@ -22,6 +22,8 @@ changes the landing page.
 
 Reader-facing documentation is Markdown:
 
+- `site/content/why.md` owns the project's origin: the name's source, the
+  motive for building it, and the independent-convergence note;
 - `site/content/how-it-works.md` owns the visual and conceptual sync story;
 - `site/content/storage.md` owns the local and remote storage model, the
   application-layer protection point, and physical backend placement;
@@ -82,6 +84,7 @@ security headers, redirects, metadata, and live-demo reachability.
 | Route              | Reader question                                                               |
 | ------------------ | ----------------------------------------------------------------------------- |
 | `/`                | Is Interocitor a fit for my application and threat model?                     |
+| `/why`             | Why is it called that, and what was it built to avoid holding?                |
 | `/how-it-works`    | What is Interocitor, why use it, and how does one change travel?              |
 | `/storage`         | What rests locally and remotely, and where does each backend put it?          |
 | `/trust`           | Which endpoints may read the mesh, and how will its key lifecycle be handled? |

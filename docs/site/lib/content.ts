@@ -13,6 +13,7 @@ import securitySource from "../content/security.md";
 import storageSource from "../content/storage.md";
 import taintedFilesSource from "../content/tainted-files.md";
 import trustSource from "../content/trust.md";
+import whySource from "../content/why.md";
 
 export type PageRecord = {
   slug: string;
@@ -38,6 +39,12 @@ type SourceRecord = {
 };
 
 const sources: SourceRecord[] = [
+  {
+    slug: "why",
+    navLabel: "Start with why",
+    source: whySource,
+    group: "Learn",
+  },
   {
     slug: "how-it-works",
     navLabel: "How it works",

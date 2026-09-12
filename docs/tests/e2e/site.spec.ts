@@ -31,6 +31,7 @@ test("the established landing page renders with deployment security headers", as
 
 test("Markdown documentation owns its content, outline, and metadata", async ({ page }) => {
   const documentation = new Map([
+    ["/why", "Why Interocitor exists, and why it is called that"],
     ["/applications", "What can you build with Interocitor?"],
     ["/integrations", "Which Interocitor packages does your app need?"],
     ["/trust", "Who is trusted inside an Interocitor mesh?"],

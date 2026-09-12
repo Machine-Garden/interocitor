@@ -88,12 +88,13 @@ An opaque JSON string produced by `adapter.getHandshakeConfig()`. Tells the
 scanner exactly which backend instance to use as the relay. Contains no
 credentials.
 
-| Adapter           | `adapterConfig` contents                                               |
-| ----------------- | ---------------------------------------------------------------------- |
-| Cloudflare Worker | `{"baseUrl":"https://worker.example.com/io/team"}`                     |
-| WebDAV            | `{"baseUrl":"https://nextcloud.alice.com/remote.php/dav/files/alice"}` |
-| Google Drive      | `{"clientId":"1234…apps.googleusercontent.com"}`                       |
-| Memory (tests)    | `{}`                                                                   |
+| Adapter           | `adapterConfig` contents                                                |
+| ----------------- | ----------------------------------------------------------------------- |
+| Cloudflare Worker | `{"baseUrl":"https://worker.example.com/io/team"}`                      |
+| WebDAV            | `{"baseUrl":"https://nextcloud.alice.com/remote.php/dav/files/alice"}`  |
+| S3                | `{"bucket":"mailbox","region":"eu-west-1","addressingStyle":"virtual"}` |
+| Google Drive      | `{"clientId":"1234…apps.googleusercontent.com"}`                        |
+| Memory (tests)    | `{}`                                                                    |
 
 `adapterConfig` may be absent when the backend is a fixed app-global endpoint
 that every app instance already knows. In that case both sides configure their

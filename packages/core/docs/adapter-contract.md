@@ -1,7 +1,7 @@
 # Adapter contract
 
 A storage adapter is a thin wrapper over a remote byte store
-(WebDAV, Google Drive, Cloudflare, in‑memory). The engine treats the
+(WebDAV, S3, Google Drive, Cloudflare, in‑memory). The engine treats the
 remote as **a mailbox**: it lists files, reads files, writes files,
 deletes files. Portable byte-store semantics do not require remote compute;
 protocol-aware endpoints may add stronger policy and stale-write rejection.

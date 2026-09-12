@@ -16,6 +16,7 @@ That is the same arrangement you already accept with Google Drive. Google decide
 | --------------------- | ---------------------------------------------- | --------------------------------------------------------------------------- |
 | **Google Drive**      | The user and their Google account              | Uses the OAuth token the application obtained; never asks for the password. |
 | **WebDAV / NAS**      | The user and the server’s login                | Sends the credential the application configured.                            |
+| **S3-compatible**     | The bucket policy and credential issuer        | Signs requests with the temporary credential the application obtained.      |
 | **Cloudflare Worker** | The host application and its identity provider | Runs the host’s middleware decision before the mailbox route.               |
 
 An application can sit behind any provider it already trusts:
@@ -67,7 +68,7 @@ Three rules follow from this table:
 
 This is the contract that keeps the boundary honest. The provider decides. The Worker enforces. The client understands the answer and gives the application a clear moment to respond.
 
-In code, the moment is the `remote:access` event. The Cloudflare, WebDAV, and Google Drive adapters turn the statuses above into a `RemoteAccessError` with `status`, `kind` (`unauthenticated`, `forbidden`, `not-found`, `rate-limited`, `policy-unavailable`), the adapter, the operation, and the path. When the decision is a denial, the engine pauses polling and publishing for that mesh, flips `connected` to false, and emits the event with `paused: true`. Local reads and writes continue.
+In code, the moment is the `remote:access` event. The Cloudflare, WebDAV, S3, and Google Drive adapters turn the statuses above into a `RemoteAccessError` with `status`, `kind` (`unauthenticated`, `forbidden`, `not-found`, `rate-limited`, `policy-unavailable`), the adapter, the operation, and the path. When the decision is a denial, the engine pauses polling and publishing for that mesh, flips `connected` to false, and emits the event with `paused: true`. Local reads and writes continue.
 
 ```ts
 db.on((event) => {
@@ -131,7 +132,7 @@ Interocitor accepts any non-empty normalized phrase; the application owns its fo
 
 The phrase is processed on the client. It derives an opaque remote locator and the key that opens a recovery wrapper. That wrapper contains the portable mesh key, mesh identity, and remote path. The remote receives neither the words nor the mesh key.
 
-Recovery does not restore the application session, Google or WebDAV credentials, or a separately provisioned Worker address. The Worker recovery route is also outside mesh middleware by default. A deployment that wants account-gated recovery must wrap that route in host authentication or issue a dedicated recovery credential.
+Recovery does not restore the application session, Google, WebDAV, or S3 credentials, or a separately provisioned Worker address. The Worker recovery route is also outside mesh middleware by default. A deployment that wants account-gated recovery must wrap that route in host authentication or issue a dedicated recovery credential.
 
 A copied wrapper permits offline phrase guesses, so high entropy matters. Removing the wrapper closes that recovery path; it cannot revoke a mesh key that was already recovered or copied.
 

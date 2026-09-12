@@ -9,6 +9,7 @@
     "local-first",
     "mesh",
     "offline-first",
+    "s3",
     "sync",
     "webdav"
   ],
@@ -51,6 +52,10 @@
     "./adapters/cloudflare": {
       "types": "./dist/adapters/cloudflare.d.ts",
       "import": "./dist/adapters/cloudflare.js"
+    },
+    "./adapters/s3": {
+      "types": "./dist/adapters/s3.d.ts",
+      "import": "./dist/adapters/s3.js"
     },
     "./storage/local-store": {
       "types": "./dist/storage/local-store.d.ts",

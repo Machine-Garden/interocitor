@@ -20,7 +20,7 @@ The ladder only goes up. Every call you make on rung 3 is still a call into rung
 
 ## Rung 1: core is the engine {#core}
 
-Core owns everything that makes a mesh a mesh: the row CRDT, the sync protocol, client-side encryption, pairing, recovery phrases, path-addressed durable files, and the contracts for a local store and a remote adapter. Mailbox adapters for memory, WebDAV, Google Drive, and the Cloudflare worker are separate entry points of this package, so an app imports only the backend it uses.
+Core owns everything that makes a mesh a mesh: the row CRDT, the sync protocol, client-side encryption, pairing, recovery phrases, path-addressed durable files, and the contracts for a local store and a remote adapter. Mailbox adapters for memory, WebDAV, S3, Google Drive, and the Cloudflare worker are separate entry points of this package, so an app imports only the backend it uses.
 
 Core asks for two things explicitly and refuses to guess either. A `localStore` says where plaintext rows live. A `keySource` says who holds the mesh key, and `null` is a deliberate answer that creates an unencrypted mesh. A remote adapter and `remotePath` are needed only for sync and files.
 

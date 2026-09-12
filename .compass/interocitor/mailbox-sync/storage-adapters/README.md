@@ -21,6 +21,7 @@ the smallest thing every candidate storage can do.
 
 - The configured external storage service: a
   [WebDAV service](../../../externals/webdav-storage.md),
+  [S3-compatible object storage](../../../externals/s3-object-storage.md),
   [Google Drive](../../../externals/google-drive.md), the
   [Cloudflare platform](../../../externals/cloudflare-platform.md), or an
   in-memory stand-in
@@ -39,7 +40,7 @@ wrong shape.
 
 ## Implementation coordinates
 
-- `packages/core/src/adapters/{webdav,google-drive,cloudflare,memory}.ts`
+- `packages/core/src/adapters/{webdav,s3,google-drive,cloudflare,memory}.ts`
 - `packages/interocitor-swift/Sources/InterocitorSwift/{StorageAdapter,WebDAVStorageAdapter,CloudflareStorageAdapter}.swift`
 - `packages/interocitor-python/src/interocitor/adapters.py`
 

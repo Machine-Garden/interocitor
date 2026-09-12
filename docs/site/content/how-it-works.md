@@ -53,7 +53,7 @@ That boundary is the central trade-off. Interocitor removes the remote from the 
 
 Interocitor does not copy one live database between machines. It keeps working rows and an outbox on each trusted endpoint, carries protected changes and snapshots through a remote sync mailbox, and stores durable files remotely on a separate path.
 
-With protection configured, payloads are encrypted before the storage adapter receives them. The [storage chapter](/storage) shows exactly what rests locally, what remains visible remotely, and how WebDAV, Google Drive, Cloudflare + R2, and Cloudflare + S3 carry that model.
+With protection configured, payloads are encrypted before the storage adapter receives them. The [storage chapter](/storage) shows exactly what rests locally, what remains visible remotely, and how WebDAV, direct S3, Google Drive, Cloudflare + R2, and Cloudflare + S3 carry that model.
 
 ## Follow one row change from intent to convergence {#journey}
 
@@ -199,7 +199,7 @@ Access control itself is not Interocitor’s job. It belongs to the user and the
 
 ## Keep backend choice behind one storage contract {#adapter-title}
 
-WebDAV, Google Drive, and a protocol-aware Cloudflare Worker all perform the same fundamental mailbox role: store and return artifacts without merging rows or receiving the mesh key. They differ in physical placement, account ownership, availability, recovery, and the guardrails they can enforce.
+WebDAV, direct S3, Google Drive, and a protocol-aware Cloudflare Worker all perform the same fundamental mailbox role: store and return artifacts without merging rows or receiving the mesh key. They differ in physical placement, account ownership, availability, recovery, and the guardrails they can enforce.
 
 The [storage chapter](/storage) explains those layouts, including Cloudflare with R2 or S3 file bodies. [Mailbox operations](/mailbox) helps choose the operational owner and plan access, limits, backup, and restore. Package documentation owns exact adapter and deployment configuration.
 

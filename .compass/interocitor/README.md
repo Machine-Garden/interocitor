@@ -30,7 +30,7 @@ graph TB
   SYS -->|"leaves and collects mesh artifacts"| WEBDAV
   SYS -->|"leaves and collects mesh artifacts"| DRIVE
   SYS -->|"leaves and collects mesh artifacts, and is hosted by"| CF
-  SYS -->|"stores durable file bytes in"| S3
+  SYS -->|"leaves and collects mesh artifacts, or stores Worker file bodies in"| S3
   SYS -->|"asks who the caller is and whether they may reach a mesh"| HOST
   SYS -->|"asks a person to release key material"| AUTH
 
@@ -55,7 +55,7 @@ graph TB
 | [WebDAV storage service](../externals/webdav-storage.md)          | Mesh artifacts and durable file bytes, written and read as whole objects at paths    |
 | [Google Drive](../externals/google-drive.md)                      | The same artifacts and bytes, in storage the account holder already owns             |
 | [Cloudflare platform](../externals/cloudflare-platform.md)        | Mesh artifacts and file bytes, plus the execution and storage a mailbox host runs on |
-| [S3-compatible object storage](../externals/s3-object-storage.md) | Durable file bodies for a deployment that keeps them out of its row store            |
+| [S3-compatible object storage](../externals/s3-object-storage.md) | Complete mailbox objects for direct adapters, or durable file bodies behind a Worker |
 | [Host application](../externals/host-application.md)              | A caller identity in, an access decision out                                         |
 | [WebAuthn authenticator](../externals/webauthn-authenticator.md)  | A human gesture in, released key material out                                        |
 

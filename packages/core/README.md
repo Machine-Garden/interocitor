@@ -142,9 +142,13 @@ request identity, device metadata, or the manifest.
 | ----------------------------------------- | ----------------------------------------------------------------------- |
 | `@interocitor/core/adapters/memory`       | Tests need an in-process, non-persistent mailbox.                       |
 | `@interocitor/core/adapters/webdav`       | A NAS, Nextcloud, ownCloud, or another WebDAV service owns the mailbox. |
+| `@interocitor/core/adapters/s3`           | A browser can reach an S3-compatible bucket with temporary credentials. |
 | `@interocitor/core/adapters/google-drive` | A user-owned Google Drive should carry the artifacts.                   |
 | `@interocitor/core/adapters/cloudflare`   | A deployed Interocitor Worker supplies D1/R2 storage and invalidations. |
 | Custom implementation of `StorageAdapter` | Existing storage should implement the mailbox contract.                 |
+
+For browser credentials, bucket CORS, least-privilege prefixes, and compatible
+endpoints, see [Use an S3 mailbox from a browser](docs/s3-browser.md).
 
 The remote is storage, not a merge authority or query server. One
 `remotePath` identifies one mesh; sharing the same folder between unrelated
@@ -187,21 +191,21 @@ allowing a reset.
 
 ## Public entry points
 
-| API or entry point                                                                                                                                           | Use it for                                                                        |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| `Interocitor`                                                                                                                                                | Runtime-neutral engine lifecycle, rows, sync, and durable files.                  |
-| `db.table(name)`                                                                                                                                             | Typed row CRUD, queries, row handles, and subscriptions.                          |
-| `db.putFile`, `db.getFile`, `db.openFile`, `db.deleteFile`, `db.getFileMetadata`                                                                             | Direct durable file storage, including application-keyed sealed files.            |
-| `db.flush`, `db.pull`, `db.rehydrate`, `db.compact`                                                                                                          | Explicit sync and maintenance operations.                                         |
-| `db.observeChanges`                                                                                                                                          | Optional live observation of attempted changes and this endpoint's merge effects. |
-| `db.connectedStores`                                                                                                                                         | Application-owned credentials for related meshes.                                 |
-| `PortablePassphraseKeySource`, `BoundSharedKeySource`                                                                                                        | Portable or application-bound key recovery.                                       |
-| `createRecoveryWrapper`, `publishRecoveryWrapper`, `recoverMeshCredentials`                                                                                  | Client-provided recovery phrases for portable-key meshes.                         |
-| `generateShareQR`, `generateJoinQR`, `handleScannedQR`                                                                                                       | Recommended QR pairing flows.                                                     |
-| `createGeneratorSession`, `runScannerHandshake`                                                                                                              | Lower-level pairing handshake control.                                            |
-| `PairingCapabilities`, `PairingCapabilityId`, `HandshakeChannelOptions`, `MESH_GRANT_AUTHORIZATION_V1`, `INDIRECT_MESH_ROUTING_V1`                           | Fail-closed negotiation for protected and indirect pairing.                       |
-| `@interocitor/core/adapters/memory`, `@interocitor/core/adapters/webdav`, `@interocitor/core/adapters/google-drive`, `@interocitor/core/adapters/cloudflare` | Mailbox transports.                                                               |
-| `@interocitor/core/crypto/signing`                                                                                                                           | ECDSA authorship and capability-token helpers.                                    |
+| API or entry point                                                                                                                                                                            | Use it for                                                                        |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `Interocitor`                                                                                                                                                                                 | Runtime-neutral engine lifecycle, rows, sync, and durable files.                  |
+| `db.table(name)`                                                                                                                                                                              | Typed row CRUD, queries, row handles, and subscriptions.                          |
+| `db.putFile`, `db.getFile`, `db.openFile`, `db.deleteFile`, `db.getFileMetadata`                                                                                                              | Direct durable file storage, including application-keyed sealed files.            |
+| `db.flush`, `db.pull`, `db.rehydrate`, `db.compact`                                                                                                                                           | Explicit sync and maintenance operations.                                         |
+| `db.observeChanges`                                                                                                                                                                           | Optional live observation of attempted changes and this endpoint's merge effects. |
+| `db.connectedStores`                                                                                                                                                                          | Application-owned credentials for related meshes.                                 |
+| `PortablePassphraseKeySource`, `BoundSharedKeySource`                                                                                                                                         | Portable or application-bound key recovery.                                       |
+| `createRecoveryWrapper`, `publishRecoveryWrapper`, `recoverMeshCredentials`                                                                                                                   | Client-provided recovery phrases for portable-key meshes.                         |
+| `generateShareQR`, `generateJoinQR`, `handleScannedQR`                                                                                                                                        | Recommended QR pairing flows.                                                     |
+| `createGeneratorSession`, `runScannerHandshake`                                                                                                                                               | Lower-level pairing handshake control.                                            |
+| `PairingCapabilities`, `PairingCapabilityId`, `HandshakeChannelOptions`, `MESH_GRANT_AUTHORIZATION_V1`, `INDIRECT_MESH_ROUTING_V1`                                                            | Fail-closed negotiation for protected and indirect pairing.                       |
+| `@interocitor/core/adapters/memory`, `@interocitor/core/adapters/webdav`, `@interocitor/core/adapters/s3`, `@interocitor/core/adapters/google-drive`, `@interocitor/core/adapters/cloudflare` | Mailbox transports.                                                               |
+| `@interocitor/core/crypto/signing`                                                                                                                                                            | ECDSA authorship and capability-token helpers.                                    |
 
 For exact signatures, configuration defaults, lifecycle effects, events, and
 typed errors, use the [Core API reference](docs/api-reference.md).
@@ -259,7 +263,7 @@ yarn workspace @interocitor/core test:e2e
 ```
 
 The unit suite includes the local-store contract. The browser suite exercises
-the public package entry point, memory and WebDAV adapters, sync, encryption,
+the public package entry point, memory, WebDAV, and S3 adapters, sync, encryption,
 pairing, recovery, compaction, and failure handling.
 
 Use the repository-level [`yarn preflight`](../../README.md#validate-a-release)

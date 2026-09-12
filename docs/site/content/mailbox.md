@@ -23,17 +23,18 @@ The mailbox is intentionally simple, but it remains part of the product’s secu
 
 ## Choose a backend by ownership {#choices}
 
-| Backend         | Choose it when                                | Responsibility that remains                                               |
-| --------------- | --------------------------------------------- | ------------------------------------------------------------------------- |
-| Cloudflare + R2 | You need a programmable protocol-aware remote | Identity integration, limits, D1/R2 bindings, backups, and operations.    |
-| Cloudflare + S3 | File bodies need an S3-compatible placement   | Everything above, plus S3 credentials, residency, migration, and restore. |
-| WebDAV server   | You need a portable file-oriented remote      | Server login, overwrite behavior, quotas, logs, and backups.              |
-| Google Drive    | The user should own the storage account       | Consent, tokens, provider availability, and the user’s storage decisions. |
-| Custom adapter  | The mailbox must fit an existing platform     | Faithful adapter semantics and an explicit account of missing guarantees. |
+| Backend         | Choose it when                                           | Responsibility that remains                                               |
+| --------------- | -------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Cloudflare + R2 | You need a programmable protocol-aware remote            | Identity integration, limits, D1/R2 bindings, backups, and operations.    |
+| Cloudflare + S3 | File bodies need an S3-compatible placement              | Everything above, plus S3 credentials, residency, migration, and restore. |
+| WebDAV server   | You need a portable file-oriented remote                 | Server login, overwrite behavior, quotas, logs, and backups.              |
+| Direct S3       | Every endpoint can safely obtain temporary bucket access | CORS, credential issuance, prefix policy, object limits, and backups.     |
+| Google Drive    | The user should own the storage account                  | Consent, tokens, provider availability, and the user’s storage decisions. |
+| Custom adapter  | The mailbox must fit an existing platform                | Faithful adapter semantics and an explicit account of missing guarantees. |
 
 No backend is universally best. Choose the failure modes and operational owner the product can support.
 
-The [complete storage model](/storage#backends) shows what is local, what is remote, and exactly how WebDAV, Google Drive, Cloudflare + R2, and Cloudflare + S3 place the mailbox artifacts. In particular, S3 is a durable-file body destination behind the Worker, not a standalone row-sync mailbox; D1 still contains row history, control state, and durable-file metadata.
+The [complete storage model](/storage#backends) shows what is local, what is remote, and exactly how WebDAV, direct S3, Google Drive, Cloudflare + R2, and Cloudflare + S3 place the mailbox artifacts. Direct S3 puts the complete mailbox in a bucket. Cloudflare + S3 is a different deployment: D1 retains row history, control state, and durable-file metadata while S3 holds only file bodies.
 
 ## Treat addresses as routing, not credentials {#door}
 

@@ -39,6 +39,7 @@ flowchart LR
     L[Trusted endpoint<br/>plaintext + mesh key] --> P[Interocitor encrypts<br/>and authenticates]
     P --> A{Storage adapter}
     A --> W[WebDAV<br/>remote file tree]
+    A --> S[S3-compatible<br/>object prefix]
     A --> G[Google Drive<br/>remote folder tree]
     A --> C[Cloudflare Worker]
     C --> D[D1<br/>sync + metadata]
@@ -66,6 +67,12 @@ If the NAS is unreachable, local-first row work continues on each endpoint, but 
 A privately operated WebDAV service makes the same complete mailbox reachable beyond one local network. It can be a compatible hosted server, Nextcloud, ownCloud, or another WebDAV implementation under the owner’s control.
 
 This buys reach without making the server a plaintext authority. It also makes the owner responsible for TLS, login policy, updates, rate limits, monitoring, availability, and recovery. The generic WebDAV server stores files; it does not understand Interocitor meshes or enforce Interocitor-specific quotas and authorization.
+
+### Direct S3-compatible storage
+
+A browser can put the complete mailbox in an AWS S3 or compatible bucket. This fits a NAS or hosted object store that exposes the S3 API, provided it supports browser CORS and the application can obtain short-lived credentials limited to its mailbox prefix.
+
+The browser signs each list, read, write, metadata, and delete request directly. The credential issuer, bucket policy, CORS policy, lifecycle rules, capacity, backup, and restore remain the operator's responsibility. Never embed a long-lived bucket secret in a shipped browser application; [the core S3 guide](https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/s3-browser.md) covers the required boundary.
 
 ### Family Google Drive
 
@@ -98,6 +105,7 @@ The adapter preserves the same Interocitor storage contract while mapping it to 
 | Configuration       | Row history and control state                                         | Durable file bodies                                                      |
 | ------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | **WebDAV**          | Files beneath the configured remote path on the WebDAV server.        | Beneath the same remote path through the same adapter.                   |
+| **Direct S3**       | Objects beneath the configured bucket prefix through the S3 adapter.  | Beneath the same bucket prefix through the same adapter.                 |
 | **Google Drive**    | Files in the Interocitor folder hierarchy in the user’s Drive.        | In the same Drive hierarchy through the same adapter.                    |
 | **Cloudflare + R2** | D1 stores changes, snapshots, control state, and file metadata.       | R2 stores the durable file bodies.                                       |
 | **Cloudflare + S3** | D1 still stores changes, snapshots, control state, and file metadata. | The configured S3-compatible bucket stores only the durable file bodies. |
@@ -110,6 +118,10 @@ The WebDAV adapter uses ordinary folder, list, read, write, and delete operation
 
 The Google Drive adapter presents the same path-and-file behavior while resolving Drive folder and file IDs internally. The application supplies an OAuth token for the user’s Drive account. Drive stores the protected artifacts; trusted endpoints still own decryption and merge.
 
+### Direct S3 maps the tree into object keys
+
+The S3 adapter stores sync artifacts, control records, and durable files beneath one bucket prefix. Prefixes stand in for folders; ListObjectsV2 supplies direct-child listings, and exact object requests supply the remaining mailbox operations. The browser signs those requests with credentials obtained by the host application.
+
 ### Cloudflare separates D1 from file bodies
 
 The Cloudflare Worker is protocol-aware, but it is still outside the plaintext boundary. D1 stores sync artifacts and their operating state. Durable-file paths, quotas, sizes, content types, taints, and access counters also stay in D1, while the configured `FileBodyStore` holds the file bytes.
@@ -120,7 +132,7 @@ With R2 selected as the file-body store, those bodies live in R2. The Worker can
 
 With an S3-compatible file-body store, the Worker and D1 remain in place while durable file bodies go to the configured bucket. The S3 provider sees its bucket, access principal, object keys, stored sizes, content types, and timing, but protected file contents arrive as Interocitor ciphertext.
 
-S3 is therefore not a built-in whole-mailbox adapter. Selecting S3 does not move row history, snapshots, control state, or durable-file metadata out of D1. It changes one storage boundary: where durable file bodies rest.
+This is distinct from the direct S3 adapter. Selecting S3 behind the Worker does not move row history, snapshots, control state, or durable-file metadata out of D1. It changes one storage boundary: where durable file bodies rest.
 
 ## Keep the visible envelope honest {#envelope}
 
@@ -140,21 +152,22 @@ A mailbox or object-store dump therefore does not reveal protected application c
 
 Confidentiality does not make storage disposable. Losing the mailbox can strand changes that existed on no other endpoint and can remove directly remote files entirely. Restoring an older mailbox can also hide changes or move control state backward without breaking ciphertext authentication.
 
-For WebDAV and Google Drive, backup the complete Interocitor hierarchy. For Cloudflare + R2, recovery needs D1 and R2. For Cloudflare + S3, it needs D1 and the S3-compatible bucket. Restoring only the object bucket recovers file bodies without the D1 metadata and row history needed to operate them.
+For WebDAV, direct S3, and Google Drive, backup the complete Interocitor hierarchy or prefix. For Cloudflare + R2, recovery needs D1 and R2. For Cloudflare + S3, it needs D1 and the S3-compatible bucket. Restoring only the object bucket recovers file bodies without the D1 metadata and row history needed to operate them.
 
 [Mailbox operations](/mailbox) turns these placement facts into ownership, authorization, quota, backup, restore, and incident-response decisions.
 
 ## Decision summary {#summary}
 
-|                                  |                                                                                                                                  |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| **Interocitor protects**         | Application payloads before a remote adapter receives them.                                                                      |
-| **Trusted endpoints hold**       | Plaintext local rows and the keys needed to interpret protected remote contents.                                                 |
-| **Remote storage holds**         | Protected artifacts plus the visible envelope required to store and retrieve them.                                               |
-| **Start with**                   | A local NAS, private WebDAV service, family-owned Drive account, or Cloudflare Free deployment according to reach and ownership. |
-| **Use advanced Cloudflare when** | The mailbox must apply application authorization, limits, audits, maintenance, or realtime invalidation.                         |
-| **Backend choice changes**       | Physical placement, access, operations, availability, and recovery—not the protection point.                                     |
-| **S3 changes**                   | The Cloudflare durable-file body destination; D1 remains the sync and metadata store.                                            |
+|                                  |                                                                                                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Interocitor protects**         | Application payloads before a remote adapter receives them.                                                                                       |
+| **Trusted endpoints hold**       | Plaintext local rows and the keys needed to interpret protected remote contents.                                                                  |
+| **Remote storage holds**         | Protected artifacts plus the visible envelope required to store and retrieve them.                                                                |
+| **Start with**                   | A local NAS, private WebDAV or S3-compatible service, family-owned Drive account, or Cloudflare Free deployment according to reach and ownership. |
+| **Use advanced Cloudflare when** | The mailbox must apply application authorization, limits, audits, maintenance, or realtime invalidation.                                          |
+| **Backend choice changes**       | Physical placement, access, operations, availability, and recovery—not the protection point.                                                      |
+| **Direct S3**                    | Stores the complete mailbox in one bucket prefix.                                                                                                 |
+| **Cloudflare + S3**              | Changes only the Worker durable-file body destination; D1 remains the sync and metadata store.                                                    |
 
 ## Annex: Cloudflare Free numbers {#cloudflare-free-numbers}
 

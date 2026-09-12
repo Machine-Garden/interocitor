@@ -710,7 +710,7 @@ export interface RemoteInvalidationStorageAdapter {
 }
 
 /**
- * Contract implemented by remote backends such as WebDAV, Google Drive,
+ * Contract implemented by remote backends such as WebDAV, S3, Google Drive,
  * Cloudflare, or in-memory test adapters.
  */
 export interface StorageAdapter {

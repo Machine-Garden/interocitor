@@ -388,7 +388,7 @@ retention check or later compaction retries cleanup.
 Interocitor manages encrypted data. Deciding who may reach a mesh belongs to
 the host and its identity provider. The engine's job is to understand that
 decision when it arrives as an HTTP status and give the application a clear
-moment to react. The built-in Cloudflare, WebDAV, and Google Drive adapters
+moment to react. The built-in Cloudflare, WebDAV, S3, and Google Drive adapters
 turn these statuses into a `RemoteAccessError` instead of a generic failure:
 
 | Status | `kind`               | Effect on the engine                                                    |
@@ -428,8 +428,8 @@ The current decision is available synchronously through
 `db.getRemoteAccessError()` and `db.getConnectionStatusDetails().remoteAccess`,
 and in React through `useRemoteAccess(db)`. A successful `connect()` clears it
 and emits `remote:access:restored`; `disconnect()` and `setRemoteStorage()`
-clear it silently. `CloudflareAdapter.setToken()`, `WebDAVAdapter.setAuth()`, and
-`GoogleDriveAdapter.setAccessToken()` accept the refreshed credential and mark
+clear it silently. `CloudflareAdapter.setToken()`, `WebDAVAdapter.setAuth()`,
+`S3Adapter.setCredentials()`, and `GoogleDriveAdapter.setAccessToken()` accept the refreshed credential and mark
 the adapter unauthenticated so the next `connect()` re-verifies.
 
 ## Typed errors

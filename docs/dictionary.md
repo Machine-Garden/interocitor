@@ -95,7 +95,7 @@ wrapping key. See [Recovery phrases](../packages/core/docs/recovery.md) and the
 ## Remote mailbox
 
 The **remote mailbox** is the storage backend used to exchange row-sync
-artifacts and hold durable files. It can be WebDAV, Google Drive, Cloudflare,
+artifacts and hold durable files. It can be WebDAV, S3, Google Drive, Cloudflare,
 or a custom adapter. With a non-null key source it stores ciphertext plus
 routing metadata; with a null key source payload artifacts are not encrypted.
 The mailbox does not merge CRDT rows.

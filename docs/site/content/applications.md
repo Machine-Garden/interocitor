@@ -63,7 +63,7 @@ Reach for Firestore when the server must read, query, or report on the data.
 
 Interocitor is not a browser library, and it does not have to persist in IndexedDB. The core runs wherever you give it a local store: memory, or your own, in a server process.
 
-Point it at WebDAV, S3-compatible storage behind the worker, or a NAS, and a mesh behaves much like a small distributed database whose storage cannot read it. Clients merge and compact; the storage only keeps bytes. Trusted workers and agents join as endpoints, the way [automation](/automation) describes, and share the same rows and files as the browsers.
+Point it at WebDAV, an S3-compatible bucket, or a NAS, and a mesh behaves much like a small distributed database whose storage cannot read it. Clients merge and compact; the storage only keeps bytes. Trusted workers and agents join as endpoints, the way [automation](/automation) describes, and share the same rows and files as the browsers.
 
 Reach for a real database when you need central transactions or plaintext reporting.
 

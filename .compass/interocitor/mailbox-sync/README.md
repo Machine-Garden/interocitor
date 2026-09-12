@@ -20,7 +20,8 @@ and retires; it never interprets.
 ## Technology
 
 TypeScript, Swift, and Python engines over pluggable **storage adapter**
-implementations for WebDAV, Google Drive, Cloudflare, and memory.
+implementations. TypeScript includes WebDAV, S3, Google Drive, Cloudflare, and
+memory; the other runtimes implement their documented subsets.
 
 ## Implementation coordinates
 
@@ -87,8 +88,8 @@ recognizably a refusal rather than an empty **mesh**.
 
 #### What would make me leave
 
-Any behaviour that made the host necessary, so a plain WebDAV folder could no
-longer stand in.
+Any behaviour that made the host necessary, so a plain WebDAV folder or S3
+object prefix could no longer stand in.
 
 ## Components
 

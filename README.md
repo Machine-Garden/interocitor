@@ -84,7 +84,7 @@ logged. It never decides which rows.
 
 **As a distributed database.** Interocitor is not a browser library. The core
 runs wherever you give it a local store: memory, or your own, in a server
-process. Point it at WebDAV, S3-compatible storage behind the worker, or a NAS,
+process. Point it at WebDAV, an S3-compatible bucket, or a NAS,
 and a mesh behaves much like a small distributed database whose storage cannot
 read it. Trusted workers and agents join as endpoints and share the same rows
 and files as the browsers.
@@ -165,6 +165,7 @@ the installed Chromium binary.
 - [Terminology](docs/dictionary.md)
 - [Protocol flows](docs/flows.md)
 - [Core adapter contract](packages/core/docs/adapter-contract.md)
+- [Use an S3 mailbox from a browser](packages/core/docs/s3-browser.md)
 - [Pair a device](packages/core/docs/pairing.md)
 - [Publish and use a recovery phrase](packages/core/docs/recovery.md)
 - [Recovery API reference](packages/core/docs/recovery-reference.md)
@@ -200,8 +201,9 @@ commodity file-sync storage—“just bring your own cloud.” Interocitor was
 developed independently and turns that pattern into an application data layer
 with structured rows, durable files, pairing, recovery, and compaction.
 
-Run the mailbox backend on Cloudflare, let users connect Google Drive, or point
-WebDAV at a home NAS. Each backend carries the same artifacts; with a non-null
+Run the mailbox backend on Cloudflare, let users connect Google Drive, point
+WebDAV at a home NAS, or connect directly to an S3-compatible bucket. Each
+whole-mailbox backend carries the same artifacts; with a non-null
 key source, protected payloads are encrypted before the storage adapter receives
 them.
 

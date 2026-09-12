@@ -2,6 +2,20 @@
 
 import { useEffect, useId, useState } from "react";
 
+/**
+ * Mermaid emits `width="100%"` and leaves the height to the viewBox. A browser then has to
+ * derive the height from the aspect ratio, which Safari declines to do: the diagram collapses
+ * to nothing. Pin the size the viewBox already describes so every browser lays it out the same.
+ */
+function withIntrinsicSize(svg: string): string {
+  return svg.replace(/<svg([^>]*)>/, (tag, attributes: string) => {
+    const box = /viewBox="[\d.]+ [\d.]+ ([\d.]+) ([\d.]+)"/.exec(attributes);
+    if (!box) return tag;
+    const sized = attributes.replaceAll(/\s(?:width|height)="[^"]*"/g, "");
+    return `<svg${sized} width="${box[1]}" height="${box[2]}">`;
+  });
+}
+
 export function MermaidDiagram({ chart }: { chart: string }) {
   const reactId = useId();
   const [svg, setSvg] = useState<string>();
@@ -29,7 +43,7 @@ export function MermaidDiagram({ chart }: { chart: string }) {
           },
         });
         const result = await mermaid.render(id, chart);
-        if (active) setSvg(result.svg);
+        if (active) setSvg(withIntrinsicSize(result.svg));
       })
       .catch((reason: unknown) => {
         if (active) {

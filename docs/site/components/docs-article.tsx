@@ -60,10 +60,12 @@ function Markdown({ page }: { page: PageRecord }) {
           );
         },
         pre: ({ children }) => {
+          // The single child is still the unrendered `code` element, so match on its language
+          // rather than on MermaidDiagram: a diagram must not inherit the code-block chrome.
           const nodes = Children.toArray(children);
-          if (nodes.length === 1 && isValidElement(nodes[0]) && nodes[0].type === MermaidDiagram) {
-            return nodes[0];
-          }
+          const only = nodes.length === 1 && isValidElement(nodes[0]) ? nodes[0] : undefined;
+          const language = (only?.props as { className?: string } | undefined)?.className;
+          if (language === "language-mermaid") return only;
           return <pre>{children}</pre>;
         },
       }}

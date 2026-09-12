@@ -283,8 +283,8 @@
 
 .mermaid-diagram svg {
   display: block;
+  flex: 0 0 auto;
   width: auto;
-  max-width: 100%;
   height: auto;
 }
 

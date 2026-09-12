@@ -21,6 +21,14 @@ export type {
   MeshGrantPrincipal,
 } from "./access-control.ts";
 
+export { meshInfo, provideMeshInfo } from "./mesh-info.ts";
+
+export type { MeshInfo } from "./mesh-info.ts";
+
+export { standardUploadPolicy } from "./upload-policy.ts";
+
+export type { StandardUploadPolicyOptions, UnknownMeshAgeDecision } from "./upload-policy.ts";
+
 export { InterocitorRelayDurableObject, broadcast } from "./relay.ts";
 
 export type { BroadcastDiagnostics } from "./relay.ts";

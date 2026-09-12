@@ -247,6 +247,7 @@ The request includes:
 | `canonicalAddress`       | Stable mesh namespace selected by route resolution.                                      |
 | `path`                   | Normalized durable-file path.                                                            |
 | `size`                   | Stored request-body bytes.                                                               |
+| `replacedBytes`          | Stored bytes of the object this write replaces; `0` when the path is new.                |
 | `currentMeshStoredBytes` | Stored durable-file bytes before this write.                                             |
 | `maxMeshStoredBytes`     | Resolved quota for this mesh.                                                            |
 | `uploadedByDeviceId`     | Client-supplied `X-Interocitor-Device-Id`.                                               |
@@ -261,7 +262,48 @@ response. Only omission or `undefined` disables the hook. A configured
 non-function, thrown or rejected callback, malformed result, non-boolean
 `allowed`, or invalid status returns `503`. The hook does not authorize
 sync-object writes or reads; use `meshMiddleware` for whole-mesh request
-policy.
+policy. Rejection happens after the request body has been read.
+
+#### `standardUploadPolicy(options)`
+
+Builds a policy from documented defaults. It is opt-in: nothing applies it for
+you, and supplying your own `authorizeFileUpload` replaces it entirely. The
+returned callback has the same signature as the hook.
+
+| Option               | Default    | Effect                                                                        |
+| -------------------- | ---------- | ----------------------------------------------------------------------------- |
+| `minMeshAgeMs`       | `60000`    | Milliseconds a mesh must have existed. `0` disables. Rejects with `429`.      |
+| `minDeviceCount`     | `2`        | Devices that must have announced themselves. `0` or `1` disables. `403`.      |
+| `onUnknownMeshAge`   | `"reject"` | Whether a mesh holding no sync root yet may upload.                           |
+| `maxMeshStoredBytes` | —          | Stored-byte ceiling for this mesh. Only tightens the deployment quota. `413`. |
+| `maxStoredFileBytes` | —          | Single-upload ceiling. Only tightens the deployment limit. `413`.             |
+
+A ceiling projects `storedBytes - replacedBytes + size`, so an overwrite is
+charged only for what it adds. `maxStoredFileBytes` is checked before any mesh
+fact is read.
+
+#### `meshInfo(request)`
+
+Resolves server-authored facts about the mesh behind this upload. Stored volume
+is known before policy runs; age and device count are read on first call and
+memoized for the rest of the request. Available only on the request the runtime
+supplies — it throws a `TypeError` otherwise, and `provideMeshInfo(request,
+info)` seeds a hand-built request for tests.
+
+| Field             | Meaning                                                                             |
+| ----------------- | ----------------------------------------------------------------------------------- |
+| `createdAt`       | Epoch ms at which this address first held a sync root, or `null` when it holds none |
+| `ageMs`           | Milliseconds since `createdAt`, or `null` when that is `null`                       |
+| `deviceCount`     | Device heartbeat objects across this address's roots                                |
+| `storedFileCount` | Durable file bodies stored for this address, before this write                      |
+| `storedBytes`     | Total bytes of those bodies; equal to `currentMeshStoredBytes`                      |
+
+Every field is read from the deployment's own row store, never from request
+metadata a client can assert. Encrypted payloads stay opaque.
+
+For which layer a requirement belongs in, bot-protection and tier recipes, and
+the limits of these facts, see
+[Decide who may upload durable files](upload-policy.md).
 
 ### Checksum authority
 

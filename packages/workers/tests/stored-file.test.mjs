@@ -60,10 +60,13 @@ class MemoryD1 {
     if (sql.includes("COALESCE(SUM(size)")) {
       const [prefix] = params;
       let total = 0;
+      let count = 0;
       for (const row of this.storedFiles.values()) {
-        if (row.prefix === prefix) total += row.size;
+        if (row.prefix !== prefix) continue;
+        total += row.size;
+        count += 1;
       }
-      return { total };
+      return { total, count };
     }
     if (sql.includes("SELECT size, seal_guard, r2_key AS body_key FROM stored_files")) {
       const [prefix, path] = params;

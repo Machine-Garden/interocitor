@@ -13,6 +13,7 @@ import {
   opPutSemantic,
   opReconcileMetrics,
 } from "./ops.ts";
+import { attachMeshInfoSource } from "./mesh-info.ts";
 import { PATH_TYPE, classifyPath, meshRootForPath } from "./paths.ts";
 import { broadcast } from "./relay.ts";
 import { getMaintenanceStatus, runMaintenance } from "./maintenance.ts";
@@ -27,6 +28,7 @@ import type {
   InterocitorRuntimeOptions,
   WorkerLike,
   FileBodyStore,
+  FileUploadAuthorizationRequest,
   CorsOptions,
   MeshAccess,
   MeshAuthorization,
@@ -872,12 +874,15 @@ function storedFileMetadata(row: StoredFileRow): Record<string, unknown> {
   };
 }
 
-async function currentStoredBytes(db: DatabaseAdapter, prefix: string): Promise<number> {
-  const row = await db.first<{ total?: number }>(
-    "SELECT COALESCE(SUM(size), 0) AS total FROM stored_files WHERE prefix=?1",
+async function currentStoredUsage(
+  db: DatabaseAdapter,
+  prefix: string,
+): Promise<{ bytes: number; fileCount: number }> {
+  const row = await db.first<{ total?: number; count?: number }>(
+    "SELECT COALESCE(SUM(size), 0) AS total, COUNT(*) AS count FROM stored_files WHERE prefix=?1",
     prefix,
   );
-  return Number(row?.total ?? 0);
+  return { bytes: Number(row?.total ?? 0), fileCount: Number(row?.count ?? 0) };
 }
 
 async function handleStoredFileMetadata<Env>(
@@ -1039,7 +1044,8 @@ async function handlePutStoredFile<Env>(
     normalized,
   );
   if (!sealGuardMatches(existing?.seal_guard, guard)) return sealedFileResponse();
-  const current = await currentStoredBytes(db, prefix);
+  const usage = await currentStoredUsage(db, prefix);
+  const current = usage.bytes;
   const nextTotal = current - Number(existing?.size ?? 0) + bytes.byteLength;
   if (nextTotal > runtime.maxMeshStoredBytes)
     return jsonResponse(
@@ -1050,26 +1056,29 @@ async function handlePutStoredFile<Env>(
     if (typeof runtime.authorizeFileUpload !== "function") {
       return jsonResponse({ error: "Upload authorization unavailable" }, 503);
     }
+    const authorizationRequest: FileUploadAuthorizationRequest = {
+      address: prefix,
+      presentedAddress: route.presentedAddress,
+      canonicalAddress: route.canonicalAddress,
+      path: normalized,
+      uploadedByDeviceId,
+      size: bytes.byteLength,
+      sealed: guard !== null,
+      overwritesSealed: Boolean(existing?.seal_guard),
+      replacedBytes: Number(existing?.size ?? 0),
+      currentMeshStoredBytes: current,
+      maxMeshStoredBytes: runtime.maxMeshStoredBytes,
+      request,
+    };
+    attachMeshInfoSource(authorizationRequest, {
+      db,
+      prefix,
+      storedBytes: current,
+      storedFileCount: usage.fileCount,
+    });
     let auth: ReturnType<typeof normalizeAuthorization>;
     try {
-      auth = normalizeAuthorization(
-        await runtime.authorizeFileUpload(
-          {
-            address: prefix,
-            presentedAddress: route.presentedAddress,
-            canonicalAddress: route.canonicalAddress,
-            path: normalized,
-            uploadedByDeviceId,
-            size: bytes.byteLength,
-            sealed: guard !== null,
-            overwritesSealed: Boolean(existing?.seal_guard),
-            currentMeshStoredBytes: current,
-            maxMeshStoredBytes: runtime.maxMeshStoredBytes,
-            request,
-          },
-          env,
-        ),
-      );
+      auth = normalizeAuthorization(await runtime.authorizeFileUpload(authorizationRequest, env));
     } catch {
       return jsonResponse({ error: "Upload authorization unavailable" }, 503);
     }

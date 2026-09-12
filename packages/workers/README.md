@@ -243,7 +243,13 @@ Uploads are guarded before the file-body-store write:
 
 - `maxStoredFileBytes` limits one upload.
 - `maxMeshStoredBytes` limits total stored file bytes for a mesh, accounting for overwrites and deletes.
-- `authorizeFileUpload` can reject by mesh address, path, uploader device id, size, content type, current mesh usage, or app-specific request auth.
+- `authorizeFileUpload` can reject by mesh address, path, uploader device id, size, current mesh usage, or app-specific request auth.
+- `standardUploadPolicy()` supplies documented defaults for that hook — a minimum mesh age and a second announced device — tunable by option and replaceable outright.
+- `meshInfo(request)` extends that policy with server-authored facts about the mesh — its age, how many devices have announced themselves, and what it already stores — for rules such as "no uploads to a mesh created a minute ago" or "no uploads until there is a second device to share with".
+
+Which requirement belongs in a deployment limit, a plan ceiling, or a per-write
+decision — and the recipes for bot protection and paid tiers — are in
+[Decide who may upload durable files](docs/upload-policy.md).
 
 The following illustrative policy omits the host identity provider and
 environment type. It shows where whole-mesh authorization and
@@ -298,7 +304,7 @@ Start with the behavior your deployment needs:
 | Define valid mesh addresses                          | `meshIntegrityGates`                                                                                                       |
 | Apply application access or request policy           | `meshMiddleware`                                                                                                           |
 | Set D1/file-body-store request and quota limits      | `maxControlBytes`, `maxChangeBytes`, `maxMainlineBytes`, `maxGenericFileBytes`, `maxStoredFileBytes`, `maxMeshStoredBytes` |
-| Add durable-file-specific policy                     | `authorizeFileUpload`                                                                                                      |
+| Add durable-file-specific policy                     | `authorizeFileUpload`, `standardUploadPolicy`, `meshInfo`; see [upload policy](docs/upload-policy.md)                      |
 | Reclaim inactive D1 sync roots                       | `enableScheduledMaintenance`, `pathTtlHours`                                                                               |
 | Instrument completed storage operations              | `storageOperationAudit`                                                                                                    |
 | Enable targeted diagnostics                          | `verbose`                                                                                                                  |

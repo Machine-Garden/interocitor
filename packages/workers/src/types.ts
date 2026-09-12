@@ -186,6 +186,14 @@ export interface FileUploadAuthorizationRequest {
   sealed: boolean;
   /** The object being replaced is sealed; the presented guard already matched it. */
   overwritesSealed: boolean;
+  /**
+   * Stored bytes of the object this write replaces; `0` when the path is new.
+   *
+   * A replacement frees what it overwrites, so mesh usage after this write is
+   * `currentMeshStoredBytes - replacedBytes + size`. Policy that compares
+   * against a quota must subtract this, or it charges a re-saved file twice.
+   */
+  replacedBytes: number;
   /** Durable-file bytes recorded for the mesh before this write. */
   currentMeshStoredBytes: number;
   /** Resolved durable-file quota for the mesh. */
@@ -434,6 +442,14 @@ export interface InterocitorRuntimeOptions<Env = unknown> {
    * Return `true` to allow, `false` to reject with default status, or an
    * explicit `{ allowed, status, reason }` object to control the response.
    * A malformed result or unavailable configured callback returns `503`.
+   *
+   * For policy that turns on the state of the mesh rather than of this write —
+   * its age, its announced devices, what it already stores — pass the request
+   * to `meshInfo()`.
+   *
+   * @see {@link ../docs/upload-policy.md | Decide who may upload durable files}
+   *   — which requirement belongs in a deployment limit, a plan ceiling, or a
+   *   per-write decision, with bot-protection and paid-tier recipes.
    */
   authorizeFileUpload?: (
     request: FileUploadAuthorizationRequest,

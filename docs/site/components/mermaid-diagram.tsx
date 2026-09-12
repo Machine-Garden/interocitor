@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
+
+/**
+ * Mermaid keys its work by this id and clears any element already carrying it, so two renders
+ * must never share one. Count invocations instead of deriving the id from the component, which
+ * hands the same id to both halves of a double-invoked effect.
+ */
+let diagramSequence = 0;
 
 /**
  * Mermaid emits `width="100%"` and leaves the height to the viewBox. A browser then has to
@@ -17,13 +24,12 @@ function withIntrinsicSize(svg: string): string {
 }
 
 export function MermaidDiagram({ chart }: { chart: string }) {
-  const reactId = useId();
   const [svg, setSvg] = useState<string>();
   const [error, setError] = useState<string>();
 
   useEffect(() => {
     let active = true;
-    const id = `interocitor-diagram-${reactId.replaceAll(":", "")}`;
+    const id = `interocitor-diagram-${++diagramSequence}`;
 
     void import("mermaid")
       .then(async ({ default: mermaid }) => {
@@ -31,6 +37,10 @@ export function MermaidDiagram({ chart }: { chart: string }) {
           startOnLoad: false,
           securityLevel: "strict",
           theme: "base",
+          // Mermaid measures label text in an element of its own, where a page-level custom
+          // property does not resolve. Name the same stack --sans holds.
+          fontFamily: 'Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          flowchart: { useMaxWidth: false },
           themeVariables: {
             background: "#f8f7f0",
             primaryColor: "#e3e6d8",
@@ -39,7 +49,6 @@ export function MermaidDiagram({ chart }: { chart: string }) {
             lineColor: "#58645e",
             secondaryColor: "#dce6d9",
             tertiaryColor: "#fff8ed",
-            fontFamily: "var(--sans)",
           },
         });
         const result = await mermaid.render(id, chart);
@@ -54,23 +63,28 @@ export function MermaidDiagram({ chart }: { chart: string }) {
     return () => {
       active = false;
     };
-  }, [chart, reactId]);
-
-  if (error) {
-    return (
-      <p className="mermaid-error" role="alert">
-        This diagram could not be rendered: {error}
-      </p>
-    );
-  }
+  }, [chart]);
 
   return (
-    <figure className="mermaid-diagram" aria-busy={!svg}>
+    <figure className="mermaid-diagram" aria-busy={!svg && !error}>
       {svg ? (
         <div dangerouslySetInnerHTML={{ __html: svg }} />
+      ) : error ? (
+        <p className="mermaid-error" role="alert">
+          This diagram could not be rendered: {error}
+        </p>
       ) : (
         <p className="mermaid-loading">Rendering diagram…</p>
       )}
+      {/* Drawing the diagram needs a browser that runs our JavaScript and finishes mermaid's
+          work. The source always reads, so a diagram that never arrives still leaves the
+          reader the same relationships in text. */}
+      <details className="mermaid-source">
+        <summary>View diagram source</summary>
+        <pre tabIndex={0}>
+          <code>{chart}</code>
+        </pre>
+      </details>
     </figure>
   );
 }

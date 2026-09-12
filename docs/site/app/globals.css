@@ -265,27 +265,39 @@
 }
 
 .mermaid-diagram {
-  min-height: 180px;
   margin: 32px 0;
   padding: clamp(16px, 3vw, 30px);
-  overflow-x: auto;
   border: 1px solid rgba(10, 18, 14, 0.16);
   border-radius: 3px;
   background: #f8f7f0;
   box-shadow: 9px 9px 0 rgba(10, 18, 14, 0.08);
 }
 
+/* The diagram scrolls inside the frame; the caption and source below it must not. */
 .mermaid-diagram > div {
-  display: flex;
-  justify-content: center;
-  min-width: max-content;
+  overflow-x: auto;
 }
 
 .mermaid-diagram svg {
   display: block;
-  flex: 0 0 auto;
   width: auto;
   height: auto;
+  margin-inline: auto;
+}
+
+.mermaid-source {
+  margin-top: 14px;
+}
+
+.mermaid-source summary {
+  color: #65716b;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.mermaid-source pre {
+  margin-top: 10px;
 }
 
 .mermaid-loading,

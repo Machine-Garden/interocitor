@@ -1,6 +1,6 @@
 {
   "name": "@interocitor/web",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Browser runtime stores, credential stores, and UI helpers for Interocitor.",
   "keywords": [
     "browser",

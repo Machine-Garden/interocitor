@@ -1,6 +1,6 @@
 {
   "name": "@interocitor/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local-first CRDT rows and durable remote files with optional client-side encryption.",
   "keywords": [
     "crdt",

@@ -32,15 +32,15 @@ handling.
 
 ## What this package owns
 
-| Need                                              | Use                                                       |
-| ------------------------------------------------- | --------------------------------------------------------- |
-| Browser local cache / outbox                      | `IndexedDbLocalStore`                                     |
-| Safer IndexedDB open fallback                     | `createResilientLocalStore`                               |
-| Rotatable local DB names for reset/recovery flows | `createNamedLocalStore`, `getActiveLocalDatabaseName`     |
-| Local IndexedDB deletion                          | `resetLocalDatabase`, `resetLocalDatabaseWithDeadline`    |
-| Browser credential persistence                    | `createWebCredentialStore` and concrete credential stores |
-| Additional app key material                       | `createWebSecretStore`                                    |
-| Browser image upload/display helpers              | `putImage`, `getImage`, `getImageBlobUrl`                 |
+| Need                                              | Use                                                                              |
+| ------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Browser local cache / outbox                      | `IndexedDbLocalStore`                                                            |
+| Safer IndexedDB open fallback                     | `createResilientLocalStore`                                                      |
+| Rotatable local DB names for reset/recovery flows | `createNamedLocalStore`, `getActiveLocalDatabaseName`, `rotateLocalDatabaseName` |
+| Local IndexedDB deletion                          | `resetLocalDatabase`, `resetLocalDatabaseWithDeadline`                           |
+| Browser credential persistence                    | `createWebCredentialStore` and concrete credential stores                        |
+| Additional app key material                       | `createWebSecretStore`                                                           |
+| Browser image upload/display helpers              | `putImage`, `getImage`, `getImageBlobUrl`                                        |
 
 Mailbox adapters such as WebDAV, Google Drive, and Cloudflare live in
 `@interocitor/core`. Browser runtime choices live here.
@@ -81,7 +81,7 @@ Documented entrypoints in this package:
 | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `IndexedDbLocalStore`                                                                                                      | Browser tabs should persist local rows, outbox, and metadata in IndexedDB                                    |
 | `createResilientLocalStore`                                                                                                | IndexedDB may be blocked or unstable and the app must keep opening                                           |
-| `createNamedLocalStore`, `getActiveLocalDatabaseName`                                                                      | The app needs reset/recovery flows that rotate the physical IndexedDB name                                   |
+| `createNamedLocalStore`, `getActiveLocalDatabaseName`, `rotateLocalDatabaseName`                                           | The app needs reset/recovery flows that rotate the physical IndexedDB name                                   |
 | `resetLocalDatabase`, `resetLocalDatabaseWithDeadline`                                                                     | The app needs explicit local-cache deletion UX                                                               |
 | `createWebCredentialStore`                                                                                                 | The app needs a browser credential custody choice for mesh credentials                                       |
 | `createWebSecretStore`                                                                                                     | The app needs browser storage, platform WebAuthn, or cross-platform WebAuthn custody for an app-owned secret |
@@ -182,20 +182,38 @@ swallowed so the engine can keep opening.
 ### Named stores for reset/recovery flows
 
 ```ts
-import { createNamedLocalStore, getActiveLocalDatabaseName } from "@interocitor/web";
+import {
+  createNamedLocalStore,
+  getActiveLocalDatabaseName,
+  rotateLocalDatabaseName,
+} from "@interocitor/web";
 
 const localStore = createNamedLocalStore({
   baseName: "case-vault",
 });
 
 console.log(getActiveLocalDatabaseName("case-vault"));
+
+// After disconnecting every engine instance, deliberately move a replacement
+// mesh to a fresh physical database without waiting for blocked deletion.
+rotateLocalDatabaseName("case-vault");
+const replacementStore = createNamedLocalStore({ baseName: "case-vault" });
 ```
 
 Named stores persist the active physical database name in `localStorage` when
 available. When their own resilient store degrades because opening stalled or
-the handle became unusable, they advance the pointer to `baseName-v2`,
-`baseName-v3`, and so on for the next open. Calling a reset helper by itself
-does not rotate that pointer.
+the handle became unusable, they advance the pointer to a unique generation
+name such as `baseName-v2-4f3a...` for the next open. The random suffix keeps
+two tabs that rotate concurrently from selecting the same physical database.
+Calling a reset helper by itself does not rotate that pointer.
+
+`rotateLocalDatabaseName` explicitly advances the pointer without deleting the
+old database, so another tab or a delayed WebKit close cannot block creation of
+the replacement encryption domain. Disconnect first, and clear or isolate the
+old credential store separately. Named stores do not automatically delete old
+generations: deletion sends `versionchange` to live sibling tabs and a timed-out
+IndexedDB deletion cannot be cancelled. Delete an exact old physical name only
+in an application-confirmed quiescent maintenance flow.
 
 ### Local reset
 
@@ -212,7 +230,9 @@ Call reset only after disconnecting the engine and clearing credentials. The
 deadline helper returns `'deleted'`, `'blocked'`, `'timed-out'`, or `'errored'`
 and never throws; its default deadline is 1500 ms. If the app uses a named
 store, recovery should create/open that store and let its degradation path
-manage pointer rotation rather than assuming the reset call rotated it.
+manage pointer rotation rather than assuming the reset call rotated it. A
+`blocked` or `timed-out` result means the browser deletion request is still
+queued and may complete later, so never reuse that physical name.
 
 ## Credential storage choices
 

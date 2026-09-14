@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe("createNamedLocalStore", () => {
-  test("rotates to next versioned name when handle closes mid-flight", async ({ page }) => {
+  test("keeps a healthy store on its current generation", async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { createNamedLocalStore, getActiveLocalDatabaseName } =
         await import("/packages/web/dist/index.js");
@@ -19,15 +19,6 @@ test.describe("createNamedLocalStore", () => {
         },
       };
 
-      // Hack: pass a factory through namedLocalStore by intercepting primaryFactory
-      // via createResilientLocalStore. createNamedLocalStore does not expose it,
-      // so we wrap our own factory: we monkey-patch by setting localStorage absent
-      // and using a custom primaryFactory via the inner resilient store path —
-      // achieved by passing our own pointerStore + observing rotation directly.
-      //
-      // The simplest path is: build a tiny harness that mirrors namedLocalStore's
-      // observable contract — rotation must move the active name forward and
-      // emit onRotated.
       const rotations: any[] = [];
       const degradations: any[] = [];
       const store = createNamedLocalStore({
@@ -45,13 +36,6 @@ test.describe("createNamedLocalStore", () => {
       await store.open();
       const initialName = getActiveLocalDatabaseName("IDBRotationTest", pointer);
 
-      // Force a closing-handle failure by writing a sentinel and then
-      // simulating Safari's behaviour. We do this by calling setMeta a few
-      // times — the real implementation will only have us rotate if the
-      // backing IDB handle actually closes, which is not deterministic in a
-      // real browser test. Instead, validate that the API surface is honoured:
-      // the pointer slot is initialized, the initial name matches baseName,
-      // and no rotation happens on a healthy store.
       await store.setMeta("canary", "healthy");
       const meta = await store.getMeta("canary");
       const finalName = getActiveLocalDatabaseName("IDBRotationTest", pointer);
@@ -98,6 +82,122 @@ test.describe("createNamedLocalStore", () => {
 
     expect(result.observedName).toBe("RotationPersistence-v3");
   });
+
+  test("explicitly rotates to a fresh physical generation before replacement", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { getActiveLocalDatabaseName, rotateLocalDatabaseName } =
+        await import("/packages/web/dist/index.js");
+      const pointerMemory = new Map<string, string>();
+      const pointer = {
+        get: (key: string) => pointerMemory.get(key) ?? null,
+        set: (key: string, value: string) => {
+          pointerMemory.set(key, value);
+        },
+      };
+
+      const first = rotateLocalDatabaseName("Household", pointer);
+      const second = rotateLocalDatabaseName("Household", pointer);
+      return {
+        first,
+        second,
+        active: getActiveLocalDatabaseName("Household", pointer),
+      };
+    });
+
+    expect(result.first.from).toBe("Household");
+    expect(result.first.to).toMatch(/^Household-v2-[0-9a-f]{16}$/);
+    expect(result.second.from).toBe(result.first.to);
+    expect(result.second.to).toMatch(/^Household-v3-[0-9a-f]{16}$/);
+    expect(result.second.to).not.toBe(result.first.to);
+    expect(result.active).toBe(result.second.to);
+  });
+
+  test("does not parse an unrelated suffix as a generation counter", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { rotateLocalDatabaseName } = await import("/packages/web/dist/index.js");
+      const pointerMemory = new Map([["interocitor:dbName:Household", "Household-vault-v99"]]);
+      return rotateLocalDatabaseName("Household", {
+        get: (key) => pointerMemory.get(key) ?? null,
+        set: (key, value) => pointerMemory.set(key, value),
+      });
+    });
+
+    expect(result.from).toBe("Household-vault-v99");
+    expect(result.to).toMatch(/^Household-v2-[0-9a-f]{16}$/);
+  });
+
+  test("opens a rotated generation without versionchanging or deleting a live old page", async ({
+    context,
+    page,
+  }) => {
+    const baseName = `LiveOldGeneration-${crypto.randomUUID()}`;
+    const replacementPage = await context.newPage();
+    await replacementPage.goto("/packages/web/tests/e2e/fixtures/harness.html");
+    try {
+      await page.evaluate(async (name) => {
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          const request = indexedDB.open(name, 2);
+          request.onupgradeneeded = () => request.result.createObjectStore("old-data");
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        let versionChanges = 0;
+        db.onversionchange = () => {
+          versionChanges += 1;
+        };
+        Object.assign(window, {
+          liveOldDatabase: db,
+          readOldVersionChanges: () => versionChanges,
+        });
+      }, baseName);
+
+      const replacement = await replacementPage.evaluate(async (name) => {
+        const { createNamedLocalStore, getActiveLocalDatabaseName, rotateLocalDatabaseName } =
+          await import("/packages/web/dist/index.js");
+        const rotation = rotateLocalDatabaseName(name);
+        const store = createNamedLocalStore({ baseName: name, openTimeoutMs: 2_000 });
+        const degradations: string[] = [];
+        const checkedStore = createNamedLocalStore({
+          baseName: name,
+          openTimeoutMs: 2_000,
+          onLocalDegraded: (info: any) => degradations.push(info.reason),
+        });
+        await store.open();
+        await store.setMeta("durable", "yes");
+        store.close();
+        await checkedStore.open();
+        const durable = await checkedStore.getMeta("durable");
+        checkedStore.close();
+        return {
+          rotation,
+          active: getActiveLocalDatabaseName(name),
+          durable,
+          degradations,
+        };
+      }, baseName);
+      await page.waitForTimeout(100);
+      const old = await page.evaluate(() => ({
+        versionChanges: (
+          window as typeof window & { readOldVersionChanges: () => number }
+        ).readOldVersionChanges(),
+        stillOpen: Array.from(
+          (window as typeof window & { liveOldDatabase: IDBDatabase }).liveOldDatabase
+            .objectStoreNames,
+        ).includes("old-data"),
+      }));
+
+      expect(replacement.rotation.to).toMatch(new RegExp(`^${baseName}-v2-[0-9a-f]{16}$`));
+      expect(replacement.active).toBe(replacement.rotation.to);
+      expect(replacement.durable).toBe("yes");
+      expect(replacement.degradations).toEqual([]);
+      expect(old).toEqual({ versionChanges: 0, stillOpen: true });
+    } finally {
+      await page.evaluate(() => {
+        (window as typeof window & { liveOldDatabase?: IDBDatabase }).liveOldDatabase?.close();
+      });
+      await replacementPage.close();
+    }
+  });
 });
 
 test.describe("resetLocalDatabaseWithDeadline", () => {
@@ -112,6 +212,53 @@ test.describe("resetLocalDatabaseWithDeadline", () => {
       return { outcome };
     });
 
-    expect(["deleted", "errored"]).toContain(result.outcome);
+    expect(result.outcome).toBe("deleted");
+  });
+
+  test("reports blocked while the queued deletion completes after release", async ({
+    context,
+    page,
+  }) => {
+    const dbName = `delayed-delete-${crypto.randomUUID()}`;
+    const resetPage = await context.newPage();
+    await resetPage.goto("/packages/web/tests/e2e/fixtures/harness.html");
+    try {
+      await page.evaluate(async (name) => {
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          const request = indexedDB.open(name, 1);
+          request.onupgradeneeded = () => request.result.createObjectStore("sentinel");
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        (window as typeof window & { deleteBlocker?: IDBDatabase }).deleteBlocker = db;
+      }, dbName);
+      const outcome = await resetPage.evaluate(async (name) => {
+        const { resetLocalDatabaseWithDeadline } = await import("/packages/web/dist/index.js");
+        return resetLocalDatabaseWithDeadline(name, 1_000);
+      }, dbName);
+      expect(outcome).toBe("blocked");
+
+      await page.evaluate(() => {
+        (window as typeof window & { deleteBlocker?: IDBDatabase }).deleteBlocker?.close();
+      });
+      const afterRelease = await resetPage.evaluate(async (name) => {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 150);
+        });
+        return new Promise<{ version: number; stores: string[] }>((resolve, reject) => {
+          const request = indexedDB.open(name);
+          request.onsuccess = () => {
+            const db = request.result;
+            const result = { version: db.version, stores: Array.from(db.objectStoreNames) };
+            db.close();
+            resolve(result);
+          };
+          request.onerror = () => reject(request.error);
+        });
+      }, dbName);
+      expect(afterRelease).toEqual({ version: 1, stores: [] });
+    } finally {
+      await resetPage.close();
+    }
   });
 });

@@ -28,5 +28,10 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
     },
+    {
+      name: "webkit-indexeddb",
+      testMatch: /(?:.*local-store.*|pairing-replacement)\.spec\.ts/,
+      use: { ...devices["Desktop Safari"] },
+    },
   ],
 });

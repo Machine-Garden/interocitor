@@ -10,13 +10,33 @@
  */
 export function resetLocalDatabase(dbName = "interocitor"): Promise<void> {
   return new Promise((resolve, reject) => {
+    let blockedTimer: ReturnType<typeof setTimeout> | null = null;
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (blockedTimer) clearTimeout(blockedTimer);
+      if (error) reject(error);
+      else resolve();
+    };
     const req = indexedDB.deleteDatabase(dbName);
-    req.onsuccess = () => resolve();
+    req.onsuccess = () => finish();
     req.onerror = () =>
-      reject(req.error ?? new Error(`Failed to delete IndexedDB database "${dbName}"`));
+      finish(req.error ?? new Error(`Failed to delete IndexedDB database "${dbName}"`));
     req.onblocked = () => {
-      reject(
-        new Error(`Cannot delete IndexedDB database "${dbName}" while another connection is open`),
+      // WebKit can briefly retain a handle after close(). Allow it to drain.
+      // IndexedDB deletion requests cannot be cancelled: after this promise
+      // rejects, the request remains queued and may delete the database later.
+      if (blockedTimer) return;
+      blockedTimer = setTimeout(
+        () =>
+          finish(
+            new Error(
+              `Deletion of IndexedDB database "${dbName}" is still blocked by an open connection. ` +
+                `The browser request remains queued and may complete later; do not reuse this physical name.`,
+            ),
+          ),
+        1_000,
       );
     };
   });
@@ -33,8 +53,10 @@ export type ResetLocalDatabaseOutcome = "deleted" | "blocked" | "timed-out" | "e
  * variant returns a deterministic outcome within `timeoutMs`.
  *
  * - `'deleted'` — the database was successfully deleted.
- * - `'blocked'` — another connection prevented deletion; safe to rotate name.
- * - `'timed-out'` — neither success nor block fired within the deadline.
+ * - `'blocked'` — another connection delayed deletion. The request remains
+ *   queued and may still complete, so rotate rather than reusing this name.
+ * - `'timed-out'` — neither success nor block fired within the deadline. The
+ *   request may still complete later; rotate rather than reusing this name.
  * - `'errored'` — the request emitted an explicit error.
  */
 export function resetLocalDatabaseWithDeadline(

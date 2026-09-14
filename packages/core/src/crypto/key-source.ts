@@ -15,6 +15,8 @@ export interface MeshKeyMaterial {
   portableKey?: string | null;
 }
 
+export type MeshKeyCredentialPersistence = "none" | "durable";
+
 /**
  * How an engine obtains the mesh key it encrypts with.
  *
@@ -25,9 +27,22 @@ export interface MeshKeyMaterial {
  *   — the portable and bound contracts, and who holds each key component.
  */
 export interface MeshKeySource {
+  /**
+   * Whether this source writes credentials outside the engine's LocalStore.
+   * Durable sources must expose side-effect-free inspection so the engine can
+   * compare before replacing. Nonpersistent sources opt out explicitly.
+   */
+  readonly credentialPersistence: MeshKeyCredentialPersistence;
   load(context: MeshKeyContext): Promise<MeshKeyMaterial>;
   persist(context: MeshKeyContext, credentials: StoredCredentials): Promise<void>;
   clear(): Promise<void>;
+  /**
+   * Return the credential record already held by this source, without changing
+   * the active key. Engines use this optional inspection hook to detect a
+   * stale mesh anchor before adopting or overwriting persisted credentials.
+   * Required when `credentialPersistence === "durable"`.
+   */
+  loadPersistedCredentials?(): Promise<StoredCredentials | null>;
 }
 
 export interface PortablePassphraseKeySourceOptions {
@@ -50,6 +65,7 @@ export interface BoundSharedKeySourceOptions {
  *   contract is the better trade.
  */
 export class PortablePassphraseKeySource implements MeshKeySource {
+  readonly credentialPersistence: MeshKeyCredentialPersistence;
   private portableKey: string | null;
   private readonly credentialStore: CredentialStore | null;
   private readonly generateIfMissing: boolean;
@@ -58,6 +74,7 @@ export class PortablePassphraseKeySource implements MeshKeySource {
     this.portableKey = options.portableKey ?? null;
     this.credentialStore = options.credentialStore ?? null;
     this.generateIfMissing = options.generateIfMissing ?? true;
+    this.credentialPersistence = this.credentialStore ? "durable" : "none";
   }
 
   setPortableKey(portableKey: string | null): void {
@@ -66,6 +83,10 @@ export class PortablePassphraseKeySource implements MeshKeySource {
 
   getPortableKey(): string | null {
     return this.portableKey;
+  }
+
+  async loadPersistedCredentials(): Promise<StoredCredentials | null> {
+    return this.credentialStore ? this.credentialStore.load() : null;
   }
 
   async load(_context: MeshKeyContext): Promise<MeshKeyMaterial> {
@@ -98,6 +119,7 @@ export class PortablePassphraseKeySource implements MeshKeySource {
  *   — what `derive` must guarantee, and the exposure this contract removes.
  */
 export class BoundSharedKeySource implements MeshKeySource {
+  readonly credentialPersistence: MeshKeyCredentialPersistence;
   private portableKey: string | null;
   private readonly credentialStore: CredentialStore | null;
   private readonly deriveKey: BoundSharedKeySourceOptions["derive"];
@@ -106,6 +128,7 @@ export class BoundSharedKeySource implements MeshKeySource {
     this.portableKey = options.portableKey ?? null;
     this.credentialStore = options.credentialStore ?? null;
     this.deriveKey = options.derive;
+    this.credentialPersistence = this.credentialStore ? "durable" : "none";
   }
 
   setPortableKey(portableKey: string | null): void {
@@ -114,6 +137,10 @@ export class BoundSharedKeySource implements MeshKeySource {
 
   getPortableKey(): string | null {
     return this.portableKey;
+  }
+
+  async loadPersistedCredentials(): Promise<StoredCredentials | null> {
+    return this.credentialStore ? this.credentialStore.load() : null;
   }
 
   async load(context: MeshKeyContext): Promise<MeshKeyMaterial> {

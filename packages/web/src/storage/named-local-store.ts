@@ -13,18 +13,18 @@ import type { LocalStoreDegradationInfo, LocalStoreDegradedHook } from "./resili
  * what state IndexedDB is in. To guarantee this, the local store name is
  * treated as a nuance — when a disaster occurs (handle keeps closing, repeated
  * blocked open, irrecoverable corruption) we rotate to the next versioned
- * name (`baseName`, `baseName-v2`, `baseName-v3`, …), remember the new pointer
- * in a small persistent slot, and reopen.
+ * name (`baseName`, then names such as `baseName-v2-4f3a…`), remember the new
+ * pointer in a small persistent slot, and reopen.
  *
  * Storage of the rotation pointer:
  *   - Default uses globalThis.localStorage when available.
  *   - SSR / private mode without localStorage fall back to an in-memory map,
  *     which still survives within the page but not across reloads.
  *
- * Cleanup of old versions (Option B, opportunistic):
- *   - When `indexedDB.databases()` exists (Chromium/WebKit modern), older
- *     versioned names are deleted in the background after a successful open
- *     on the current name. Firefox keeps them; the browser eventually evicts.
+ * Old generations are deliberately retained. IndexedDB open/delete requests
+ * cannot be cancelled after a blocked timeout, and another tab may still be
+ * using an older generation. Destructive cleanup therefore belongs to an
+ * explicit application reset flow, not this availability wrapper.
  *
  * This module deliberately depends on `createResilientLocalStore` so it gets
  * the open-deadline and post-open closing-handle recovery for free.
@@ -56,12 +56,13 @@ function defaultPointerStore(): PointerStore {
     return {
       get: (key) => {
         try {
-          return ls.getItem(key);
+          return ls.getItem(key) ?? memoryPointerSlots.get(key) ?? null;
         } catch {
-          return null;
+          return memoryPointerSlots.get(key) ?? null;
         }
       },
       set: (key, value) => {
+        memoryPointerSlots.set(key, value);
         try {
           ls.setItem(key, value);
         } catch {
@@ -79,7 +80,7 @@ function defaultPointerStore(): PointerStore {
 }
 
 const POINTER_PREFIX = "interocitor:dbName:";
-const VERSION_SUFFIX = /-v(\d+)$/;
+const VERSION_SUFFIX = /^-v(\d+)(?:-([0-9a-f]+))?$/;
 
 function parseVersion(name: string, baseName: string): number {
   if (name === baseName) return 1;
@@ -92,47 +93,35 @@ function buildName(baseName: string, version: number): string {
   return version <= 1 ? baseName : `${baseName}-v${version}`;
 }
 
+function freshGenerationName(baseName: string, version: number): string {
+  const random = new Uint8Array(8);
+  crypto.getRandomValues(random);
+  const token = Array.from(random, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${buildName(baseName, version)}-${token}`;
+}
+
 function pointerKey(baseName: string): string {
   return `${POINTER_PREFIX}${baseName}`;
 }
 
 /**
- * Best-effort cleanup of older versioned IndexedDB databases. Only runs when
- * the platform exposes `indexedDB.databases()` (modern Chromium/WebKit). Any
- * failure is silently swallowed — cleanup is a luxury, not a requirement.
+ * Advance a logical store to a fresh physical IndexedDB generation.
+ *
+ * Call only after disconnecting the current engine. This does not delete the
+ * previous database or clear credentials; callers replacing an encryption
+ * domain must clear or isolate the credential store separately.
  */
-async function cleanupOlderVersions(baseName: string, currentVersion: number): Promise<void> {
-  const idb = (typeof indexedDB === "undefined" ? null : indexedDB) as IDBFactory | null;
-  if (
-    !idb ||
-    typeof (idb as IDBFactory & { databases?: () => Promise<{ name?: string }[]> }).databases !==
-      "function"
-  )
-    return;
-  try {
-    const dbs = await (
-      idb as IDBFactory & { databases: () => Promise<{ name?: string }[]> }
-    ).databases();
-    for (const entry of dbs) {
-      const name = entry?.name;
-      if (!name) continue;
-      if (name !== baseName && !name.startsWith(`${baseName}-v`)) continue;
-      const version = parseVersion(name, baseName);
-      if (version >= currentVersion) continue;
-      try {
-        await new Promise<void>((resolve) => {
-          const req = idb.deleteDatabase(name);
-          req.onsuccess = () => resolve();
-          req.onerror = () => resolve();
-          req.onblocked = () => resolve();
-        });
-      } catch {
-        // Swallow; never block on cleanup.
-      }
-    }
-  } catch {
-    // Swallow; never block on enumeration.
-  }
+export function rotateLocalDatabaseName(
+  baseName: string,
+  pointer: PointerStore = defaultPointerStore(),
+): { from: string; to: string } {
+  const slot = pointerKey(baseName);
+  const from = pointer.get(slot) ?? baseName;
+  // The counter is diagnostic only. The random suffix makes physical names
+  // distinct even when two tabs race the pointer's read-modify-write cycle.
+  const to = freshGenerationName(baseName, parseVersion(from, baseName) + 1);
+  pointer.set(slot, to);
+  return { from, to };
 }
 
 /**
@@ -150,16 +139,13 @@ export function createNamedLocalStore(options: NamedLocalStoreOptions): LocalSto
   const slot = pointerKey(options.baseName);
 
   const persistedName = pointer.get(slot);
-  let activeVersion = persistedName ? parseVersion(persistedName, options.baseName) : 1;
-  let activeName = persistedName ?? buildName(options.baseName, activeVersion);
+  const initialVersion = persistedName ? parseVersion(persistedName, options.baseName) : 1;
+  let activeName = persistedName ?? buildName(options.baseName, initialVersion);
   pointer.set(slot, activeName);
 
   const rotate = (reason: string): void => {
-    activeVersion += 1;
-    const nextName = buildName(options.baseName, activeVersion);
-    const previousName = activeName;
+    const { from: previousName, to: nextName } = rotateLocalDatabaseName(options.baseName, pointer);
     activeName = nextName;
-    pointer.set(slot, nextName);
     if (options.onRotated) {
       try {
         options.onRotated({ from: previousName, to: nextName, reason });
@@ -194,19 +180,10 @@ export function createNamedLocalStore(options: NamedLocalStoreOptions): LocalSto
     fallbackFactory: () => new MemoryLocalStore(),
   });
 
-  // Best-effort background cleanup once the active store has had a chance to
-  // open. Failures are swallowed.
-  const scheduleCleanup = (): void => {
-    Promise.resolve()
-      .then(() => cleanupOlderVersions(options.baseName, activeVersion))
-      .catch(() => {});
-  };
-
   return {
     withLock: (name, operation) => inner.withLock(name, operation),
     async open() {
       await inner.open();
-      scheduleCleanup();
     },
     close: () => inner.close(),
     getRow: (table, rowId) => inner.getRow(table, rowId),

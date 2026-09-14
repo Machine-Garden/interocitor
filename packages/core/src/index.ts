@@ -98,6 +98,7 @@ export {
   type MeshKeyContext,
   type MeshKeyMaterial,
   type MeshKeySource,
+  type MeshKeyCredentialPersistence,
   type PortablePassphraseKeySourceOptions,
 } from "./crypto/key-source.ts";
 export {
@@ -140,6 +141,9 @@ export {
 export {
   MeshEncryptionMismatchError,
   MeshCredentialMismatchError,
+  CredentialReplacementRequiredError,
+  CredentialPersistenceError,
+  MeshKeySourceContractError,
   FileIntegrityError,
   RemoteAccessError,
   isRemoteAccessError,

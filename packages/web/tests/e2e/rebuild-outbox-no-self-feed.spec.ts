@@ -4,8 +4,9 @@
  * Contract under test:
  *   client makes a few changes, flushes, disconnects, then reloads
  *   with the same local DB and a fresh adapter instance. After minimal
- *   adapter auth, the reload should probe remote head and list immutable
- *   change filenames, while exact receipts suppress payload downloads:
+ *   adapter auth, the reload should validate the authoritative manifest,
+ *   probe remote head, and list immutable change filenames, while exact
+ *   receipts suppress payload downloads:
  *     - no remote writes
  *     - no change-file reads
  *     - no outbox re-push from canonical local rows
@@ -184,11 +185,15 @@ test("reload after local writes reads head and performs no extra remote activity
   expect(result.changeFiles).toHaveLength(3);
   expect(result.rowCount).toBe(3);
 
-  // The reload steady-state contract: fresh adapter auth, then one head read
-  // proves no remote change.
-  expect(result.readPaths).toEqual(["/ReloadNoExtra/changes/head.json"]);
+  // Reconnect must validate both authoritative manifest slots before trusting
+  // cached identity, then a head read proves there is no remote change.
+  expect(result.readPaths).toEqual([
+    "/ReloadNoExtra/manifest.json",
+    "/ReloadNoExtra/manifest-1.json",
+    "/ReloadNoExtra/changes/head.json",
+  ]);
   expect(result.remoteDelta.authenticate).toBe(1);
-  expect(result.remoteDelta.readFile).toBe(1);
+  expect(result.remoteDelta.readFile).toBe(3);
 
   // Pull still lists immutable filenames so exact receipts can prove every
   // retained file was already observed, but it does not download them.

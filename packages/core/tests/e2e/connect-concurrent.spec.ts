@@ -524,10 +524,10 @@ test("disconnect+reconnect on same adapter: ensureFolder is cached, manifest cac
     result.cacheAfterFirst,
   );
 
-  // Manifest re-validated on reconnect -> some reads expected. Bound at 5
-  // to detect any future regression (would jump to >=8 if the bootstrap
-  // path were taken twice).
-  expect(result.delta.readFile).toBeLessThanOrEqual(5);
+  // Manifest identity is authoritatively re-validated before the reconnect
+  // fast path. Bound at 6 to retain that security read while still detecting
+  // a repeated bootstrap/full-connect pipeline (which jumps to >=8).
+  expect(result.delta.readFile).toBeLessThanOrEqual(6);
 
   // Reconnect writes: device-metadata only (bootstrap=false on reconnect).
   // Manifest already exists -> no manifest writes.

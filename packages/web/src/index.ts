@@ -10,6 +10,7 @@ export {
 export {
   createNamedLocalStore,
   getActiveLocalDatabaseName,
+  rotateLocalDatabaseName,
   type NamedLocalStoreOptions,
   type PointerStore,
 } from "./storage/named-local-store.ts";

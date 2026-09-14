@@ -137,7 +137,7 @@ Swift 5.10 or later, Python 3.11 or later, and a Playwright-supported even
 Node.js line: 22.12 or later in the 22.x line, 24.x, or 26.x. If the Node
 installation does not include Corepack, install it before enabling the
 repository's pinned Yarn version. Then prepare an isolated Python environment
-and the Chromium binary used by the browser suites:
+and the Chromium and WebKit binaries used by the browser suites:
 
 ```bash
 if ! command -v corepack >/dev/null 2>&1; then

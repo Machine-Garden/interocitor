@@ -73,6 +73,9 @@ import {
 import type { MeshKeySource } from "../crypto/key-source.ts";
 import {
   FileIntegrityError,
+  CredentialReplacementRequiredError,
+  CredentialPersistenceError,
+  MeshKeySourceContractError,
   MeshCredentialMismatchError,
   RemoteAccessError,
   isRemoteAccessError,
@@ -161,6 +164,7 @@ const DEFAULT_SECOND_COMPACT_DELAY_JITTER_MS = 5 * 60_000;
 const DEFAULT_COMPACT_REMOTE_CHANGE_THRESHOLD = 2;
 const DEFAULT_BATCH_WINDOW_MS = 1_000;
 const SYNC_STATE_LOCK = "sync-state";
+const CREDENTIAL_STATE_LOCK = "credential-state";
 const LAST_SUCCESSFUL_SYNC_AT_META = "lastSuccessfulSyncAt";
 const OFFLINE_RETENTION_EXPIRED_AT_META = "offlineRetentionExpiredAt";
 const QUARANTINED_OFFLINE_CHANGES_META = "quarantinedOfflineChanges";
@@ -1719,12 +1723,8 @@ export class Interocitor<
     try {
       let meshId = this.manifest?.meshId;
       if (!meshId) {
-        try {
-          const existing = await this.loadPersistedCredentials();
-          if (existing?.meshId) meshId = existing.meshId;
-        } catch {
-          /* best-effort merge */
-        }
+        const existing = await this.loadPersistedCredentials();
+        if (existing?.meshId) meshId = existing.meshId;
       }
       await this.keySource.persist(
         {
@@ -1753,6 +1753,10 @@ export class Interocitor<
       });
     } catch (err) {
       this.log("error", "persistCredentials() — failed", err);
+      if (err instanceof CredentialPersistenceError || err instanceof MeshKeySourceContractError) {
+        throw err;
+      }
+      throw new CredentialPersistenceError(this.dbName, "persist", err);
     }
   }
 
@@ -1768,12 +1772,7 @@ export class Interocitor<
   private async assertCredentialMeshParity(): Promise<void> {
     const activeMeshId = this.manifest?.meshId;
     if (!activeMeshId || !this.keySource) return;
-    let stored: { meshId?: string } | null = null;
-    try {
-      stored = await this.loadPersistedCredentials();
-    } catch {
-      return;
-    }
+    const stored = await this.loadPersistedCredentials();
     if (!stored?.meshId) return;
     if (stored.meshId === activeMeshId) return;
 
@@ -1793,18 +1792,16 @@ export class Interocitor<
     meshId?: string;
   } | null> {
     if (!this.keySource) return null;
-    const loaded = await this.keySource.load({
-      dbName: this.dbName,
-      remotePath: this.config.remotePath,
-      meshId: this.manifest?.meshId,
-      deviceId: this.deviceId,
-    });
-    if (!loaded.portableKey) return null;
-    return {
-      portableKey: loaded.portableKey,
-      deviceId: this.deviceId,
-      ...(this.manifest?.meshId ? { meshId: this.manifest.meshId } : {}),
-    };
+    if (this.keySource.credentialPersistence === "none") return null;
+    if (this.keySource.credentialPersistence !== "durable") {
+      throw new MeshKeySourceContractError();
+    }
+    if (!this.keySource.loadPersistedCredentials) throw new MeshKeySourceContractError();
+    try {
+      return await this.keySource.loadPersistedCredentials();
+    } catch (err) {
+      throw new CredentialPersistenceError(this.dbName, "inspect", err);
+    }
   }
 
   private async clearPersistedCredentials(): Promise<void> {
@@ -1854,16 +1851,6 @@ export class Interocitor<
         const key = await generateKey();
         this.encryptionKey = key;
         this.passphrase = await keyToPassphrase(key);
-      }
-      if (this.encrypted && this.encryptionKey && !this.readerMode) {
-        await this.persistCredentials();
-        this.emit({
-          type: "encryption:resolved",
-          strategy: this.keySource.constructor.name,
-          dbName: this.dbName,
-          remotePath: this.config.remotePath,
-          encrypted: true,
-        });
       }
       return;
     }
@@ -1954,16 +1941,30 @@ export class Interocitor<
       const initialState = await this.config.resolveInitialState?.();
       this.applyInitialState(initialState ?? null);
 
-      if (!this.readerMode) {
-        await this.restoreDeviceIdFromLocalStore();
-
-        // Recover credentials from the silent primary store only.
-        await this.restoreCredentials();
-        await this.persistDeviceIdToLocalStore();
+      if (this.readerMode) {
+        await this.resolveEncryption();
+      } else {
+        // Serialize first key generation and persistence across every wrapper
+        // for this physical LocalStore. A sibling tab that enters second must
+        // observe the first tab's durable key instead of minting another one.
+        await this.local.withLock(CREDENTIAL_STATE_LOCK, async () => {
+          await this.restoreDeviceIdFromLocalStore();
+          await this.resolveEncryption();
+          await this.restoreCredentials();
+          await this.persistCredentials();
+          await this.persistDeviceIdToLocalStore();
+        });
       }
 
-      // Resolve encryption: derive key from passphrase, load persisted, or generate.
-      await this.resolveEncryption();
+      if (this.encrypted && this.encryptionKey && this.keySource && !this.readerMode) {
+        this.emit({
+          type: "encryption:resolved",
+          strategy: this.keySource.constructor.name,
+          dbName: this.dbName,
+          remotePath: this.config.remotePath,
+          encrypted: true,
+        });
+      }
 
       this.log("debug", "init() — loading local state (table names, HLC)");
       await this.loadLocalState();
@@ -1985,35 +1986,8 @@ export class Interocitor<
    * Used during normal init(). No biometric prompt.
    */
   private async restoreCredentials(): Promise<void> {
-    console.log("[interocitor:cred] restoreCredentials() — entry", {
-      dbName: this.dbName,
-      activeDeviceId: this.deviceId,
-      activePassphraseFingerprint: this.passphrase
-        ? `len=${this.passphrase.length} head=${this.passphrase.slice(0, 8)} tail=${this.passphrase.slice(-4)}`
-        : null,
-      hasKey: !!this.encryptionKey,
-      encrypted: this.encrypted,
-    });
     let stored: { portableKey: string; deviceId: string; meshId?: string } | null = null;
-    try {
-      stored = await this.loadPersistedCredentials();
-    } catch (err) {
-      console.log("[interocitor:cred] restoreCredentials() — store load failed", {
-        dbName: this.dbName,
-        err: err instanceof Error ? err.message : String(err),
-      });
-      this.log("warn", "restoreCredentials() — silent load failed", err);
-      return;
-    }
-    console.log("[interocitor:cred] restoreCredentials() — store loaded", {
-      dbName: this.dbName,
-      hasStored: !!stored,
-      storedDeviceId: stored?.deviceId,
-      storedMeshId: stored?.meshId,
-      storedPortableKeyFingerprint: stored?.portableKey
-        ? `len=${stored.portableKey.length} head=${stored.portableKey.slice(0, 8)} tail=${stored.portableKey.slice(-4)}`
-        : null,
-    });
+    stored = await this.loadPersistedCredentials();
     if (!stored) {
       this.log("debug", "restoreCredentials() — no persisted credentials", { dbName: this.dbName });
       return;
@@ -2074,7 +2048,6 @@ export class Interocitor<
         remotePath: this.config.remotePath,
       });
       this.setDeviceId(stored.deviceId);
-      await this.persistDeviceIdToLocalStore();
       deviceIdChanged = true;
     }
 
@@ -2096,8 +2069,6 @@ export class Interocitor<
             remotePath: this.config.remotePath,
           },
         );
-        // Keep caller-provided portable key; the conflict event lets UI prompt
-        // the user to either clearCredentials() or correct the portable key.
         this.emit({
           type: "credentials:conflict",
           storedDeviceId: stored.deviceId,
@@ -2105,17 +2076,7 @@ export class Interocitor<
           dbName: this.dbName,
           remotePath: this.config.remotePath,
         });
-        // Reset every observation marker so the upcoming pull must decode
-        // retained remote changes under the newly supplied key. Otherwise
-        // exact-file progress recorded under the OLD key would hide the
-        // mismatch and suppress the decode failure that proves the key is
-        // wrong. Conflict surfaces via decode:error + remote:poisoned on the
-        // next pull, instead of silently proceeding.
-        try {
-          await ChangeObservationLedger.reset(this.local);
-        } catch {
-          /* best-effort */
-        }
+        throw new CredentialReplacementRequiredError(this.dbName);
       }
     }
 
@@ -2135,18 +2096,6 @@ export class Interocitor<
    * invalidation. It auto-`init()`s if needed.
    */
   async connect(): Promise<void> {
-    console.log("[interocitor:connect] connect() — entry", {
-      dbName: this.dbName,
-      remotePath: this.config.remotePath,
-      deviceId: this.deviceId,
-      adapter: this.adapter?.name ?? null,
-      encrypted: this.encrypted,
-      hasPassphrase: !!this.passphrase,
-      hasKey: !!this.encryptionKey,
-      meshId: this.manifest?.meshId,
-      connected: this.connected,
-      hasInFlight: !!this.connectPromise,
-    });
     await this.ensureReady();
     if (this.encrypted && !this.encryptionKey) await this.resolveEncryption();
     if (!this.config.remotePath)
@@ -2204,11 +2153,24 @@ export class Interocitor<
     // Fast-path is only safe when we have a locally cached manifest whose
     // encryption mode matches the current engine config. If it does not match,
     // fall through to full connect so MeshEncryptionMismatchError is raised.
-    if (!this.manifest) {
-      const cached = (await this.local.getMeta("manifestCache")) as Manifest | undefined;
-      if (!cached || cached.encrypted !== this.encrypted) return false;
-      this.manifest = cached;
+    const cached =
+      this.manifest ?? ((await this.local.getMeta("manifestCache")) as Manifest | undefined);
+    if (!cached || cached.encrypted !== this.encrypted) return false;
+
+    // A cached manifest is not proof that the configured remote still names
+    // the same mesh. Verify the authoritative manifest before a shortcut can
+    // bypass the full join/parity pipeline.
+    try {
+      await this.doLoadOrCreateManifest("connect-fast-path-identity", true, {
+        assertLocalMeshId: false,
+        createIfMissing: false,
+        persistCache: false,
+      });
+    } catch {
+      return false;
     }
+    if (this.manifest?.meshId !== cached.meshId) return false;
+    await this.assertCredentialMeshParity();
     const observation = await ChangeObservationLedger.load(this.local);
     const cursor = observation.globalHighWaterHlc;
     if (!cursor) return false;
@@ -2312,22 +2274,9 @@ export class Interocitor<
 
   private async doConnect(): Promise<void> {
     const adapter = this.requireAdapter("connect()");
-    console.log("[interocitor:connect] doConnect() — start", {
-      dbName: this.dbName,
-      remotePath: this.config.remotePath,
-      deviceId: this.deviceId,
-      adapter: adapter.name,
-      meshIdBefore: this.manifest?.meshId,
-    });
     const stage = (s: string, err: unknown): Error => {
       const e = err instanceof Error ? err : new Error(String(err));
       this.handleRemoteAccessError(e, "connect");
-      console.log("[interocitor:connect] doConnect() — STAGE FAIL", {
-        stage: s,
-        dbName: this.dbName,
-        deviceId: this.deviceId,
-        err: e.message,
-      });
       this.emit({
         type: "connect:error",
         error: e,
@@ -2339,7 +2288,7 @@ export class Interocitor<
       return e;
     };
     const stageOk = (s: string, extra?: Record<string, unknown>) => {
-      console.log("[interocitor:connect] doConnect() — stage ok", {
+      this.log("debug", "connect() — stage ok", {
         stage: s,
         dbName: this.dbName,
         deviceId: this.deviceId,
@@ -2440,12 +2389,6 @@ export class Interocitor<
       generation: this.manifest?.generation,
     });
 
-    await this.applyJoinExistingMeshPolicy(bootstrapped);
-    stageOk("joinExistingMeshPolicy", {
-      policy: this.config.joinExistingMeshPolicy,
-      meshId: this.manifest?.meshId,
-    });
-
     // Post-manifest credential check.
     //
     // We now know the live meshId. Compare it to the meshId attached to
@@ -2464,6 +2407,14 @@ export class Interocitor<
       this.log("error", "connect() — credential mesh parity failed", err);
       throw stage("credentialMeshParity", err);
     }
+
+    // Only a verified credential/manifest pairing may authorize destructive
+    // local replacement or retention of local work into another mesh.
+    await this.applyJoinExistingMeshPolicy(bootstrapped);
+    stageOk("joinExistingMeshPolicy", {
+      policy: this.config.joinExistingMeshPolicy,
+      meshId: this.manifest?.meshId,
+    });
 
     // Anchor credentials to the live meshId now that parity is known
     // good. First-connect of a fresh mesh has no meshId in the
@@ -2747,7 +2698,11 @@ export class Interocitor<
   private async doLoadOrCreateManifest(
     reason: string = "unknown",
     force: boolean = false,
-    options: { assertLocalMeshId?: boolean; createIfMissing?: boolean } = {},
+    options: {
+      assertLocalMeshId?: boolean;
+      createIfMissing?: boolean;
+      persistCache?: boolean;
+    } = {},
   ): Promise<{ bootstrapped: boolean }> {
     if (!force && this.manifest && !this.remotePoisonError) {
       this.emit({
@@ -2769,7 +2724,7 @@ export class Interocitor<
     );
     this.manifest = manifest;
     this.encrypted = manifest.encrypted || this.encrypted;
-    await this.local.setMeta("manifestCache", manifest);
+    if (options.persistCache !== false) await this.local.setMeta("manifestCache", manifest);
     return { bootstrapped };
   }
 

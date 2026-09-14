@@ -76,7 +76,7 @@
     "test:e2e:docs:chat": "yarn check:docs:chat && playwright test -c docs/examples/chat/playwright.config.ts",
     "test:e2e:docs:board": "yarn check:docs:board && playwright test -c docs/examples/board/playwright.config.ts",
     "test:e2e:docs:locator": "yarn check:docs:locator && playwright test -c docs/examples/family-locator/playwright.config.ts",
-    "test:e2e:install": "playwright install chromium"
+    "test:e2e:install": "playwright install chromium webkit"
   },
   "devDependencies": {
     "@playwright/test": "^1.54.2",

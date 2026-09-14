@@ -43,6 +43,55 @@ export class MeshCredentialMismatchError extends Error {
   }
 }
 
+/** Thrown when a configured key conflicts with durable credentials. */
+export class CredentialReplacementRequiredError extends Error {
+  readonly code = "CREDENTIAL_REPLACEMENT_REQUIRED" as const;
+  readonly dbName: string;
+
+  constructor(dbName: string) {
+    super(
+      `The configured key conflicts with credentials already stored under dbName="${dbName}". ` +
+        `Refusing an in-place key swap. Use a fresh isolated local store, or fully erase ` +
+        `the old local state and credential before constructing the replacement engine.`,
+    );
+    this.name = "CredentialReplacementRequiredError";
+    this.dbName = dbName;
+  }
+}
+
+export type CredentialPersistenceOperation = "inspect" | "persist";
+
+/** Thrown when durable credential state cannot be safely inspected or saved. */
+export class CredentialPersistenceError extends Error {
+  readonly code = "CREDENTIAL_PERSISTENCE_FAILED" as const;
+  readonly dbName: string;
+  readonly operation: CredentialPersistenceOperation;
+
+  constructor(dbName: string, operation: CredentialPersistenceOperation, cause?: unknown) {
+    super(
+      `Credential ${operation} failed for dbName="${dbName}". ` +
+        `Refusing to continue without a durable, verified credential state.`,
+      cause === undefined ? undefined : { cause },
+    );
+    this.name = "CredentialPersistenceError";
+    this.dbName = dbName;
+    this.operation = operation;
+  }
+}
+
+/** Thrown when a durable key source omits the required inspection hook. */
+export class MeshKeySourceContractError extends Error {
+  readonly code = "MESH_KEY_SOURCE_CONTRACT_INVALID" as const;
+
+  constructor() {
+    super(
+      `A durable MeshKeySource must implement loadPersistedCredentials() so existing ` +
+        `credentials can be checked before replacement.`,
+    );
+    this.name = "MeshKeySourceContractError";
+  }
+}
+
 /**
  * Thrown by `connect()` when the configured key-source mode does not
  * match the encryption mode the remote mesh was bootstrapped with.

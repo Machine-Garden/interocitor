@@ -214,6 +214,12 @@ When an existing remote mesh has a different identity from local state,
 Select that policy before connecting and back up meaningful local work before
 allowing a reset.
 
+Never reopen an existing local store under another mesh key. Use a fresh,
+isolated `dbName` and credential store, or disconnect every instance and fully
+erase the old local state and credential before constructing the replacement
+engine. `joinExistingMeshPolicy` runs at remote connect time; it does not
+authorize an in-place change of the local encryption domain.
+
 ## Public entry points
 
 | API or entry point                                                                                                                                                                            | Use it for                                                                                |

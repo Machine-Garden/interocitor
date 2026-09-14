@@ -37,6 +37,17 @@ interface CredentialStore {
 }
 ```
 
+The built-in key sources declare whether they have durable credential storage.
+Durable sources expose that store to the engine through the required
+`MeshKeySource.loadPersistedCredentials()` inspection hook. That
+hook reads the existing record without adopting its key, so mesh-anchor and
+explicit-key conflicts are checked before the engine overwrites credentials.
+Custom key sources declare `credentialPersistence: "durable"` and implement the
+same hook. Sources with no persistence declare `credentialPersistence: "none"`
+and may omit it. Inspection and required saves fail closed with
+`CredentialPersistenceError`; a malformed durable source fails with
+`MeshKeySourceContractError`.
+
 ## Built-in implementations
 
 Browser apps normally call `createWebCredentialStore(...)`. Construct one of
@@ -235,6 +246,12 @@ unencrypted engine to an encrypted mesh and fail with
 cached state, remember that the default join policy clears local rows and
 queued writes; see
 [Joining an existing mesh with local state](api-reference.md#joining-an-existing-mesh-with-local-state).
+
+Clearing only the credential is not enough to reuse the same local database
+under another mesh key. Prefer a fresh, isolated `dbName`. Reusing one requires
+the application to disconnect every instance and erase the entire old local
+store before constructing the replacement engine; otherwise initialization
+throws `CredentialReplacementRequiredError` without changing durable state.
 
 ## Disabling persistence
 

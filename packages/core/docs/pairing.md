@@ -236,6 +236,13 @@ await db.init();
 await db.connect();
 ```
 
+Do not reopen an existing local store under the received key. A different mesh
+is a different local encryption domain. Use a fresh, isolated `dbName` and
+credential store for the joined mesh. If the product deliberately reuses a
+name, it must first disconnect every instance and fully erase the old rows,
+outbox, cursors, observation metadata, mesh metadata, and persisted credential.
+Core rejects an in-place key swap with `CredentialReplacementRequiredError`.
+
 The default join policy clears any existing local rows and queued work before
 pulling a different existing mesh. If this device deliberately needs to
 publish retained local work into that mesh, choose `merge-with-remote`

@@ -32,6 +32,7 @@ const DEFAULT_DB_VERSION = 2;
 const PENDING_BATCH_META_KEY = "pendingBatch";
 const OUTBOX_ID_INDEX = "by_id";
 const CACHE_FINGERPRINT_META_KEY = "interocitor:cache:fingerprint";
+const BLOCKED_UPGRADE_GRACE_MS = 1_000;
 const fallbackLockTails = new Map<string, Promise<void>>();
 
 async function withFallbackLock<T>(name: string, operation: () => Promise<T>): Promise<T> {
@@ -117,6 +118,16 @@ function expectedSchemaIndexes(
     }
   }
   return expected;
+}
+
+function schemaFingerprint(schema?: DatabaseSchemaDefinition): string {
+  return JSON.stringify(
+    Array.from(expectedSchemaIndexes(schema).entries()).map(([name, def]) => ({
+      name,
+      keyPath: def.keyPath,
+      unique: def.unique,
+    })),
+  );
 }
 
 function normalizeFieldInput(input: SchemaField<unknown>): { index: boolean; unique: boolean } {
@@ -244,9 +255,21 @@ function reconcileSchemaIndexes(
   }
 
   for (const [indexName, def] of expected.entries()) {
-    if (!rowsStore.indexNames.contains(indexName)) {
-      rowsStore.createIndex(indexName, def.keyPath, { unique: def.unique });
+    if (rowsStore.indexNames.contains(indexName)) {
+      const index = rowsStore.index(indexName);
+      const actualKeyPath = Array.isArray(index.keyPath) ? index.keyPath : [index.keyPath];
+      if (
+        JSON.stringify(actualKeyPath) === JSON.stringify(def.keyPath) &&
+        index.unique === def.unique
+      ) {
+        continue;
+      }
+      // IndexedDB cannot alter an index descriptor. Recreate a same-name index
+      // whose field or uniqueness changed while the versionchange transaction
+      // is active.
+      rowsStore.deleteIndex(indexName);
     }
+    rowsStore.createIndex(indexName, def.keyPath, { unique: def.unique });
   }
 }
 
@@ -257,6 +280,12 @@ function openDB(
   onProgress?: () => void,
 ): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
+    let blockedTimer: ReturnType<typeof setTimeout> | null = null;
+    let settled = false;
+    const clearBlockedTimer = () => {
+      if (blockedTimer) clearTimeout(blockedTimer);
+      blockedTimer = null;
+    };
     const req =
       dbVersion === undefined ? indexedDB.open(dbName) : indexedDB.open(dbName, dbVersion);
 
@@ -295,12 +324,25 @@ function openDB(
         db.createObjectStore(STORES.meta);
       }
 
+      // Stamp the cache shape in the same upgrade transaction. A fresh
+      // database must become current in one open; reopening v1 -> v2 -> v3
+      // can make WebKit block on this store's own recently closed handle.
+      req.transaction
+        ?.objectStore(STORES.meta)
+        .put(schemaFingerprint(schema), CACHE_FINGERPRINT_META_KEY);
+
       const rowsStore = req.transaction?.objectStore(STORES.rows);
       if (rowsStore) reconcileSchemaIndexes(rowsStore, schema);
     };
 
     req.onsuccess = () => {
+      clearBlockedTimer();
       const db = req.result;
+      if (settled) {
+        db.close();
+        return;
+      }
+      settled = true;
       // If another caller (sibling tab, worker, or even our own next open()
       // for an upgrade) requests a higher version, voluntarily close this
       // connection so the upgrade can proceed instead of blocking it.
@@ -315,20 +357,34 @@ function openDB(
       };
       resolve(db);
     };
-    req.onerror = () => reject(req.error ?? new Error(`IndexedDB open failed for "${dbName}"`));
+    req.onerror = () => {
+      clearBlockedTimer();
+      if (settled) return;
+      settled = true;
+      reject(req.error ?? new Error(`IndexedDB open failed for "${dbName}"`));
+    };
     // Fired when an upgrade open is held up by another live connection at a
     // lower version. Without this handler the request never fires success or
     // error and the promise hangs forever — surfacing only as a downstream
     // init() timeout with no diagnostic. Reject loudly with an actionable
     // message instead.
     req.onblocked = () => {
-      reject(
-        new Error(
-          `IndexedDB open blocked: another connection to "${dbName}" is open at a lower version ` +
-            `(requested v${dbVersion ?? "current"}). Close other tabs/workers using this database, ` +
-            `or ensure prior LocalStore instances called close().`,
-        ),
-      );
+      // WebKit can briefly report this store's own synchronously closed handle
+      // as a blocker. Give that handle a bounded grace period to drain; a real
+      // sibling-tab/worker blocker still rejects with an actionable error.
+      if (blockedTimer) return;
+      blockedTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(
+          new Error(
+            `IndexedDB open blocked: another connection to "${dbName}" is open at a lower version ` +
+              `(requested v${dbVersion ?? "current"}). Close other tabs/workers using this database, ` +
+              `or ensure prior LocalStore instances called close(). The browser request cannot be ` +
+              `cancelled and may still finish later; do not reuse this physical database name for a replacement.`,
+          ),
+        );
+      }, BLOCKED_UPGRADE_GRACE_MS);
     };
   });
 }
@@ -397,13 +453,7 @@ export class IndexedDbLocalStore implements LocalStore {
     this.dbName = dbName ?? DEFAULT_DB_NAME;
     this.configuredDbVersion = dbVersion;
     this.expectedIndexes = expectedSchemaIndexes(this.schema);
-    this.desiredFingerprint = JSON.stringify(
-      Array.from(this.expectedIndexes.entries()).map(([name, def]) => ({
-        name,
-        keyPath: def.keyPath,
-        unique: def.unique,
-      })),
-    );
+    this.desiredFingerprint = schemaFingerprint(this.schema);
   }
 
   async withLock<T>(name: string, operation: () => Promise<T>): Promise<T> {
@@ -429,20 +479,36 @@ export class IndexedDbLocalStore implements LocalStore {
   private needsRepair(db: IDBDatabase, storedFingerprint?: string): boolean {
     if (!db.objectStoreNames.contains(STORES.rows)) return true;
     const rows = tx(db, STORES.rows, "readonly").objectStore(STORES.rows);
-    const existing = new Set(
-      domStringListToArray(rows.indexNames).filter((name) => name.startsWith(SCHEMA_INDEX_PREFIX)),
+    const existing = domStringListToArray(rows.indexNames).filter((name) =>
+      name.startsWith(SCHEMA_INDEX_PREFIX),
     );
-    if (storedFingerprint !== this.desiredFingerprint) return true;
-    if (existing.size !== this.expectedIndexes.size) return true;
-    for (const name of this.expectedIndexes.keys()) {
-      if (!existing.has(name)) return true;
+    if (existing.length !== this.expectedIndexes.size) return true;
+    for (const [name, expected] of this.expectedIndexes) {
+      if (!rows.indexNames.contains(name)) return true;
+      const index = rows.index(name);
+      const actualKeyPath = Array.isArray(index.keyPath) ? index.keyPath : [index.keyPath];
+      if (JSON.stringify(actualKeyPath) !== JSON.stringify(expected.keyPath)) return true;
+      if (index.unique !== expected.unique) return true;
     }
+    // A missing fingerprint is bookkeeping, not schema damage. It can be
+    // written in place without a version upgrade once structure is verified.
+    void storedFingerprint;
     return false;
   }
 
   async open(onProgress?: () => void): Promise<void> {
     const requestedVersion = this.configuredDbVersion ?? DEFAULT_DB_VERSION;
-    let db = await openDB(this.dbName, undefined, this.schema, onProgress);
+    let db: IDBDatabase;
+    try {
+      // Fresh databases are created directly at the current version, with all
+      // stores, indexes, and the fingerprint in one upgrade transaction.
+      db = await openDB(this.dbName, requestedVersion, this.schema, onProgress);
+    } catch (error) {
+      // An existing database may already be newer than a caller's configured
+      // floor. Discover and accept that version instead of failing downgrade.
+      if (!(error instanceof DOMException) || error.name !== "VersionError") throw error;
+      db = await openDB(this.dbName, undefined, this.schema, onProgress);
+    }
 
     const reopenAt = async (nextVersion: number): Promise<IDBDatabase> => {
       // Close synchronously, then yield a macrotask before re-opening at the
@@ -461,10 +527,6 @@ export class IndexedDbLocalStore implements LocalStore {
       // upcoming upgrade-needed.
       return openDB(this.dbName, nextVersion, this.schema, onProgress);
     };
-
-    if (db.version < requestedVersion) {
-      db = await reopenAt(requestedVersion);
-    }
 
     let storedFingerprint = await this.readCacheFingerprint(db);
     const repairVersion = this.needsRepair(db, storedFingerprint)

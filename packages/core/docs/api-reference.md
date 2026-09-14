@@ -284,6 +284,10 @@ safe. Keep policy labels such as taints on the row as well. See
 metadata before pull. `merge-with-remote` retains and can publish local work.
 The engine emits `join:existing-mesh` before applying the selected policy.
 
+This policy does not authorize changing the key of an existing local store.
+Pairing into another mesh must use a fresh isolated local store and credential
+namespace, or an application-owned full erase completed before `init()`.
+
 ### Initialization and diagnostics
 
 | Option                  | Default  | Contract                                                                                                                                                                                             |
@@ -351,12 +355,12 @@ new implementations.
 
 ## Key sources
 
-| Source                        | Use                                                                                                                     |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `PortablePassphraseKeySource` | Produce the mesh key from a high-entropy portable base58 value; optionally load/persist it through a `CredentialStore`. |
-| `BoundSharedKeySource`        | Combine the portable component with runtime- or account-bound derivation supplied by the application.                   |
-| Custom `MeshKeySource`        | Implement `load(context)`, `persist(context, credentials)`, and `clear()`.                                              |
-| `null`                        | Select an unencrypted mesh.                                                                                             |
+| Source                        | Use                                                                                                                                                                                                                                                                    |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PortablePassphraseKeySource` | Produce the mesh key from a high-entropy portable base58 value; optionally load/persist it through a `CredentialStore`.                                                                                                                                                |
+| `BoundSharedKeySource`        | Combine the portable component with runtime- or account-bound derivation supplied by the application.                                                                                                                                                                  |
+| Custom `MeshKeySource`        | Declare `credentialPersistence` as `"none"` or `"durable"`, and implement `load(context)`, `persist(context, credentials)`, and `clear()`. Durable sources must also implement `loadPersistedCredentials()` so the engine can inspect mesh anchors before replacement. |
+| `null`                        | Select an unencrypted mesh.                                                                                                                                                                                                                                            |
 
 Configure the key source before `init()`. Use a new engine to change mesh or
 encryption mode. See [Shared key scenarios](shared-key-scenarios.md) and
@@ -459,13 +463,16 @@ the adapter unauthenticated so the next `connect()` re-verifies.
 
 ## Typed errors
 
-| Error                         | When                                                                              | Recovery                                                                                                                          |
-| ----------------------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `MeshCredentialMismatchError` | Persisted credential `meshId` differs from the live manifest.                     | Confirm the intended mesh, disconnect, clear credentials, and construct a new engine with the correct key source and join policy. |
-| `MeshEncryptionMismatchError` | Configured encrypted/unencrypted mode differs from the manifest.                  | Construct a new engine with the expected mode and matching key material.                                                          |
-| `ConnectStageTimeoutError`    | `withDeadline` expires; also supplied as the error for a timed-out connect stage. | Treat a handled connect-stage timeout as offline-ready and retry later; the underlying operation is not cancelled.                |
-| `RemoteAccessError`           | The remote rejected a request with 401, 403, a mesh-level 404, 429, or 503.       | Inspect `kind`; sign in, show read-only state, or leave the mesh, then give the adapter the new credential and call `connect()`.  |
-| `FileIntegrityError`          | Bytes opened for a `FileRef` do not hash to `ref.digest`.                         | Treat the bytes as untrusted; re-read the row for a newer reference, or re-upload and store a fresh `toFileRef` result.           |
+| Error                                | When                                                                              | Recovery                                                                                                                          |
+| ------------------------------------ | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `MeshCredentialMismatchError`        | Persisted credential `meshId` differs from the live manifest.                     | Confirm the intended mesh, disconnect, clear credentials, and construct a new engine with the correct key source and join policy. |
+| `CredentialReplacementRequiredError` | A configured key differs from the durable credential under the same `dbName`.     | Use an isolated local and credential namespace, or complete a full application-owned reset before constructing a replacement.     |
+| `CredentialPersistenceError`         | Required durable credential inspection or persistence failed.                     | Preserve the current local state and retry or repair credential custody; do not continue with an unverified key.                  |
+| `MeshKeySourceContractError`         | A source declared durable persistence without an inspection hook.                 | Implement `loadPersistedCredentials()` or explicitly declare the source nonpersistent.                                            |
+| `MeshEncryptionMismatchError`        | Configured encrypted/unencrypted mode differs from the manifest.                  | Construct a new engine with the expected mode and matching key material.                                                          |
+| `ConnectStageTimeoutError`           | `withDeadline` expires; also supplied as the error for a timed-out connect stage. | Treat a handled connect-stage timeout as offline-ready and retry later; the underlying operation is not cancelled.                |
+| `RemoteAccessError`                  | The remote rejected a request with 401, 403, a mesh-level 404, 429, or 503.       | Inspect `kind`; sign in, show read-only state, or leave the mesh, then give the adapter the new credential and call `connect()`.  |
+| `FileIntegrityError`                 | Bytes opened for a `FileRef` do not hash to `ref.digest`.                         | Treat the bytes as untrusted; re-read the row for a newer reference, or re-upload and store a fresh `toFileRef` result.           |
 
 Other adapter, storage, crypto, and validation failures reject with ordinary
 `Error` values; their message text is not a stable programmatic contract.

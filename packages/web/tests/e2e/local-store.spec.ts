@@ -13,6 +13,86 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test("a real cross-page upgrade blocker may drain within the WebKit grace", async ({
+  context,
+  page,
+}) => {
+  const dbName = `interocitor-blocked-release-${crypto.randomUUID()}`;
+  const challenger = await context.newPage();
+  await challenger.goto("/packages/web/tests/e2e/fixtures/harness.html");
+  try {
+    await page.evaluate(async (name) => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(name, 1);
+        request.onupgradeneeded = () => request.result.createObjectStore("legacy");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      (window as typeof window & { blocker?: IDBDatabase }).blocker = db;
+    }, dbName);
+
+    const opening = challenger.evaluate(async (name) => {
+      const { IndexedDbLocalStore } = await import("/packages/web/dist/index.js");
+      const started = performance.now();
+      const store = new IndexedDbLocalStore(name);
+      await store.open();
+      const result = { elapsed: performance.now() - started, version: (store as any).db.version };
+      store.close();
+      return result;
+    }, dbName);
+    await page.waitForTimeout(150);
+    await page.evaluate(() => {
+      (window as typeof window & { blocker?: IDBDatabase }).blocker?.close();
+    });
+    const result = await opening;
+    expect(result.version).toBe(2);
+    expect(result.elapsed).toBeLessThan(1_000);
+  } finally {
+    await challenger.close();
+  }
+});
+
+test("a persistent cross-page upgrade blocker rejects after a bounded grace", async ({
+  context,
+  page,
+}) => {
+  const dbName = `interocitor-blocked-timeout-${crypto.randomUUID()}`;
+  const challenger = await context.newPage();
+  await challenger.goto("/packages/web/tests/e2e/fixtures/harness.html");
+  try {
+    await page.evaluate(async (name) => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(name, 1);
+        request.onupgradeneeded = () => request.result.createObjectStore("legacy");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      (window as typeof window & { blocker?: IDBDatabase }).blocker = db;
+    }, dbName);
+    const result = await challenger.evaluate(async (name) => {
+      const { IndexedDbLocalStore } = await import("/packages/web/dist/index.js");
+      const started = performance.now();
+      try {
+        await new IndexedDbLocalStore(name).open();
+        return { elapsed: performance.now() - started, message: "" };
+      } catch (error) {
+        return {
+          elapsed: performance.now() - started,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }, dbName);
+    expect(result.elapsed).toBeGreaterThanOrEqual(900);
+    expect(result.elapsed).toBeLessThan(2_000);
+    expect(result.message).toContain("request cannot be cancelled and may still finish later");
+  } finally {
+    await page.evaluate(() => {
+      (window as typeof window & { blocker?: IDBDatabase }).blocker?.close();
+    });
+    await challenger.close();
+  }
+});
+
 // ─── Basic row CRUD ──────────────────────────────────────────────────
 
 test.describe("IndexedDbLocalStore — row operations", () => {
@@ -245,6 +325,79 @@ test.describe("IndexedDbLocalStore — row operations", () => {
     expect(result).toEqual(["t1"]);
   });
 
+  test("creates a fresh current database without a repair-version reopen", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { IndexedDbLocalStore } = await import("/packages/web/dist/index.js");
+      const dbName = "interocitor-fresh-current-version";
+      await new Promise<void>((resolve) => {
+        const request = indexedDB.deleteDatabase(dbName);
+        request.onsuccess = request.onerror = request.onblocked = () => resolve();
+      });
+
+      const store = new IndexedDbLocalStore(dbName, undefined, {
+        tables: {
+          tasks: {
+            fields: {
+              status: { type: { kind: "string" }, index: true },
+            },
+          },
+        },
+      });
+      await store.open();
+      const version = (store as any).db?.version ?? null;
+      const fingerprint = await store.getMeta("interocitor:cache:fingerprint");
+      store.close();
+      return { version, fingerprint };
+    });
+
+    expect(result.version).toBe(2);
+    expect(typeof result.fingerprint).toBe("string");
+  });
+
+  test("repairs a missing fingerprint in place when indexes are already correct", async ({
+    page,
+  }) => {
+    const result = await page.evaluate(async () => {
+      const { IndexedDbLocalStore } = await import("/packages/web/dist/index.js");
+      const dbName = "interocitor-missing-fingerprint";
+      const schema = {
+        tables: {
+          tasks: {
+            fields: {
+              status: { type: { kind: "string" }, index: true },
+            },
+          },
+        },
+      } as any;
+      const initial = new IndexedDbLocalStore(dbName, undefined, schema);
+      await initial.open();
+      initial.close();
+
+      const raw = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(dbName);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const transaction = raw.transaction("meta", "readwrite");
+        transaction.objectStore("meta").delete("interocitor:cache:fingerprint");
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      });
+      raw.close();
+
+      const reopened = new IndexedDbLocalStore(dbName, undefined, schema);
+      await reopened.open();
+      const version = (reopened as any).db?.version ?? null;
+      const fingerprint = await reopened.getMeta("interocitor:cache:fingerprint");
+      reopened.close();
+      return { version, fingerprint };
+    });
+
+    expect(result.version).toBe(2);
+    expect(typeof result.fingerprint).toBe("string");
+  });
+
   test("auto-repairs schema indexes when schema changes without version bump", async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { IndexedDbLocalStore } = await import("/packages/web/dist/index.js");
@@ -384,9 +537,51 @@ test.describe("IndexedDbLocalStore — row operations", () => {
     expect(result.idbVersion).toBeGreaterThan(1);
   });
 
-  test("queryWhere survives missing physical index and falls back without throwing", async ({
-    page,
-  }) => {
+  test("recreates a same-name index when its key path is wrong", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { IndexedDbLocalStore } = await import("/packages/web/dist/index.js");
+      const dbName = `interocitor-wrong-index-shape-${crypto.randomUUID()}`;
+      const schema = {
+        tables: {
+          tasks: {
+            fields: { status: { type: { kind: "string" }, index: true } },
+          },
+        },
+      } as any;
+      const initial = new IndexedDbLocalStore(dbName, undefined, schema);
+      await initial.open();
+      const currentVersion = (initial as any).db.version as number;
+      initial.close();
+
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open(dbName, currentVersion + 1);
+        request.onupgradeneeded = () => {
+          const rows = request.transaction!.objectStore("rows");
+          rows.deleteIndex("idx:tasks:by_status");
+          rows.createIndex("idx:tasks:by_status", ["_meta.table", "payload.title.value"]);
+        };
+        request.onsuccess = () => {
+          request.result.close();
+          resolve();
+        };
+        request.onerror = () => reject(request.error);
+      });
+
+      const repaired = new IndexedDbLocalStore(dbName, undefined, schema);
+      await repaired.open();
+      const rows = (repaired as any).db.transaction("rows", "readonly").objectStore("rows");
+      const index = rows.index("idx:tasks:by_status");
+      const keyPath = Array.isArray(index.keyPath) ? index.keyPath : [index.keyPath];
+      const version = (repaired as any).db.version;
+      repaired.close();
+      return { keyPath, version, damagedVersion: currentVersion + 1 };
+    });
+
+    expect(result.keyPath).toEqual(["_meta.table", "payload.status.value"]);
+    expect(result.version).toBeGreaterThan(result.damagedVersion);
+  });
+
+  test("repairs a missing physical index before querying", async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { IndexedDbLocalStore } = await import("/packages/web/dist/index.js");
       const dbName = "interocitor-missing-index-fallback";
@@ -425,31 +620,47 @@ test.describe("IndexedDbLocalStore — row operations", () => {
       });
       await upgraded.open();
 
-      const tx = (upgraded as any).db.transaction("rows", "readonly");
-      const store = tx.objectStore("rows");
-      const indexName = "table:tasks:status";
-      if (store.indexNames.contains(indexName)) {
-        store.deleteIndex(indexName);
-      }
-      await new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error ?? new Error("deleteIndex aborted"));
+      const damagedVersion = (upgraded as any).db.version + 1;
+      upgraded.close();
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open(dbName, damagedVersion);
+        request.onupgradeneeded = () => {
+          request.transaction!.objectStore("rows").deleteIndex("idx:tasks:by_status");
+        };
+        request.onsuccess = () => {
+          request.result.close();
+          resolve();
+        };
+        request.onerror = () => reject(request.error);
       });
 
+      const repaired = new IndexedDbLocalStore(dbName, undefined, {
+        tables: {
+          tasks: {
+            fields: {
+              title: { type: { kind: "string" } },
+              status: { type: { kind: "string" }, index: true },
+            },
+          },
+        },
+      });
+      await repaired.open();
       try {
-        const open = await upgraded.queryWhere("tasks", {
+        const open = await repaired.queryWhere("tasks", {
           field: "status",
           op: "equals",
           value: "open",
         } as any);
-        upgraded.close();
+        const repairedVersion = (repaired as any).db.version;
+        repaired.close();
         return {
           rows: open.map((row) => row._meta.rowId),
           threw: false,
+          repairedVersion,
+          damagedVersion,
         };
       } catch (error) {
-        upgraded.close();
+        repaired.close();
         return {
           rows: [],
           threw: true,
@@ -460,6 +671,7 @@ test.describe("IndexedDbLocalStore — row operations", () => {
 
     expect(result.threw).toBe(false);
     expect(result.rows).toEqual(["t1"]);
+    expect(result.repairedVersion).toBeGreaterThan(result.damagedVersion);
   });
 });
 

@@ -473,7 +473,7 @@ export class Table<T extends Record<string, unknown>> {
   }
 }
 
-class TableWhere<T extends Record<string, unknown>> {
+export class TableWhere<T extends Record<string, unknown>> {
   constructor(
     private readonly engine: AnyEngine,
     private readonly table: string,
@@ -525,5 +525,36 @@ class TableWhere<T extends Record<string, unknown>> {
 
   anyOf(values: WherePrimitive[]): QueryResult<T> {
     return this.run({ op: "anyOf", values });
+  }
+}
+
+/**
+ * Row-query surface returned by {@link InterocitorReader}.
+ *
+ * Unlike {@link Table}, this object has no mutation methods. The distinction
+ * is also present at runtime, so JavaScript callers cannot accidentally turn
+ * an identityless reader into a writer by reaching for `put()` or `delete()`.
+ */
+export class ReadonlyTable<T extends Record<string, unknown>> {
+  constructor(private readonly tableHandle: Table<T>) {}
+
+  get name(): string {
+    return this.tableHandle.name;
+  }
+
+  row(rowId: string): RowResult<T> {
+    return this.tableHandle.row(rowId);
+  }
+
+  query(): QueryResult<T> {
+    return this.tableHandle.query();
+  }
+
+  where<K extends keyof T & string>(field: K): TableWhere<T> {
+    return this.tableHandle.where(field);
+  }
+
+  subscribe(cb: TableEventListener<T>): () => void {
+    return this.tableHandle.subscribe(cb);
   }
 }

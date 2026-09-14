@@ -7,7 +7,8 @@ boundaries for application callers.
 
 Use the [package README](../README.md) for orientation and a first call. Use
 the focused pages for [pairing](pairing.md), [recovery](recovery.md),
-[adapters](adapter-contract.md), [compaction](compaction.md), and the
+[identityless readers](reader.md), [adapters](adapter-contract.md),
+[compaction](compaction.md), and the
 [security model](security-model.md).
 
 TypeScript snippets on this page are partial API fragments. Application schema,
@@ -36,6 +37,30 @@ new Interocitor(adapter, config);
 The config-only form starts without a remote adapter. Attach one later with
 `setRemoteStorage(adapter)`. `localStore` and `keySource` are required config
 fields; use `keySource: null` for an unencrypted mesh.
+
+### Construct an identityless reader
+
+```ts
+import { InterocitorReader } from "@interocitor/core";
+
+const reader = new InterocitorReader(adapter, {
+  keySource,
+  remotePath: "/MyApp",
+});
+```
+
+`InterocitorReaderConfig` requires `remotePath` and `keySource`. Its
+`localStore` defaults to a volatile `MemoryLocalStore`; supply one explicitly
+for a persistent read cache. It also accepts `dbName`, `schema`, polling and
+relay intervals, logging, connect-stage timeout options, and the expected
+`serverId` for a server-managed mesh. Writer identity, batching, replicas,
+compaction, initialization mutations, and join-policy options are absent.
+
+The reader lifecycle is `init`, `connect`, `pull`, `disconnect`, and optional
+`setRemoteStorage`. It reads only existing meshes and exposes query,
+subscription, status, observation, and durable-file read methods. Its
+`ReadonlyTable` exposes `row`, `query`, `where`, and `subscribe`. See the
+[reader guide](reader.md) for caching, React use, and the security boundary.
 
 ## Engine lifecycle
 

@@ -188,9 +188,9 @@ This guarantee has explicit limits:
 - A previously opened relay socket is not closed by a later grant change. The
   socket carries invalidation metadata rather than mesh payloads; immediate
   per-subject socket closure needs a subject-aware relay extension.
-- Core's normal connected lifecycle writes device metadata and heartbeats, so
-  `readonly` is a raw Worker permission rather than a complete read-only
-  Interocitor client mode.
+- Core's normal `Interocitor` lifecycle writes device metadata and
+  acknowledgements. Use `InterocitorReader` with a `readonly` grant when the
+  client must consume the mesh without becoming a device or attempting writes.
 - `full` authorizes Worker write operations, not an application's semantic
   action or claimed author. Review and tribunal services must derive the actor
   from server authentication and validate the application role instead of

@@ -107,6 +107,11 @@ import {
 import { createDeviceId } from "./ids.ts";
 import { resolveRetentionPolicy } from "./retention.ts";
 import { cloneChangeEntry, cloneRow, createRowChangeEffect } from "./change-effects.ts";
+import { READER_MODE } from "./reader-mode.ts";
+
+type InternalSyncConfig<S extends Record<string, Record<string, unknown>>> = SyncConfig<S> & {
+  [READER_MODE]?: true;
+};
 
 // ─── Config ──────────────────────────────────────────────────────────
 
@@ -336,6 +341,8 @@ export class Interocitor<
   private pendingLocalObservationListeners: Set<ChangeObservationListener> | null = null;
   private readonly schema?: DatabaseSchemaDefinition<S>;
   private readonly dbName: string;
+  private readonly readerMode: boolean;
+  private readerManifestFresh = false;
   private deviceIdConfigured = false;
   private connectedStoresApi: ConnectedStoresApi | null = null;
 
@@ -371,7 +378,7 @@ export class Interocitor<
   constructor(config: SyncConfig<S>);
   constructor(adapter: StorageAdapter | null, config: SyncConfig<S>);
   constructor(adapterOrConfig: StorageAdapter | SyncConfig<S> | null, maybeConfig?: SyncConfig<S>) {
-    const config = (maybeConfig ?? adapterOrConfig) as SyncConfig<S>;
+    const config = (maybeConfig ?? adapterOrConfig) as InternalSyncConfig<S>;
     const adapter = (maybeConfig ? adapterOrConfig : null) as StorageAdapter | null;
 
     if (!config.localStore) {
@@ -427,8 +434,9 @@ export class Interocitor<
     this.dbName = this.config.dbName;
     this.logLevel = normalizeLogLevel(config.logLevel);
     this.local = this.config.localStore;
-    this.deviceIdConfigured = Boolean(config.deviceId);
-    this.deviceId = config.deviceId ?? createDeviceId();
+    this.readerMode = config[READER_MODE] === true;
+    this.deviceIdConfigured = this.readerMode || Boolean(config.deviceId);
+    this.deviceId = this.readerMode ? "reader" : (config.deviceId ?? createDeviceId());
     this.hlc = hlcInit(this.deviceId);
 
     this.encrypted = this.keySource !== null;
@@ -1107,6 +1115,7 @@ export class Interocitor<
   }
 
   private async acknowledgeManifest(): Promise<void> {
+    if (this.readerMode) return;
     if (!this.adapter || !this.config.remotePath || !this.manifest) return;
     // Before the first compaction there is no canonical watermark to
     // acknowledge. Initial connect already writes device presence metadata;
@@ -1838,12 +1847,15 @@ export class Interocitor<
       if (this.passphrase && !this.encryptionKey) {
         this.encryptionKey = await passphraseToKey(this.passphrase);
       }
+      if (!this.encryptionKey && this.encrypted && this.readerMode) {
+        throw new Error("InterocitorReader requires the existing mesh key; it never generates one");
+      }
       if (!this.encryptionKey && this.encrypted) {
         const key = await generateKey();
         this.encryptionKey = key;
         this.passphrase = await keyToPassphrase(key);
       }
-      if (this.encrypted && this.encryptionKey) {
+      if (this.encrypted && this.encryptionKey && !this.readerMode) {
         await this.persistCredentials();
         this.emit({
           type: "encryption:resolved",
@@ -1942,11 +1954,13 @@ export class Interocitor<
       const initialState = await this.config.resolveInitialState?.();
       this.applyInitialState(initialState ?? null);
 
-      await this.restoreDeviceIdFromLocalStore();
+      if (!this.readerMode) {
+        await this.restoreDeviceIdFromLocalStore();
 
-      // Recover credentials from the silent primary store only.
-      await this.restoreCredentials();
-      await this.persistDeviceIdToLocalStore();
+        // Recover credentials from the silent primary store only.
+        await this.restoreCredentials();
+        await this.persistDeviceIdToLocalStore();
+      }
 
       // Resolve encryption: derive key from passphrase, load persisted, or generate.
       await this.resolveEncryption();
@@ -2351,7 +2365,45 @@ export class Interocitor<
     // plus the changes folder and stop — no folder creation, manifest reads,
     // device metadata writes, or change-file reads. This covers clients that
     // recreate the adapter on reload before calling setRemoteStorage().
-    if (await this.tryConnectFastPath(adapter)) return;
+    if (!this.readerMode && (await this.tryConnectFastPath(adapter))) return;
+
+    if (this.readerMode) {
+      const manifestResult = await this.runConnectStage("loadExistingManifest", () =>
+        this.doLoadOrCreateManifest("reader-connect", true, {
+          assertLocalMeshId: false,
+          createIfMissing: false,
+        }),
+      );
+      if (!manifestResult.ok) {
+        if (manifestResult.error instanceof ConnectStageTimeoutError) return;
+        throw stage("loadExistingManifest", manifestResult.error);
+      }
+
+      await this.applyJoinExistingMeshPolicy(false);
+      if ((await this.local.outboxSize()) > 0 || (await this.local.peekPendingBatch()) !== null) {
+        throw stage(
+          "readerLocalState",
+          new Error(
+            "InterocitorReader localStore contains queued writes; use a dedicated reader cache",
+          ),
+        );
+      }
+
+      this.readerManifestFresh = true;
+      const pullResult = await this.runConnectStage("pull", () => this.pull());
+      if (!pullResult.ok) {
+        if (pullResult.error instanceof ConnectStageTimeoutError) return;
+        throw stage("pull", pullResult.error);
+      }
+
+      this.startPolling(this.config.pollInterval);
+      this.startRemoteInvalidations(adapter);
+      this.connected = true;
+      this.clearRemoteAccessPause(adapter.name);
+      await this.markSuccessfulRemoteSync();
+      this.setConnectionStatus("idle");
+      return;
+    }
 
     const remotePath = this.requireRemotePath("connect()");
     const p = paths(remotePath);
@@ -2529,7 +2581,7 @@ export class Interocitor<
     this.clearScheduledFlush();
     this.clearCompactTimers();
     this.clearBatchTimer();
-    if (!this.remotePoisonError) {
+    if (!this.readerMode && !this.remotePoisonError) {
       try {
         await this.flushQueued(true);
       } catch (err) {
@@ -2657,7 +2709,7 @@ export class Interocitor<
   async setLocalStore(local: LocalStore): Promise<void> {
     await this.ensureReady();
     const wasConnected = this.connected;
-    if (wasConnected) await this.flushQueued(true);
+    if (wasConnected && !this.readerMode) await this.flushQueued(true);
 
     this.clearScheduledFlush();
     this.pendingCount = 0;
@@ -2670,7 +2722,7 @@ export class Interocitor<
 
     if (!wasConnected) return;
     await this.pull();
-    await this.flushQueued(true);
+    if (!this.readerMode) await this.flushQueued(true);
   }
 
   // ── Manifest (delegated) ───────────────────────────────────────────
@@ -2695,7 +2747,7 @@ export class Interocitor<
   private async doLoadOrCreateManifest(
     reason: string = "unknown",
     force: boolean = false,
-    options: { assertLocalMeshId?: boolean } = {},
+    options: { assertLocalMeshId?: boolean; createIfMissing?: boolean } = {},
   ): Promise<{ bootstrapped: boolean }> {
     if (!force && this.manifest && !this.remotePoisonError) {
       this.emit({
@@ -2961,7 +3013,13 @@ export class Interocitor<
   private scheduleRetentionCompactionCheck(
     delayMs = this.activeRetentionPolicy().compactAfterMs,
   ): void {
-    if (!this.connected || !this.config.remotePath || !this.manifest?.server.managed) return;
+    if (
+      this.readerMode ||
+      !this.connected ||
+      !this.config.remotePath ||
+      !this.manifest?.server.managed
+    )
+      return;
     const dueAt = Date.now() + Math.max(0, delayMs);
     if (this.compactRetentionTimer && this.compactRetentionDueAt <= dueAt) return;
     if (this.compactRetentionTimer) clearTimeout(this.compactRetentionTimer);
@@ -2987,6 +3045,7 @@ export class Interocitor<
 
   private async runRetentionCompactionCheck(): Promise<void> {
     if (
+      this.readerMode ||
       !this.connected ||
       !this.adapter ||
       !this.config.remotePath ||
@@ -3400,6 +3459,19 @@ export class Interocitor<
     const adapter = this.requireAdapter("pull()");
     if (this.connected) this.setConnectionStatus("syncing");
     try {
+      if (this.readerMode) {
+        if (!this.readerManifestFresh) {
+          await this.doLoadOrCreateManifest("reader-pull", true, { createIfMissing: false });
+        }
+        this.readerManifestFresh = false;
+        const localEpochRaw = await this.local.getMeta("epoch");
+        const localEpoch = typeof localEpochRaw === "number" ? localEpochRaw : 0;
+        if (this.manifest && this.manifest.epoch > localEpoch && this.manifest.snapshotPath) {
+          this.readerManifestFresh = true;
+          await this.rehydrateNow();
+          return;
+        }
+      }
       this.hlc = await doPull({
         adapter,
         local: this.local,
@@ -3418,7 +3490,9 @@ export class Interocitor<
         ensureRowsCached: (ops) => this.ensureRowsCached(ops),
         poisonRemote: (err, path) => this.poisonRemote(err, path),
         loadOrCreateManifest: async () => {
-          await this.doLoadOrCreateManifest("pull");
+          await this.doLoadOrCreateManifest("pull", false, {
+            createIfMissing: !this.readerMode,
+          });
         },
       });
       if (this.connected) {
@@ -3465,7 +3539,9 @@ export class Interocitor<
       poisonRemote: (err, path) => this.poisonRemote(err, path),
       pull: () => this.pullNow(),
       reloadManifest: async () => {
-        await this.doLoadOrCreateManifest("rehydrate-stale-snapshot", true);
+        await this.doLoadOrCreateManifest("rehydrate-stale-snapshot", true, {
+          createIfMissing: !this.readerMode,
+        });
         return this.manifest;
       },
       preservedMeta,

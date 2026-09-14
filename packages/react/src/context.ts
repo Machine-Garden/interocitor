@@ -1,7 +1,11 @@
 // compass: interocitor.mailbox-sync.sync-lifecycle
 
 import { createContext, useContext } from "react";
-import type { Interocitor } from "@interocitor/core";
+import type { Interocitor, InterocitorReader } from "@interocitor/core";
+
+export interface InterocitorContextOptions {
+  mode?: "read-write" | "reader";
+}
 
 /**
  * Create a typed provider + hook pair for your database.
@@ -29,13 +33,29 @@ import type { Interocitor } from "@interocitor/core";
  * const db = useCaseVault();
  * const cases = await db.table('cases').query(); // fully typed
  */
-export function createInterocitorContext<S extends Record<string, Record<string, unknown>>>(): [
-  provider: React.Provider<Interocitor<S> | null>,
-  hook: () => Interocitor<S>,
+export function createInterocitorContext<
+  S extends Record<string, Record<string, unknown>>,
+>(options: {
+  mode: "reader";
+}): [provider: React.Provider<InterocitorReader<S> | null>, hook: () => InterocitorReader<S>];
+export function createInterocitorContext<
+  S extends Record<string, Record<string, unknown>>,
+>(options?: {
+  mode?: "read-write";
+}): [provider: React.Provider<Interocitor<S> | null>, hook: () => Interocitor<S>];
+export function createInterocitorContext<S extends Record<string, Record<string, unknown>>>(
+  _options: InterocitorContextOptions = {},
+): [
+  // Overloads above preserve the selected capability; this implementation
+  // owns the one runtime context shared by both structurally distinct modes.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  provider: React.Provider<any>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  hook: () => any,
 ] {
-  const ctx = createContext<Interocitor<S> | null>(null);
+  const ctx = createContext<Interocitor<S> | InterocitorReader<S> | null>(null);
 
-  function useDb(): Interocitor<S> {
+  function useDb(): Interocitor<S> | InterocitorReader<S> {
     const db = useContext(ctx);
     if (!db) {
       throw new Error(

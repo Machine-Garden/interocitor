@@ -1,6 +1,6 @@
 // compass: interocitor.durable-files.image-helpers
 
-import type { Interocitor, StoredFileMetadata } from "@interocitor/core";
+import type { Interocitor, InterocitorReader, StoredFileMetadata } from "@interocitor/core";
 
 export type ImageInput = Blob | ArrayBuffer | Uint8Array | string;
 
@@ -145,7 +145,7 @@ export async function putImage<
 
 export async function getImage<
   S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>,
->(db: Interocitor<S>, path: string): Promise<StoredImage> {
+>(db: Interocitor<S> | InterocitorReader<S>, path: string): Promise<StoredImage> {
   // One download: the metadata lives inside the stored object, so opening the
   // file already answers both questions.
   const sealed = await db.openFile(path);
@@ -163,7 +163,7 @@ export async function getImage<
 
 export async function getImageBlobUrl<
   S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>,
->(db: Interocitor<S>, path: string): Promise<StoredImageBlobUrl> {
+>(db: Interocitor<S> | InterocitorReader<S>, path: string): Promise<StoredImageBlobUrl> {
   const image = await getImage(db, path);
   const url = URL.createObjectURL(image.blob);
   return {

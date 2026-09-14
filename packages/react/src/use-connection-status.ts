@@ -1,12 +1,12 @@
 // compass: interocitor.mailbox-sync.sync-lifecycle
 
 import { useDebugValue, useMemo, useSyncExternalStore } from "react";
-import type { ConnectionStatus, Interocitor } from "@interocitor/core";
+import type { ConnectionStatus, Interocitor, InterocitorReader } from "@interocitor/core";
 
 export type { ConnectionStatus, ConnectionStatusDetails } from "@interocitor/core";
 
 function subscribeToStatus<S extends Record<string, Record<string, unknown>>>(
-  db: Interocitor<S>,
+  db: Interocitor<S> | InterocitorReader<S>,
   notify: () => void,
 ): () => void {
   return db.on((event) => {
@@ -27,7 +27,7 @@ function subscribeToStatus<S extends Record<string, Record<string, unknown>>>(
  * Solo/local-only mode is a separate boolean gate; use `useIsSolo(db)`.
  */
 export function useConnectionStatus<S extends Record<string, Record<string, unknown>>>(
-  db: Interocitor<S>,
+  db: Interocitor<S> | InterocitorReader<S>,
 ): ConnectionStatus {
   const getSnapshot = (): ConnectionStatus => db.getConnectionStatus();
 
@@ -40,7 +40,7 @@ export function useConnectionStatus<S extends Record<string, Record<string, unkn
 
 /** Boolean gate for local-only / no-mesh mode. Not a communication status. */
 export function useIsSolo<S extends Record<string, Record<string, unknown>>>(
-  db: Interocitor<S>,
+  db: Interocitor<S> | InterocitorReader<S>,
 ): boolean {
   const getSnapshot = (): boolean => db.getConnectionStatusDetails().solo;
 

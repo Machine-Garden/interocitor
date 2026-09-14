@@ -1,5 +1,5 @@
 import { createElement } from "react";
-import type { Interocitor } from "@interocitor/core";
+import type { Interocitor, InterocitorReader } from "@interocitor/core";
 
 import {
   createInterocitorContext,
@@ -56,5 +56,31 @@ export function PublicApiTypeFixture({
   return createElement(Provider, {
     value: fromContext,
     children: JSON.stringify({ query, titles, row, title, image, stores, store, status, solo }),
+  });
+}
+
+export function ReaderPublicApiTypeFixture({
+  reader,
+  taskId,
+  imagePath,
+}: {
+  reader: InterocitorReader<TestDatabase>;
+  taskId?: string;
+  imagePath?: string;
+}): ReturnType<typeof createElement> {
+  const [Provider, useDatabase] = createInterocitorContext<TestDatabase>({ mode: "reader" });
+  const fromContext: InterocitorReader<TestDatabase> = useDatabase();
+  const query = useLiveQuery(() => reader.table("tasks").query(), [reader]);
+  const row = useRow(reader.table("tasks"), taskId);
+  const image = useImage(reader, imagePath);
+  const status = useConnectionStatus(reader);
+  const solo = useIsSolo(reader);
+
+  // @ts-expect-error — the reader context does not expose row mutations
+  fromContext.table("tasks").put("task-1", { title: "write" });
+
+  return createElement(Provider, {
+    value: fromContext,
+    children: JSON.stringify({ query, row, image, status, solo }),
   });
 }

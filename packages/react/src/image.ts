@@ -1,7 +1,7 @@
 // compass: interocitor.durable-files.image-helpers
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Interocitor } from "@interocitor/core";
+import type { Interocitor, InterocitorReader } from "@interocitor/core";
 import { getImageBlobUrl, type StoredImageMetadata } from "@interocitor/web";
 
 export interface UseImageResult {
@@ -40,7 +40,7 @@ function toError(error: unknown): Error {
  */
 export function useImage<
   S extends Record<string, Record<string, unknown>> = Record<string, Record<string, unknown>>,
->(db: Interocitor<S>, path: string | null | undefined): UseImageResult {
+>(db: Interocitor<S> | InterocitorReader<S>, path: string | null | undefined): UseImageResult {
   const [state, setState] = useState<Omit<UseImageResult, "revoke">>(EMPTY_RESULT);
   const revokeRef = useRef<() => void>(() => {});
 

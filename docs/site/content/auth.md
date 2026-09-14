@@ -118,7 +118,7 @@ flowchart LR
 
 The host owns provider login, callback handling, sessions, membership, and revocation freshness. It must produce a stable, server-verified subject; a name or author field claimed by the client is not identity.
 
-Interocitor’s `meshMiddleware` is the integration point for IO and live-notify requests. Its standard authorization layer translates host policy into `none`, `readonly`, `full`, or `deny`, then enforces that result before mailbox storage runs. `readonly` is a raw Worker permission, not a complete read-only client mode: a normally connected client also writes small device records.
+Interocitor’s `meshMiddleware` is the integration point for IO and live-notify requests. Its standard authorization layer translates host policy into `none`, `readonly`, `full`, or `deny`, then enforces that result before mailbox storage runs. Pair a `readonly` grant with [`InterocitorReader`](https://github.com/Machine-Garden/interocitor/blob/main/packages/core/docs/reader.md) when an endpoint must consume a mesh without joining as a device. The ordinary read/write `Interocitor` client publishes device metadata and acknowledgements, so it requires `full` access.
 
 Keep a stable mesh address when ordinary application membership already answers who belongs. Removing a member then blocks later requests and new live connections without changing the mesh name.
 

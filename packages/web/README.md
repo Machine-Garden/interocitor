@@ -45,6 +45,34 @@ handling.
 Mailbox adapters such as WebDAV, Google Drive, and Cloudflare live in
 `@interocitor/core`. Browser runtime choices live here.
 
+## Build a display-only reader
+
+Use core's `InterocitorReader` with an IndexedDB store for a browser or TV
+surface that must stay current without joining the mesh as a device. IndexedDB
+retains the same row cache and exact change-file ledger used by a read/write
+client, so reloads fetch only unseen remote changes.
+
+```ts
+import { InterocitorReader, PortablePassphraseKeySource } from "@interocitor/core";
+import { IndexedDbLocalStore } from "@interocitor/web";
+
+const dbName = "taska-family-view-reader";
+const reader = new InterocitorReader(adapter, {
+  dbName,
+  remotePath: "/TaskaFamily",
+  localStore: new IndexedDbLocalStore(dbName),
+  keySource: new PortablePassphraseKeySource({ portableKey, generateIfMissing: false }),
+});
+
+await reader.connect();
+```
+
+Use a local database dedicated to the reader. It never generates a device UUID
+or writes to the mailbox, and it refuses a local store containing queued
+read/write work. `getImage` and `getImageBlobUrl` accept either an
+`InterocitorReader` or the ordinary read/write engine. See the
+[reader guide](../core/docs/reader.md) for the complete boundary.
+
 ## Public API
 
 Documented entrypoints in this package:

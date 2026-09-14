@@ -1,7 +1,7 @@
 // compass: interocitor.rows.table-api
 
 import { useMemo, useRef, useSyncExternalStore } from "react";
-import type { RowResult, Table } from "@interocitor/core";
+import type { ReadonlyTable, RowResult, Table } from "@interocitor/core";
 
 export interface UseRowResult<R> {
   /** `undefined` until first fetch resolves, or if row doesn't exist. */
@@ -44,11 +44,11 @@ export interface UseRowResult<R> {
  * );
  */
 export function useRow<T extends Record<string, unknown>>(
-  table: Table<T>,
+  table: Table<T> | ReadonlyTable<T>,
   rowId: string | undefined,
 ): UseRowResult<T>;
 export function useRow<T extends Record<string, unknown>, R>(
-  table: Table<T>,
+  table: Table<T> | ReadonlyTable<T>,
   rowId: string | undefined,
   selector: (row: T | undefined) => R,
 ): UseRowResult<R>;
@@ -62,7 +62,7 @@ export function useRow<T extends Record<string, unknown>, R>(
   selector: (row: T | undefined) => R,
 ): UseRowResult<R>;
 export function useRow<T extends Record<string, unknown>, R = T>(
-  tableOrFactory: Table<T> | (() => RowResult<T>),
+  tableOrFactory: Table<T> | ReadonlyTable<T> | (() => RowResult<T>),
   rowIdOrDeps: string | undefined | readonly unknown[],
   selector?: (row: T | undefined) => R,
 ): UseRowResult<R> {
@@ -78,7 +78,7 @@ export function useRow<T extends Record<string, unknown>, R = T>(
       }
       const rowId = rowIdOrDeps as string | undefined;
       if (!rowId) return null;
-      return (tableOrFactory as Table<T>).row(rowId);
+      return (tableOrFactory as Table<T> | ReadonlyTable<T>).row(rowId);
       // Factory form: deps array drives invalidation.
       // Table form: table + rowId drive invalidation.
     },

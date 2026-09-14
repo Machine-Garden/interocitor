@@ -1,10 +1,10 @@
 import { useDebugValue, useMemo, useSyncExternalStore } from "react";
-import type { Interocitor, RemoteAccessError } from "@interocitor/core";
+import type { Interocitor, InterocitorReader, RemoteAccessError } from "@interocitor/core";
 
 export type { RemoteAccessError, RemoteAccessKind } from "@interocitor/core";
 
 function subscribeToRemoteAccess<S extends Record<string, Record<string, unknown>>>(
-  db: Interocitor<S>,
+  db: Interocitor<S> | InterocitorReader<S>,
   notify: () => void,
 ): () => void {
   return db.on((event) => {
@@ -31,7 +31,7 @@ function subscribeToRemoteAccess<S extends Record<string, Record<string, unknown
  * `db.on` and the `remote:access` event when needed.
  */
 export function useRemoteAccess<S extends Record<string, Record<string, unknown>>>(
-  db: Interocitor<S>,
+  db: Interocitor<S> | InterocitorReader<S>,
 ): RemoteAccessError | null {
   const getSnapshot = (): RemoteAccessError | null => db.getRemoteAccessError();
 

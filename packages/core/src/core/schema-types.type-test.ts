@@ -12,6 +12,7 @@ import type {
 import { PortablePassphraseKeySource } from "../crypto/key-source.ts";
 import { types } from "./schema-types.ts";
 import type { Interocitor } from "./sync-engine.ts";
+import type { InterocitorReader } from "./reader.ts";
 import { MemoryLocalStore } from "../storage/memory-store.ts";
 
 // ─── Scalar types carry their generic ────────────────────────────────
@@ -268,6 +269,15 @@ void _checkRow;
 
 // @ts-expect-error — 'nonexistent' is not keyof DB (no fallback overload)
 typedEngine.table("nonexistent");
+
+declare const typedReader: InterocitorReader<InferSchemaType<typeof typedSchema>>;
+const readerTasks = typedReader.table("tasks");
+readerTasks.query();
+readerTasks.row("task-1");
+// @ts-expect-error — identityless reader tables cannot publish row mutations
+readerTasks.put("task-1", { title: "write" });
+// @ts-expect-error — identityless readers cannot upload durable files
+typedReader.putFile("task-1/report.txt", "write");
 
 // ─── Regression: satisfies DatabaseSchemaDefinition infers correctly ─
 

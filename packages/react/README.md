@@ -93,6 +93,27 @@ export const [InterocitorProvider, useDb] = createInterocitorContext<DB>();
 The generated hook throws if it is called outside its matching provider. Create
 the pair once at app level and provide an initialized engine.
 
+For a display-only application, select the reader capability when creating the
+context. The provider then accepts `InterocitorReader`, and the generated hook
+returns reader tables without mutation methods:
+
+```tsx
+import type { InterocitorReader } from "@interocitor/core";
+
+export const [FamilyViewProvider, useFamilyView] = createInterocitorContext<DB>({ mode: "reader" });
+
+declare const reader: InterocitorReader<DB>;
+
+<FamilyViewProvider value={reader}>
+  <App />
+</FamilyViewProvider>;
+```
+
+`useLiveQuery`, `useRow`, `useImage`, `useConnectionStatus`, `useIsSolo`, and
+`useRemoteAccess` accept the reader. Connected-store credential hooks remain a
+read/write-engine surface. The application still constructs, initializes, and
+connects the reader outside React.
+
 ```ts
 import { Interocitor, PortablePassphraseKeySource } from "@interocitor/core";
 import { IndexedDbLocalStore, createWebCredentialStore } from "@interocitor/web";

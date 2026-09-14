@@ -8,6 +8,7 @@
  * against local state once the engine has initialized.
  */
 export { createInterocitorContext } from "./context.ts";
+export type { InterocitorContextOptions } from "./context.ts";
 export { useLiveQuery } from "./use-live-query.ts";
 export type { UseLiveQueryResult } from "./use-live-query.ts";
 export { useRow } from "./use-row.ts";

@@ -152,12 +152,15 @@ export async function loadOrCreateManifest(
   local: import("./types.ts").LocalStore,
   poisonRemote: (error: unknown, path?: string) => Promise<Error>,
   reason: string = "unknown",
-  options: { assertLocalMeshId?: boolean } = {},
+  options: { assertLocalMeshId?: boolean; createIfMissing?: boolean } = {},
 ): Promise<{ manifest: Manifest; bootstrapped: boolean }> {
   const p = paths(ctx.remotePath);
 
   ctx.emit({ type: "trace:manifest", op: "read", reason, path: p.manifestPointer });
-  const globalPointer = await readJsonIfExists<ManifestPointer>(ctx.adapter, p.manifestPointer);
+  const globalPointer =
+    options.createIfMissing === false
+      ? await readJson<ManifestPointer>(ctx.adapter, p.manifestPointer)
+      : await readJsonIfExists<ManifestPointer>(ctx.adapter, p.manifestPointer);
 
   let pointer: ManifestPointer;
   let manifest: Manifest;

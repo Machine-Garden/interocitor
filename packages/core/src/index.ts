@@ -74,6 +74,11 @@ export type {
 // ─── Engine ───────────────────────────────────────────────────────────
 
 export { Interocitor, type InterocitorInitContext } from "./core/sync-engine.ts";
+export {
+  InterocitorReader,
+  type InterocitorReaderConfig,
+  type InterocitorReaderConnectionStatusDetails,
+} from "./core/reader.ts";
 export type { LocalStore, RowRef } from "./storage/local-store.ts";
 export { MemoryLocalStore } from "./storage/memory-store.ts";
 export {
@@ -120,7 +125,7 @@ export {
   type RecoveryWrapper,
 } from "./crypto/recovery.ts";
 export { type CredentialStore, type StoredCredentials } from "./storage/credential-store.ts";
-export { Table, QueryResult, RowResult } from "./core/table.ts";
+export { Table, ReadonlyTable, TableWhere, QueryResult, RowResult } from "./core/table.ts";
 export { types } from "./core/schema-types.ts";
 export { toFileRef, sha256Hex } from "./core/file-ref.ts";
 export {

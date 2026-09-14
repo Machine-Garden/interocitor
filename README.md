@@ -165,6 +165,7 @@ the installed Chromium binary.
 - [Terminology](docs/dictionary.md)
 - [Protocol flows](docs/flows.md)
 - [Core adapter contract](packages/core/docs/adapter-contract.md)
+- [Read an existing mesh without joining as a device](packages/core/docs/reader.md)
 - [Use an S3 mailbox from a browser](packages/core/docs/s3-browser.md)
 - [Pair a device](packages/core/docs/pairing.md)
 - [Publish and use a recovery phrase](packages/core/docs/recovery.md)

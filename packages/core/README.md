@@ -68,6 +68,31 @@ Keep the portable key returned by `keySource.getPortableKey()` in an
 application-owned credential store or establish a recovery path. Losing the
 only copy makes a protected mesh unreadable.
 
+## Read without joining as a device
+
+Use `InterocitorReader` for a one-shot process or display-only application
+that consumes an existing mesh but must never write to its mailbox. It keeps
+the normal optimized change-file ledger, polling, and relay path, but generates
+no device UUID and publishes no presence, acknowledgement, change, manifest,
+compaction, or durable file. Its cache is in memory unless you supply a
+`localStore`.
+
+This partial integration shape assumes an existing adapter and mesh key:
+
+```ts
+const reader = new InterocitorReader(adapter, {
+  remotePath: "/MyApp",
+  keySource,
+});
+
+await reader.connect();
+const todos = await reader.table("todos").query();
+```
+
+Reader tables expose queries and subscriptions without mutation methods. See
+[Read an existing mesh without joining it](docs/reader.md) for Node.js,
+browser, React, caching, and security boundaries.
+
 ## Keep rows and files distinct
 
 | Surface       | Use it for                                                  | Availability and lifecycle                                                                                    |
@@ -191,21 +216,22 @@ allowing a reset.
 
 ## Public entry points
 
-| API or entry point                                                                                                                                                                            | Use it for                                                                        |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `Interocitor`                                                                                                                                                                                 | Runtime-neutral engine lifecycle, rows, sync, and durable files.                  |
-| `db.table(name)`                                                                                                                                                                              | Typed row CRUD, queries, row handles, and subscriptions.                          |
-| `db.putFile`, `db.getFile`, `db.openFile`, `db.deleteFile`, `db.getFileMetadata`                                                                                                              | Direct durable file storage, including application-keyed sealed files.            |
-| `db.flush`, `db.pull`, `db.rehydrate`, `db.compact`                                                                                                                                           | Explicit sync and maintenance operations.                                         |
-| `db.observeChanges`                                                                                                                                                                           | Optional live observation of attempted changes and this endpoint's merge effects. |
-| `db.connectedStores`                                                                                                                                                                          | Application-owned credentials for related meshes.                                 |
-| `PortablePassphraseKeySource`, `BoundSharedKeySource`                                                                                                                                         | Portable or application-bound key recovery.                                       |
-| `createRecoveryWrapper`, `publishRecoveryWrapper`, `recoverMeshCredentials`                                                                                                                   | Client-provided recovery phrases for portable-key meshes.                         |
-| `generateShareQR`, `generateJoinQR`, `handleScannedQR`                                                                                                                                        | Recommended QR pairing flows.                                                     |
-| `createGeneratorSession`, `runScannerHandshake`                                                                                                                                               | Lower-level pairing handshake control.                                            |
-| `PairingCapabilities`, `PairingCapabilityId`, `HandshakeChannelOptions`, `MESH_GRANT_AUTHORIZATION_V1`, `INDIRECT_MESH_ROUTING_V1`                                                            | Fail-closed negotiation for protected and indirect pairing.                       |
-| `@interocitor/core/adapters/memory`, `@interocitor/core/adapters/webdav`, `@interocitor/core/adapters/s3`, `@interocitor/core/adapters/google-drive`, `@interocitor/core/adapters/cloudflare` | Mailbox transports.                                                               |
-| `@interocitor/core/crypto/signing`                                                                                                                                                            | ECDSA authorship and capability-token helpers.                                    |
+| API or entry point                                                                                                                                                                            | Use it for                                                                                |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `Interocitor`                                                                                                                                                                                 | Runtime-neutral engine lifecycle, rows, sync, and durable files.                          |
+| `InterocitorReader`                                                                                                                                                                           | Identityless read-only access to an existing mesh with the optimized local receive cache. |
+| `db.table(name)`                                                                                                                                                                              | Typed row CRUD, queries, row handles, and subscriptions.                                  |
+| `db.putFile`, `db.getFile`, `db.openFile`, `db.deleteFile`, `db.getFileMetadata`                                                                                                              | Direct durable file storage, including application-keyed sealed files.                    |
+| `db.flush`, `db.pull`, `db.rehydrate`, `db.compact`                                                                                                                                           | Explicit sync and maintenance operations.                                                 |
+| `db.observeChanges`                                                                                                                                                                           | Optional live observation of attempted changes and this endpoint's merge effects.         |
+| `db.connectedStores`                                                                                                                                                                          | Application-owned credentials for related meshes.                                         |
+| `PortablePassphraseKeySource`, `BoundSharedKeySource`                                                                                                                                         | Portable or application-bound key recovery.                                               |
+| `createRecoveryWrapper`, `publishRecoveryWrapper`, `recoverMeshCredentials`                                                                                                                   | Client-provided recovery phrases for portable-key meshes.                                 |
+| `generateShareQR`, `generateJoinQR`, `handleScannedQR`                                                                                                                                        | Recommended QR pairing flows.                                                             |
+| `createGeneratorSession`, `runScannerHandshake`                                                                                                                                               | Lower-level pairing handshake control.                                                    |
+| `PairingCapabilities`, `PairingCapabilityId`, `HandshakeChannelOptions`, `MESH_GRANT_AUTHORIZATION_V1`, `INDIRECT_MESH_ROUTING_V1`                                                            | Fail-closed negotiation for protected and indirect pairing.                               |
+| `@interocitor/core/adapters/memory`, `@interocitor/core/adapters/webdav`, `@interocitor/core/adapters/s3`, `@interocitor/core/adapters/google-drive`, `@interocitor/core/adapters/cloudflare` | Mailbox transports.                                                                       |
+| `@interocitor/core/crypto/signing`                                                                                                                                                            | ECDSA authorship and capability-token helpers.                                            |
 
 For exact signatures, configuration defaults, lifecycle effects, events, and
 typed errors, use the [Core API reference](docs/api-reference.md).

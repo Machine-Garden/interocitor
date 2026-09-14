@@ -10,7 +10,7 @@ import type {
   SyncEventListener,
   WhereClause,
 } from "./types.ts";
-import type { RemoteAccessError } from "./errors.ts";
+import { ReaderRemotePullIncompleteError, type RemoteAccessError } from "./errors.ts";
 import { Interocitor } from "./sync-engine.ts";
 import { ReadonlyTable } from "./table.ts";
 import { READER_MODE } from "./reader-mode.ts";
@@ -47,6 +47,30 @@ export interface InterocitorReaderConnectionStatusDetails {
   mode: "reader";
 }
 
+export interface InterocitorReaderReadOnceDiagnostics {
+  /** The remote receive pipeline completed over the objects storage exposed. */
+  consistency: "completed-remote-pull";
+  /** The isolated cache is deliberately process-local and discarded afterwards. */
+  cache: {
+    mode: "memory";
+    persistent: false;
+    /** Persistent receipts are bypassed, so the remote receive path is replayed cold. */
+    coldReplay: true;
+  };
+  elapsedMs: number;
+}
+
+export interface InterocitorReaderReadOnceResult<T> {
+  value: T;
+  diagnostics: InterocitorReaderReadOnceDiagnostics;
+}
+
+interface ReaderConnectStall {
+  stage: string;
+  timeoutMs: number;
+  error: unknown;
+}
+
 const REMOTE_WRITE_METHODS = new Set<PropertyKey>([
   "ensureFolder",
   "writeFile",
@@ -81,9 +105,11 @@ function guardAdapter(adapter: StorageAdapter): StorageAdapter {
  */
 export class InterocitorReader<S extends Record<string, Record<string, unknown>>> {
   private readonly runtime: Interocitor<S>;
+  private readonly readerConfig: InterocitorReaderConfig<S>;
   private sourceAdapter: StorageAdapter | null;
   private adapter: StorageAdapter | null;
   private readonly remotePath: string;
+  private lastConnectStall: ReaderConnectStall | null = null;
 
   constructor(config: InterocitorReaderConfig<S>);
   constructor(adapter: StorageAdapter | null, config: InterocitorReaderConfig<S>);
@@ -95,6 +121,7 @@ export class InterocitorReader<S extends Record<string, Record<string, unknown>>
     const adapter = (maybeConfig ? adapterOrConfig : null) as StorageAdapter | null;
     if (!config.remotePath) throw new Error("InterocitorReader requires remotePath");
 
+    this.readerConfig = { ...config };
     this.remotePath = config.remotePath;
     this.sourceAdapter = adapter;
     this.adapter = adapter ? guardAdapter(adapter) : null;
@@ -103,6 +130,14 @@ export class InterocitorReader<S extends Record<string, Record<string, unknown>>
       localStore: config.localStore ?? new MemoryLocalStore(),
       autoCompact: false,
       replicas: [],
+      onConnectStalled: (info: ReaderConnectStall) => {
+        this.lastConnectStall = info;
+        try {
+          config.onConnectStalled?.(info);
+        } catch {
+          // Telemetry must never change the reader's freshness decision.
+        }
+      },
       [READER_MODE]: true,
     } as SyncConfig<S>;
     this.runtime = new Interocitor<S>(this.adapter, runtimeConfig);
@@ -112,8 +147,53 @@ export class InterocitorReader<S extends Record<string, Record<string, unknown>>
     return this.runtime.init();
   }
 
-  connect(): Promise<void> {
-    return this.runtime.connect();
+  async connect(): Promise<void> {
+    this.lastConnectStall = null;
+    await this.runtime.connect();
+    if (this.runtime.getConnectionStatusDetails().connected) return;
+    const stall = this.lastConnectStall as ReaderConnectStall | null;
+    throw new ReaderRemotePullIncompleteError(this.remotePath, {
+      stage: stall?.stage,
+      timeoutMs: stall?.timeoutMs,
+      cause: stall?.error,
+    });
+  }
+
+  /**
+   * Run one completed remote read through an isolated in-memory cache, then disconnect.
+   *
+   * This path never opens the configured persistent `localStore`. It therefore
+   * carries on through unavailable, blocked, quota-limited, or corrupt local
+   * persistence by paying for a cold remote replay. Remote access, credential,
+   * decryption, integrity, and remote-pull failures still reject.
+   */
+  async readOnce<T>(
+    read: (reader: InterocitorReader<S>) => T | Promise<T>,
+  ): Promise<InterocitorReaderReadOnceResult<T>> {
+    const startedAt = Date.now();
+    const isolated = new InterocitorReader<S>(this.sourceAdapter, {
+      ...this.readerConfig,
+      localStore: new MemoryLocalStore(),
+      relayEnabled: false,
+    });
+    try {
+      await isolated.connect();
+      const value = await read(isolated);
+      return {
+        value,
+        diagnostics: {
+          consistency: "completed-remote-pull",
+          cache: {
+            mode: "memory",
+            persistent: false,
+            coldReplay: true,
+          },
+          elapsedMs: Math.max(0, Date.now() - startedAt),
+        },
+      };
+    } finally {
+      await isolated.disconnect();
+    }
   }
 
   disconnect(): Promise<void> {

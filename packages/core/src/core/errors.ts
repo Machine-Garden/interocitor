@@ -93,6 +93,38 @@ export class MeshKeySourceContractError extends Error {
 }
 
 /**
+ * Thrown when an identityless reader could not complete its remote pull.
+ *
+ * Writer engines may remain offline-ready after a connect-stage deadline, but
+ * a reader must not let a caller mistake an empty or stale cache for a
+ * completed remote read. The stage and timeout identify the temporal failure
+ * when available.
+ */
+export class ReaderRemotePullIncompleteError extends Error {
+  readonly code = "READER_REMOTE_PULL_INCOMPLETE" as const;
+  readonly remotePath: string;
+  readonly stage?: string;
+  readonly timeoutMs?: number;
+
+  constructor(
+    remotePath: string,
+    options: { stage?: string; timeoutMs?: number; cause?: unknown } = {},
+  ) {
+    const stage = options.stage ? ` during stage "${options.stage}"` : "";
+    const deadline = options.timeoutMs ? ` after ${options.timeoutMs}ms` : "";
+    super(
+      `InterocitorReader did not complete a remote pull from "${remotePath}"${stage}${deadline}. ` +
+        `No cache contents should be treated as a completed read.`,
+      options.cause === undefined ? undefined : { cause: options.cause },
+    );
+    this.name = "ReaderRemotePullIncompleteError";
+    this.remotePath = remotePath;
+    this.stage = options.stage;
+    this.timeoutMs = options.timeoutMs;
+  }
+}
+
+/**
  * Thrown by `connect()` when the configured key-source mode does not
  * match the encryption mode the remote mesh was bootstrapped with.
  *

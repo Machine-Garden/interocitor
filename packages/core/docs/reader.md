@@ -38,17 +38,17 @@ const reader = new InterocitorReader(
   },
 );
 
-await reader.connect();
-try {
-  const tasks = await reader.table("tasks").query();
-  console.log(tasks);
-} finally {
-  await reader.disconnect();
-}
+const { value: tasks, diagnostics } = await reader.readOnce((view) => view.table("tasks").query());
+console.log(tasks, diagnostics);
 ```
 
 The mesh must already exist. A missing manifest or missing encryption key is
-an error rather than an invitation to bootstrap new state.
+an error rather than an invitation to bootstrap new state. `readOnce()` uses a
+new isolated `MemoryLocalStore`, requires a completed remote pull, and always
+disconnects it. Persistent row-cache storage being missing, blocked, corrupt,
+or over quota cannot prevent this path from reading; the returned diagnostics
+mark the cold replay so applications can report or measure the extra remote
+work. Credential custody remains mandatory and is never bypassed.
 
 ## Keep a browser display current
 
@@ -93,3 +93,14 @@ the next pull restores the current snapshot and then merges every uncovered
 change. A completed pull represents the objects the mailbox exposed during
 that read; storage can still withhold or roll back data as described in the
 [security model](security-model.md).
+
+Reader `connect()` rejects with `ReaderRemotePullIncompleteError` if a named
+connect stage reaches its deadline. It never turns an offline-ready empty or
+stale cache into a successful Reader connection. Remote access, credential,
+decryption, and integrity errors also reject; local-cache availability is the
+only boundary that `readOnce()` deliberately bypasses.
+
+`consistency: "completed-remote-pull"` means exactly that the receive pipeline
+completed over the objects storage exposed during the read. It is not an
+atomic-snapshot claim and cannot prove that storage did not withhold or roll
+back objects.

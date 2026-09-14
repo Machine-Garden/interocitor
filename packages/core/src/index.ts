@@ -78,6 +78,8 @@ export {
   InterocitorReader,
   type InterocitorReaderConfig,
   type InterocitorReaderConnectionStatusDetails,
+  type InterocitorReaderReadOnceDiagnostics,
+  type InterocitorReaderReadOnceResult,
 } from "./core/reader.ts";
 export type { LocalStore, RowRef } from "./storage/local-store.ts";
 export { MemoryLocalStore } from "./storage/memory-store.ts";
@@ -144,6 +146,7 @@ export {
   CredentialReplacementRequiredError,
   CredentialPersistenceError,
   MeshKeySourceContractError,
+  ReaderRemotePullIncompleteError,
   FileIntegrityError,
   RemoteAccessError,
   isRemoteAccessError,

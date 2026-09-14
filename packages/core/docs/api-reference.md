@@ -56,11 +56,21 @@ relay intervals, logging, connect-stage timeout options, and the expected
 `serverId` for a server-managed mesh. Writer identity, batching, replicas,
 compaction, initialization mutations, and join-policy options are absent.
 
-The reader lifecycle is `init`, `connect`, `pull`, `disconnect`, and optional
-`setRemoteStorage`. It reads only existing meshes and exposes query,
-subscription, status, observation, and durable-file read methods. Its
-`ReadonlyTable` exposes `row`, `query`, `where`, and `subscribe`. See the
-[reader guide](reader.md) for caching, React use, and the security boundary.
+For a one-shot operation, `readOnce(callback)` creates an isolated in-memory
+cache, completes a remote pull, invokes the callback, and disconnects. It
+returns the callback value plus diagnostics with
+`consistency: 'completed-remote-pull'` and `cache.coldReplay: true`. Persistent
+cache failures cannot block this path, but the cold replay can increase remote
+reads, bytes, and latency.
+
+The long-running reader lifecycle is `init`, `connect`, `pull`, `disconnect`,
+and optional `setRemoteStorage`. Reader `connect()` rejects with
+`ReaderRemotePullIncompleteError` when a connect stage times out rather than
+exposing an offline cache as a completed remote read. It reads only existing
+meshes and exposes query, subscription, status, observation, and durable-file
+read methods. Its `ReadonlyTable` exposes `row`, `query`, `where`, and
+`subscribe`. See the [reader guide](reader.md) for caching, React use, and the
+security boundary.
 
 ## Engine lifecycle
 
@@ -471,6 +481,7 @@ the adapter unauthenticated so the next `connect()` re-verifies.
 | `MeshKeySourceContractError`         | A source declared durable persistence without an inspection hook.                 | Implement `loadPersistedCredentials()` or explicitly declare the source nonpersistent.                                            |
 | `MeshEncryptionMismatchError`        | Configured encrypted/unencrypted mode differs from the manifest.                  | Construct a new engine with the expected mode and matching key material.                                                          |
 | `ConnectStageTimeoutError`           | `withDeadline` expires; also supplied as the error for a timed-out connect stage. | Treat a handled connect-stage timeout as offline-ready and retry later; the underlying operation is not cancelled.                |
+| `ReaderRemotePullIncompleteError`    | A Reader connect stage timed out before its remote receive pipeline completed.    | Do not consume the cache as a completed read; retry the single-shot operation or restore remote availability.                     |
 | `RemoteAccessError`                  | The remote rejected a request with 401, 403, a mesh-level 404, 429, or 503.       | Inspect `kind`; sign in, show read-only state, or leave the mesh, then give the adapter the new credential and call `connect()`.  |
 | `FileIntegrityError`                 | Bytes opened for a `FileRef` do not hash to `ref.digest`.                         | Treat the bytes as untrusted; re-read the row for a newer reference, or re-upload and store a fresh `toFileRef` result.           |
 

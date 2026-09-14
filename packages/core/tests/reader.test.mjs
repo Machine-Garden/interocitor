@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { Interocitor, InterocitorReader, MemoryLocalStore } from "../dist/index.js";
+import {
+  Interocitor,
+  InterocitorReader,
+  MemoryLocalStore,
+  ReaderRemotePullIncompleteError,
+} from "../dist/index.js";
 import { MemoryAdapter } from "../dist/adapters/memory.js";
 
 test("InterocitorReader consumes an existing mesh without remote writes or device identity", async () => {
@@ -70,6 +75,75 @@ test("InterocitorReader refuses to bootstrap a missing mesh", async () => {
 
   await assert.rejects(reader.connect(), /not found/i);
   assert.deepEqual(adapter.dump(), {});
+});
+
+test("InterocitorReader readOnce bypasses broken persistence and reports cold replay", async () => {
+  const adapter = new MemoryAdapter();
+  const writer = new Interocitor(adapter, {
+    remotePath: "/reader-once",
+    localStore: new MemoryLocalStore(),
+    keySource: null,
+    deviceId: "writer",
+    batchWindowMs: 0,
+    autoCompact: false,
+  });
+  await writer.connect();
+  await writer.table("tasks").put("task-1", { title: "Authoritative" });
+  await writer.flush();
+
+  class BrokenPersistentStore extends MemoryLocalStore {
+    async open() {
+      throw new DOMException("persistent storage unavailable", "UnknownError");
+    }
+  }
+
+  const reader = new InterocitorReader(adapter, {
+    remotePath: "/reader-once",
+    localStore: new BrokenPersistentStore(),
+    keySource: null,
+    relayEnabled: false,
+  });
+
+  const result = await reader.readOnce(async (view) => view.table("tasks").query());
+  assert.deepEqual(result.value, [{ title: "Authoritative" }]);
+  assert.deepEqual(result.diagnostics.cache, {
+    mode: "memory",
+    persistent: false,
+    coldReplay: true,
+  });
+  assert.equal(result.diagnostics.consistency, "completed-remote-pull");
+  assert.equal(result.diagnostics.elapsedMs >= 0, true);
+  assert.equal(reader.isReady(), false);
+
+  await writer.disconnect();
+});
+
+test("InterocitorReader rejects a connect deadline instead of exposing an empty cache", async () => {
+  const adapter = new MemoryAdapter();
+  adapter.readFile = async () =>
+    new Promise(() => {
+      // Simulate a remote request that never settles.
+    });
+  const stalls = [];
+  const reader = new InterocitorReader(adapter, {
+    remotePath: "/reader-stalled",
+    keySource: null,
+    relayEnabled: false,
+    connectStageTimeoutMs: 10,
+    onConnectStalled: (info) => stalls.push(info),
+  });
+
+  await assert.rejects(
+    reader.connect(),
+    (error) =>
+      error instanceof ReaderRemotePullIncompleteError &&
+      error.code === "READER_REMOTE_PULL_INCOMPLETE" &&
+      error.stage === "loadExistingManifest" &&
+      error.timeoutMs === 10,
+  );
+  assert.equal(reader.isConnected(), false);
+  assert.equal(stalls.length, 1);
+  await reader.disconnect();
 });
 
 test("InterocitorReader restores a newer compacted snapshot without acknowledging it", async () => {

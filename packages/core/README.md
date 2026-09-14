@@ -85,9 +85,14 @@ const reader = new InterocitorReader(adapter, {
   keySource,
 });
 
-await reader.connect();
-const todos = await reader.table("todos").query();
+const { value: todos, diagnostics } = await reader.readOnce((view) => view.table("todos").query());
 ```
+
+`readOnce()` bypasses persistent row-cache storage, requires a completed remote
+remote pull, and disconnects automatically. Its diagnostics report the
+intentional in-memory cold replay so callers can observe the additional remote
+work. Use the longer `connect()` / `pull()` / `disconnect()` lifecycle when a
+persistent receive cache and live updates are valuable.
 
 Reader tables expose queries and subscriptions without mutation methods. See
 [Read an existing mesh without joining it](docs/reader.md) for Node.js,

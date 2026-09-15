@@ -53,11 +53,20 @@ const signerStore = createWebSecretStore("case-vault:jwt-signer", {
 await signerStore.save(signingKeyBundleBytes);
 ```
 
-This requests a cross-platform WebAuthn credential. If no local credential
-reference matches, `load()` omits `allowCredentials` and lets the browser run a
-discoverable-credential ceremony. It may prompt, reject, return a blob, or
-return `null` when the assertion or `largeBlob` result contains no blob; `null`
-is not a reliable “no phone enrolled” signal.
+This requests a cross-platform WebAuthn credential. If no cross-platform
+reference matches but this namespace remembers any credential at all, the
+ceremony is still constrained to the remembered set — the read is never widened
+to every discoverable credential for the relying party while a reference is
+known. Only a namespace with no remembered reference (after a `localStorage`
+clear, say) falls back to a discoverable-credential ceremony, and the namespace
+header in the blob then rejects a credential belonging to some other namespace.
+
+`load()` returns `null` only for the absent case: the ceremony completed and
+the credential holds no blob for this namespace. A ceremony that could not
+complete throws `CredentialUnavailableError`, and bytes that cannot be read as
+this namespace's blob throw `CredentialUnreadableError`. Do not treat a throw
+as “no phone enrolled” and mint replacement key material — that is how a mesh
+forks.
 
 ## 4. Request another authenticator
 
@@ -165,8 +174,14 @@ used to sign this JWT.
 - WebAuthn protects retrieval at rest, but the loaded bytes exist in
   JavaScript. XSS or malicious same-origin code can use or export them while
   available.
-- `clear()` removes local credential hints; it does not revoke a passkey or
-  securely erase authenticator-managed storage.
+- `clear()` overwrites the stored blob of every locally remembered credential
+  with an empty one (prompting once per credential) and then removes the local
+  hints. It cannot revoke the passkey: WebAuthn exposes no such API to script,
+  so an empty credential shell survives in the OS keychain until the user
+  removes it in operating-system or browser passkey settings. If the local
+  hints were already gone, nothing can be addressed and the original blob
+  survives readable. `clearWithReport()` returns exactly which case applies;
+  see the [WebAuthn blob store reference](./webauthn-blob-store.md#clearing).
 
 ## Example
 

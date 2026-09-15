@@ -28,6 +28,8 @@ Key custody determines what survives a reload and what an attacker must compromi
 
 Credential storage protects key material at rest. Endpoint security protects plaintext and usable keys while the application is running. No storage mode makes a key harmless after it has been resolved.
 
+Custody is also separate from the row database. No built-in local store encrypts rows at rest, so every custody mode above leaves the mesh contents readable on a device an attacker can read — the choice changes what a thief must do to obtain the _key_, not what they can read from the _store_.
+
 ## Separate loss from compromise {#lost}
 
 - **A device is lost, but its key is still trusted:** another paired endpoint or a recovery phrase prepared earlier can restore access.

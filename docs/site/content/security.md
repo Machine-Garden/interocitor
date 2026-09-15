@@ -33,13 +33,13 @@ Every endpoint that can derive the mesh key can read the complete row database a
 
 Protect those endpoints accordingly:
 
-- keep devices patched and local storage protected;
+- keep devices patched, and rely on full-disk encryption and OS account separation for the local row database, which no built-in local store encrypts at rest;
 - choose whether browser credentials persist beyond the session;
 - give automation only the meshes it must read;
 - separate unrelated reader groups into different meshes;
 - prepare and test recovery before the last key is lost.
 
-Encryption protects data in remote storage and transit through the adapter. It does not hide plaintext from the application that must use it.
+Encryption protects data in remote storage and transit through the adapter. It does not hide plaintext from the application that must use it, and it does not reach the endpoint's own database: rows, the fields indexed over them, and changes not yet uploaded are stored unencrypted on the device.
 
 ## Model a failed or malicious remote {#trouble}
 
@@ -75,3 +75,4 @@ This is cryptographic migration, not merely an authorization change.
 | **Protected**     | Row values and ordinary file contents encrypted before upload.         |
 | **Still visible** | Paths, sizes, timing, request identity, devices, and control metadata. |
 | **Still trusted** | Every key-bearing endpoint, plus the remote for availability.          |
+| **Unprotected**   | The endpoint's own row database, which is stored without encryption.   |

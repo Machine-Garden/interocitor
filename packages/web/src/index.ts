@@ -29,6 +29,19 @@ export {
   type WebAuthnCredentialRef,
   type WebAuthnEnrollOptions,
   type WebAuthnLoadOptions,
+  CredentialAccessError,
+  CredentialUnavailableError,
+  CredentialUnreadableError,
+  ResidualWebAuthnCredentialError,
+  credentialAvailabilityOf,
+  isCredentialAccessError,
+  type CredentialAccessErrorInit,
+  type CredentialAvailability,
+  type WebAuthnBlobFormat,
+  type WebAuthnClearOptions,
+  type WebAuthnClearResult,
+  type WebAuthnResidualRisk,
+  type WebAuthnTaggedBlob,
 } from "./webauthn.ts";
 
 export {
@@ -61,6 +74,11 @@ export {
   type CredentialStorageLocation,
   type EnvelopeStorageLocation,
   type WebCredentialStore,
+  CURRENT_CREDENTIAL_ENVELOPE_VERSION,
+  type CredentialEnvelopeKeyRequest,
+  type StoredCredentialEnvelope,
+  type StoredCredentialEnvelopeV1,
+  type StoredCredentialEnvelopeV2,
 } from "./credential-store.ts";
 
 export {
@@ -73,3 +91,23 @@ export {
   type StoredImageBlobUrl,
   type StoredImageMetadata,
 } from "./image.ts";
+
+export {
+  BrowserPassphraseKeyRecordStore,
+  MemoryPassphraseKeyRecordStore,
+  PassphraseEnvelopeKeyProvider,
+  PassphraseEnvelopeError,
+  PassphraseLockedError,
+  PassphraseNamespaceMismatchError,
+  InvalidPassphraseKeyRecordError,
+  MissingPassphraseKeyRecordError,
+  WrongPassphraseError,
+  DEFAULT_PASSPHRASE_IDLE_TIMEOUT_MS,
+  DEFAULT_PASSPHRASE_KDF_ITERATIONS,
+  MAXIMUM_PASSPHRASE_KDF_ITERATIONS,
+  MINIMUM_PASSPHRASE_KDF_ITERATIONS,
+  type PassphraseEnvelopeKeyProviderOptions,
+  type PassphraseKeyRecord,
+  type PassphraseKeyRecordStore,
+  type PassphraseRecordStorageLocation,
+} from "./passphrase-envelope.ts";

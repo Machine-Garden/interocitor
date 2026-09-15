@@ -8,7 +8,7 @@
 
 import type { StorageAdapter, LocalStore, ChangeEntry, ChangesHead, SyncEvent } from "./types.ts";
 import { hlcCompareStr } from "./hlc.ts";
-import { paths, textEncoder, textDecoder } from "./internals.ts";
+import { paths, textEncoder, textDecoder, type LogLevel } from "./internals.ts";
 import { encodeChangePayload } from "./codec.ts";
 import type { CodecState } from "./codec.ts";
 import { upsertDeviceMetadata } from "./manifest.ts";
@@ -19,6 +19,18 @@ export interface FlushReplicaTarget {
   remotePath: string;
 }
 
+/**
+ * Level-gated logger supplied by the engine.
+ *
+ * Flush runs as free functions with no engine handle, so tracing is injected
+ * rather than written straight to the console: an unconditional `console.log`
+ * here ignores the caller's `logLevel` and chatters on every write. Defaults
+ * to a no-op so non-engine callers stay silent.
+ */
+export type FlushLogger = (level: LogLevel, ...args: unknown[]) => void;
+
+const noopLog: FlushLogger = () => {};
+
 async function flushToAdapter(
   adapter: StorageAdapter,
   remotePath: string,
@@ -27,6 +39,7 @@ async function flushToAdapter(
   codecState: CodecState,
   deviceId: string,
   emit: (event: SyncEvent) => void = () => {},
+  log: FlushLogger = noopLog,
 ): Promise<void> {
   const p = paths(remotePath);
   await adapter.ensureFolder(p.changesFolder);
@@ -36,7 +49,7 @@ async function flushToAdapter(
   for (const entry of entries) {
     const fileName = changeFileName(entry);
     const payload = await encodeChangePayload(codecState, entry);
-    console.log("[interocitor:write] flush.changeFile", {
+    log("debug", "flush() — change file", {
       path: p.changeFile(fileName),
       deviceId,
       isPrimary,
@@ -124,7 +137,7 @@ async function flushToAdapter(
   });
 
   if (!regressed) {
-    console.log("[interocitor:write] flush.head", {
+    log("debug", "flush() — head", {
       path: p.changesHead,
       deviceId,
       isPrimary,
@@ -153,16 +166,17 @@ export async function flushPrimary(
   emit: (event: SyncEvent) => void = () => {},
   replicas: readonly FlushReplicaTarget[] = [],
   onReplicaError: (adapterName: string, error: unknown) => void = () => {},
+  log: FlushLogger = noopLog,
 ): Promise<void> {
   // A receipt failure prevents publication. A later remote failure is safe:
   // sync-engine requeues the same immutable identities for retry.
   await recordFlushedChanges(local, entries);
-  await flushToAdapter(adapter, remotePath, entries, true, codecState, deviceId, emit);
+  await flushToAdapter(adapter, remotePath, entries, true, codecState, deviceId, emit, log);
 
   for (const replica of replicas) {
     try {
       if (!replica.adapter.isAuthenticated()) await replica.adapter.authenticate();
-      await flushReplica(replica.adapter, replica.remotePath, entries, codecState, deviceId);
+      await flushReplica(replica.adapter, replica.remotePath, entries, codecState, deviceId, log);
     } catch (error) {
       onReplicaError(replica.adapter.name, error);
     }
@@ -176,6 +190,7 @@ async function flushReplica(
   entries: ChangeEntry[],
   codecState: CodecState,
   deviceId: string,
+  log: FlushLogger = noopLog,
 ): Promise<void> {
-  await flushToAdapter(adapter, remotePath, entries, false, codecState, deviceId);
+  await flushToAdapter(adapter, remotePath, entries, false, codecState, deviceId, () => {}, log);
 }

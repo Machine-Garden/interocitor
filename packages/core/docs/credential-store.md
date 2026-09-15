@@ -307,8 +307,15 @@ Contract:
   the same `dbName` twice replaces the earlier record.
 - `load()` should document whether it can prompt. Browser apps using WebAuthn
   should call it from a user action.
-- `clear()` MUST remove every record this store wrote for this `dbName`.
-  It MAY keep the global device id; the default stores do.
+- `clear()` MUST remove every record this store wrote for this `dbName` that
+  it is able to remove, and MUST document anything it cannot. It MAY keep the
+  global device id; the default stores do. A store whose custody belongs to
+  the platform is necessarily narrower: `WebAuthnBlobStore.clear()` — and so
+  `WebAuthnCredentialStore.clear()` and `WebAuthnEnvelopeKeyProvider` — removes
+  only the browser-side credential-id hints. It cannot delete the
+  platform-managed credential or the `largeBlob` inside it, so the credential
+  record survives `clear()` and remains readable by a later ceremony. See
+  [WebAuthn blob store](../../web/docs/webauthn-blob-store.md).
 
 ## What can go wrong
 

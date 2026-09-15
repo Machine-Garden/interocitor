@@ -23,6 +23,7 @@ import type {
   CredentialEnvelopeKeyProvider,
   CredentialEnvelopeKeyPurpose,
 } from "./credential-store.ts";
+import { CredentialAccessError, type CredentialAvailability } from "./webauthn.ts";
 
 const encoder = new TextEncoder();
 
@@ -90,10 +91,27 @@ const VERIFIER_PLAINTEXT = encoder.encode("interocitor.passphrase.envelope.verif
 // look like "no credentials", because a caller that reads absence as "first
 // run" will mint a fresh mesh key and fork the mesh.
 
-/** Base class for every passphrase-envelope failure. */
-export class PassphraseEnvelopeError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
+/**
+ * Base class for every passphrase-envelope failure.
+ *
+ * This extends {@link CredentialAccessError} rather than `Error` so that
+ * `EnvelopedCredentialStore` re-throws these unchanged instead of flattening
+ * them into a generic `CredentialUnavailableError`. The distinction between
+ * "wrong passphrase" and "the record is gone" is the whole point of this
+ * taxonomy, and it has to survive the trip through the envelope store.
+ *
+ * Every subclass therefore also declares an `availability`: `"unavailable"`
+ * when the key could not be derived at all, `"unreadable"` when a record was
+ * found but does not open. Neither is `"absent"` — a caller that reads any of
+ * these as "nothing stored" will mint a fresh mesh key and fork the mesh.
+ */
+export class PassphraseEnvelopeError extends CredentialAccessError {
+  constructor(
+    availability: Exclude<CredentialAvailability, "absent">,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(availability, message, { cause: options?.cause });
     this.name = "PassphraseEnvelopeError";
   }
 }
@@ -107,7 +125,8 @@ export class PassphraseEnvelopeError extends Error {
  */
 export class WrongPassphraseError extends PassphraseEnvelopeError {
   constructor(options?: ErrorOptions) {
-    super("Passphrase does not match this credential envelope", options);
+    // A record was found and its AEAD check failed: unreadable, not missing.
+    super("unreadable", "Passphrase does not match this credential envelope", options);
     this.name = "WrongPassphraseError";
   }
 }
@@ -115,7 +134,8 @@ export class WrongPassphraseError extends PassphraseEnvelopeError {
 /** No passphrase is cached and none could be requested. */
 export class PassphraseLockedError extends PassphraseEnvelopeError {
   constructor(message = "Credential envelope is locked; unlock it with a passphrase") {
-    super(message);
+    // The custody mechanism could not be consulted; the record is untouched.
+    super("unavailable", message);
     this.name = "PassphraseLockedError";
   }
 }
@@ -128,7 +148,8 @@ export class PassphraseLockedError extends PassphraseEnvelopeError {
  */
 export class MissingPassphraseKeyRecordError extends PassphraseEnvelopeError {
   constructor(namespace: string) {
-    super(`No passphrase key record is stored for "${namespace}"`);
+    // No key can be derived, so the envelope cannot be consulted at all.
+    super("unavailable", `No passphrase key record is stored for "${namespace}"`);
     this.name = "MissingPassphraseKeyRecordError";
   }
 }
@@ -136,7 +157,7 @@ export class MissingPassphraseKeyRecordError extends PassphraseEnvelopeError {
 /** A stored record is malformed, unsupported, or below the accepted work factor. */
 export class InvalidPassphraseKeyRecordError extends PassphraseEnvelopeError {
   constructor(reason: string, options?: ErrorOptions) {
-    super(`Invalid passphrase key record: ${reason}`, options);
+    super("unreadable", `Invalid passphrase key record: ${reason}`, options);
     this.name = "InvalidPassphraseKeyRecordError";
   }
 }
@@ -144,7 +165,7 @@ export class InvalidPassphraseKeyRecordError extends PassphraseEnvelopeError {
 /** The stored record belongs to a different credential namespace. */
 export class PassphraseNamespaceMismatchError extends PassphraseEnvelopeError {
   constructor(expected: string, found: string) {
-    super(`Passphrase key record is bound to "${found}", not "${expected}"`);
+    super("unreadable", `Passphrase key record is bound to "${found}", not "${expected}"`);
     this.name = "PassphraseNamespaceMismatchError";
   }
 }
@@ -346,7 +367,7 @@ async function deriveKek(
   iterations: number,
 ): Promise<CryptoKey> {
   const normalized = normalizePassphrase(passphrase);
-  if (!normalized) throw new PassphraseEnvelopeError("Passphrase must not be empty");
+  if (!normalized) throw new PassphraseEnvelopeError("unavailable", "Passphrase must not be empty");
   const source = await crypto.subtle.importKey(
     "raw",
     encoder.encode(normalized) as unknown as BufferSource,
@@ -443,7 +464,8 @@ export class PassphraseEnvelopeKeyProvider implements CredentialEnvelopeKeyProvi
     private readonly namespace: string,
     options: PassphraseEnvelopeKeyProviderOptions = {},
   ) {
-    if (!namespace) throw new PassphraseEnvelopeError("Credential namespace must not be empty");
+    if (!namespace)
+      throw new PassphraseEnvelopeError("unavailable", "Credential namespace must not be empty");
     this.records =
       options.recordStore ?? createRecordStore(namespace, options.storage ?? "localStorage");
     const idle = options.idleTimeoutMs ?? DEFAULT_PASSPHRASE_IDLE_TIMEOUT_MS;
@@ -451,10 +473,13 @@ export class PassphraseEnvelopeKeyProvider implements CredentialEnvelopeKeyProvi
     this.iterations = options.iterations ?? DEFAULT_PASSPHRASE_KDF_ITERATIONS;
     this.minimumIterations = options.minimumIterations ?? MINIMUM_PASSPHRASE_KDF_ITERATIONS;
     if (this.iterations < this.minimumIterations) {
-      throw new PassphraseEnvelopeError("iterations must be at least minimumIterations");
+      throw new PassphraseEnvelopeError(
+        "unavailable",
+        "iterations must be at least minimumIterations",
+      );
     }
     if (this.iterations > MAXIMUM_PASSPHRASE_KDF_ITERATIONS) {
-      throw new PassphraseEnvelopeError("iterations exceeds the supported maximum");
+      throw new PassphraseEnvelopeError("unavailable", "iterations exceeds the supported maximum");
     }
     this.requestPassphrase = options.requestPassphrase;
 

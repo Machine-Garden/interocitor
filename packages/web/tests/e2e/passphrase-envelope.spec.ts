@@ -409,4 +409,81 @@ test.describe("PassphraseEnvelopeKeyProvider", () => {
 
     expect(result).toEqual({ prompts: 1, same: true });
   });
+
+  test("passphrase failures keep their identity through EnvelopedCredentialStore", async ({
+    page,
+  }) => {
+    // EnvelopedCredentialStore.requireKey() re-throws CredentialAccessError
+    // unchanged and wraps everything else in CredentialUnavailableError. When
+    // this taxonomy did not descend from CredentialAccessError, every specific
+    // failure below arrived at the caller as a generic "unavailable" — losing
+    // the difference between "wrong passphrase" and "the record is gone", which
+    // is the only thing that tells an application what to show the user.
+    const result = await page.evaluate(
+      async ([namespace, fast, creds]) => {
+        const {
+          PassphraseEnvelopeKeyProvider,
+          EnvelopedCredentialStore,
+          CredentialAccessError,
+          MissingPassphraseKeyRecordError,
+          WrongPassphraseError,
+          isCredentialAccessError,
+        } = await import("/packages/web/dist/index.js");
+
+        const seen = async (run: () => Promise<unknown>) =>
+          run().then(
+            () => ({ name: "", availability: "", isAccessError: false, specific: false }),
+            (error: Error & { availability?: string }) => ({
+              name: error.name,
+              availability: error.availability ?? "",
+              isAccessError:
+                error instanceof CredentialAccessError && isCredentialAccessError(error),
+              specific:
+                error instanceof WrongPassphraseError ||
+                error instanceof MissingPassphraseKeyRecordError,
+            }),
+          );
+
+        const writer = new PassphraseEnvelopeKeyProvider(namespace, fast);
+        await writer.unlock("correct horse battery staple");
+        await new EnvelopedCredentialStore(namespace, "localStorage", writer).save(creds);
+
+        // A record that exists, opened with the wrong passphrase.
+        const reader = new PassphraseEnvelopeKeyProvider(namespace, fast);
+        const wrong = await seen(() => reader.unlock("incorrect horse battery staple"));
+
+        // The ciphertext survives; only the KDF record is lost. The store must
+        // not report "no credentials" for an envelope that is still sitting there.
+        localStorage.removeItem(`interocitor-creds-passphrase:${namespace}`);
+        const missing = await seen(() =>
+          new EnvelopedCredentialStore(
+            namespace,
+            "localStorage",
+            new PassphraseEnvelopeKeyProvider(namespace, {
+              ...fast,
+              requestPassphrase: () => "correct horse battery staple",
+            }),
+          ).load(),
+        );
+
+        return { missing, wrong };
+      },
+      [NAMESPACE, FAST, CREDS] as const,
+    );
+
+    // "unavailable": no key could be derived, so the envelope was never opened.
+    expect(result.missing).toEqual({
+      name: "MissingPassphraseKeyRecordError",
+      availability: "unavailable",
+      isAccessError: true,
+      specific: true,
+    });
+    // "unreadable": a record was found and its AEAD check failed.
+    expect(result.wrong).toEqual({
+      name: "WrongPassphraseError",
+      availability: "unreadable",
+      isAccessError: true,
+      specific: true,
+    });
+  });
 });

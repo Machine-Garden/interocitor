@@ -89,8 +89,21 @@ export interface CredentialEnvelopeKeyProvider {
   /**
    * Return the long-lived key directly. Used for v1 envelopes, which have no
    * KDF, and by providers that cannot derive.
+   *
+   * `request` carries the same `CredentialEnvelopeKeyRequest` that
+   * {@link deriveKey} would receive, including the `keyId` of the envelope
+   * being opened or written. It is a second, optional parameter rather than a
+   * replacement for `purpose` so that every provider written against the
+   * original one-argument signature keeps compiling and keeps behaving
+   * identically: a provider that declares `getKey(purpose?)` — or `getKey()` —
+   * simply ignores the extra argument and returns its single key, exactly as
+   * before. Implement the `request` parameter only to support key rotation;
+   * see {@link CredentialEnvelopeKeyRequest.keyId}.
    */
-  getKey(purpose?: CredentialEnvelopeKeyPurpose): Promise<CryptoKey>;
+  getKey(
+    purpose?: CredentialEnvelopeKeyPurpose,
+    request?: CredentialEnvelopeKeyRequest,
+  ): Promise<CryptoKey>;
   /**
    * Derive a per-envelope key-encryption key from a long-lived seed.
    *
@@ -102,13 +115,39 @@ export interface CredentialEnvelopeKeyProvider {
   clear?(): Promise<void>;
 }
 
-/** What {@link CredentialEnvelopeKeyProvider.deriveKey} binds a KEK to. */
+/**
+ * What {@link CredentialEnvelopeKeyProvider.deriveKey} and
+ * {@link CredentialEnvelopeKeyProvider.getKey} bind a KEK to.
+ */
 export interface CredentialEnvelopeKeyRequest {
   purpose: CredentialEnvelopeKeyPurpose;
   /** Stable encryption domain — the credential namespace, not a rotatable db name. */
   dbName: string;
   /** Per-envelope salt stored in the envelope's `kdf.salt`. */
   salt: Uint8Array;
+  /**
+   * Which key the envelope is written under, or was written under.
+   *
+   * This is the exact value bound into the envelope's AAD, so a provider that
+   * holds a current key plus previous keys can select the matching one instead
+   * of guessing. Without it a wrong guess surfaces as
+   * `CredentialUnreadableError` with no second chance, which makes rotation
+   * impossible.
+   *
+   * - On `encrypt` it is the provider's own `envelopeKeyId` (defaulting to
+   *   `"custom"`), i.e. the id the new envelope will record.
+   * - On `decrypt` of a v2 envelope it is the `keyId` recorded in that
+   *   envelope.
+   * - On `decrypt` of a v1 envelope, which predates `keyId` and records none,
+   *   it is the provider's current `envelopeKeyId`. A rotating provider
+   *   therefore answers a v1 request with its current key, which is exactly
+   *   what happened before this field existed.
+   *
+   * Optional only so that code which builds a request by hand keeps
+   * compiling; {@link EnvelopedCredentialStore} always sets it. A provider
+   * that ignores it behaves exactly as it did before.
+   */
+  keyId?: string;
 }
 
 /** Original envelope: the provider's key was used directly, with no AAD. */
@@ -475,7 +514,10 @@ export class EnvelopedCredentialStore implements CredentialStore {
     try {
       return derive && this.keyProvider.deriveKey
         ? await this.keyProvider.deriveKey(request)
-        : await this.keyProvider.getKey(request.purpose);
+        : // `purpose` stays the first argument so providers written against the
+          // original signature are unaffected; `request` carries the keyId a
+          // rotating provider needs to select a previous key.
+          await this.keyProvider.getKey(request.purpose, request);
     } catch (error) {
       if (error instanceof CredentialAccessError) throw error;
       throw new CredentialUnavailableError(
@@ -490,13 +532,22 @@ export class EnvelopedCredentialStore implements CredentialStore {
    *
    * A record read from a v1 envelope is upgraded here: the next write after an
    * upgrade always produces v2.
+   *
+   * The same upgrade-in-place shape carries key rotation. The envelope is
+   * always written under the provider's *current* `envelopeKeyId`, so once a
+   * provider starts reporting a new id, the next `save()` re-wraps the record
+   * under the new key and records the new id. Envelopes still on a previous id
+   * keep opening, because `load()` hands that recorded id back to the provider.
    */
   async save(creds: StoredCredentials): Promise<void> {
     const keyId = this.keyId();
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const derive = typeof this.keyProvider.deriveKey === "function";
     const saltText = derive ? encodeBase64(salt) : "";
-    const key = await this.requireKey({ purpose: "encrypt", dbName: this.dbName, salt }, derive);
+    const key = await this.requireKey(
+      { purpose: "encrypt", dbName: this.dbName, salt, keyId },
+      derive,
+    );
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const payload: StoredCredentials = {
       portableKey: creds.portableKey,
@@ -545,7 +596,15 @@ export class EnvelopedCredentialStore implements CredentialStore {
   /** Legacy path: the provider's key is the KEK and there is no AAD. */
   private async decryptV1(envelope: StoredCredentialEnvelopeV1): Promise<ArrayBuffer> {
     const key = await this.requireKey(
-      { purpose: "decrypt", dbName: this.dbName, salt: new Uint8Array(0) },
+      {
+        purpose: "decrypt",
+        dbName: this.dbName,
+        salt: new Uint8Array(0),
+        // A v1 envelope records no keyId, so there is nothing historical to
+        // report. Passing the provider's current id keeps a rotating provider
+        // on the same key it would have returned before this field existed.
+        keyId: this.keyId(),
+      },
       false,
     );
     try {
@@ -575,11 +634,15 @@ export class EnvelopedCredentialStore implements CredentialStore {
       );
     }
     const saltText = envelope.kdf?.salt ?? "";
+    // One value for both the unwrap request and the AAD: the provider is asked
+    // for exactly the key this ciphertext is bound to.
+    const keyId = envelope.keyId ?? "custom";
     const key = await this.requireKey(
       {
         purpose: "decrypt",
         dbName: this.dbName,
         salt: saltText ? decodeBase64(saltText) : new Uint8Array(0),
+        keyId,
       },
       derive,
     );
@@ -588,7 +651,7 @@ export class EnvelopedCredentialStore implements CredentialStore {
         {
           name: "AES-GCM",
           iv: decodeBase64(envelope.iv),
-          additionalData: this.aad(envelope.keyId ?? "custom", saltText),
+          additionalData: this.aad(keyId, saltText),
         },
         key,
         decodeBase64(envelope.ciphertext),

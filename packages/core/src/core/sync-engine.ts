@@ -171,6 +171,23 @@ const QUARANTINED_OFFLINE_CHANGES_META = "quarantinedOfflineChanges";
 const MAX_TIMER_DELAY_MS = 2_147_000_000;
 const RETENTION_RETRY_DELAY_MS = 60 * 60_000;
 
+/**
+ * Let a background timer stop holding the host process open.
+ *
+ * Node's `setTimeout` returns a `Timeout` with `unref()`; the browser returns a
+ * number and has no such concept, so this is a no-op there. Used only for the
+ * engine's own maintenance schedules — polling and compaction — never for a
+ * timer that stands in for pending user work such as a queued flush.
+ *
+ * Without it, a Node host that builds a mesh and never disconnects hangs at
+ * exit forever behind a poll loop that reschedules itself, and behind a
+ * retention check that can be days out.
+ */
+function unrefTimer<T>(timer: T): T {
+  (timer as { unref?: () => void })?.unref?.();
+  return timer;
+}
+
 // ─── Sync Engine ─────────────────────────────────────────────────────
 
 /**
@@ -316,6 +333,12 @@ export class Interocitor<
 
   // Poll / push invalidation management
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Polling is torn down and may not restart until the next connect().
+   *
+   * See {@link haltPolling} for why stopPolling() alone leaks a timer.
+   */
+  private pollingHalted = false;
   private pollBaseIntervalMs = 0;
   private pollCurrentIntervalMs = 0;
   private pollGeneration: object = {};
@@ -680,7 +703,7 @@ export class Interocitor<
     if (paused) {
       const wasPaused = this.remoteAccessError !== null;
       this.remoteAccessError = err;
-      this.stopPolling();
+      this.haltPolling();
       this.stopRemoteInvalidations();
       this.clearScheduledFlush();
       this.clearCompactTimers();
@@ -1175,7 +1198,26 @@ export class Interocitor<
     this.pollBaseIntervalMs = 0;
   }
 
+  /**
+   * Stop polling *and* forbid it from restarting until the next connect().
+   *
+   * stopPolling() alone is not enough on a teardown path. startPolling() is
+   * reachable from the relay subscription callbacks (`onReady`, `onError`,
+   * `onClose`) and from the late continuation of a connect() that has already
+   * rejected — an adapter that fires `onClose` while being unsubscribed hits
+   * exactly that. Any of those re-arms the loop with a *fresh* generation
+   * token, which nothing subsequently invalidates, so the timer reschedules
+   * itself forever: the mesh is closed, and the poll keeps running.
+   *
+   * Every teardown site uses this; connect() is the only thing that lifts it.
+   */
+  private haltPolling(): void {
+    this.stopPolling();
+    this.pollingHalted = true;
+  }
+
   private startPolling(intervalMs = this.config.pollInterval): void {
+    if (this.pollingHalted) return;
     this.stopPolling();
     this.pollBaseIntervalMs = intervalMs;
     this.pollCurrentIntervalMs = intervalMs;
@@ -1184,16 +1226,18 @@ export class Interocitor<
     const generation = {};
     this.pollGeneration = generation;
     const schedule = (): void => {
-      this.pollTimer = setTimeout(() => {
-        this.pollTimer = null;
-        this.pull()
-          .catch(() => {})
-          .finally(() => {
-            if (this.pollGeneration === generation) {
-              schedule();
-            }
-          });
-      }, this.pollCurrentIntervalMs);
+      this.pollTimer = unrefTimer(
+        setTimeout(() => {
+          this.pollTimer = null;
+          this.pull()
+            .catch(() => {})
+            .finally(() => {
+              if (this.pollGeneration === generation) {
+                schedule();
+              }
+            });
+        }, this.pollCurrentIntervalMs),
+      );
     };
     schedule();
   }
@@ -1605,7 +1649,7 @@ export class Interocitor<
     const poisoned = error instanceof Error ? error : new Error(String(error));
     if (!this.remotePoisonError) {
       this.remotePoisonError = poisoned;
-      this.stopPolling();
+      this.haltPolling();
       this.clearScheduledFlush();
       this.connected = false;
       this.connectPromise = null;
@@ -2125,6 +2169,8 @@ export class Interocitor<
    */
   async connect(): Promise<void> {
     await this.ensureReady();
+    // The only place the teardown gate is lifted; see haltPolling().
+    this.pollingHalted = false;
     if (this.encrypted && !this.encryptionKey) await this.resolveEncryption();
     if (!this.config.remotePath)
       throw new Error("connect() requires remotePath; configure mesh before connecting");
@@ -2555,7 +2601,7 @@ export class Interocitor<
     await this.ensureReady();
     // Hard tear-down. Order matters: stop timers first so no in-flight
     // poll/push/flush touches the adapter while we are killing the session.
-    this.stopPolling();
+    this.haltPolling();
     this.stopRemoteInvalidations();
     this.clearScheduledFlush();
     this.clearCompactTimers();
@@ -2636,7 +2682,7 @@ export class Interocitor<
     // Without this, polling timers + outbox flush can race against the
     // newly-attached adapter and re-write the *new* mesh with files signed
     // for the old mesh — i.e. self-poison the remote on adapter switch.
-    this.stopPolling();
+    this.haltPolling();
     this.stopRemoteInvalidations();
     this.clearScheduledFlush();
     this.connected = false;
@@ -3020,6 +3066,7 @@ export class Interocitor<
       }
       void this.runRetentionCompactionCheck();
     }, waitMs);
+    unrefTimer(this.compactRetentionTimer);
   }
 
   private async runRetentionCompactionCheck(): Promise<void> {
@@ -3177,6 +3224,7 @@ export class Interocitor<
       this.compactCheckTimer = null;
       this.runDelayedCompactCheck(version).catch(() => {});
     }, delayMs);
+    unrefTimer(this.compactCheckTimer);
   }
 
   private async runDelayedCompactCheck(version: number): Promise<void> {
@@ -3241,6 +3289,7 @@ export class Interocitor<
         () => {},
       );
     }, delayMs);
+    unrefTimer(this.compactRunTimer);
   }
 
   private async runDelayedCompact(

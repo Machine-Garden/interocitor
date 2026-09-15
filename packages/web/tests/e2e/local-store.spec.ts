@@ -93,6 +93,93 @@ test("a persistent cross-page upgrade blocker rejects after a bounded grace", as
   }
 });
 
+test("a timed-out resilient open cannot later retain a ghost IndexedDB connection", async ({
+  context,
+  page,
+}) => {
+  const dbName = `interocitor-abandoned-open-${crypto.randomUUID()}`;
+  const challenger = await context.newPage();
+  await challenger.goto("/packages/web/tests/e2e/fixtures/harness.html");
+  try {
+    await page.evaluate(async (name) => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(name, 1);
+        request.onupgradeneeded = () => request.result.createObjectStore("legacy");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      (window as typeof window & { blocker?: IDBDatabase }).blocker = db;
+    }, dbName);
+
+    const fallback = await challenger.evaluate(async (name) => {
+      const { IndexedDbLocalStore, createResilientLocalStore } =
+        await import("/packages/web/dist/index.js");
+      const primary = new IndexedDbLocalStore(name);
+      const store = createResilientLocalStore({
+        dbName: name,
+        openTimeoutMs: 50,
+        primaryFactory: () => primary,
+      });
+      const originalError = console.error;
+      console.error = () => {};
+      try {
+        await store.open();
+      } finally {
+        console.error = originalError;
+      }
+      Object.assign(window, {
+        abandonedPrimary: primary,
+        resilientFallback: store,
+      });
+      return { degraded: (store as any).__degraded === true };
+    }, dbName);
+    expect(fallback.degraded).toBe(true);
+
+    // Release after the resilient deadline but before openDB's own blocked
+    // grace expires. The uncancellable request will now succeed late.
+    await page.waitForTimeout(100);
+    await page.evaluate(() => {
+      (window as typeof window & { blocker?: IDBDatabase }).blocker?.close();
+    });
+    await challenger.waitForTimeout(250);
+
+    const result = await challenger.evaluate(async (name) => {
+      const abandoned = (
+        window as typeof window & {
+          abandonedPrimary: { db?: IDBDatabase | null };
+          resilientFallback: { close(): void };
+        }
+      ).abandonedPrimary;
+      const retainedGhost = Boolean(abandoned.db);
+
+      // A higher-version open must not wait for a discarded store to process
+      // versionchange. This models a page becoming suspended after fallback.
+      const upgraded = await new Promise<number>((resolve, reject) => {
+        const request = indexedDB.open(name, 3);
+        request.onupgradeneeded = () => {};
+        request.onsuccess = () => {
+          const version = request.result.version;
+          request.result.close();
+          resolve(version);
+        };
+        request.onerror = () => reject(request.error);
+        request.onblocked = () => reject(new Error("late ghost blocked the replacement upgrade"));
+      });
+      (
+        window as typeof window & { resilientFallback: { close(): void } }
+      ).resilientFallback.close();
+      return { retainedGhost, upgraded };
+    }, dbName);
+
+    expect(result).toEqual({ retainedGhost: false, upgraded: 3 });
+  } finally {
+    await page.evaluate(() => {
+      (window as typeof window & { blocker?: IDBDatabase }).blocker?.close();
+    });
+    await challenger.close();
+  }
+});
+
 // ─── Basic row CRUD ──────────────────────────────────────────────────
 
 test.describe("IndexedDbLocalStore — row operations", () => {

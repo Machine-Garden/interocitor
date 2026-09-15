@@ -436,6 +436,8 @@ async function readPendingBatch(t: IDBTransaction): Promise<ChangeEntry | null> 
  */
 export class IndexedDbLocalStore implements LocalStore {
   private db: IDBDatabase | null = null;
+  private opening: Promise<void> | null = null;
+  private openAttempt = 0;
   private readonly dbName: string;
   private readonly configuredDbVersion?: number;
   private readonly schema?: DatabaseSchemaDefinition;
@@ -496,7 +498,28 @@ export class IndexedDbLocalStore implements LocalStore {
     return false;
   }
 
-  async open(onProgress?: () => void): Promise<void> {
+  open(onProgress?: () => void): Promise<void> {
+    if (this.db) return Promise.resolve();
+    if (this.opening) return this.opening;
+
+    const attempt = ++this.openAttempt;
+    const opening = this.performOpen(attempt, onProgress).finally(() => {
+      if (this.opening === opening) this.opening = null;
+    });
+    this.opening = opening;
+    return opening;
+  }
+
+  private abandonIfClosed(attempt: number, db: IDBDatabase): void {
+    if (attempt === this.openAttempt) return;
+    db.close();
+    throw new DOMException(
+      "IndexedDB open was abandoned because the LocalStore closed",
+      "AbortError",
+    );
+  }
+
+  private async performOpen(attempt: number, onProgress?: () => void): Promise<void> {
     const requestedVersion = this.configuredDbVersion ?? DEFAULT_DB_VERSION;
     let db: IDBDatabase;
     try {
@@ -509,6 +532,7 @@ export class IndexedDbLocalStore implements LocalStore {
       if (!(error instanceof DOMException) || error.name !== "VersionError") throw error;
       db = await openDB(this.dbName, undefined, this.schema, onProgress);
     }
+    this.abandonIfClosed(attempt, db);
 
     const reopenAt = async (nextVersion: number): Promise<IDBDatabase> => {
       // Close synchronously, then yield a macrotask before re-opening at the
@@ -522,13 +546,22 @@ export class IndexedDbLocalStore implements LocalStore {
       await new Promise<void>((resolve) => {
         setTimeout(resolve, 0);
       });
+      if (attempt !== this.openAttempt) {
+        throw new DOMException(
+          "IndexedDB repair was abandoned because the LocalStore closed",
+          "AbortError",
+        );
+      }
       // A reopen is itself "progress" — the deadline (if any) has already
       // been disarmed, but we keep the contract by signaling again on the
       // upcoming upgrade-needed.
-      return openDB(this.dbName, nextVersion, this.schema, onProgress);
+      const reopened = await openDB(this.dbName, nextVersion, this.schema, onProgress);
+      this.abandonIfClosed(attempt, reopened);
+      return reopened;
     };
 
     let storedFingerprint = await this.readCacheFingerprint(db);
+    this.abandonIfClosed(attempt, db);
     const repairVersion = this.needsRepair(db, storedFingerprint)
       ? Math.max(db.version + 1, requestedVersion)
       : null;
@@ -536,16 +569,29 @@ export class IndexedDbLocalStore implements LocalStore {
     if (repairVersion !== null) {
       db = await reopenAt(repairVersion);
       storedFingerprint = await this.readCacheFingerprint(db);
+      this.abandonIfClosed(attempt, db);
     }
 
     if (storedFingerprint !== this.desiredFingerprint) {
       await this.writeCacheFingerprint(db);
+      this.abandonIfClosed(attempt, db);
     }
 
     this.db = db;
   }
 
+  /**
+   * Close this store and abandon any in-flight `open()` or schema repair.
+   * Native IndexedDB requests may still finish, but a late result closes its
+   * handle instead of reviving this instance. A later `open()` starts a new
+   * attempt.
+   */
   close(): void {
+    // IndexedDB open requests cannot be cancelled. Invalidating the attempt
+    // makes a late success close its handle instead of reviving this store
+    // after a resilient wrapper has already abandoned it for memory fallback.
+    this.openAttempt += 1;
+    this.opening = null;
     this.db?.close();
     this.db = null;
   }

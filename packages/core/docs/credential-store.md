@@ -152,6 +152,233 @@ If the app needs a second protected secret that is not the Interocitor
 credential record, use `WebAuthnBlobStore` from `@interocitor/web` instead of
 overloading the credential-store API.
 
+## Application-supplied app keys
+
+`CredentialEnvelopeKeyProvider` is a seam the **application** owns. The obvious
+thing to put behind it — beyond a passkey or a passphrase — is an
+application-supplied secret: a value your bundle carries, or one your server
+hands the client at sign-in. Wrap the credential record with it and a stolen
+envelope is inert without it.
+
+Interocitor deliberately ships no app-key provider. Whether the app key is a
+constant compiled into your bundle or a per-user secret delivered by your
+server changes what it is worth by an enormous margin, and only the application
+knows which one it has. Shipping a class named `AppKeyEnvelopeKeyProvider`
+would make the two look interchangeable. They are not. The recipe below is ten
+lines; read [What an app key actually buys](#what-an-app-key-actually-buys)
+before deciding it is a security control.
+
+### The recipe
+
+```ts
+import { EnvelopedCredentialStore, StaticEnvelopeKeyProvider } from "@interocitor/web";
+
+// APP_KEY_BYTES: 32 bytes your application supplies. A bundled constant, or
+// bytes fetched from your server at sign-in — see the honest framing below.
+const appKey = await crypto.subtle.importKey("raw", APP_KEY_BYTES, "AES-GCM", false, [
+  "encrypt",
+  "decrypt",
+]);
+
+const credentialStore = new EnvelopedCredentialStore(
+  "case-vault",
+  "localStorage",
+  new StaticEnvelopeKeyProvider(appKey),
+);
+```
+
+`extractable: false` is the load-bearing argument: after `importKey` returns,
+no code path — yours, or an attacker's running in your page — can read the key
+back out of the `CryptoKey`. Zero `APP_KEY_BYTES` once it is imported.
+
+The factory form is equivalent and takes the same provider:
+
+```ts
+const credentialStore = createWebCredentialStore("case-vault", {
+  envelope: { storage: "localStorage", keyProvider: new StaticEnvelopeKeyProvider(appKey) },
+});
+```
+
+`localStorage` now holds an AES-GCM envelope under
+`interocitor-creds-envelope:case-vault` instead of a plaintext credential
+record. The ciphertext is bound by AAD to the credential namespace, the key
+provider's `envelopeKeyId`, and the per-envelope salt, so it cannot be replayed
+into another namespace or under another provider.
+
+### Rotating the app key
+
+`StaticEnvelopeKeyProvider` holds exactly one key, which is all a first
+deployment needs. Rotation needs a provider that holds the **current** key plus
+the **previous** keys, and that is told which one to use.
+
+That is what `keyId` on `CredentialEnvelopeKeyRequest` is for. The envelope
+records the provider's `envelopeKeyId` and binds it into the AAD;
+`EnvelopedCredentialStore` hands that same value back to the provider:
+
+- on **encrypt**, the id the new envelope will be written under — the
+  provider's own current `envelopeKeyId`;
+- on **decrypt**, the id recorded in the envelope being opened.
+
+Without it, a provider gets one `getKey`/`deriveKey` call and no second chance:
+a wrong guess is a terminal `CredentialUnreadableError`. Rotating a bundled app
+key would strand every stored credential in the fleet at once.
+
+```ts
+import {
+  CredentialUnavailableError,
+  type CredentialEnvelopeKeyProvider,
+  type CredentialEnvelopeKeyPurpose,
+  type CredentialEnvelopeKeyRequest,
+} from "@interocitor/web";
+
+class AppKeyProvider implements CredentialEnvelopeKeyProvider {
+  /** `keys` holds the current key and every previous key still in the retention window. */
+  constructor(
+    private readonly current: string,
+    private readonly keys: Map<string, CryptoKey>,
+  ) {}
+
+  /** Read on every write: the id the next envelope is recorded under. */
+  get envelopeKeyId(): string {
+    return this.current;
+  }
+
+  async getKey(
+    _purpose?: CredentialEnvelopeKeyPurpose,
+    request?: CredentialEnvelopeKeyRequest,
+  ): Promise<CryptoKey> {
+    const id = request?.keyId ?? this.current;
+    const key = this.keys.get(id);
+    // Fail loudly. Returning the wrong key produces an indistinguishable
+    // "tampered ciphertext" error three frames later.
+    if (!key) throw new CredentialUnavailableError(`No app key for envelope key id "${id}"`);
+    return key;
+  }
+}
+
+const provider = new AppKeyProvider(
+  "app-key-2",
+  new Map([
+    ["app-key-1", previousKey],
+    ["app-key-2", currentKey],
+  ]),
+);
+```
+
+Ship `app-key-2` and existing installs keep opening their `app-key-1`
+envelopes. Re-wrapping is **upgrade in place**, the same shape the v1 → v2
+envelope migration uses: `save()` always writes under the current
+`envelopeKeyId`, so the next write the engine makes — the `meshId` anchor on
+the next `connect()`, at the latest — re-wraps the record under `app-key-2` and
+records the new id. Nothing scans or rewrites storage eagerly.
+
+Retiring a previous key is therefore a product decision, not a deploy step. An
+install that never comes back keeps its envelope on the old id forever, and
+dropping that key from the map makes the credential unopenable — the user must
+re-pair. Keep a previous key for at least as long as you are willing to
+support a returning client.
+
+Two compatibility notes:
+
+- **v1 envelopes record no `keyId`.** The decrypt request for one carries the
+  provider's _current_ id, which is exactly the key a provider would have
+  returned before this field existed.
+- **`keyId` is optional, and `getKey`'s `request` is a second optional
+  parameter.** A provider written against the original
+  `getKey(purpose?)` signature — including `StaticEnvelopeKeyProvider` — keeps
+  compiling and keeps behaving identically; it simply ignores the extra
+  argument. Implement the parameter only when you need rotation.
+
+### What an app key actually buys
+
+Be precise about this, because the pattern is easy to oversell.
+
+**A bundled app key is public.** It ships in your JavaScript. An attacker
+downloads your bundle exactly the way every user does, and extracts the
+constant. There is no obfuscation that changes this — only the time to the
+first extraction. And the extraction is permanent and fleet-wide: one person
+pulling the constant out of your bundle removes the protection for your entire
+install base, not for one user. Rotating afterwards protects future envelopes;
+it does nothing for envelopes already harvested.
+
+**What it does buy is cost against bulk, opportunistic harvesting.** A
+commodity infostealer that scrapes `localStorage` across thousands of profiles
+gets nothing usable from yours without a per-application extraction step. That
+is a real and worthwhile increase in the attacker's unit cost. It is **not** a
+defense against an attacker who has decided to target your application
+specifically; for that attacker the app key is a few minutes of work, once.
+
+**A browser extension is not stopped by it.** It is true that an extension's
+content script runs in an isolated world and cannot read your page's JavaScript
+variables, so it cannot simply pluck the `CryptoKey` out of your closure. That
+is not the relevant path. An extension can fetch your bundle from your origin
+like any other client and extract the constant, or inject into the `MAIN` world
+and run in your page's own context. Your page's CSP does not constrain
+extensions. Treat "an extension is installed" as "the app key is available to
+the attacker".
+
+**A per-user, server-delivered app key is materially stronger**, and the
+difference is categorical rather than incremental:
+
+- it is **not public** — there is no artifact every user downloads that
+  contains it;
+- it is **revocable** — you stop serving it to a compromised account and that
+  account's stored envelopes stop opening;
+- it is **rate-limitable** — fetching it is an authenticated server call you
+  can throttle, log, and alert on;
+- it **does not generalise** — extracting one user's key gains nothing against
+  any other user.
+
+**And it protects the credential, not the local replica.** The envelope covers
+the mesh credential record only. The IndexedDB row store is plaintext
+regardless of which key provider you choose — see
+[Local store format and browser exposure](../../web/docs/local-store-format.md),
+Part 1. An attacker with a copy of the browser profile reads your rows, your
+outbox, and your change history without touching the envelope. What the app key
+contains is the **live sync capability**: the ability to keep syncing as that
+device, read future remote writes, and publish new ones. That is containment,
+not local confidentiality, and it is worth saying to your users in those terms.
+
+### The offline tension
+
+The strong form and the local-first requirement pull against each other, and
+there is no arrangement that satisfies both.
+
+A per-user, server-delivered app key is strong precisely because it is not
+resident on the device. But a local-first application must **cold-start
+offline**: a user opens the app on a plane, the engine needs the mesh
+credential to read and write the local replica, and the credential is inside an
+envelope whose key is on a server that cannot be reached. Making that work
+means caching the app key locally — which puts it back in the same browser
+profile as the credential it protects, available to whoever copies that
+profile.
+
+This is a product decision. Pick one deliberately and say which you picked:
+
+**Memory-only (strong; cannot cold-start offline).** Fetch the app key at
+sign-in, import it non-extractable, hold it in a module-scoped variable, never
+persist it. Every cold start requires the network. A reload while offline
+leaves the app unable to open the credential; the honest UX is a "sign in to
+continue" screen, not a silent failure — and definitely not a fallback that
+mints a fresh mesh identity. Suits applications where a session already implies
+connectivity.
+
+**Cached (weaker; cold-starts offline).** Persist the fetched key alongside the
+envelope. Against a full profile copy this collapses to roughly the bundled
+case: the attacker has the envelope and the key in the same place. It retains
+one advantage the bundled key never has — the cached value is still per-user
+and still revocable, so extracting it compromises one user, and a server-side
+revocation takes effect on the next refresh. Bound the damage with a short
+cache lifetime and a refresh on every successful online start: the shorter the
+window, the closer the cached mode sits to the memory-only mode.
+
+A middle position worth naming: cache the key but keep the _credential_ behind
+a second, device-held gate — a passkey via `WebAuthnEnvelopeKeyProvider`, or a
+passphrase via `PassphraseEnvelopeKeyProvider` (see
+[Passphrase envelope keys](../../web/docs/passphrase-envelope.md)). A profile
+copy then yields the cached app key but still not the credential, and the
+offline cold start is a biometric prompt rather than a network round trip.
+
 ## Storage layout
 
 ### `LocalStorageCredentialStore`

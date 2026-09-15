@@ -73,3 +73,23 @@ export {
   type StoredImageBlobUrl,
   type StoredImageMetadata,
 } from "./image.ts";
+
+export {
+  BrowserPassphraseKeyRecordStore,
+  MemoryPassphraseKeyRecordStore,
+  PassphraseEnvelopeKeyProvider,
+  PassphraseEnvelopeError,
+  PassphraseLockedError,
+  PassphraseNamespaceMismatchError,
+  InvalidPassphraseKeyRecordError,
+  MissingPassphraseKeyRecordError,
+  WrongPassphraseError,
+  DEFAULT_PASSPHRASE_IDLE_TIMEOUT_MS,
+  DEFAULT_PASSPHRASE_KDF_ITERATIONS,
+  MAXIMUM_PASSPHRASE_KDF_ITERATIONS,
+  MINIMUM_PASSPHRASE_KDF_ITERATIONS,
+  type PassphraseEnvelopeKeyProviderOptions,
+  type PassphraseKeyRecord,
+  type PassphraseKeyRecordStore,
+  type PassphraseRecordStorageLocation,
+} from "./passphrase-envelope.ts";

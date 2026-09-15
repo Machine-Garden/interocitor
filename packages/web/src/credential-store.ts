@@ -15,6 +15,12 @@ import {
   type WebAuthnAttachmentPreference,
   type WebAuthnBlobStoreOptions,
 } from "./webauthn.ts";
+import {
+  isGeneratedLocalDatabaseName,
+  UnstableCredentialNamespaceError,
+} from "./storage/local-database-name.ts";
+
+export { UnstableCredentialNamespaceError } from "./storage/local-database-name.ts";
 
 /**
  * Browser-facing credential store contract returned by
@@ -532,8 +538,8 @@ export class WebAuthnEnvelopeKeyProvider implements CredentialEnvelopeKeyProvide
  * Create a browser credential store.
  *
  * Forms:
- * - `createWebCredentialStore(dbName)` → localStorage
- * - `createWebCredentialStore(dbName, 'App Name')` → localStorage with passkey display name
+ * - `createWebCredentialStore(credentialNamespace)` → localStorage
+ * - `createWebCredentialStore(credentialNamespace, 'App Name')` → localStorage with passkey display name
  * - `{ storage: 'memory' }` → key lives in JS memory only
  * - `{ storage: 'sessionStorage' }` → key survives reloads in the same tab only
  * - `{ storage: 'passkey' }` → key lives only in WebAuthn largeBlob
@@ -541,19 +547,31 @@ export class WebAuthnEnvelopeKeyProvider implements CredentialEnvelopeKeyProvide
  * - `{ envelope: { store, keyProvider } }` → encrypted record from app/backend/custom storage
  *
  * The returned store always manages the Interocitor mesh credential record.
+ * `credentialNamespace` must identify the stable encryption domain. When using
+ * `createNamedLocalStore`, pass its `credentialNamespace`, never its rotatable
+ * `activeDatabaseName`. Generated physical names fail with
+ * {@link UnstableCredentialNamespaceError}.
+ *
  * Choose `storage: 'passkey'` when the whole record should live behind
  * WebAuthn. Choose `envelope` when the record may live elsewhere but unwrap
  * should be gated by a key provider such as {@link WebAuthnEnvelopeKeyProvider}.
  */
-export function createWebCredentialStore(dbName: string, displayName?: string): WebCredentialStore;
 export function createWebCredentialStore(
-  dbName: string,
+  credentialNamespace: string,
+  displayName?: string,
+): WebCredentialStore;
+export function createWebCredentialStore(
+  credentialNamespace: string,
   options: CreateWebCredentialStoreOptions,
 ): WebCredentialStore;
 export function createWebCredentialStore(
-  dbName: string,
+  credentialNamespace: string,
   displayNameOrOptions?: string | CreateWebCredentialStoreOptions,
 ): WebCredentialStore {
+  if (isGeneratedLocalDatabaseName(credentialNamespace)) {
+    throw new UnstableCredentialNamespaceError(credentialNamespace);
+  }
+
   const options: CreateWebCredentialStoreOptions =
     typeof displayNameOrOptions === "string"
       ? { displayName: displayNameOrOptions }
@@ -562,7 +580,7 @@ export function createWebCredentialStore(
   if (options.envelope) {
     return new NoopBiometricControls(
       new EnvelopedCredentialStore(
-        dbName,
+        credentialNamespace,
         options.envelope.store ?? options.envelope.storage ?? "localStorage",
         options.envelope.keyProvider,
       ),
@@ -571,12 +589,14 @@ export function createWebCredentialStore(
 
   switch (options.storage ?? "localStorage") {
     case "memory":
-      return new NoopBiometricControls(new MemoryCredentialStore(dbName, options.memory));
+      return new NoopBiometricControls(
+        new MemoryCredentialStore(credentialNamespace, options.memory),
+      );
     case "sessionStorage":
-      return new NoopBiometricControls(new SessionStorageCredentialStore(dbName));
+      return new NoopBiometricControls(new SessionStorageCredentialStore(credentialNamespace));
     case "passkey":
       return new NoopBiometricControls(
-        new WebAuthnCredentialStore(dbName, {
+        new WebAuthnCredentialStore(credentialNamespace, {
           rpId: options.rpId,
           displayName: options.displayName,
           authenticatorAttachment: options.authenticatorAttachment,
@@ -584,6 +604,6 @@ export function createWebCredentialStore(
         }),
       );
     case "localStorage":
-      return new NoopBiometricControls(new LocalStorageCredentialStore(dbName));
+      return new NoopBiometricControls(new LocalStorageCredentialStore(credentialNamespace));
   }
 }

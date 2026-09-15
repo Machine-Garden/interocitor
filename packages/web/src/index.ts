@@ -10,7 +10,9 @@ export {
 export {
   createNamedLocalStore,
   getActiveLocalDatabaseName,
+  isGeneratedLocalDatabaseName,
   rotateLocalDatabaseName,
+  type NamedLocalStore,
   type NamedLocalStoreOptions,
   type PointerStore,
 } from "./storage/named-local-store.ts";
@@ -50,6 +52,7 @@ export {
   StaticEnvelopeKeyProvider,
   WebAuthnCredentialStore,
   WebAuthnEnvelopeKeyProvider,
+  UnstableCredentialNamespaceError,
   createWebCredentialStore,
   type CreateWebCredentialStoreOptions,
   type CredentialEnvelopeKeyProvider,

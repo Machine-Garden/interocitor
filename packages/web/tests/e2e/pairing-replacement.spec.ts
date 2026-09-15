@@ -824,6 +824,147 @@ test("mixed-key remote reports the exact poisoned change without deleting local 
   }
 });
 
+test("named cache rotation preserves the encryption key across a WebKit reload", async ({
+  browser,
+}) => {
+  const remote = createWebDavRouteState();
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const baseName = `rotation-keeps-key-${crypto.randomUUID()}`;
+
+  try {
+    await attachWebDavRouteMock(context, remote, "/__rotation_keeps_key__");
+    await page.goto("/packages/web/tests/e2e/fixtures/harness-importmap.html");
+
+    const before = await page.evaluate(async (name) => {
+      const { Interocitor, PortablePassphraseKeySource } =
+        await import("/packages/core/dist/index.js");
+      const { WebDAVAdapter } = await import("/packages/core/dist/adapters/webdav.js");
+      const {
+        UnstableCredentialNamespaceError,
+        createNamedLocalStore,
+        createWebCredentialStore,
+        rotateLocalDatabaseName,
+      } = await import("/packages/web/dist/index.js");
+
+      const localStore = createNamedLocalStore({ baseName: name, openTimeoutMs: 2_000 });
+      const credentialStore = createWebCredentialStore(localStore.credentialNamespace);
+      const keySource = new PortablePassphraseKeySource({ credentialStore });
+      const engine = new Interocitor(
+        new WebDAVAdapter({
+          baseUrl: `${location.origin}/__rotation_keeps_key__`,
+          auth: { username: "u", password: "p" },
+        }),
+        {
+          dbName: localStore.credentialNamespace,
+          remotePath: "/RotatingMesh",
+          deviceId: "rotation_owner",
+          keySource,
+          localStore,
+          batchWindowMs: 0,
+          pollInterval: 600_000,
+        },
+      );
+      await engine.init();
+      await engine.connect();
+      await engine.put("tasks", "before-rotation", { title: "decrypt me after rotation" });
+      await engine.flush();
+      const portableKey = keySource.getPortableKey();
+      if (!portableKey) throw new Error("encrypted fixture produced no portable key");
+      const keyDigest = await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(portableKey),
+      );
+      const result = {
+        credentialNamespace: localStore.credentialNamespace,
+        physicalBefore: localStore.activeDatabaseName,
+        fingerprint: Array.from(new Uint8Array(keyDigest), (byte) =>
+          byte.toString(16).padStart(2, "0"),
+        ).join(""),
+      };
+      await engine.disconnect();
+
+      const rotation = rotateLocalDatabaseName(name);
+      let rejectedPhysicalNamespace = false;
+      try {
+        createWebCredentialStore(rotation.to);
+      } catch (error) {
+        rejectedPhysicalNamespace = error instanceof UnstableCredentialNamespaceError;
+      }
+      return { ...result, rotation, rejectedPhysicalNamespace };
+    }, baseName);
+
+    expect(before.credentialNamespace).toBe(baseName);
+    expect(before.physicalBefore).toBe(baseName);
+    expect(before.rotation.to).toMatch(new RegExp(`^${baseName}-v2-[0-9a-f]{16}$`));
+    expect(before.rejectedPhysicalNamespace).toBe(true);
+
+    await page.reload();
+
+    const after = await page.evaluate(async (name) => {
+      const { Interocitor, PortablePassphraseKeySource, readColumn } =
+        await import("/packages/core/dist/index.js");
+      const { WebDAVAdapter } = await import("/packages/core/dist/adapters/webdav.js");
+      const { createNamedLocalStore, createWebCredentialStore } =
+        await import("/packages/web/dist/index.js");
+
+      const localStore = createNamedLocalStore({ baseName: name, openTimeoutMs: 2_000 });
+      const credentialStore = createWebCredentialStore(localStore.credentialNamespace);
+      const keySource = new PortablePassphraseKeySource({ credentialStore });
+      const engine = new Interocitor(
+        new WebDAVAdapter({
+          baseUrl: `${location.origin}/__rotation_keeps_key__`,
+          auth: { username: "u", password: "p" },
+        }),
+        {
+          dbName: localStore.credentialNamespace,
+          remotePath: "/RotatingMesh",
+          deviceId: "rotation_owner",
+          keySource,
+          localStore,
+          pollInterval: 600_000,
+        },
+      );
+      const events: any[] = [];
+      engine.on((event) => events.push(event));
+      await engine.init();
+      await engine.connect();
+      const rows = await engine.query("tasks");
+      const portableKey = keySource.getPortableKey();
+      if (!portableKey) throw new Error("persisted portable key was not restored");
+      const keyDigest = await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(portableKey),
+      );
+      const result = {
+        credentialNamespace: localStore.credentialNamespace,
+        physicalAfter: localStore.activeDatabaseName,
+        fingerprint: Array.from(new Uint8Array(keyDigest), (byte) =>
+          byte.toString(16).padStart(2, "0"),
+        ).join(""),
+        titles: rows.map((row: any) => readColumn(row, "title")),
+        poisonCount: events.filter((event) => event.type === "remote:poisoned").length,
+        generatedCredentialRecord: localStorage.getItem(
+          `interocitor-creds:${localStore.activeDatabaseName}`,
+        ),
+      };
+      await engine.disconnect();
+      return result;
+    }, baseName);
+
+    expect(after).toEqual({
+      credentialNamespace: baseName,
+      physicalAfter: before.rotation.to,
+      fingerprint: before.fingerprint,
+      titles: ["decrypt me after rotation"],
+      poisonCount: 0,
+      generatedCredentialRecord: null,
+    });
+  } finally {
+    await context.close();
+  }
+});
+
 test("a stale persisted mesh anchor fails before credentials or IndexedDB are changed", async ({
   browser,
 }) => {

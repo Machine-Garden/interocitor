@@ -2,6 +2,10 @@
 
 import { MemoryLocalStore } from "@interocitor/core";
 import { IndexedDbLocalStore } from "./indexed-db-local-store.ts";
+import {
+  isGeneratedLocalDatabaseName,
+  UnstableCredentialNamespaceError,
+} from "./local-database-name.ts";
 import { createResilientLocalStore } from "./resilient-store.ts";
 import type { LocalStore, DatabaseSchemaDefinition } from "@interocitor/core";
 import type { LocalStoreDegradationInfo, LocalStoreDegradedHook } from "./resilient-store.ts";
@@ -43,6 +47,18 @@ export interface NamedLocalStoreOptions {
   onRotated?: (info: { from: string; to: string; reason: string }) => void;
 }
 
+/**
+ * A rotatable local cache with a stable encryption-domain identity.
+ *
+ * `credentialNamespace` is safe to pass to the engine and credential stores.
+ * `activeDatabaseName` is the current physical IndexedDB generation and is
+ * exposed for diagnostics and exact maintenance only.
+ */
+export interface NamedLocalStore extends LocalStore {
+  readonly credentialNamespace: string;
+  readonly activeDatabaseName: string;
+}
+
 export interface PointerStore {
   get(key: string): string | null;
   set(key: string, value: string): void;
@@ -82,6 +98,8 @@ function defaultPointerStore(): PointerStore {
 const POINTER_PREFIX = "interocitor:dbName:";
 const VERSION_SUFFIX = /^-v(\d+)(?:-([0-9a-f]+))?$/;
 
+export { isGeneratedLocalDatabaseName } from "./local-database-name.ts";
+
 function parseVersion(name: string, baseName: string): number {
   if (name === baseName) return 1;
   const tail = name.slice(baseName.length);
@@ -108,8 +126,8 @@ function pointerKey(baseName: string): string {
  * Advance a logical store to a fresh physical IndexedDB generation.
  *
  * Call only after disconnecting the current engine. This does not delete the
- * previous database or clear credentials; callers replacing an encryption
- * domain must clear or isolate the credential store separately.
+ * previous database or change the encryption domain. Credentials remain
+ * anchored to the stable `baseName`, never to the returned physical name.
  */
 export function rotateLocalDatabaseName(
   baseName: string,
@@ -134,7 +152,11 @@ export function rotateLocalDatabaseName(
  * The returned store is itself wrapped by `createResilientLocalStore`, so
  * the never-stuck contract still holds for the freshly named DB.
  */
-export function createNamedLocalStore(options: NamedLocalStoreOptions): LocalStore {
+export function createNamedLocalStore(options: NamedLocalStoreOptions): NamedLocalStore {
+  if (isGeneratedLocalDatabaseName(options.baseName)) {
+    throw new UnstableCredentialNamespaceError(options.baseName);
+  }
+
   const pointer = options.pointerStore ?? defaultPointerStore();
   const slot = pointerKey(options.baseName);
 
@@ -181,6 +203,10 @@ export function createNamedLocalStore(options: NamedLocalStoreOptions): LocalSto
   });
 
   return {
+    credentialNamespace: options.baseName,
+    get activeDatabaseName() {
+      return activeName;
+    },
     withLock: (name, operation) => inner.withLock(name, operation),
     async open() {
       await inner.open();
@@ -215,7 +241,9 @@ export function createNamedLocalStore(options: NamedLocalStoreOptions): LocalSto
 
 /**
  * Read the current active DB name for a base name, without opening anything.
- * Useful for diagnostics, banners, or "reset database" UIs.
+ * Useful for diagnostics, banners, or exact reset UIs. This physical name is
+ * not a credential namespace; use `NamedLocalStore.credentialNamespace` for
+ * credential stores and the engine's logical `dbName`.
  */
 export function getActiveLocalDatabaseName(
   baseName: string,

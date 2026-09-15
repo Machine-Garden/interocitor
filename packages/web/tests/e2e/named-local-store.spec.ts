@@ -41,6 +41,8 @@ test.describe("createNamedLocalStore", () => {
       const finalName = getActiveLocalDatabaseName("IDBRotationTest", pointer);
 
       return {
+        credentialNamespace: store.credentialNamespace,
+        physicalDatabaseName: store.activeDatabaseName,
         initialName,
         finalName,
         rotations,
@@ -51,6 +53,8 @@ test.describe("createNamedLocalStore", () => {
 
     expect(result.initialName).toBe("IDBRotationTest");
     expect(result.finalName).toBe("IDBRotationTest");
+    expect(result.credentialNamespace).toBe("IDBRotationTest");
+    expect(result.physicalDatabaseName).toBe("IDBRotationTest");
     expect(result.meta).toBe("healthy");
     expect(result.rotations).toEqual([]);
     expect(result.degradations).toEqual([]);
@@ -124,6 +128,30 @@ test.describe("createNamedLocalStore", () => {
 
     expect(result.from).toBe("Household-vault-v99");
     expect(result.to).toMatch(/^Household-v2-[0-9a-f]{16}$/);
+  });
+
+  test("rejects a physical generation wherever stable credential identity is required", async ({
+    page,
+  }) => {
+    const result = await page.evaluate(async () => {
+      const { UnstableCredentialNamespaceError, createNamedLocalStore, createWebCredentialStore } =
+        await import("/packages/web/dist/index.js");
+      const physicalName = "Household-v2-0123456789abcdef";
+      const errorCodes: string[] = [];
+      for (const create of [
+        () => createNamedLocalStore({ baseName: physicalName }),
+        () => createWebCredentialStore(physicalName),
+      ]) {
+        try {
+          create();
+        } catch (error) {
+          if (error instanceof UnstableCredentialNamespaceError) errorCodes.push(error.code);
+        }
+      }
+      return errorCodes;
+    });
+
+    expect(result).toEqual(["UNSTABLE_CREDENTIAL_NAMESPACE", "UNSTABLE_CREDENTIAL_NAMESPACE"]);
   });
 
   test("opens a rotated generation without versionchanging or deleting a live old page", async ({

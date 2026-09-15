@@ -184,6 +184,7 @@ swallowed so the engine can keep opening.
 ```ts
 import {
   createNamedLocalStore,
+  createWebCredentialStore,
   getActiveLocalDatabaseName,
   rotateLocalDatabaseName,
 } from "@interocitor/web";
@@ -191,11 +192,12 @@ import {
 const localStore = createNamedLocalStore({
   baseName: "case-vault",
 });
+const credentialStore = createWebCredentialStore(localStore.credentialNamespace);
 
 console.log(getActiveLocalDatabaseName("case-vault"));
 
-// After disconnecting every engine instance, deliberately move a replacement
-// mesh to a fresh physical database without waiting for blocked deletion.
+// After disconnecting every engine instance, deliberately move the local cache
+// to a fresh physical database without waiting for blocked deletion.
 rotateLocalDatabaseName("case-vault");
 const replacementStore = createNamedLocalStore({ baseName: "case-vault" });
 ```
@@ -207,13 +209,31 @@ name such as `baseName-v2-4f3a...` for the next open. The random suffix keeps
 two tabs that rotate concurrently from selecting the same physical database.
 Calling a reset helper by itself does not rotate that pointer.
 
-`rotateLocalDatabaseName` explicitly advances the pointer without deleting the
-old database, so another tab or a delayed WebKit close cannot block creation of
-the replacement encryption domain. Disconnect first, and clear or isolate the
-old credential store separately. Named stores do not automatically delete old
-generations: deletion sends `versionchange` to live sibling tabs and a timed-out
-IndexedDB deletion cannot be cancelled. Delete an exact old physical name only
-in an application-confirmed quiescent maintenance flow.
+`baseName` is the stable encryption-domain and credential namespace.
+`localStore.credentialNamespace` therefore remains unchanged across automatic
+and explicit cache rotations. Use it for `createWebCredentialStore(...)` and
+the engine's logical `dbName`. The active physical name returned by
+`getActiveLocalDatabaseName(...)` is diagnostic/reset data only. Passing a
+name matching the reserved generated suffix (`-v<counter>-<16 hex digits>`) as a
+`baseName` or to `createWebCredentialStore(...)` throws
+`UnstableCredentialNamespaceError`; otherwise a reload could mint a new key and
+write undecryptable changes into the existing mesh.
+
+`rotateLocalDatabaseName` explicitly advances the cache pointer without
+deleting the old database, so another tab or a delayed WebKit close cannot
+block creation of the replacement cache. It does not replace or clear the
+encryption domain. Disconnect first. Named stores do not automatically delete
+old generations: deletion sends `versionchange` to live sibling tabs and a
+timed-out IndexedDB deletion cannot be cancelled. Delete an exact old physical
+name only in an application-confirmed quiescent maintenance flow.
+
+If an older integration already used a generated physical name for credential
+storage, disconnect and quiesce every writer before migrating it. First compare
+that record's key fingerprint with a known healthy device or otherwise prove it
+decrypts the established mesh. Only then copy it into the stable `baseName`
+credential namespace and verify a cold reconnect before removing the old
+record. Do not migrate an accidentally generated key from a poisoned writer,
+and do not delete the whole remote mesh or unrelated local databases.
 
 ### Local reset
 

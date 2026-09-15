@@ -61,7 +61,7 @@ implementation rather than select a factory storage mode.
 | `MemoryCredentialStore` / `{ storage: 'memory' }`                 | JS memory                                                                                         | None                                       | Current engine/process only                            |
 | `WebAuthnCredentialStore` / `{ storage: 'passkey' }`              | WebAuthn `largeBlob` / OS keychain                                                                | Touch ID / Face ID / Windows Hello         | Passkey/platform credential lifetime                   |
 | `EnvelopedCredentialStore` / `{ envelope: ... }`                  | AES-GCM encrypted record in memory, browser storage, backend, or custom `CredentialEnvelopeStore` | Depends on `CredentialEnvelopeKeyProvider` | Envelope-store lifetime plus envelope-key availability |
-| default `createWebCredentialStore(dbName)`                        | plaintext `localStorage` JSON                                                                     | None                                       | Same origin until browser data is cleared              |
+| default `createWebCredentialStore(credentialNamespace)`           | plaintext `localStorage` JSON                                                                     | None                                       | Same origin until browser data is cleared              |
 
 Core never wires a browser default automatically. Runtime code constructs a
 store explicitly when it builds a `MeshKeySource`, for example to:
@@ -79,7 +79,11 @@ store explicitly when it builds a `MeshKeySource`, for example to:
 const credentialStore = createWebCredentialStore("case-vault");
 ```
 
-Stores the credential record in `localStorage`.
+Stores the credential record in `localStorage`. The argument is the stable
+encryption-domain namespace, not necessarily a physical database name. With
+`createNamedLocalStore`, pass `localStore.credentialNamespace`; never pass its
+rotatable `activeDatabaseName` or the result of
+`getActiveLocalDatabaseName(...)`. Cache rotation must not change key custody.
 
 ### Memory-only key material
 

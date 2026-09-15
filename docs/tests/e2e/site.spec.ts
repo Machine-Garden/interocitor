@@ -315,3 +315,100 @@ test("live examples remain reachable from the SPA", async ({ page }) => {
     await expect(page.locator(".site-map-footer"), route).toBeVisible();
   }
 });
+
+test("agent readers get llms.txt and the Markdown behind every page", async ({ request }) => {
+  const slugs = [
+    "why",
+    "how-it-works",
+    "storage",
+    "security",
+    "compaction",
+    "tainted-files",
+    "applications",
+    "integrations",
+    "trust",
+    "data-boundaries",
+    "mailbox",
+    "auth",
+    "automation",
+    "qa",
+    "dictionary",
+    "flows",
+  ];
+
+  const listing = await request.get("/llms.txt");
+  expect(listing.status()).toBe(200);
+  expect(listing.headers()["content-type"]).toContain("text/plain");
+  const index = await listing.text();
+  expect(index.startsWith("# Interocitor\n")).toBe(true);
+  // A line of this file may be read far from the host that served it.
+  expect(index).toContain("Site: https://interocitor.dev/");
+  for (const section of [
+    "## What to know before answering about Interocitor",
+    "## Learn",
+    "## Plan",
+    "## Reference",
+    "## Packages",
+    "## Runnable examples",
+  ]) {
+    expect(index, section).toContain(`\n${section}\n`);
+  }
+
+  // A page URL in the index would send a Markdown reader back into HTML.
+  const pageLink = new RegExp(String.raw`\]\(https?://[^)]*/(?:${slugs.join("|")})\)`);
+  expect(index).not.toMatch(pageLink);
+
+  for (const slug of slugs) {
+    expect(index, slug).toContain(`(https://interocitor.dev/${slug}/index.md):`);
+
+    const response = await request.get(`/${slug}/index.md`);
+    expect(response.status(), slug).toBe(200);
+    expect(response.headers()["content-type"], slug).toContain("text/markdown");
+
+    const source = await response.text();
+    expect(source.startsWith("# "), slug).toBe(true);
+    expect(source, slug).toContain("\n## ");
+    // Cross-references stay in Markdown rather than falling back to the page.
+    expect(source, slug).not.toMatch(
+      new RegExp(String.raw`\]\(/(?:${slugs.join("|")})(?:#[^)]*)?\)`),
+    );
+    expect(response.headers().link, slug).toContain(
+      '</llms.txt>; rel="describedby"; type="text/markdown"',
+    );
+  }
+
+  const missing = await request.get("/not-a-documented-page/index.md");
+  expect(missing.status()).toBe(404);
+});
+
+test("every page says where its machine-readable description lives", async ({ request }) => {
+  const describedby = '</llms.txt>; rel="describedby"; type="text/markdown"';
+
+  const landing = await request.get("/");
+  expect(landing.headers().link).toContain(describedby);
+  // The landing page is not a documentation page and has no Markdown twin.
+  expect(landing.headers().link).not.toContain('rel="alternate"');
+  expect(await landing.text()).toContain(
+    '<link rel="describedby" href="/llms.txt" type="text/markdown"/>',
+  );
+
+  for (const slug of ["storage", "qa", "automation"]) {
+    const page = await request.get(`/${slug}`);
+    const link = page.headers().link;
+    expect(link, slug).toContain(describedby);
+    expect(link, slug).toContain(`</${slug}/index.md>; rel="alternate"; type="text/markdown"`);
+
+    const html = await page.text();
+    expect(html, slug).toContain(
+      `<link rel="alternate" type="text/markdown" href="/${slug}/index.md"/>`,
+    );
+    // And in words, for a reader who would rather click than parse.
+    expect(html, slug).toContain(`<a href="/${slug}/index.md">Read this page as Markdown</a>`);
+    expect(html, slug).toContain('<a href="/llms.txt">llms.txt</a>');
+  }
+
+  // A standalone demo still names the index; it has no Markdown twin either.
+  const demo = await request.get("/examples/todomvc/");
+  expect(demo.headers().link).toContain(describedby);
+  expect(demo.headers().link).not.toContain('rel="alternate"');
+});

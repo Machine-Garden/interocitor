@@ -3,6 +3,7 @@ import { Children, isValidElement, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { PageRecord } from "@/lib/content";
+import { markdownPath } from "@/lib/markdown";
 import { MermaidDiagram } from "@/components/mermaid-diagram";
 
 function heading(children: ReactNode): { id: string | undefined; children: ReactNode } {
@@ -97,7 +98,18 @@ export function DocsArticle({ page }: { page: PageRecord }) {
 
       <div className="docs-reading-grid">
         <main id="main" className="docs-content">
+          {/*
+            The same document in the form a machine reader would rather have. The
+            footer below says it in words for a reader who would rather have it too.
+          */}
+          <link rel="alternate" type="text/markdown" href={markdownPath(page.slug)} />
           <Markdown page={page} />
+
+          <footer className="docs-source">
+            <a href={markdownPath(page.slug)}>Read this page as Markdown</a>
+            <span aria-hidden="true">·</span>
+            <a href="/llms.txt">llms.txt</a>
+          </footer>
         </main>
 
         <aside className="docs-outline">

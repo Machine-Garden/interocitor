@@ -341,6 +341,28 @@
   font-size: 0.9rem;
 }
 
+.docs-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 56px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(10, 18, 14, 0.16);
+  color: #8b958f;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
+
+.docs-source a {
+  color: #65716b;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.docs-source a:hover {
+  color: #0a6042;
+}
+
 .docs-footer {
   width: min(calc(100% - 48px), 1240px);
   margin-inline: auto;

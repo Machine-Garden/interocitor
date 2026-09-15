@@ -42,6 +42,38 @@ function withSecurityHeaders(response: Response): Response {
   });
 }
 
+/**
+ * The same `describedby` and `alternate` links the documents carry in their
+ * heads, said at the HTTP level as well.
+ *
+ * A reader that only issues `HEAD`, or that takes the response without parsing
+ * the body, still learns where the machine-readable index is and that this page
+ * has a Markdown twin — without spending a request to find out.
+ *
+ * The twin's path needs no table of slugs: `/:slug` and `/:slug/index.md` are
+ * the same route space, so a one-segment path that rendered a page has its
+ * Markdown at that path plus `/index.md`, and the two cannot drift apart.
+ */
+function withDescriptionLinks(response: Response, pathname: string): Response {
+  const type = response.headers.get("content-type") ?? "";
+  const html = type.startsWith("text/html");
+  if (!html && !type.startsWith("text/markdown")) return response;
+  if (response.status !== 200) return response;
+
+  const links = ['</llms.txt>; rel="describedby"; type="text/markdown"'];
+  if (html && /^\/[a-z0-9-]+$/.test(pathname)) {
+    links.push(`<${pathname}/index.md>; rel="alternate"; type="text/markdown"`);
+  }
+
+  const headers = new Headers(response.headers);
+  headers.set("link", links.join(", "));
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 const worker = {
   async fetch(request: Request, env: Env, context: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -51,7 +83,9 @@ const worker = {
     }
 
     if (/^\/examples\/(todomvc|chat|board|family-locator)\//.test(url.pathname)) {
-      return withSecurityHeaders(await env.ASSETS.fetch(request));
+      return withSecurityHeaders(
+        withDescriptionLinks(await env.ASSETS.fetch(request), url.pathname),
+      );
     }
 
     if (url.pathname === "/_vinext/image") {
@@ -70,7 +104,9 @@ const worker = {
       );
     }
 
-    return withSecurityHeaders(await handler.fetch(request, env, context));
+    return withSecurityHeaders(
+      withDescriptionLinks(await handler.fetch(request, env, context), url.pathname),
+    );
   },
 };
 

@@ -77,7 +77,8 @@ yarn test:e2e:docs:site
 `yarn check:docs:site` type-checks the application. The build emits the
 Cloudflare Worker-compatible Sites artifact. The browser suite checks the
 landing-page contract, Markdown routes, client-side navigation, narrow layouts,
-security headers, redirects, metadata, and live-demo reachability.
+security headers, redirects, metadata, the agent index and Markdown sources, and
+live-demo reachability.
 
 ## Stable public routes
 
@@ -104,6 +105,36 @@ Legacy `.html` URLs redirect to their clean route. Short routes such as `/web`,
 `/workers`, `/mesh-access`, `/recovery`, and `/security` redirect to the
 corresponding canonical repository documentation.
 
+## Readers that take Markdown
+
+Every route in the table above also serves the Markdown it is rendered from, at
+the same path plus `/index.md`. The document carries its front-matter title and
+description, then its lede and body; the kicker, outline, and boundary strip
+stay behind as page chrome. Cross-references are repointed at the Markdown of
+the page they name, so a reader following the text stays in the source.
+
+`/llms.txt` is the index for those readers. It states the boundaries an answer
+about Interocitor has to get right — no server holds readable data, metadata and
+availability are outside the encryption boundary, the mesh key is the whole
+trust boundary, every endpoint holds the entire mesh, and lost key material is
+lost data — and then lists the documentation in the sidebar's reading order,
+pointing at each page's Markdown. Its page entries, groups, and descriptions are
+generated from `site/lib/content.ts`; only the prose is written by hand, so a
+new page joins the index by being added there. Its URLs are absolute against
+`https://interocitor.dev`, because a single line of this file may be quoted into
+a context that has no idea which host served it and must still resolve.
+
+Neither file is worth much if it has to be guessed at, so every response says
+where it is. Each page carries `<link rel="describedby" href="/llms.txt">` in
+its head and a documentation page adds `<link rel="alternate"
+type="text/markdown">` pointing at its own twin; the Worker repeats both as an
+HTTP `Link:` header, so a reader that only issues `HEAD`, or that never parses
+the body, learns the same thing without a second request. A short row at the
+foot of each article says it in words as well. The links declare
+`type="text/markdown"` because that is the format; `/llms.txt` is nonetheless
+served as `text/plain`, so opening it in a browser tab reads it instead of
+downloading it.
+
 ## Runnable examples
 
 The live examples under `examples/` remain standalone browser applications:
@@ -127,5 +158,10 @@ withholding, deletion, and rollback remain observable or possible.
 
 Sites configuration lives in `site/.openai/hosting.json`. A publication may
 advertise a canonical production URL only after it resolves, serves valid TLS,
-and passes an anonymous link crawl. Keep canonical URL metadata absent until
-those conditions hold.
+and passes an anonymous link crawl. `https://interocitor.dev` now meets those
+conditions and is the canonical origin `/llms.txt` names.
+
+`robots.txt` is served by Cloudflare rather than from this repository, and its
+managed block currently disallows ClaudeBot, GPTBot, CCBot, Google-Extended and
+their peers. The agent index describes the site for readers that are allowed to
+take it; changing who is allowed is a Cloudflare setting, not a code change.

@@ -12,6 +12,7 @@ import {
   keyToPassphrase,
   passphraseToKey,
 } from "../dist/crypto/encryption.js";
+import { Interocitor, MemoryLocalStore } from "../dist/index.js";
 import {
   decodeStoredFrame,
   deriveFileGuard,
@@ -219,4 +220,42 @@ test("pairing credentials carry the portable string, not a CryptoKey", async () 
 
   assert.equal(snapshot.passphrase, portableKey);
   assert.equal(typeof snapshot.passphrase, "string");
+});
+
+// ─── The engine's own hot path ────────────────────────────────────────
+
+test("a mesh created from scratch holds a non-extractable key", async () => {
+  // The branch under test is the one that mints a key because the key source
+  // had none: previously `generateKey()` + `keyToPassphrase()`, which needed
+  // an extractable key purely to read back the bytes it had just generated.
+  const source = {
+    credentialPersistence: "none",
+    async load() {
+      return { encrypted: true, key: null, portableKey: null };
+    },
+    async persist() {},
+    async clear() {},
+  };
+
+  const engine = new Interocitor({
+    dbName: "mesh-key-extractability",
+    deviceId: "device_fresh",
+    localStore: new MemoryLocalStore(),
+    keySource: source,
+    batchWindowMs: 0,
+    autoCompact: false,
+  });
+  await engine.init();
+
+  const key = engine.encryptionKey;
+  assert.ok(key instanceof CryptoKey, "the engine minted a mesh key");
+  assert.equal(key.extractable, false);
+  await assert.rejects(() => crypto.subtle.exportKey("raw", key), /InvalidAccessError|not extractable/);
+
+  // Non-extractability costs the mesh nothing: the portable form is produced
+  // alongside the key, so the mesh is still shareable and recoverable.
+  assert.equal(typeof engine.passphrase, "string");
+  const rejoined = await passphraseToKey(engine.passphrase);
+  const sealed = await encryptBytes(key, encoder.encode("fresh mesh"));
+  assert.equal(new TextDecoder().decode(await decryptBytes(rejoined, sealed)), "fresh mesh");
 });

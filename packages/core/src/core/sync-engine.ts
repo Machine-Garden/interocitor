@@ -66,8 +66,7 @@ import { loadOrCreateManifest, upsertDeviceMetadata } from "./manifest.ts";
 import {
   decryptBytes,
   encryptBytes,
-  generateKey,
-  keyToPassphrase,
+  generateMeshKeyMaterial,
   passphraseToKey,
 } from "../crypto/encryption.ts";
 import { MeshCredentialAccessError } from "../crypto/key-source.ts";
@@ -1877,9 +1876,9 @@ export class Interocitor<
         throw new Error("InterocitorReader requires the existing mesh key; it never generates one");
       }
       if (!this.encryptionKey && this.encrypted) {
-        const key = await generateKey();
+        const { key, portableKey } = await generateMeshKeyMaterial();
         this.encryptionKey = key;
-        this.passphrase = await keyToPassphrase(key);
+        this.passphrase = portableKey;
       }
       return;
     }

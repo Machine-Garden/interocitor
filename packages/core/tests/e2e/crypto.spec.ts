@@ -52,7 +52,9 @@ test.describe("keyToPassphrase / passphraseToKey", () => {
         await import("/packages/core/dist/crypto/keys.js");
       const original = await generateKey();
       const passphrase = await keyToPassphrase(original);
-      const restored = await passphraseToKey(passphrase);
+      // `{ extractable: true }` only so the test can compare bytes; the
+      // default import is non-extractable.
+      const restored = await passphraseToKey(passphrase, { extractable: true });
 
       const rawOrig = await exportKeyRaw(original);
       const rawRestored = await exportKeyRaw(restored);
@@ -84,11 +86,76 @@ test.describe("keyToPassphrase / passphraseToKey", () => {
       const key = await generateKey();
       const passphrase = await keyToPassphrase(key);
       const padded = `  ${passphrase}  `;
-      const restored = await passphraseToKey(padded);
+      const restored = await passphraseToKey(padded, { extractable: true });
       return { match: toHex(await exportKeyRaw(key)) === toHex(await exportKeyRaw(restored)) };
     });
 
     expect(result.match).toBe(true);
+  });
+});
+
+// ─── Extractability ──────────────────────────────────────────────────
+
+test.describe("mesh key extractability", () => {
+  test("browser WebCrypto refuses to export an imported mesh key", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { generateKey, keyToPassphrase, passphraseToKey, importKeyRaw } =
+        await import("/packages/core/dist/crypto/keys.js");
+      const portableKey = await keyToPassphrase(await generateKey());
+      const fromPassphrase = await passphraseToKey(portableKey);
+      const fromRaw = await importKeyRaw(new Uint8Array(32).fill(4));
+
+      const rejects = async (fn: () => Promise<unknown>) => {
+        try {
+          await fn();
+          return false;
+        } catch {
+          return true;
+        }
+      };
+
+      return {
+        passphraseExtractable: fromPassphrase.extractable,
+        rawExtractable: fromRaw.extractable,
+        passphraseExportRejects: await rejects(() =>
+          crypto.subtle.exportKey("raw", fromPassphrase),
+        ),
+        rawExportRejects: await rejects(() => crypto.subtle.exportKey("raw", fromRaw)),
+        optInExtractable: (await importKeyRaw(new Uint8Array(32).fill(4), { extractable: true }))
+          .extractable,
+      };
+    });
+
+    expect(result.passphraseExtractable).toBe(false);
+    expect(result.rawExtractable).toBe(false);
+    expect(result.passphraseExportRejects).toBe(true);
+    expect(result.rawExportRejects).toBe(true);
+    expect(result.optInExtractable).toBe(true);
+  });
+
+  test("a non-extractable key still encrypts, decrypts, and hides file paths", async ({ page }) => {
+    const result = await page.evaluate(async () => {
+      const { importKeyRaw } = await import("/packages/core/dist/crypto/keys.js");
+      const { encryptEntry, decryptEntry } =
+        await import("/packages/core/dist/crypto/encryption.js");
+      const { deriveFilePathKey, hideFilePath } =
+        await import("/packages/core/dist/core/stored-file.js");
+      const raw = new Uint8Array(32).fill(9);
+      const locked = await importKeyRaw(raw);
+      const open = await importKeyRaw(raw, { extractable: true });
+
+      return {
+        roundTrip: await decryptEntry(locked, await encryptEntry(locked, "secret")),
+        crossOpen: await decryptEntry(open, await encryptEntry(locked, "secret")),
+        lockedName: await hideFilePath(await deriveFilePathKey(locked), "a/b.txt"),
+        openName: await hideFilePath(await deriveFilePathKey(open), "a/b.txt"),
+      };
+    });
+
+    expect(result.roundTrip).toBe("secret");
+    expect(result.crossOpen).toBe("secret");
+    // The remote object name must not depend on how the key was imported.
+    expect(result.lockedName).toBe(result.openName);
   });
 });
 
@@ -110,7 +177,9 @@ test.describe("keyToShareUrl / keyFromFragment", () => {
       const extractedRaw = keyFromFragment(url.split("#")[1]);
       if (!extractedRaw) return { match: false, url };
 
-      const restored = await importKeyRaw(extractedRaw);
+      // `{ extractable: true }` only so the test can compare bytes; a real
+      // join would import the fragment's key with the safe default.
+      const restored = await importKeyRaw(extractedRaw, { extractable: true });
       const rawRestored = await exportKeyRaw(restored);
 
       return {

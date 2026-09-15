@@ -87,33 +87,178 @@ function base58Decode(str: string): Uint8Array {
 
 // ─── Key lifecycle ───────────────────────────────────────────────────
 
-/** Generate a new 256-bit AES-GCM key. */
-export async function generateKey(): Promise<CryptoKey> {
-  return crypto.subtle.generateKey(
-    { name: "AES-GCM", length: 256 },
-    true, // extractable for export/transfer
-    ["encrypt", "decrypt"],
-  );
+/**
+ * How a mesh key enters Web Crypto.
+ *
+ * `extractable: false` — the default for {@link importKeyRaw}, and so for
+ * {@link passphraseToKey} — means `crypto.subtle.exportKey` rejects for the
+ * resulting `CryptoKey`. Page script that reaches the key object (an extension
+ * escalated into the MAIN world, a compromised first-party dependency) can
+ * still encrypt and decrypt with it while the tab is open, but cannot copy the
+ * raw bytes out for later or offline use. Mesh key bytes are a permanent
+ * read-and-write capability over the whole mesh, so that is the difference
+ * between a session-scoped compromise and a permanent one.
+ *
+ * Pass `extractable: true` only where the bytes genuinely have to come back
+ * out of the `CryptoKey` itself. Almost nothing does: the base58 portable key
+ * is retained separately by every key source, derivations go through the HKDF
+ * twin described below, and {@link generateMeshKeyMaterial} hands back the
+ * portable form alongside the key.
+ */
+export interface MeshKeyImportOptions {
+  /** Default `false` on import, `true` on {@link generateKey}. */
+  extractable?: boolean;
 }
 
-/** Export key to raw bytes. */
+/**
+ * HKDF input-keying-material twin for every mesh key this module imports.
+ *
+ * An AES-GCM `CryptoKey` cannot itself be HKDF input: Web Crypto rejects it as
+ * a `deriveKey` base key, and AES-GCM keys cannot carry the `deriveKey` usage
+ * at all. Until now the only way to key a derivation off the mesh key was
+ * `exportKey` then re-import as HKDF — precisely the extractability this
+ * module exists to remove. So each import registers a second, independent view
+ * of the same 32 bytes: an HKDF base key, handed out by
+ * {@link meshKeyDerivationBase}.
+ *
+ * Holding it leaks nothing. Web Crypto forbids extractable HKDF keys outright
+ * (`importKey` throws `SyntaxError`), so the twin is as opaque as the AES-GCM
+ * key beside it, and this registry is module-private and weakly keyed, so it
+ * neither exposes the twin nor pins the mesh key in memory.
+ */
+const derivationTwins = new WeakMap<CryptoKey, CryptoKey>();
+
+/**
+ * Generate a new 256-bit AES-GCM key.
+ *
+ * Unlike {@link importKeyRaw}, this still defaults to `extractable: true`: its
+ * callers generate a key precisely in order to read the bytes back out as the
+ * portable base58 form and persist them. {@link generateMeshKeyMaterial} is
+ * the better shape for that — it produces both halves at once and never needs
+ * an extractable key — and `generateKey({ extractable: false })` is here for
+ * callers that want only the key.
+ */
+export async function generateKey(options: MeshKeyImportOptions = {}): Promise<CryptoKey> {
+  if (options.extractable ?? true) {
+    return crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, [
+      "encrypt",
+      "decrypt",
+    ]);
+  }
+  const raw = crypto.getRandomValues(new Uint8Array(KEY_BYTES));
+  try {
+    return await importKeyRaw(raw);
+  } finally {
+    raw.fill(0);
+  }
+}
+
+/**
+ * Mint a fresh mesh key and its portable form together.
+ *
+ * The raw bytes exist only inside this call: the base58 string is encoded from
+ * the same buffer that seeds the import, and the buffer is zeroed before the
+ * function returns. The key itself is non-extractable, so the portable string
+ * is the only copy of the material, held where the caller decides.
+ *
+ * This is the shape a key source wants at first run. `generateKey()` followed
+ * by `keyToPassphrase()` needs an extractable key purely to read back bytes
+ * the generator already had in hand.
+ */
+export async function generateMeshKeyMaterial(): Promise<{
+  key: CryptoKey;
+  portableKey: string;
+}> {
+  const raw = crypto.getRandomValues(new Uint8Array(KEY_BYTES));
+  try {
+    return { key: await importKeyRaw(raw), portableKey: base58Encode(raw) };
+  } finally {
+    raw.fill(0);
+  }
+}
+
+/**
+ * Export key to raw bytes.
+ *
+ * Rejects with `InvalidAccessError` for a non-extractable key — which is every
+ * key {@link importKeyRaw} and {@link passphraseToKey} produce unless the
+ * caller opted in. That is the point; read the material from whatever base58
+ * or raw value you already retained instead.
+ */
 export async function exportKeyRaw(key: CryptoKey): Promise<Uint8Array> {
   const buffer = await crypto.subtle.exportKey("raw", key);
   return new Uint8Array(buffer);
 }
 
-/** Import key from raw bytes. */
-export async function importKeyRaw(raw: Uint8Array): Promise<CryptoKey> {
-  return crypto.subtle.importKey("raw", raw.buffer as ArrayBuffer, { name: "AES-GCM" }, true, [
-    "encrypt",
-    "decrypt",
+/**
+ * Import key from raw bytes. Non-extractable unless asked otherwise; see
+ * {@link MeshKeyImportOptions}.
+ */
+export async function importKeyRaw(
+  raw: Uint8Array,
+  options: MeshKeyImportOptions = {},
+): Promise<CryptoKey> {
+  const material = asBufferSource(raw);
+  // Both imports copy their bytes synchronously, so the caller may zero the
+  // buffer as soon as this returns.
+  const [key, twin] = await Promise.all([
+    crypto.subtle.importKey("raw", material, { name: "AES-GCM" }, options.extractable ?? false, [
+      "encrypt",
+      "decrypt",
+    ]),
+    crypto.subtle.importKey("raw", material, "HKDF", false, ["deriveKey"]),
   ]);
+  derivationTwins.set(key, twin);
+  return key;
 }
 
-/** Export key as a base58 string (~43 chars, human-transferable). */
+/**
+ * The HKDF base key to hang a derivation off a mesh or file-seal key.
+ *
+ * Returns the twin registered at import when this module minted the key, so a
+ * non-extractable mesh key can still key a derivation. Falls back to
+ * export-and-reimport for a `CryptoKey` this module did not mint — an
+ * application-supplied file seal key, or one from a second copy of this
+ * module. That fallback is exactly what every caller did before the twin
+ * existed, and HKDF over the same 32 bytes is byte-identical either way, so
+ * object names and seal guards are unchanged by which path a key takes.
+ */
+export async function meshKeyDerivationBase(key: CryptoKey): Promise<CryptoKey> {
+  const twin = derivationTwins.get(key);
+  if (twin) return twin;
+
+  let raw: Uint8Array;
+  try {
+    raw = await exportKeyRaw(key);
+  } catch (cause) {
+    throw new Error(
+      "Cannot derive from this key: it is non-extractable and was not imported by " +
+        "@interocitor/core, so no HKDF twin is registered for it. Import the material " +
+        "with importKeyRaw() instead of importing it directly.",
+      { cause },
+    );
+  }
+  try {
+    return await crypto.subtle.importKey("raw", asBufferSource(raw), "HKDF", false, ["deriveKey"]);
+  } finally {
+    raw.fill(0);
+  }
+}
+
+/**
+ * Export key as a base58 string (~43 chars, human-transferable).
+ *
+ * Requires an extractable key. Prefer the portable string a key source already
+ * holds (`PortablePassphraseKeySource.getPortableKey()`), or mint both halves
+ * at once with {@link generateMeshKeyMaterial}.
+ */
 export async function keyToPassphrase(key: CryptoKey): Promise<string> {
   const raw = await exportKeyRaw(key);
-  return base58Encode(raw);
+  try {
+    return base58Encode(raw);
+  } finally {
+    raw.fill(0);
+  }
 }
 
 /**
@@ -134,8 +279,15 @@ export async function keyToPassphrase(key: CryptoKey): Promise<string> {
  * Callers wanting a key from a human passphrase must run their own KDF
  * (see `BoundSharedKeySource`) and hand the derived 32 bytes to
  * {@link importKeyRaw}.
+ *
+ * The returned key is non-extractable unless `options.extractable` says
+ * otherwise. The caller already holds the base58 string, so there is nothing
+ * to learn by exporting the key again.
  */
-export async function passphraseToKey(passphrase: string): Promise<CryptoKey> {
+export async function passphraseToKey(
+  passphrase: string,
+  options: MeshKeyImportOptions = {},
+): Promise<CryptoKey> {
   const trimmed = passphrase.trim();
   if (!trimmed) throw new Error("Invalid mesh key: empty");
 
@@ -148,7 +300,11 @@ export async function passphraseToKey(passphrase: string): Promise<CryptoKey> {
     );
   }
 
-  return importKeyRaw(raw);
+  try {
+    return await importKeyRaw(raw, options);
+  } finally {
+    raw.fill(0);
+  }
 }
 
 /**

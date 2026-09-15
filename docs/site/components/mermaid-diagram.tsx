@@ -39,7 +39,8 @@ export function MermaidDiagram({ chart }: { chart: string }) {
           theme: "base",
           // Mermaid measures label text in an element of its own, where a page-level custom
           // property does not resolve. Name the same stack --sans holds.
-          fontFamily: 'Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          fontFamily:
+            'Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
           flowchart: { useMaxWidth: false },
           themeVariables: {
             background: "#f8f7f0",

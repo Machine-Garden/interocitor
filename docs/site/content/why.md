@@ -14,13 +14,13 @@ Before it come two others. The name is a claim about what kind of thing this is.
 
 ## Why "interocitor" {#name}
 
-The interocitor is a fictional device from Raymond F. Jones's 1949 short story "The Alien Machine," later folded into the novel *This Island Earth* and filmed in 1955.
+The interocitor is a fictional device from Raymond F. Jones's 1949 short story "The Alien Machine," later folded into the novel _This Island Earth_ and filmed in 1955.
 
 It arrives as a mail-order kit of unlabelled parts and no promise of what it becomes. That is the point: assembling it is a screening test, quietly sorting for the engineers worth recruiting. Once assembled it is a two-way viewing screen, a power source, and — in the film that followed — a weapon. Whoever switches one on finds the Peace Engineers on the other side, hiring.
 
 The name is a description, not a joke.
 
-Interocitor ships as a kit rather than a service. There is no account to open and no server of ours to reach. You supply the parts: [which storage carries the mailbox](/storage), [where the mesh key comes from](/trust), which rows exist, and how their fields merge. That assembly *is* the test, because it decides what the deployment can do and who can read it. And like the original, it has a dangerous end — every endpoint holding the mesh key reads everything in that mesh, and [a key lost with no recovery path](/qa#lost-key) takes the data with it.
+Interocitor ships as a kit rather than a service. There is no account to open and no server of ours to reach. You supply the parts: [which storage carries the mailbox](/storage), [where the mesh key comes from](/trust), which rows exist, and how their fields merge. That assembly _is_ the test, because it decides what the deployment can do and who can read it. And like the original, it has a dangerous end — every endpoint holding the mesh key reads everything in that mesh, and [a key lost with no recovery path](/qa#lost-key) takes the data with it.
 
 So: good luck assembling yours, and be careful with it.
 
@@ -34,11 +34,11 @@ So the founding move was to stop holding it. Payloads are sealed on the trusted 
 
 That is a smaller surface rather than a blanket exemption, and the difference is worth stating precisely:
 
-| The storage side still keeps | And can still                                                                      |
-| ---------------------------- | ---------------------------------------------------------------------------------- |
-| Encrypted changes, snapshots, and ordinary file bodies | Store and return them. Not open them.                    |
+| The storage side still keeps                           | And can still                                                 |
+| ------------------------------------------------------ | ------------------------------------------------------------- |
+| Encrypted changes, snapshots, and ordinary file bodies | Store and return them. Not open them.                         |
 | Object paths, sizes, and timing                        | Infer activity and volume, and read a careless path outright. |
-| Request identity and device records                    | See which account, count its devices, and cut either off.    |
+| Request identity and device records                    | See which account, count its devices, and cut either off.     |
 
 Whether that ciphertext is personal data at all depends on whose hands it is in. To the side running the storage it is dead weight: no key, no reasonable way to get one, nothing to read, profile, reason about, or hand to anyone — and the test for whether data identifies a person is increasingly applied to the party actually holding it rather than in the abstract. To the side running the application it is personal data as surely as it ever was, because that side has the users, the keys, and the answer to give. Sealing on the client moves the boundary; it does not move the application's operator outside it.
 

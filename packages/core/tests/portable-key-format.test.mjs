@@ -7,11 +7,16 @@ import {
   passphraseToKey,
 } from "../dist/crypto/encryption.js";
 
+// `passphraseToKey` returns a non-extractable key, so these tests read the
+// bytes back through an explicitly extractable import of the same base58
+// value. What is under test is the codec, not the key handle.
+const readBack = (passphrase) => passphraseToKey(passphrase, { extractable: true });
+
 test("a generated key round-trips through its base58 form", async () => {
   for (let i = 0; i < 64; i++) {
     const key = await generateKey();
     const passphrase = await keyToPassphrase(key);
-    const restored = await passphraseToKey(passphrase);
+    const restored = await readBack(passphrase);
     assert.deepEqual(
       [...(await exportKeyRaw(restored))],
       [...(await exportKeyRaw(key))],
@@ -22,7 +27,7 @@ test("a generated key round-trips through its base58 form", async () => {
 
 test("surrounding whitespace is still tolerated", async () => {
   const passphrase = await keyToPassphrase(await generateKey());
-  const restored = await passphraseToKey(`\n  ${passphrase}\t `);
+  const restored = await readBack(`\n  ${passphrase}\t `);
   assert.equal(await keyToPassphrase(restored), passphrase);
 });
 
@@ -92,9 +97,9 @@ test("keys with leading zero bytes are accepted", async () => {
   for (const leadingZeros of [1, 2, 5, 10]) {
     const raw = crypto.getRandomValues(new Uint8Array(32));
     raw.fill(0, 0, leadingZeros);
-    const key = await importKeyRaw(raw);
+    const key = await importKeyRaw(raw, { extractable: true });
     const passphrase = await keyToPassphrase(key);
-    const restored = await passphraseToKey(passphrase);
+    const restored = await readBack(passphrase);
     assert.deepEqual(
       [...(await exportKeyRaw(restored))],
       [...raw],

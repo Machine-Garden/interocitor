@@ -1,6 +1,6 @@
 // compass: interocitor.durable-files.file-api
 
-import { decryptBytes, encryptBytes, exportKeyRaw } from "../crypto/encryption.ts";
+import { decryptBytes, encryptBytes, meshKeyDerivationBase } from "../crypto/encryption.ts";
 
 /**
  * What the remote is allowed to learn about a durable file: nothing beyond
@@ -36,11 +36,19 @@ export async function deriveFilePathKey(meshKey: CryptoKey): Promise<CryptoKey> 
   return deriveHmacKey(meshKey, PATH_INFO);
 }
 
+/**
+ * HKDF a single-purpose HMAC key out of a mesh or file-seal key.
+ *
+ * The base key comes from `meshKeyDerivationBase`, not from exporting
+ * `secret`: an AES-GCM `CryptoKey` cannot be HKDF input keying material, and
+ * the export that used to bridge that gap is what made the mesh key
+ * exfiltratable. Core-imported keys carry an HKDF twin of the same bytes
+ * instead; an application-supplied seal key still falls back to export, and
+ * both paths derive byte-identical output, so object names and seal guards are
+ * unchanged.
+ */
 async function deriveHmacKey(secret: CryptoKey, info: Uint8Array): Promise<CryptoKey> {
-  const raw = await exportKeyRaw(secret);
-  const base = await crypto.subtle.importKey("raw", raw as BufferSource, "HKDF", false, [
-    "deriveKey",
-  ]);
+  const base = await meshKeyDerivationBase(secret);
   return crypto.subtle.deriveKey(
     { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: info as BufferSource },
     base,

@@ -102,6 +102,12 @@ export {
   type MeshKeySource,
   type MeshKeyCredentialPersistence,
   type PortablePassphraseKeySourceOptions,
+  MeshCredentialAccessError,
+  isMeshCredentialAccessError,
+  type MeshCredentialStatus,
+  type MeshCredentialFailureStatus,
+  type MeshCredentialLoadResult,
+  type CredentialStateStore,
 } from "./crypto/key-source.ts";
 export {
   generateSigningKeypair,

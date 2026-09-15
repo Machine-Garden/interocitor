@@ -33,7 +33,11 @@ What this gives you:
 
 - **Confidentiality of row contents.** Field names, field values, and
   table names are inside the encrypted payload. The remote cannot read
-  them without the final mesh key.
+  them without the final mesh key. This holds only for a mesh with a
+  non-null `keySource`: with `keySource: null`, `encodeForCloud` writes
+  plaintext JSON, and the change-file **body** carries table names, row
+  ids, and values. No remote object *name* ever derives from a table name
+  in either mode.
 - **Confidentiality of durable file contents.** `putFile()` encrypts file
   bytes with the mesh key before adapter upload when the mesh has a non-null `keySource`.
   Browser image helpers in `@interocitor/web` delegate to this API.
@@ -90,10 +94,11 @@ plaintext on the remote.
   those values are enumerable, sorted, and range-queryable without reading a
   row. Encryption is for the cloud, not for the device; device-side
   protection is full-disk encryption, OS account separation, and browser
-  profile hygiene. See the `@interocitor/web` documentation for the
-  browser-specific account.
-- **Debug logging.** The engine's logger, and some unconditional
-  `console.log` calls on the write path, emit operational metadata:
+  profile hygiene. See
+  [Local store format](../../web/docs/local-store-format.md) for the
+  browser-specific account and for what a future encrypted local format
+  must do about those index keys.
+- **Debug logging.** The engine's logger emits operational metadata:
   `dbName`, device ids, mesh ids, remote paths, change-entry ids, and HLCs.
   No key material or row payload is logged today. Whatever the host wires a
   log sink to — an open devtools session, a crash reporter, a log shipper —

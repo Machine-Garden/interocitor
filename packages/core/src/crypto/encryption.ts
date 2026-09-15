@@ -50,6 +50,17 @@ function base58Encode(bytes: Uint8Array): string {
   return result;
 }
 
+/** Raw byte length of a mesh key (AES-256). */
+const KEY_BYTES = 32;
+
+/**
+ * Decode base58 into exactly {@link KEY_BYTES} bytes.
+ *
+ * Values wider than the key are rejected here rather than deferred to
+ * `importKey`. Narrow values are left-padded with zero bytes, which is
+ * lossless for the decode itself — {@link passphraseToKey} is what rejects
+ * non-canonical (short) inputs, by re-encoding and comparing.
+ */
 function base58Decode(str: string): Uint8Array {
   let num = 0n;
   for (const char of str) {
@@ -58,11 +69,17 @@ function base58Decode(str: string): Uint8Array {
     num = num * 58n + BigInt(idx);
   }
 
-  // Convert BigInt to byte array
-  const hex = num.toString(16).padStart(64, "0"); // 256 bits = 64 hex chars
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16) ?? 0;
+  // Convert BigInt to a fixed-width byte array, least-significant byte last.
+  // Done arithmetically rather than through a hex string: `toString(16)` can
+  // yield an odd number of digits, which used to slice a half byte out of the
+  // front of oversized inputs.
+  const bytes = new Uint8Array(KEY_BYTES);
+  for (let i = KEY_BYTES - 1; i >= 0; i--) {
+    bytes[i] = Number(num & 0xffn);
+    num >>= 8n;
+  }
+  if (num > 0n) {
+    throw new Error(`Invalid mesh key: decodes to more than ${KEY_BYTES} bytes`);
   }
 
   return bytes;
@@ -99,9 +116,38 @@ export async function keyToPassphrase(key: CryptoKey): Promise<string> {
   return base58Encode(raw);
 }
 
-/** Import key from a base58 passphrase. */
+/**
+ * Import a mesh key from its base58 form.
+ *
+ * The argument is key material, not a human-chosen password: there is no KDF
+ * behind this, so whatever entropy the string carries is the entropy of the
+ * mesh. Only the canonical base58 encoding of exactly {@link KEY_BYTES} bytes
+ * is accepted — the exact form {@link keyToPassphrase} produces.
+ *
+ * Anything else throws:
+ *  - a short, human-chosen string ("hunter2") used to left-pad into a
+ *    structurally valid AES-256 key with a few dozen bits of entropy;
+ *  - an over-long string used to throw deep inside `importKey`;
+ *  - a truncated or otherwise mistyped key, which used to surface later as an
+ *    undiagnosable decryption failure against the remote.
+ *
+ * Callers wanting a key from a human passphrase must run their own KDF
+ * (see `BoundSharedKeySource`) and hand the derived 32 bytes to
+ * {@link importKeyRaw}.
+ */
 export async function passphraseToKey(passphrase: string): Promise<CryptoKey> {
-  const raw = base58Decode(passphrase.trim());
+  const trimmed = passphrase.trim();
+  if (!trimmed) throw new Error("Invalid mesh key: empty");
+
+  const raw = base58Decode(trimmed);
+  if (base58Encode(raw) !== trimmed) {
+    throw new Error(
+      `Invalid mesh key: expected the canonical base58 encoding of ${KEY_BYTES} bytes ` +
+        `(as produced by keyToPassphrase), got ${trimmed.length} characters. ` +
+        `A mesh key is generated key material, not a chosen password.`,
+    );
+  }
+
   return importKeyRaw(raw);
 }
 

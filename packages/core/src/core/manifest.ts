@@ -71,18 +71,6 @@ export async function writeJson(
   path: string,
   value: unknown,
 ): Promise<void> {
-  console.log("[interocitor:write] manifest.writeJson", {
-    path,
-    kind: path.endsWith("/manifest.json")
-      ? "pointer"
-      : path.includes("/manifest-")
-        ? "manifest"
-        : path.includes("/devices/")
-          ? "device"
-          : path.includes("/changes/")
-            ? "changes"
-            : "other",
-  });
   await adapter.writeFile(path, textEncoder.encode(JSON.stringify(value, null, 2)));
 }
 

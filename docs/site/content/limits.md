@@ -49,14 +49,15 @@ Client-held custody moves the secret into an environment you do not control and 
 - **Userscripts are the same authority** with a lower installation bar.
 - **Your code is re-delivered on every load.** A server-side application is deployed once and can be audited as deployed. A web application is shipped fresh to every visitor, so "the code I reviewed" and "the code running in this tab" are separate claims. Anyone who can change what your origin serves — you, your host, your CDN, an attacker with your deploy credentials, or a court order — changes the application for everyone with no visible trace. Subresource integrity, integrity manifests, and transparency logs are the proposed answer to this, and they are early-stage standardization rather than something you can rely on today.
 - **The disk outlives the session.** A copied browser profile, a laptop backup, or a synced profile carries the local replica and any credential stored beside it.
+- **Full-disk encryption has its own rules.** FileVault, BitLocker and LUKS protect a volume that is *locked* — powered off, or before first unlock. They are worth having and they are not a browser-storage control. Once you have logged in, the volume is mounted and readable, so every process running as you reads the profile exactly as the browser does; an extension, a userscript, and a piece of malware are all on the authorized side of that boundary. The protection also stops at the disk: a backup written to an unencrypted target, a profile synced to a vendor account, or a recovery key escrowed to a company or cloud account all carry the data past it, under a different set of rules and often a different set of people.
 
-Interocitor addresses the last of these and can raise the cost of the first. It does not address hostile first-party code. If the code serving your application is against you, no configuration of this library helps — it is the thing doing the decrypting.
+Interocitor addresses the copied disk and can raise the cost of the extension. It does not address hostile first-party code. If the code serving your application is against you, no configuration of this library helps — it is the thing doing the decrypting.
 
 ## Reach the end of the chain {#physics}
 
 Beyond software there is a limit that no design crosses.
 
-A person who can reach *you* does not need to break your encryption. Security folklore calls this rubber-hose cryptanalysis, and there is a well-known cartoon about a five-dollar wrench; most languages have their own grimmer version of the joke. The point behind it is serious and load-bearing: your cryptosystem's strength is capped by what happens to the human holding the key.
+A person who can reach *you* does not need to break your encryption. Security folklore calls this rubber-hose cryptanalysis, and [xkcd 538](https://xkcd.com/538/) is the version most people have seen: two panels of imagined cryptanalysis, then a man with a five-dollar wrench. Most languages have their own, grimmer telling of the same joke. The point behind it is serious and load-bearing: your cryptosystem's strength is capped by what happens to the human holding the key.
 
 This is not an argument for giving up. It is the boundary condition that tells you where to stop spending. If your threat model includes someone arriving at your home, or a state with a warrant for your person, then software is not the layer that saves you, and choosing a sync library is not the decision that matters.
 
@@ -95,7 +96,7 @@ The library is one link. A strong link in a chain of weak ones is decoration.
 
 What actually determines whether your data stays yours:
 
-- Full-disk encryption, a screen that locks, and an OS that gets updates.
+- Full-disk encryption, a screen that locks, and an OS that gets updates — remembering that the first of those guards a powered-off machine, and the second is what guards the one in front of you.
 - A browser profile you are deliberate about, and extensions you actually chose and still trust.
 - Separate meshes for data that must not mix, so that one compromise does not become all of them.
 - A key custody mode matched to the device: memory-only on shared machines, a passkey or passphrase where the device is yours but the disk may be copied.

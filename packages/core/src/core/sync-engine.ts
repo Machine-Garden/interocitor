@@ -70,6 +70,7 @@ import {
   keyToPassphrase,
   passphraseToKey,
 } from "../crypto/encryption.ts";
+import { MeshCredentialAccessError } from "../crypto/key-source.ts";
 import type { MeshKeySource } from "../crypto/key-source.ts";
 import {
   FileIntegrityError,
@@ -1753,7 +1754,11 @@ export class Interocitor<
       });
     } catch (err) {
       this.log("error", "persistCredentials() — failed", err);
-      if (err instanceof CredentialPersistenceError || err instanceof MeshKeySourceContractError) {
+      if (
+        err instanceof CredentialPersistenceError ||
+        err instanceof MeshKeySourceContractError ||
+        err instanceof MeshCredentialAccessError
+      ) {
         throw err;
       }
       throw new CredentialPersistenceError(this.dbName, "persist", err);
@@ -1800,6 +1805,9 @@ export class Interocitor<
     try {
       return await this.keySource.loadPersistedCredentials();
     } catch (err) {
+      // "Could not be read" is not "could not be inspected": the distinct
+      // status is what lets a host re-prompt instead of forking the mesh.
+      if (err instanceof MeshCredentialAccessError) throw err;
       throw new CredentialPersistenceError(this.dbName, "inspect", err);
     }
   }
@@ -1838,6 +1846,27 @@ export class Interocitor<
         meshId: this.manifest?.meshId,
         deviceId: this.deviceId,
       });
+      // Fail closed before anything can generate a replacement key.
+      //
+      // A key source may report inaccessible credentials either by throwing
+      // MeshCredentialAccessError (which propagates out of init on its own) or
+      // by returning the status on the material. Both must reach the caller:
+      // minting a fresh key here would fork the mesh into two halves that can
+      // never merge, and the loss is silent until the user notices half their
+      // data missing on the other device.
+      const credentialStatus = resolved.credentialStatus;
+      if (
+        !resolved.key &&
+        !resolved.portableKey &&
+        (credentialStatus === "unavailable" || credentialStatus === "unreadable")
+      ) {
+        this.log("error", "resolveEncryption() — credentials not readable, refusing to generate", {
+          dbName: this.dbName,
+          status: credentialStatus,
+        });
+        throw new MeshCredentialAccessError(credentialStatus, { dbName: this.dbName });
+      }
+
       this.encrypted = resolved.encrypted;
       this.encryptionKey = resolved.key;
       this.passphrase = resolved.portableKey ?? null;
@@ -2565,7 +2594,7 @@ export class Interocitor<
    * the engine tears it down and reconnects on the new adapter as needed.
    */
   async setRemoteStorage(adapter: StorageAdapter | null): Promise<void> {
-    console.log("[interocitor:share] setRemoteStorage() — entry", {
+    this.log("debug", "setRemoteStorage() — entry", {
       dbName: this.dbName,
       newAdapter: adapter?.name ?? null,
       currentAdapter: this.adapter?.name ?? null,
@@ -2576,14 +2605,10 @@ export class Interocitor<
       meshId: this.manifest?.meshId,
     });
     await this.ensureReady();
-    this.log("debug", "setRemoteStorage()", {
-      adapter: adapter?.name ?? null,
-      remotePath: this.config.remotePath,
-    });
     const wasConnected = this.connected;
     const hadAdapter = this.adapter !== null;
     const switching = adapter !== this.adapter;
-    console.log("[interocitor:share] setRemoteStorage() — decision", {
+    this.log("debug", "setRemoteStorage() — decision", {
       wasConnected,
       hadAdapter,
       switching,
@@ -3384,6 +3409,7 @@ export class Interocitor<
           this.log("warn", "flush() — replica write failed", { adapter: adapterName }, err);
           this.emit({ type: "replica:error", adapter: adapterName, error: err as Error });
         },
+        (level, ...args) => this.log(level, ...args),
       );
       await this.local.acknowledgeOutbox(entries.map((entry) => entry.id));
       await this.markSuccessfulRemoteSync();

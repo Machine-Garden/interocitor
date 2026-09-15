@@ -71,11 +71,33 @@ plaintext on the remote.
 - **Portable key strength.** If a `keySource` uses a portable base58 key,
   that value must be high entropy. The engine maps the base58 value
   directly to 32 random bytes — there is **no KDF stretching** (no PBKDF2,
-  no Argon2). Generated portable keys are safe; short human-chosen values
-  are not.
-- **Local store.** Rows live in IndexedDB (browser) or SQLite (Swift) in
-  plaintext. An attacker with code execution on the device reads them
-  directly. Encryption is for the cloud, not for the device.
+  no Argon2). Nothing in the library enforces the entropy today:
+  `passphraseToKey` decodes any base58 string and left-pads it to 32 bytes,
+  so a short human-chosen value is accepted silently and becomes a
+  low-entropy key. Generated portable keys are safe; the check that a
+  user-supplied one is not short belongs to the host.
+- **Local store.** Nothing protects the local row database. Rows live in
+  IndexedDB (browser) or SQLite (Swift) exactly as the application wrote
+  them — no encryption, no passphrase, no lock. "Plaintext" here does not
+  mean a text file: IndexedDB is a structured-clone binary format over
+  LevelDB, which is an **encoding, not encryption**, and public forensic
+  tooling reads it out of a disk image or a copied browser profile. Three
+  stores are exposed, not one: `rows` holds current row state, and
+  `pendingOps` and `outbox` hold change history not yet uploaded — table
+  names, field names, values, and the per-field HLC that dates each write.
+  IndexedDB **index keys are stored in the clear** as well: every field a
+  schema marks `index` or `unique` becomes a `[table, value]` index key, so
+  those values are enumerable, sorted, and range-queryable without reading a
+  row. Encryption is for the cloud, not for the device; device-side
+  protection is full-disk encryption, OS account separation, and browser
+  profile hygiene. See the `@interocitor/web` documentation for the
+  browser-specific account.
+- **Debug logging.** The engine's logger, and some unconditional
+  `console.log` calls on the write path, emit operational metadata:
+  `dbName`, device ids, mesh ids, remote paths, change-entry ids, and HLCs.
+  No key material or row payload is logged today. Whatever the host wires a
+  log sink to — an open devtools session, a crash reporter, a log shipper —
+  receives that metadata, and payload encryption does not cover it.
 - **Credential store at rest.** A browser `PortablePassphraseKeySource`
   may persist its portable key component through `createWebCredentialStore(dbName)`.
   The default path writes that credential record to `localStorage` in plain text. Use `MemoryCredentialStore`,
@@ -113,6 +135,12 @@ Even with encryption on, a remote with full access to the bucket sees:
 | Compaction author        | `manifest.writtenBy`, `serverId` in snapshot file name | Which device compacted                                                                                       |
 | Number of devices        | `devices/` listing                                     | Mesh size                                                                                                    |
 | Recovery-wrapper record  | `/.interocitor/recovery/` or Worker recovery route     | Stable opaque locator plus wrapper crypto metadata, ciphertext, and timestamp; not recovery words or mesh ID |
+
+This table is about the **remote**, and only the remote. A device sees
+strictly more than any row in it: table and field names, index keys, writes
+that have not been pushed yet, delete tombstones, and per-write timing rather
+than per-file timing. Do not read a row above as a statement about local
+exposure; see **Local store** under "What encryption does not protect".
 
 If any of these are sensitive in your threat model, encryption alone is
 not enough — you need a transport that hides metadata (e.g. a relay that
@@ -169,16 +197,37 @@ Drive).
 
 ## Recommendations
 
-| Goal                                           | Setting                                                                                                             |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Protect row contents from the storage operator | Configure a non-null `keySource`                                                                                    |
-| Generate strong portable key material          | Use high-entropy generated base58 material                                                                          |
-| Resist portable-key exfiltration on the device | Use `WebAuthnCredentialStore` or an enveloped credential store                                                      |
-| Limit which Worker namespaces may be created   | Configure integrity gates; use checksummed IDs with a deployment `meshSecret` when the application provisions them  |
-| Revoke one subject's future controlled mesh IO | Use protected mesh control with a server-authenticated subject, current grant chain, and optional per-subject route |
-| Limit who can compact                          | `serverManaged: true` + dedicated `serverId`                                                                        |
-| Detect remote poisoning early                  | Subscribe to `remote:poisoned` and `decode:error`                                                                   |
-| Detect stale credential reuse                  | Subscribe to `credentials:meshMismatch`                                                                             |
+| Goal                                                    | Setting                                                                                                             |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Protect row contents from the storage operator          | Configure a non-null `keySource`                                                                                    |
+| Generate strong portable key material                   | Use high-entropy generated base58 material                                                                          |
+| Resist non-interactive portable-key theft on the device | Use `WebAuthnCredentialStore` or an enveloped credential store, with the limits below                               |
+| Limit which Worker namespaces may be created            | Configure integrity gates; use checksummed IDs with a deployment `meshSecret` when the application provisions them  |
+| Revoke one subject's future controlled mesh IO          | Use protected mesh control with a server-authenticated subject, current grant chain, and optional per-subject route |
+| Limit who can compact                                   | `serverManaged: true` + dedicated `serverId`                                                                        |
+| Detect remote poisoning early                           | Subscribe to `remote:poisoned` and `decode:error`                                                                   |
+| Detect stale credential reuse                           | Subscribe to `credentials:meshMismatch`                                                                             |
+
+### What a WebAuthn credential store does and does not do
+
+It raises the bar for **non-interactive** theft: script that cannot drive a
+user-verification ceremony cannot read the record. It is not a limit on what
+an approved ceremony yields. `WebAuthnCredentialStore.load()` returns the full
+portable key string to page JavaScript, where it is an ordinary string — one
+approved ceremony is one complete copy of the key.
+
+Two further limits:
+
+- **Availability.** It uses the WebAuthn `largeBlob` extension with
+  `residentKey: "required"`. Browser and authenticator support is patchy, so
+  this path is unavailable to a meaningful share of users. Plan a fallback.
+- **Custody.** Where the passkey lives on a syncing provider (iCloud Keychain,
+  Google Password Manager), the `largeBlob` syncs with it. The portable key is
+  then held by a third party that this threat model does not otherwise
+  introduce, under that provider's account security rather than yours. Whether
+  a credential syncs is a property of the authenticator the user enrols;
+  `authenticatorAttachment` filters which authenticators the ceremony offers
+  but cannot assert non-syncing custody.
 
 ## Out of scope
 

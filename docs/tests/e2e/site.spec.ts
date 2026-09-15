@@ -381,6 +381,22 @@ test("agent readers get llms.txt and the Markdown behind every page", async ({ r
   expect(missing.status()).toBe(404);
 });
 
+test("the site states its own crawl policy and points crawlers at the index", async ({
+  request,
+}) => {
+  const response = await request.get("/robots.txt");
+  expect(response.status()).toBe(200);
+  expect(response.headers()["content-type"]).toContain("text/plain");
+
+  const body = await response.text();
+  expect(body).toContain("User-agent: *");
+  expect(body).toContain("Allow: /");
+  // The readers llms.txt is written for must not be turned away by robots.txt.
+  expect(body).not.toMatch(/Disallow:\s*\//);
+  expect(body).toContain("/llms.txt");
+  expect(response.headers().link).toContain('</llms.txt>; rel="describedby"; type="text/markdown"');
+});
+
 test("every page says where its machine-readable description lives", async ({ request }) => {
   const describedby = '</llms.txt>; rel="describedby"; type="text/markdown"';
 

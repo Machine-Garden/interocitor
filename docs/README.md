@@ -161,7 +161,10 @@ advertise a canonical production URL only after it resolves, serves valid TLS,
 and passes an anonymous link crawl. `https://interocitor.dev` now meets those
 conditions and is the canonical origin `/llms.txt` names.
 
-`robots.txt` is served by Cloudflare rather than from this repository, and its
-managed block currently disallows ClaudeBot, GPTBot, CCBot, Google-Extended and
-their peers. The agent index describes the site for readers that are allowed to
-take it; changing who is allowed is a Cloudflare setting, not a code change.
+`robots.txt` is this site's own file, served from `site/app/robots.txt`. It
+disallows nothing: the documentation is written to be read, and publishing an
+index for assistants and coding agents while turning those same agents away at
+the door would be a contradiction. Before the route existed the path fell
+through to an edge default that disallowed ClaudeBot, GPTBot, CCBot,
+Google-Extended and their peers, so if that block reappears in the live file the
+managed-robots setting is still on at Cloudflare and wants turning off.

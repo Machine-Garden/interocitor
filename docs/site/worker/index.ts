@@ -57,7 +57,10 @@ function withSecurityHeaders(response: Response): Response {
 function withDescriptionLinks(response: Response, pathname: string): Response {
   const type = response.headers.get("content-type") ?? "";
   const html = type.startsWith("text/html");
-  if (!html && !type.startsWith("text/markdown")) return response;
+  // `text/plain` is here for `robots.txt`: the file a crawler reads first should
+  // be the one that says where the index is.
+  const described = html || type.startsWith("text/markdown") || type.startsWith("text/plain");
+  if (!described) return response;
   if (response.status !== 200) return response;
 
   const links = ['</llms.txt>; rel="describedby"; type="text/markdown"'];

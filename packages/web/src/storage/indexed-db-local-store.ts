@@ -428,6 +428,27 @@ async function readPendingBatch(t: IDBTransaction): Promise<ChangeEntry | null> 
 // ─── Public API ──────────────────────────────────────────────────────
 
 /**
+ * Meta keys that describe *this physical database* rather than the mesh.
+ * A store-format migration must never copy them into a new generation: the
+ * target stamps its own schema fingerprint, owns its own pending-batch header
+ * (adopted explicitly), and records its own format id.
+ */
+export const INTERNAL_META_KEYS: readonly string[] = [
+  CACHE_FINGERPRINT_META_KEY,
+  PENDING_BATCH_META_KEY,
+];
+
+/**
+ * Capabilities beyond `LocalStore` that a store-format migration needs.
+ * Implemented by {@link IndexedDbLocalStore} and forwarded by the resilient
+ * wrapper when the active store provides them.
+ */
+export interface LocalStoreMigrationExtensions {
+  getAllMeta?(): Promise<Record<string, unknown>>;
+  adoptPendingBatch?(entry: ChangeEntry): Promise<void>;
+}
+
+/**
  * Default IndexedDB-backed local persistence layer used by {@link Interocitor}.
  *
  * Most applications do not need to interact with this class directly unless
@@ -872,6 +893,50 @@ export class IndexedDbLocalStore implements LocalStore {
     const db = this.ensureDB();
     const t = tx(db, STORES.meta, "readwrite");
     t.objectStore(STORES.meta).put(value, key);
+    await txComplete(t);
+  }
+
+  /**
+   * Enumerate the whole `meta` store.
+   *
+   * Not part of `LocalStore`: the interface exposes `getMeta(key)` only, which
+   * is enough for the engine but not for a store-format migration, which must
+   * carry *every* meta key (mesh id, HLC, app bookkeeping) into the new
+   * generation. Dropping an unknown meta key is how a migration silently forks
+   * a mesh, so the migration helper copies by enumeration, not by allowlist.
+   *
+   * Keys in {@link INTERNAL_META_KEYS} are per-database bookkeeping and are
+   * returned here but must not be copied across generations.
+   */
+  async getAllMeta(): Promise<Record<string, unknown>> {
+    const db = this.ensureDB();
+    const t = tx(db, STORES.meta, "readonly");
+    const store = t.objectStore(STORES.meta);
+    const keys = (await reqToPromise(store.getAllKeys())) as IDBValidKey[];
+    const values = (await reqToPromise(store.getAll())) as unknown[];
+    const meta: Record<string, unknown> = {};
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      if (typeof key === "string") meta[key] = values[i];
+    }
+    return meta;
+  }
+
+  /**
+   * Install an open (un-promoted) pending batch into this database.
+   *
+   * The inverse of {@link peekPendingBatch}, and the only way a migration can
+   * carry an open batch into a new generation without prematurely promoting it
+   * into the outbox — promotion would publish a batch the engine still
+   * considers open, changing batching semantics behind the app's back.
+   */
+  async adoptPendingBatch(entry: ChangeEntry): Promise<void> {
+    const db = this.ensureDB();
+    const t = tx(db, [STORES.meta, STORES.pendingOps], "readwrite");
+    const { ops, ...header } = entry;
+    t.objectStore(STORES.meta).put(header, PENDING_BATCH_META_KEY);
+    const pendingOps = t.objectStore(STORES.pendingOps);
+    for (const op of ops) pendingOps.add(op);
     await txComplete(t);
   }
 

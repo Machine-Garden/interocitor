@@ -33,22 +33,197 @@ const PENDING_BATCH_META_KEY = "pendingBatch";
 const OUTBOX_ID_INDEX = "by_id";
 const CACHE_FINGERPRINT_META_KEY = "interocitor:cache:fingerprint";
 const BLOCKED_UPGRADE_GRACE_MS = 1_000;
-const fallbackLockTails = new Map<string, Promise<void>>();
 
+// ─── Cross-context locking ───────────────────────────────────────────
+//
+// `withLock` serializes the engine's read-modify-write cycles (see the JSDoc
+// on IndexedDbLocalStore.withLock). Those cycles span several IndexedDB
+// transactions and often a network round trip, so IndexedDB's own transaction
+// atomicity cannot cover them — the mutual exclusion has to come from
+// somewhere else, and it has to hold between *browsing contexts*, not just
+// between callers inside one JavaScript realm.
+//
+// Web Locks is that mechanism: origin-scoped, genuinely cross-tab, released
+// automatically when the holding context dies. Everything below exists to
+// keep a defensible answer for the environments where it is unavailable.
+
+/**
+ * Registry key for the in-process lock queue used when Web Locks is not
+ * usable.
+ *
+ * A module-level `Map` is the wrong home for a lock. A consumer's tree can
+ * easily hold two copies of this module — a duplicate install, pnpm's
+ * isolated layout, or a bundler emitting it into two chunks; a
+ * `peerDependency` prevents none of those — and each copy would then own a
+ * private queue. Two callers would serialize on two different chains, and a
+ * lock that does not lock is worse than no lock at all, because the engine is
+ * written assuming mutual exclusion.
+ *
+ * `Symbol.for` is realm-global, so every copy in the realm finds the same
+ * queue. The `.v1` suffix is the migration seam: a future copy whose queue
+ * entries mean something different must claim a new key rather than silently
+ * sharing a structure it would misread.
+ */
+const FALLBACK_LOCK_TAILS_KEY = Symbol.for("interocitor.fallbackLockTails.v1");
+
+/**
+ * Registry key for this realm's "Web Locks is not usable here" verdict.
+ * Shared for the same reason the queue is: two module copies that disagree
+ * about which mechanism to use would not exclude each other.
+ */
+const WEB_LOCKS_SUPPORT_KEY = Symbol.for("interocitor.webLocksSupport.v1");
+
+/** Last-resort homes, used when `globalThis` refuses to hold shared state. */
+const moduleLocalLockTails = new Map<string, Promise<void>>();
+const moduleLocalWebLocksSupport = { refused: false };
+
+/**
+ * Publish `fallbackValue` on `globalThis` under `key`, or adopt whatever is
+ * already there.
+ *
+ * Installed non-writable and non-configurable so a later module copy cannot
+ * swap the shared structure out from under a lock that is already held. Any
+ * refusal — a frozen `globalThis`, a sealed or non-writable property, a
+ * squatted key holding something we cannot use — degrades to the module-local
+ * value: weaker than sharing, but still a working lock for this copy, which
+ * is strictly better than throwing on import.
+ */
+function sharedGlobal<T extends object>(
+  key: symbol,
+  fallbackValue: T,
+  usable: (candidate: unknown) => boolean,
+): T {
+  const host = globalThis as unknown as Record<symbol, unknown>;
+  try {
+    const existing = host[key];
+    if (usable(existing)) return existing as T;
+    // Nothing usable is installed. If the key is free this claims it; if it is
+    // held non-configurably by something we cannot use, defineProperty throws
+    // and the catch hands back the module-local value.
+    Object.defineProperty(host, key, {
+      value: fallbackValue,
+      writable: false,
+      enumerable: false,
+      configurable: false,
+    });
+    const installed = host[key];
+    return usable(installed) ? (installed as T) : fallbackValue;
+  } catch {
+    return fallbackValue;
+  }
+}
+
+function fallbackLockTails(): Map<string, Promise<void>> {
+  // Module copies that share a `globalThis` necessarily share its intrinsics,
+  // so a plain `instanceof` is a sound identity check here.
+  return sharedGlobal(
+    FALLBACK_LOCK_TAILS_KEY,
+    moduleLocalLockTails,
+    (candidate) => candidate instanceof Map,
+  );
+}
+
+function webLocksSupport(): { refused: boolean } {
+  return sharedGlobal(
+    WEB_LOCKS_SUPPORT_KEY,
+    moduleLocalWebLocksSupport,
+    (candidate) =>
+      typeof candidate === "object" &&
+      candidate !== null &&
+      typeof (candidate as { refused?: unknown }).refused === "boolean",
+  );
+}
+
+/**
+ * Serialize on a promise chain inside this realm.
+ *
+ * Honest about what it is: mutual exclusion among callers that share a
+ * JavaScript context. A sibling tab serializes on its own chain and is not
+ * excluded. That is the ceiling of any in-process mechanism, and the reason
+ * Web Locks is tried first rather than second.
+ */
 async function withFallbackLock<T>(name: string, operation: () => Promise<T>): Promise<T> {
-  const previous = fallbackLockTails.get(name) ?? Promise.resolve();
+  const tails = fallbackLockTails();
+  const previous = tails.get(name) ?? Promise.resolve();
   let release!: () => void;
   const current = new Promise<void>((resolve) => {
     release = resolve;
   });
-  fallbackLockTails.set(name, current);
+  tails.set(name, current);
   await previous.catch(() => {});
   try {
     return await operation();
   } finally {
     release();
-    if (fallbackLockTails.get(name) === current) fallbackLockTails.delete(name);
+    if (tails.get(name) === current) tails.delete(name);
   }
+}
+
+function webLocksManager(): LockManager | null {
+  if (webLocksSupport().refused) return null;
+  try {
+    // `navigator` is absent under SSR and in some worker contexts; `locks` is
+    // absent on older Safari and outside secure contexts; a partial polyfill
+    // can supply the object without a callable `request`. Reading the property
+    // can itself throw behind an exotic getter, so the whole probe is guarded.
+    if (typeof navigator === "undefined") return null;
+    const locks = (navigator as Navigator & { locks?: LockManager }).locks;
+    return typeof locks?.request === "function" ? locks : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True for refusals that describe the *environment* rather than the moment.
+ *
+ * An opaque origin (a sandboxed iframe, a `file://` document), a context where
+ * the API is denied, or a shape that is not the API at all will refuse every
+ * future request too, so the verdict is worth caching: it keeps every caller
+ * in the realm on one mechanism. A transient refusal — `InvalidStateError`
+ * from a document that is not fully active, say — must not be cached, because
+ * poisoning a healthy page into the weaker in-process queue for the rest of
+ * its life costs more than the one request it would have saved.
+ */
+function isPermanentWebLocksRefusal(error: unknown): boolean {
+  if (error instanceof TypeError) return true;
+  if (typeof DOMException !== "undefined" && error instanceof DOMException) {
+    return error.name === "SecurityError" || error.name === "NotSupportedError";
+  }
+  return false;
+}
+
+/**
+ * Run `operation` under a lock named `lockName`, cross-tab where the platform
+ * allows it and in-process where it does not.
+ *
+ * The lock is non-reentrant, matching both mechanisms: Web Locks queues a
+ * second `exclusive` request behind the first even from the same context, and
+ * the fallback chain does the same. Callers must therefore never re-enter a
+ * section under the same name — the sync engine's `batchDepth` and
+ * `compactInFlight` guards exist for exactly this reason.
+ */
+async function withCrossContextLock<T>(lockName: string, operation: () => Promise<T>): Promise<T> {
+  const locks = webLocksManager();
+  if (locks) {
+    // Distinguishes "the lock was never granted" from "the section ran and
+    // threw". Only the former may retry on the fallback; retrying the latter
+    // would run a critical section twice.
+    let entered = false;
+    try {
+      return (await locks.request(lockName, async (): Promise<T> => {
+        entered = true;
+        // Web Locks holds the lock for exactly as long as this callback's
+        // promise is pending, and releases it on rejection as well as on
+        // fulfilment — so a throw inside the section cannot wedge the queue.
+        return operation();
+      })) as T;
+    } catch (error) {
+      if (entered) throw error;
+      if (isPermanentWebLocksRefusal(error)) webLocksSupport().refused = true;
+    }
+  }
+  return withFallbackLock(lockName, operation);
 }
 
 const STORES = {
@@ -479,12 +654,34 @@ export class IndexedDbLocalStore implements LocalStore {
     this.desiredFingerprint = schemaFingerprint(this.schema);
   }
 
+  /**
+   * Serialize a named correctness-critical operation against every other
+   * context using this physical database.
+   *
+   * What it guards is not an IndexedDB transaction — those are already atomic.
+   * It guards the engine's *logical* read-modify-write cycles, which span
+   * several transactions and usually a network round trip: promote the pending
+   * batch, upload it, acknowledge it; read a device cursor, fetch changes from
+   * that offset, write the cursor back; load the change-observation ledger,
+   * merge receipts, store it. Two contexts interleaving there lose updates
+   * that IndexedDB will happily commit — a clobbered cursor silently skips
+   * remote changes, and a clobbered observation ledger breaks the
+   * sync-completeness invariant that immutable change filenames prove
+   * observation.
+   *
+   * Scope is `(physical database name, lock name)`. Two engines on different
+   * databases must not block each other; two tabs on the same database must
+   * serialize. The `interocitor:` prefix namespaces the Web Locks name against
+   * the host application's own lock usage, which shares one origin-wide
+   * namespace with us.
+   *
+   * The name format is frozen. Two tabs of the same app routinely run
+   * different library versions across a deploy, and a renamed lock would make
+   * them queue on different names — mutual exclusion would silently vanish
+   * during exactly the window it is most needed.
+   */
   async withLock<T>(name: string, operation: () => Promise<T>): Promise<T> {
-    const lockName = `interocitor:${this.dbName}:${name}`;
-    if (typeof navigator !== "undefined" && navigator.locks) {
-      return navigator.locks.request(lockName, operation);
-    }
-    return withFallbackLock(lockName, operation);
+    return withCrossContextLock(`interocitor:${this.dbName}:${name}`, operation);
   }
 
   private async readCacheFingerprint(db: IDBDatabase): Promise<string | undefined> {

@@ -80,11 +80,11 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.54.2",
-    "esbuild": "0.28.2",
-    "knip": "6.24.0",
+    "esbuild": "^0.28.2",
+    "knip": "^6.24.0",
     "oxfmt": "^0.45.0",
     "oxlint": "^1.60.0",
-    "publint": "0.3.21",
+    "publint": "^0.3.21",
     "typescript": "^6.0.0",
     "wrangler": "^4.127.1"
   },

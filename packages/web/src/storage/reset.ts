@@ -93,9 +93,12 @@ export type ResetLocalDatabaseOutcome =
  * until all connections close). For the "will never stuck" contract, this
  * variant returns a deterministic outcome within `timeoutMs`.
  *
- * - `'deleted'` — the database was successfully deleted.
- * - `'blocked'` — another connection delayed deletion. The request remains
- *   queued and may still complete, so rotate rather than reusing this name.
+ * - `'deleted'` — the database was successfully deleted. This includes a
+ *   deletion that was briefly blocked and then completed: `onblocked` is not a
+ *   terminal state, so a block alone is not an answer.
+ * - `'blocked'` — another connection held deletion off for the whole deadline.
+ *   The request remains queued and may still complete, so rotate rather than
+ *   reusing this name.
  * - `'timed-out'` — neither success nor block fired within the deadline. The
  *   request may still complete later; rotate rather than reusing this name.
  * - `'errored'` — the request emitted an explicit error.
@@ -109,9 +112,12 @@ export function resetLocalDatabaseWithDeadline(
 ): Promise<ResetLocalDatabaseOutcome> {
   return new Promise((resolve) => {
     let settled = false;
+    let everBlocked = false;
+    let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
     const finish = (outcome: ResetLocalDatabaseOutcome) => {
       if (settled) return;
       settled = true;
+      if (deadlineTimer) clearTimeout(deadlineTimer);
       resolve(outcome);
     };
     if (!options.force && hasUnpushedLocalWrites(dbName, options.unpushedSlots)) {
@@ -125,11 +131,21 @@ export function resetLocalDatabaseWithDeadline(
         finish("deleted");
       };
       req.onerror = () => finish("errored");
-      req.onblocked = () => finish("blocked");
+      // `blocked` is not terminal. The deletion stays queued, and `onsuccess`
+      // still fires once the last connection closes — WebKit routinely retains
+      // a handle for a moment after close(), so a transient block is the
+      // ordinary case, not the failure. Settling here would report "blocked"
+      // for a database that is deleted milliseconds later, and callers answer
+      // "blocked" by rotating to a fresh physical name: the old database then
+      // survives a reset the user explicitly asked for. Record the block and
+      // let the deadline be the one thing that decides.
+      req.onblocked = () => {
+        everBlocked = true;
+      };
     } catch {
       finish("errored");
       return;
     }
-    setTimeout(() => finish("timed-out"), timeoutMs);
+    deadlineTimer = setTimeout(() => finish(everBlocked ? "blocked" : "timed-out"), timeoutMs);
   });
 }

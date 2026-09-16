@@ -289,4 +289,47 @@ test.describe("resetLocalDatabaseWithDeadline", () => {
       await resetPage.close();
     }
   });
+
+  test("a block that clears before the deadline is reported as deleted", async ({
+    context,
+    page,
+  }) => {
+    const dbName = `transient-block-${crypto.randomUUID()}`;
+    const resetPage = await context.newPage();
+    await resetPage.goto("/packages/web/tests/e2e/fixtures/harness.html");
+    try {
+      await page.evaluate(async (name) => {
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          const request = indexedDB.open(name, 1);
+          request.onupgradeneeded = () => request.result.createObjectStore("sentinel");
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        (window as typeof window & { deleteBlocker?: IDBDatabase }).deleteBlocker = db;
+      }, dbName);
+
+      // Start the deletion while the other page still holds the database open,
+      // so `onblocked` is certain to fire, then release it well inside the
+      // deadline. `blocked` is not a terminal IndexedDB state: the request
+      // stays queued and succeeds once the last connection closes, which is
+      // the ordinary case on WebKit, where a handle lingers briefly after
+      // close(). Reporting "blocked" here would make callers rotate to a fresh
+      // physical name and leave the database the user asked to delete on disk.
+      const pending = resetPage.evaluate(async (name) => {
+        const { resetLocalDatabaseWithDeadline } = await import("/packages/web/dist/index.js");
+        return resetLocalDatabaseWithDeadline(name, 5_000);
+      }, dbName);
+
+      await page.evaluate(async () => {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 250);
+        });
+        (window as typeof window & { deleteBlocker?: IDBDatabase }).deleteBlocker?.close();
+      });
+
+      expect(await pending).toBe("deleted");
+    } finally {
+      await resetPage.close();
+    }
+  });
 });

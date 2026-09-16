@@ -252,7 +252,10 @@ and never throws; its default deadline is 1500 ms. If the app uses a named
 store, recovery should create/open that store and let its degradation path
 manage pointer rotation rather than assuming the reset call rotated it. A
 `blocked` or `timed-out` result means the browser deletion request is still
-queued and may complete later, so never reuse that physical name.
+queued and may complete later, so never reuse that physical name. A deletion
+that is briefly blocked and then completes returns `'deleted'`: `blocked` is
+not a terminal IndexedDB state, so the helper waits out the deadline rather
+than reporting a block that has already cleared.
 
 ## Credential storage choices
 

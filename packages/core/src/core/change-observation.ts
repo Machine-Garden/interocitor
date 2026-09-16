@@ -11,6 +11,7 @@
 
 import type { ChangeEntry, LocalStore } from "./types.ts";
 import { hlcCompareStr, hlcParse } from "./hlc.ts";
+import { sharedGlobalState } from "./shared-global-state.ts";
 
 const OBSERVATION_META_KEY = "changeObservation";
 
@@ -23,7 +24,19 @@ interface StoredObservationState {
   seenChangeFiles: string[];
   writerFrontiers: WriterFrontiers;
 }
-const fallbackObservationWriteTails = new WeakMap<object, Promise<void>>();
+/**
+ * Per-store writer gate for stores that bring no lock of their own.
+ *
+ * Realm-wide rather than module-wide because the guarantee is "one writer per
+ * store object", and a store object is handed around freely. Two copies of this
+ * package holding two chains over the same store would each be serial and
+ * jointly concurrent — which is precisely the interleaving `persist` merges
+ * durable state to avoid.
+ */
+const fallbackObservationWriteTails = sharedGlobalState(
+  "core.change-observation.write-tails.v1",
+  () => new WeakMap<object, Promise<void>>(),
+);
 
 async function withObservationWrite<T>(
   local: ObservationStore,

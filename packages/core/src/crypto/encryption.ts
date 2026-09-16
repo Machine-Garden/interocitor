@@ -19,6 +19,7 @@ import {
   bytesToBase64Url,
 } from "./base64.ts";
 import { asBufferSource } from "./bytes.ts";
+import { sharedGlobalState } from "../core/shared-global-state.ts";
 
 const IV_LENGTH = 12; // 96-bit IV for AES-GCM
 const ENVELOPE_VERSION = 1;
@@ -123,10 +124,21 @@ export interface MeshKeyImportOptions {
  *
  * Holding it leaks nothing. Web Crypto forbids extractable HKDF keys outright
  * (`importKey` throws `SyntaxError`), so the twin is as opaque as the AES-GCM
- * key beside it, and this registry is module-private and weakly keyed, so it
- * neither exposes the twin nor pins the mesh key in memory.
+ * key beside it, and the registry is weakly keyed, so it does not pin the mesh
+ * key in memory.
+ *
+ * The registry is realm-wide rather than module-wide because `CryptoKey`
+ * objects pass between copies of this package freely. A twin registered by one
+ * copy has to be visible to the next, or a non-extractable key minted here
+ * would fail to derive the moment it reached a second copy. Hanging it off a
+ * `globalThis` symbol does put it within reach of script that guesses the
+ * symbol name, which a module-level binding was not — but such script already
+ * holds the mesh key object itself, and neither object will yield its bytes.
  */
-const derivationTwins = new WeakMap<CryptoKey, CryptoKey>();
+const derivationTwins = sharedGlobalState(
+  "core.crypto.derivation-twins.v1",
+  () => new WeakMap<CryptoKey, CryptoKey>(),
+);
 
 /**
  * Generate a new 256-bit AES-GCM key.
@@ -215,11 +227,12 @@ export async function importKeyRaw(
 /**
  * The HKDF base key to hang a derivation off a mesh or file-seal key.
  *
- * Returns the twin registered at import when this module minted the key, so a
- * non-extractable mesh key can still key a derivation. Falls back to
- * export-and-reimport for a `CryptoKey` this module did not mint — an
- * application-supplied file seal key, or one from a second copy of this
- * module. That fallback is exactly what every caller did before the twin
+ * Returns the twin registered at import when this package minted the key, so a
+ * non-extractable mesh key can still key a derivation. The registry is shared
+ * across copies of this package, so it does not matter which copy performed the
+ * import. Falls back to export-and-reimport only for a `CryptoKey` this package
+ * never minted — an application-supplied seal key imported through Web Crypto
+ * directly. That fallback is exactly what every caller did before the twin
  * existed, and HKDF over the same 32 bytes is byte-identical either way, so
  * object names and seal guards are unchanged by which path a key takes.
  */

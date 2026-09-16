@@ -68,6 +68,7 @@ function classifyFallbackReason(error: unknown): string {
 import type { DatabaseSchemaDefinition, LocalStore } from "@interocitor/core";
 import { MemoryLocalStore } from "@interocitor/core";
 import { IndexedDbLocalStore } from "./indexed-db-local-store.ts";
+import { sharedGlobalState } from "../shared-global-state.ts";
 
 /** Default IDB open deadline. Anything longer is a wedged platform. */
 export const DEFAULT_LOCAL_OPEN_TIMEOUT_MS = 300;
@@ -84,7 +85,17 @@ export interface KeyValueSlots {
   set(key: string, value: string): void;
 }
 
-const memorySlots = new Map<string, string>();
+/**
+ * The memory tier behind {@link createDefaultSlotStore}, realm-wide rather than
+ * module-wide.
+ *
+ * Where it is the *only* tier — SSR, private mode, a partitioned worker — it is
+ * the whole slot store, and a second copy of this package carrying its own map
+ * would make a marker written through one copy unreadable through the other.
+ * The unpushed-writes marker is exactly the state a wrong answer silently
+ * discards user writes over.
+ */
+const memorySlots = sharedGlobalState("web.memory-slots.v1", () => new Map<string, string>());
 
 /**
  * localStorage when available, an in-process map otherwise (SSR, private

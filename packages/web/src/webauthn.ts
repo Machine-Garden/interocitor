@@ -106,12 +106,26 @@ export class CredentialUnreadableError extends CredentialAccessError {
  * Also matches a structurally identical error from another copy of this
  * module, so a consumer in another package does not depend on sharing one
  * class identity.
+ *
+ * Subclasses declared in other modules — the `passphrase-envelope.ts`
+ * taxonomy, and anything an application layers on top — are matched
+ * structurally rather than by a literal list of codes: a stable `code` string
+ * plus the `availability` this base class stamps on every instance. A list
+ * would have to be edited every time the taxonomy grows, and the edit that
+ * gets forgotten is the one that flattens a real credential failure into
+ * "nothing stored" and forks the mesh.
  */
 export function isCredentialAccessError(err: unknown): err is CredentialAccessError {
   if (err instanceof CredentialAccessError) return true;
   if (typeof err !== "object" || err === null) return false;
   const code = (err as { code?: unknown }).code;
-  return code === "CREDENTIAL_UNAVAILABLE" || code === "CREDENTIAL_UNREADABLE";
+  // This base class's own two codes, kept verbatim: they were the whole
+  // fallback before, and nothing that matched then may stop matching now.
+  if (code === "CREDENTIAL_UNAVAILABLE" || code === "CREDENTIAL_UNREADABLE") return true;
+  const availability = (err as { availability?: unknown }).availability;
+  return (
+    typeof code === "string" && (availability === "unavailable" || availability === "unreadable")
+  );
 }
 
 /**

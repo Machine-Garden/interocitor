@@ -69,7 +69,7 @@ import {
   generateMeshKeyMaterial,
   passphraseToKey,
 } from "../crypto/encryption.ts";
-import { MeshCredentialAccessError } from "../crypto/key-source.ts";
+import { isMeshCredentialAccessError, MeshCredentialAccessError } from "../crypto/key-source.ts";
 import type { MeshKeySource } from "../crypto/key-source.ts";
 import {
   FileIntegrityError,
@@ -78,6 +78,8 @@ import {
   MeshKeySourceContractError,
   MeshCredentialMismatchError,
   RemoteAccessError,
+  isCredentialPersistenceError,
+  isMeshKeySourceContractError,
   isRemoteAccessError,
 } from "./errors.ts";
 import { expectedFileDigest, fileTargetPath, sha256Hex } from "./file-ref.ts";
@@ -1797,10 +1799,15 @@ export class Interocitor<
       });
     } catch (err) {
       this.log("error", "persistCredentials() — failed", err);
+      // Predicates, not `instanceof`: a key source living in another package
+      // — or another copy of this one — throws these from its own class
+      // identities, and re-wrapping one as a generic persistence failure
+      // would lose the status a host needs to re-prompt instead of replacing
+      // the record.
       if (
-        err instanceof CredentialPersistenceError ||
-        err instanceof MeshKeySourceContractError ||
-        err instanceof MeshCredentialAccessError
+        isCredentialPersistenceError(err) ||
+        isMeshKeySourceContractError(err) ||
+        isMeshCredentialAccessError(err)
       ) {
         throw err;
       }
@@ -1850,7 +1857,7 @@ export class Interocitor<
     } catch (err) {
       // "Could not be read" is not "could not be inspected": the distinct
       // status is what lets a host re-prompt instead of forking the mesh.
-      if (err instanceof MeshCredentialAccessError) throw err;
+      if (isMeshCredentialAccessError(err)) throw err;
       throw new CredentialPersistenceError(this.dbName, "inspect", err);
     }
   }

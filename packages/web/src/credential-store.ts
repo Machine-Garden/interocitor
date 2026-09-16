@@ -11,10 +11,10 @@
 
 import type { CredentialStore, StoredCredentials } from "@interocitor/core";
 import {
-  CredentialAccessError,
   credentialAvailabilityOf,
   CredentialUnavailableError,
   CredentialUnreadableError,
+  isCredentialAccessError,
   ResidualWebAuthnCredentialError,
   WebAuthnBlobStore,
   type WebAuthnAttachmentPreference,
@@ -519,7 +519,11 @@ export class EnvelopedCredentialStore implements CredentialStore {
           // rotating provider needs to select a previous key.
           await this.keyProvider.getKey(request.purpose, request);
     } catch (error) {
-      if (error instanceof CredentialAccessError) throw error;
+      // Predicate, not `instanceof`: a provider error from a second copy of
+      // this package would fail the identity check and be flattened into
+      // "the store could not be consulted", which is how a wrong passphrase
+      // ends up looking like a first run and forks the mesh.
+      if (isCredentialAccessError(error)) throw error;
       throw new CredentialUnavailableError(
         `Credential envelope key for "${this.dbName}" could not be obtained`,
         { cause: error },

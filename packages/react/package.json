@@ -38,7 +38,7 @@
   "scripts": {
     "check": "tsc --noEmit && tsc -p tsconfig.tests.json",
     "build": "rm -rf ./dist && tsc -p tsconfig.json",
-    "test:e2e": "yarn workspace @interocitor/core build && yarn workspace @interocitor/web build && yarn build && ../../node_modules/.bin/playwright test -c ./playwright.config.ts"
+    "test:e2e": "yarn workspace @interocitor/core build && yarn workspace @interocitor/web build && yarn build && playwright test -c ./playwright.config.ts"
   },
   "devDependencies": {
     "@interocitor/core": "workspace:*",

@@ -8,6 +8,9 @@
   "scripts": {
     "server:file": "node ../../tools/webdav-server/server.mjs --mode=file --data-root=examples/todo-webdav/webdav-data",
     "check": "node --check app.js && yarn test:e2e",
-    "test:e2e": "../../node_modules/.bin/playwright test -c ./playwright.config.ts"
+    "test:e2e": "playwright test -c ./playwright.config.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2"
   }
 }

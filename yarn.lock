@@ -1114,6 +1114,7 @@ __metadata:
   resolution: "@interocitor/web@workspace:packages/web"
   dependencies:
     "@interocitor/core": "workspace:*"
+    "@playwright/test": "npm:^1.54.2"
     typescript: "npm:^6.0.0"
   peerDependencies:
     "@interocitor/core": ^0.2.0
@@ -6128,6 +6129,8 @@ __metadata:
 "todo-webdav-example@workspace:examples/todo-webdav":
   version: 0.0.0-use.local
   resolution: "todo-webdav-example@workspace:examples/todo-webdav"
+  dependencies:
+    "@playwright/test": "npm:^1.54.2"
   languageName: unknown
   linkType: soft
 

@@ -1,6 +1,6 @@
 {
   "name": "@interocitor/web",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Browser runtime stores, credential stores, and UI helpers for Interocitor.",
   "keywords": [
     "browser",
@@ -73,7 +73,7 @@
     "typescript": "^6.0.0"
   },
   "peerDependencies": {
-    "@interocitor/core": "^0.2.0"
+    "@interocitor/core": "^0.3.0"
   },
   "engines": {
     "node": ">=18.0.0"

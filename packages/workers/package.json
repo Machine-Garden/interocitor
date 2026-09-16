@@ -1,6 +1,6 @@
 {
   "name": "@interocitor/workers",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Cloudflare Workers runtime for Interocitor sync with D1 plus configurable durable file-body storage.",
   "keywords": [
     "aws-s3",

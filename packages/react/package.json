@@ -1,6 +1,6 @@
 {
   "name": "@interocitor/react",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "React bindings for Interocitor live queries, rows, images, connected stores, and connection status.",
   "keywords": [
     "crdt",
@@ -51,8 +51,8 @@
     "typescript": "^6.0.0"
   },
   "peerDependencies": {
-    "@interocitor/core": "^0.2.0",
-    "@interocitor/web": "^0.2.1",
+    "@interocitor/core": "^0.3.0",
+    "@interocitor/web": "^0.3.0",
     "react": ">=18"
   },
   "engines": {

@@ -19,6 +19,7 @@ const run = promisify(execFile);
 
 const ENCRYPTION = new URL("../dist/crypto/encryption.js", import.meta.url);
 const CHANGE_OBSERVATION = new URL("../dist/core/change-observation.js", import.meta.url);
+const SHARED_STATE = new URL("../dist/core/shared-global-state.js", import.meta.url);
 
 /** Two module instances of one built file, standing in for two installs. */
 function copies(url) {
@@ -120,22 +121,36 @@ test("the fallback writer gate still serializes within a single copy", async () 
 test("a frozen globalThis degrades to per-copy state instead of failing to import", async () => {
   // A hardened embedder may freeze the global before any library loads. The
   // helper must lose sharing there, not take the import down with it.
+  //
+  // `copies()` will not serve for the degraded half of this. It duplicates one
+  // module while its relative imports stay single, which is a faithful stand-in
+  // only for as long as `globalThis` is the sole channel between copies. A copy
+  // that cannot publish falls back to state held inside the helper, so the
+  // helper is the module that has to be duplicated to observe that. Import it
+  // under two specifiers directly, which is what a second install really is.
   const probe = `
     Object.freeze(globalThis);
     const copyA = await import(${JSON.stringify(`${ENCRYPTION}?frozen=a`)});
-    const copyB = await import(${JSON.stringify(`${ENCRYPTION}?frozen=b`)});
     const key = await copyA.importKeyRaw(new Uint8Array(32).fill(5));
     const ownCopyWorks = (await copyA.meshKeyDerivationBase(key)).algorithm.name === "HKDF";
-    let sharedAcrossCopies = true;
-    try {
-      await copyB.meshKeyDerivationBase(key);
-    } catch {
-      sharedAcrossCopies = false;
-    }
+
+    const helperA = await import(${JSON.stringify(`${SHARED_STATE}?frozen=a`)});
+    const helperB = await import(${JSON.stringify(`${SHARED_STATE}?frozen=b`)});
+    const build = () => ({ owner: "unset" });
+    const fromA = helperA.sharedGlobalState("core.frozen-probe.v1", build);
+    const fromB = helperB.sharedGlobalState("core.frozen-probe.v1", build);
+    const sharedAcrossCopies = fromA === fromB;
+    // Within one copy the answer must not drift either: a caller that resolves
+    // lazily would otherwise get a fresh store per call, which is no store.
+    const stableWithinCopy =
+      helperA.sharedGlobalState("core.frozen-probe.v1", build) === fromA;
+
     const published = Object.getOwnPropertySymbols(globalThis).some((symbol) =>
       String(symbol).includes("interocitor."),
     );
-    console.log(JSON.stringify({ ownCopyWorks, sharedAcrossCopies, published }));
+    console.log(
+      JSON.stringify({ ownCopyWorks, sharedAcrossCopies, stableWithinCopy, published }),
+    );
   `;
 
   const { stdout } = await run(process.execPath, ["--input-type=module", "--eval", probe]);
@@ -143,6 +158,7 @@ test("a frozen globalThis degrades to per-copy state instead of failing to impor
 
   assert.equal(result.ownCopyWorks, true, "the module must still work inside its own copy");
   assert.equal(result.published, false, "nothing may be forced onto a frozen global");
+  assert.equal(result.stableWithinCopy, true, "a copy must keep answering with its own store");
   assert.equal(result.sharedAcrossCopies, false, "degradation is per-copy state, not sharing");
 });
 

@@ -26,6 +26,8 @@ import type {
   WherePrimitive,
 } from "@interocitor/core";
 
+import { sharedGlobalState } from "../shared-global-state.ts";
+
 const DEFAULT_DB_NAME = "interocitor";
 // v2: adds the append-only pendingOps store and the outbox by_id index.
 const DEFAULT_DB_VERSION = 2;
@@ -48,8 +50,7 @@ const BLOCKED_UPGRADE_GRACE_MS = 1_000;
 // keep a defensible answer for the environments where it is unavailable.
 
 /**
- * Registry key for the in-process lock queue used when Web Locks is not
- * usable.
+ * This realm's lock queue for the case where Web Locks is not usable.
  *
  * A module-level `Map` is the wrong home for a lock. A consumer's tree can
  * easily hold two copies of this module — a duplicate install, pnpm's
@@ -59,74 +60,28 @@ const BLOCKED_UPGRADE_GRACE_MS = 1_000;
  * lock that does not lock is worse than no lock at all, because the engine is
  * written assuming mutual exclusion.
  *
- * `Symbol.for` is realm-global, so every copy in the realm finds the same
- * queue. The `.v1` suffix is the migration seam: a future copy whose queue
- * entries mean something different must claim a new key rather than silently
- * sharing a structure it would misread.
+ * The `.v1` suffix is the migration seam: a future copy whose queue entries
+ * mean something different must claim a new name rather than silently sharing
+ * a structure it would misread.
  */
-const FALLBACK_LOCK_TAILS_KEY = Symbol.for("interocitor.fallbackLockTails.v1");
-
-/**
- * Registry key for this realm's "Web Locks is not usable here" verdict.
- * Shared for the same reason the queue is: two module copies that disagree
- * about which mechanism to use would not exclude each other.
- */
-const WEB_LOCKS_SUPPORT_KEY = Symbol.for("interocitor.webLocksSupport.v1");
-
-/** Last-resort homes, used when `globalThis` refuses to hold shared state. */
-const moduleLocalLockTails = new Map<string, Promise<void>>();
-const moduleLocalWebLocksSupport = { refused: false };
-
-/**
- * Publish `fallbackValue` on `globalThis` under `key`, or adopt whatever is
- * already there.
- *
- * Installed non-writable and non-configurable so a later module copy cannot
- * swap the shared structure out from under a lock that is already held. Any
- * refusal — a frozen `globalThis`, a sealed or non-writable property, a
- * squatted key holding something we cannot use — degrades to the module-local
- * value: weaker than sharing, but still a working lock for this copy, which
- * is strictly better than throwing on import.
- */
-function sharedGlobal<T extends object>(
-  key: symbol,
-  fallbackValue: T,
-  usable: (candidate: unknown) => boolean,
-): T {
-  const host = globalThis as unknown as Record<symbol, unknown>;
-  try {
-    const existing = host[key];
-    if (usable(existing)) return existing as T;
-    // Nothing usable is installed. If the key is free this claims it; if it is
-    // held non-configurably by something we cannot use, defineProperty throws
-    // and the catch hands back the module-local value.
-    Object.defineProperty(host, key, {
-      value: fallbackValue,
-      writable: false,
-      enumerable: false,
-      configurable: false,
-    });
-    const installed = host[key];
-    return usable(installed) ? (installed as T) : fallbackValue;
-  } catch {
-    return fallbackValue;
-  }
-}
-
 function fallbackLockTails(): Map<string, Promise<void>> {
-  // Module copies that share a `globalThis` necessarily share its intrinsics,
-  // so a plain `instanceof` is a sound identity check here.
-  return sharedGlobal(
-    FALLBACK_LOCK_TAILS_KEY,
-    moduleLocalLockTails,
+  return sharedGlobalState(
+    "web.fallback-lock-tails.v1",
+    () => new Map<string, Promise<void>>(),
     (candidate) => candidate instanceof Map,
   );
 }
 
+/**
+ * This realm's "Web Locks is not usable here" verdict.
+ *
+ * Shared for the same reason the queue is: two module copies that disagreed
+ * about which mechanism to use would not exclude each other.
+ */
 function webLocksSupport(): { refused: boolean } {
-  return sharedGlobal(
-    WEB_LOCKS_SUPPORT_KEY,
-    moduleLocalWebLocksSupport,
+  return sharedGlobalState(
+    "web.web-locks-support.v1",
+    () => ({ refused: false }),
     (candidate) =>
       typeof candidate === "object" &&
       candidate !== null &&

@@ -201,8 +201,13 @@ test("a blocked global registry degrades to a module-local lock", async ({ page 
     // non-configurably by something that is not a lock queue, so the module
     // can neither adopt it nor replace it. Failing to import, or throwing on
     // first use, would be far worse than locking a little less widely.
-    Object.defineProperty(globalThis, Symbol.for("interocitor.fallbackLockTails.v1"), {
-      value: "squatted",
+    //
+    // The squatter is a plain object on purpose. A string would be turned away
+    // by the shape check every shared store gets for free; only the narrower
+    // `instanceof Map` this registry passes in can tell that an object which is
+    // not a lock queue must not be adopted as one.
+    Object.defineProperty(globalThis, Symbol.for("interocitor.web.fallback-lock-tails.v1"), {
+      value: { notALockQueue: true },
       writable: false,
       configurable: false,
     });

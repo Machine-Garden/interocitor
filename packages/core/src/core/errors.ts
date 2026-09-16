@@ -79,6 +79,23 @@ export class CredentialPersistenceError extends Error {
   }
 }
 
+/**
+ * Narrow an unknown rejection to {@link CredentialPersistenceError}.
+ *
+ * Prefer this to `instanceof` on any path that decides whether credentials
+ * are missing: a host key source that throws this error from its own copy of
+ * this package fails the identity check, and "the record could not be
+ * inspected" must never degrade into "there is no record".
+ */
+export function isCredentialPersistenceError(err: unknown): err is CredentialPersistenceError {
+  return (
+    err instanceof CredentialPersistenceError ||
+    (typeof err === "object" &&
+      err !== null &&
+      (err as { code?: unknown }).code === "CREDENTIAL_PERSISTENCE_FAILED")
+  );
+}
+
 /** Thrown when a durable key source omits the required inspection hook. */
 export class MeshKeySourceContractError extends Error {
   readonly code = "MESH_KEY_SOURCE_CONTRACT_INVALID" as const;
@@ -90,6 +107,16 @@ export class MeshKeySourceContractError extends Error {
     );
     this.name = "MeshKeySourceContractError";
   }
+}
+
+/** Narrow an unknown rejection to {@link MeshKeySourceContractError}. */
+export function isMeshKeySourceContractError(err: unknown): err is MeshKeySourceContractError {
+  return (
+    err instanceof MeshKeySourceContractError ||
+    (typeof err === "object" &&
+      err !== null &&
+      (err as { code?: unknown }).code === "MESH_KEY_SOURCE_CONTRACT_INVALID")
+  );
 }
 
 /**

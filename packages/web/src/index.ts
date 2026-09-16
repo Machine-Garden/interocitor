@@ -102,6 +102,8 @@ export {
   InvalidPassphraseKeyRecordError,
   MissingPassphraseKeyRecordError,
   WrongPassphraseError,
+  isPassphraseEnvelopeError,
+  type PassphraseEnvelopeErrorCode,
   DEFAULT_PASSPHRASE_IDLE_TIMEOUT_MS,
   DEFAULT_PASSPHRASE_KDF_ITERATIONS,
   MAXIMUM_PASSPHRASE_KDF_ITERATIONS,

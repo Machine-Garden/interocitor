@@ -92,6 +92,21 @@ const VERIFIER_PLAINTEXT = encoder.encode("interocitor.passphrase.envelope.verif
 // run" will mint a fresh mesh key and fork the mesh.
 
 /**
+ * Stable `code` values for the passphrase-envelope taxonomy.
+ *
+ * Each value is part of the public contract and never changes. The shared
+ * `PASSPHRASE_ENVELOPE` prefix is what {@link isPassphraseEnvelopeError}
+ * matches on, so adding a member here needs no edit to any predicate.
+ */
+export type PassphraseEnvelopeErrorCode =
+  | "PASSPHRASE_ENVELOPE"
+  | "PASSPHRASE_ENVELOPE_WRONG_PASSPHRASE"
+  | "PASSPHRASE_ENVELOPE_LOCKED"
+  | "PASSPHRASE_ENVELOPE_KEY_RECORD_MISSING"
+  | "PASSPHRASE_ENVELOPE_KEY_RECORD_INVALID"
+  | "PASSPHRASE_ENVELOPE_NAMESPACE_MISMATCH";
+
+/**
  * Base class for every passphrase-envelope failure.
  *
  * This extends {@link CredentialAccessError} rather than `Error` so that
@@ -104,8 +119,15 @@ const VERIFIER_PLAINTEXT = encoder.encode("interocitor.passphrase.envelope.verif
  * when the key could not be derived at all, `"unreadable"` when a record was
  * found but does not open. Neither is `"absent"` — a caller that reads any of
  * these as "nothing stored" will mint a fresh mesh key and fork the mesh.
+ *
+ * Each subclass also carries a distinct stable `code`. `instanceof` alone
+ * decides nothing when a consumer's tree holds two copies of this package:
+ * the cross-copy answer is "not a credential error", which is exactly the
+ * flattening this class hierarchy exists to prevent.
  */
 export class PassphraseEnvelopeError extends CredentialAccessError {
+  readonly code: PassphraseEnvelopeErrorCode = "PASSPHRASE_ENVELOPE";
+
   constructor(
     availability: Exclude<CredentialAvailability, "absent">,
     message: string,
@@ -124,6 +146,8 @@ export class PassphraseEnvelopeError extends CredentialAccessError {
  * the two cases are not distinguishable from outside.
  */
 export class WrongPassphraseError extends PassphraseEnvelopeError {
+  override readonly code = "PASSPHRASE_ENVELOPE_WRONG_PASSPHRASE" as const;
+
   constructor(options?: ErrorOptions) {
     // A record was found and its AEAD check failed: unreadable, not missing.
     super("unreadable", "Passphrase does not match this credential envelope", options);
@@ -133,6 +157,8 @@ export class WrongPassphraseError extends PassphraseEnvelopeError {
 
 /** No passphrase is cached and none could be requested. */
 export class PassphraseLockedError extends PassphraseEnvelopeError {
+  override readonly code = "PASSPHRASE_ENVELOPE_LOCKED" as const;
+
   constructor(message = "Credential envelope is locked; unlock it with a passphrase") {
     // The custody mechanism could not be consulted; the record is untouched.
     super("unavailable", message);
@@ -147,6 +173,8 @@ export class PassphraseLockedError extends PassphraseEnvelopeError {
  * may still be there, and treating it as "no credentials" would fork the mesh.
  */
 export class MissingPassphraseKeyRecordError extends PassphraseEnvelopeError {
+  override readonly code = "PASSPHRASE_ENVELOPE_KEY_RECORD_MISSING" as const;
+
   constructor(namespace: string) {
     // No key can be derived, so the envelope cannot be consulted at all.
     super("unavailable", `No passphrase key record is stored for "${namespace}"`);
@@ -156,6 +184,8 @@ export class MissingPassphraseKeyRecordError extends PassphraseEnvelopeError {
 
 /** A stored record is malformed, unsupported, or below the accepted work factor. */
 export class InvalidPassphraseKeyRecordError extends PassphraseEnvelopeError {
+  override readonly code = "PASSPHRASE_ENVELOPE_KEY_RECORD_INVALID" as const;
+
   constructor(reason: string, options?: ErrorOptions) {
     super("unreadable", `Invalid passphrase key record: ${reason}`, options);
     this.name = "InvalidPassphraseKeyRecordError";
@@ -164,10 +194,28 @@ export class InvalidPassphraseKeyRecordError extends PassphraseEnvelopeError {
 
 /** The stored record belongs to a different credential namespace. */
 export class PassphraseNamespaceMismatchError extends PassphraseEnvelopeError {
+  override readonly code = "PASSPHRASE_ENVELOPE_NAMESPACE_MISMATCH" as const;
+
   constructor(expected: string, found: string) {
     super("unreadable", `Passphrase key record is bound to "${found}", not "${expected}"`);
     this.name = "PassphraseNamespaceMismatchError";
   }
+}
+
+/**
+ * Narrow an unknown rejection to {@link PassphraseEnvelopeError}.
+ *
+ * Also matches a structurally identical error from another copy of this
+ * module, so a consumer in another package does not depend on sharing one
+ * class identity. The prefix is the whole test: every member of this taxonomy
+ * carries a {@link PassphraseEnvelopeErrorCode}, all of which begin with
+ * `PASSPHRASE_ENVELOPE`, and nothing else does.
+ */
+export function isPassphraseEnvelopeError(err: unknown): err is PassphraseEnvelopeError {
+  if (err instanceof PassphraseEnvelopeError) return true;
+  if (typeof err !== "object" || err === null) return false;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === "string" && code.startsWith("PASSPHRASE_ENVELOPE");
 }
 
 // ─── Record shape and storage ─────────────────────────────────────────

@@ -8,7 +8,7 @@ an encrypted credential envelope from a passphrase the user types.
 import {
   PassphraseEnvelopeKeyProvider,
   createWebCredentialStore,
-  WrongPassphraseError,
+  isPassphraseEnvelopeError,
 } from "@interocitor/web";
 
 const keyProvider = new PassphraseEnvelopeKeyProvider("case-vault");
@@ -76,25 +76,34 @@ absence as "first run" mints a fresh mesh key and forks the mesh.
 
 Every failure path therefore throws, and each throws something distinguishable:
 
-| Error                              | Means                                                                |
-| ---------------------------------- | -------------------------------------------------------------------- |
-| `WrongPassphraseError`             | The phrase did not authenticate the stored record.                   |
-| `PassphraseLockedError`            | No key is cached and no passphrase could be obtained.                |
-| `MissingPassphraseKeyRecordError`  | A decrypt was asked for, but the key record is gone.                 |
-| `PassphraseNamespaceMismatchError` | The record belongs to a different credential namespace.              |
-| `InvalidPassphraseKeyRecordError`  | The record is malformed, unsupported, or below the accepted minimum. |
+| Error                              | `code`                                   | Means                                                                |
+| ---------------------------------- | ---------------------------------------- | -------------------------------------------------------------------- |
+| `WrongPassphraseError`             | `PASSPHRASE_ENVELOPE_WRONG_PASSPHRASE`   | The phrase did not authenticate the stored record.                   |
+| `PassphraseLockedError`            | `PASSPHRASE_ENVELOPE_LOCKED`             | No key is cached and no passphrase could be obtained.                |
+| `MissingPassphraseKeyRecordError`  | `PASSPHRASE_ENVELOPE_KEY_RECORD_MISSING` | A decrypt was asked for, but the key record is gone.                 |
+| `PassphraseNamespaceMismatchError` | `PASSPHRASE_ENVELOPE_NAMESPACE_MISMATCH` | The record belongs to a different credential namespace.              |
+| `InvalidPassphraseKeyRecordError`  | `PASSPHRASE_ENVELOPE_KEY_RECORD_INVALID` | The record is malformed, unsupported, or below the accepted minimum. |
 
-All of them extend `PassphraseEnvelopeError`. Handle them; do not treat a
-rejected `load()` as an empty store.
+All of them extend `PassphraseEnvelopeError`, which extends
+`CredentialAccessError`. Handle them; do not treat a rejected `load()` as an
+empty store.
 
 ```ts
 try {
   const credentials = await credentialStore.load();
 } catch (error) {
-  if (error instanceof WrongPassphraseError) return promptAgain();
+  if (isPassphraseEnvelopeError(error) && error.code === "PASSPHRASE_ENVELOPE_WRONG_PASSPHRASE") {
+    return promptAgain();
+  }
   throw error; // Never fall through to "start a new mesh".
 }
 ```
+
+Each `code` is stable across releases, and the predicates — `isCredentialAccessError`,
+`isPassphraseEnvelopeError` — check it as well as `instanceof`. Prefer them:
+`instanceof` alone answers "no" when the error crosses a package boundary into
+a second copy of `@interocitor/web`, and "no" on this path means "nothing
+stored", which forks the mesh.
 
 A wrong passphrase is caught by a **verifier**: a fixed plaintext encrypted
 under the derived key when the record is provisioned. Decrypting it proves the

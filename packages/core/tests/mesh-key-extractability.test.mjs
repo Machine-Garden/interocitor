@@ -250,7 +250,10 @@ test("a mesh created from scratch holds a non-extractable key", async () => {
   const key = engine.encryptionKey;
   assert.ok(key instanceof CryptoKey, "the engine minted a mesh key");
   assert.equal(key.extractable, false);
-  await assert.rejects(() => crypto.subtle.exportKey("raw", key), /InvalidAccessError|not extractable/);
+  await assert.rejects(
+    () => crypto.subtle.exportKey("raw", key),
+    /InvalidAccessError|not extractable/,
+  );
 
   // Non-extractability costs the mesh nothing: the portable form is produced
   // alongside the key, so the mesh is still shareable and recoverable.

@@ -290,7 +290,7 @@ export async function copyLocalStoreState(
       await target.setMeta(key, value);
     }
   } else {
-    throw new Error(
+    throw new TypeError(
       "Store-format migration source cannot enumerate its meta store. Copying an allowlist of " +
         "meta keys risks dropping the mesh id or HLC and forking the mesh; refusing to guess.",
     );
@@ -302,7 +302,7 @@ export async function copyLocalStoreState(
   const pending = await source.peekPendingBatch();
   if (pending) {
     if (typeof target.adoptPendingBatch !== "function") {
-      throw new Error(
+      throw new TypeError(
         "Store-format migration target cannot adopt an open pending batch. Promoting it into the " +
           "outbox instead would publish a batch the engine still considers open; refusing.",
       );
@@ -678,11 +678,7 @@ export function createNamedLocalStore(options: NamedLocalStoreOptions): NamedLoc
         target.outboxSize(),
         target.peekPendingBatch(),
       ]);
-      setUnpushedLocalWrites(
-        targetName,
-        outboxSize > 0 || pending !== null,
-        options.unpushedSlots,
-      );
+      setUnpushedLocalWrites(targetName, outboxSize > 0 || pending !== null, options.unpushedSlots);
       migrated = true;
     } catch (error) {
       throw new StoreFormatMigrationFailedError(

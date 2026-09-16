@@ -13,8 +13,6 @@ import { expect, test } from "@playwright/test";
 // 2. Every way the decision procedure can fail is a typed error and a
 //    no-op — never an unhandled exception, never a silent deletion.
 
-const FORMAT_MODULE = "/packages/web/dist/storage/named-local-store.js";
-
 test.beforeEach(async ({ page }) => {
   await page.goto("/packages/web/tests/e2e/fixtures/harness.html");
 });
@@ -25,9 +23,8 @@ test.describe("store format seam", () => {
   }) => {
     const baseName = `FormatStamp-${crypto.randomUUID()}`;
     const result = await page.evaluate(async (name) => {
-      const { IndexedDbLocalStore } = await import(
-        "/packages/web/dist/storage/indexed-db-local-store.js"
-      );
+      const { IndexedDbLocalStore } =
+        await import("/packages/web/dist/storage/indexed-db-local-store.js");
       const { createNamedLocalStore, LEGACY_PLAINTEXT_ROWS_FORMAT, STORE_FORMAT_META_KEY } =
         await import("/packages/web/dist/storage/named-local-store.js");
 
@@ -82,12 +79,10 @@ test.describe("store format seam", () => {
   }) => {
     const baseName = `FormatMigrate-${crypto.randomUUID()}`;
     const result = await page.evaluate(async (name) => {
-      const { IndexedDbLocalStore } = await import(
-        "/packages/web/dist/storage/indexed-db-local-store.js"
-      );
-      const { createNamedLocalStore, copyLocalStoreState, STORE_FORMAT_META_KEY } = await import(
-        "/packages/web/dist/storage/named-local-store.js"
-      );
+      const { IndexedDbLocalStore } =
+        await import("/packages/web/dist/storage/indexed-db-local-store.js");
+      const { createNamedLocalStore, copyLocalStoreState, STORE_FORMAT_META_KEY } =
+        await import("/packages/web/dist/storage/named-local-store.js");
 
       // ── Seed a realistic legacy generation ────────────────────────
       const legacy = new IndexedDbLocalStore(name);
@@ -174,7 +169,7 @@ test.describe("store format seam", () => {
         stamp: await store.getMeta(STORE_FORMAT_META_KEY),
         activeDatabaseName: store.activeDatabaseName,
         pointer: pointerMemory.get(`interocitor:dbName:${name}`),
-        rowIds: (await store.getAllRows()).map((r: any) => r._meta.rowId).sort(),
+        rowIds: (await store.getAllRows()).map((r: any) => r._meta.rowId).toSorted(),
         tombstoned: (await store.getAllRows()).some(
           (r: any) => r._meta.rowId === "gone" && r._meta.deleted === true,
         ),
@@ -238,12 +233,10 @@ test.describe("store format seam", () => {
   }) => {
     const baseName = `FormatUnknown-${crypto.randomUUID()}`;
     const result = await page.evaluate(async (name) => {
-      const { IndexedDbLocalStore } = await import(
-        "/packages/web/dist/storage/indexed-db-local-store.js"
-      );
-      const { createNamedLocalStore, STORE_FORMAT_META_KEY } = await import(
-        "/packages/web/dist/storage/named-local-store.js"
-      );
+      const { IndexedDbLocalStore } =
+        await import("/packages/web/dist/storage/indexed-db-local-store.js");
+      const { createNamedLocalStore, STORE_FORMAT_META_KEY } =
+        await import("/packages/web/dist/storage/named-local-store.js");
 
       // A newer build wrote this database, then the user loaded an older one.
       const written = new IndexedDbLocalStore(name);
@@ -300,12 +293,10 @@ test.describe("store format seam", () => {
   test("refuses cleanly when no migration path reaches the desired format", async ({ page }) => {
     const baseName = `FormatNoPath-${crypto.randomUUID()}`;
     const result = await page.evaluate(async (name) => {
-      const { IndexedDbLocalStore } = await import(
-        "/packages/web/dist/storage/indexed-db-local-store.js"
-      );
-      const { createNamedLocalStore } = await import(
-        "/packages/web/dist/storage/named-local-store.js"
-      );
+      const { IndexedDbLocalStore } =
+        await import("/packages/web/dist/storage/indexed-db-local-store.js");
+      const { createNamedLocalStore } =
+        await import("/packages/web/dist/storage/named-local-store.js");
       const legacy = new IndexedDbLocalStore(name);
       await legacy.open();
       await legacy.putRow({
@@ -343,12 +334,10 @@ test.describe("store format seam", () => {
   test("leaves the source and the pointer alone when a migration throws", async ({ page }) => {
     const baseName = `FormatFail-${crypto.randomUUID()}`;
     const result = await page.evaluate(async (name) => {
-      const { IndexedDbLocalStore } = await import(
-        "/packages/web/dist/storage/indexed-db-local-store.js"
-      );
-      const { createNamedLocalStore } = await import(
-        "/packages/web/dist/storage/named-local-store.js"
-      );
+      const { IndexedDbLocalStore } =
+        await import("/packages/web/dist/storage/indexed-db-local-store.js");
+      const { createNamedLocalStore } =
+        await import("/packages/web/dist/storage/named-local-store.js");
       const legacy = new IndexedDbLocalStore(name);
       await legacy.open();
       await legacy.putRow({

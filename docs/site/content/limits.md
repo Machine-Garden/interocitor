@@ -22,12 +22,12 @@ The usual argument for local-first is that the client is more trustworthy than t
 
 The real difference is **blast radius**.
 
-| | Server-held custody | Client-held custody |
-| --- | --- | --- |
-| Who must be compromised | The operator | One user's device |
-| What one compromise yields | Every user's data | That user's data |
-| Attack economics | One target, enormous payoff | Many targets, small payoffs each |
-| Who can be compelled | One company, one jurisdiction | Each person individually |
+|                            | Server-held custody           | Client-held custody              |
+| -------------------------- | ----------------------------- | -------------------------------- |
+| Who must be compromised    | The operator                  | One user's device                |
+| What one compromise yields | Every user's data             | That user's data                 |
+| Attack economics           | One target, enormous payoff   | Many targets, small payoffs each |
+| Who can be compelled       | One company, one jurisdiction | Each person individually         |
 
 A datacenter is defended far better than a laptop and is worth attacking far more. Interocitor does not claim your device is a stronger vault. It claims a breach of the mailbox yields ciphertext, and that compromising you does not compromise anyone else.
 
@@ -49,7 +49,7 @@ Client-held custody moves the secret into an environment you do not control and 
 - **Userscripts are the same authority** with a lower installation bar.
 - **Your code is re-delivered on every load.** A server-side application is deployed once and can be audited as deployed. A web application is shipped fresh to every visitor, so "the code I reviewed" and "the code running in this tab" are separate claims. Anyone who can change what your origin serves — you, your host, your CDN, an attacker with your deploy credentials, or a court order — changes the application for everyone with no visible trace. Subresource integrity, integrity manifests, and transparency logs are the proposed answer to this, and they are early-stage standardization rather than something you can rely on today.
 - **The disk outlives the session.** A copied browser profile, a laptop backup, or a synced profile carries the local replica and any credential stored beside it.
-- **Full-disk encryption has its own rules.** FileVault, BitLocker and LUKS protect a volume that is *locked* — powered off, or before first unlock. They are worth having and they are not a browser-storage control. Once you have logged in, the volume is mounted and readable, so every process running as you reads the profile exactly as the browser does; an extension, a userscript, and a piece of malware are all on the authorized side of that boundary. The protection also stops at the disk: a backup written to an unencrypted target, a profile synced to a vendor account, or a recovery key escrowed to a company or cloud account all carry the data past it, under a different set of rules and often a different set of people.
+- **Full-disk encryption has its own rules.** FileVault, BitLocker and LUKS protect a volume that is _locked_ — powered off, or before first unlock. They are worth having and they are not a browser-storage control. Once you have logged in, the volume is mounted and readable, so every process running as you reads the profile exactly as the browser does; an extension, a userscript, and a piece of malware are all on the authorized side of that boundary. The protection also stops at the disk: a backup written to an unencrypted target, a profile synced to a vendor account, or a recovery key escrowed to a company or cloud account all carry the data past it, under a different set of rules and often a different set of people.
 
 Interocitor addresses the copied disk and can raise the cost of the extension. It does not address hostile first-party code. If the code serving your application is against you, no configuration of this library helps — it is the thing doing the decrypting.
 
@@ -57,7 +57,7 @@ Interocitor addresses the copied disk and can raise the cost of the extension. I
 
 Beyond software there is a limit that no design crosses.
 
-A person who can reach *you* does not need to break your encryption. Security folklore calls this rubber-hose cryptanalysis, and [xkcd 538](https://xkcd.com/538/) is the version most people have seen: two panels of imagined cryptanalysis, then a man with a five-dollar wrench. Most languages have their own, grimmer telling of the same joke. The point behind it is serious and load-bearing: your cryptosystem's strength is capped by what happens to the human holding the key.
+A person who can reach _you_ does not need to break your encryption. Security folklore calls this rubber-hose cryptanalysis, and [xkcd 538](https://xkcd.com/538/) is the version most people have seen: two panels of imagined cryptanalysis, then a man with a five-dollar wrench. Most languages have their own, grimmer telling of the same joke. The point behind it is serious and load-bearing: your cryptosystem's strength is capped by what happens to the human holding the key.
 
 This is not an argument for giving up. It is the boundary condition that tells you where to stop spending. If your threat model includes someone arriving at your home, or a state with a warrant for your person, then software is not the layer that saves you, and choosing a sync library is not the decision that matters.
 
@@ -77,16 +77,16 @@ Raising cost is a legitimate goal even when it is not a boundary. The failure is
 
 ## Know what Interocitor claims {#claims}
 
-| Threat | Covered | By what |
-| --- | --- | --- |
-| Storage operator reads your rows | Yes | Payload encryption before upload; the remote is a mailbox |
-| Remote breach or backup leak | Yes | The remote holds ciphertext it cannot decrypt |
-| Copied disk or browser profile | Partly | Credential custody options; the local replica itself is not yet encrypted |
-| Bulk storage-scraping extension | Partly | Credential custody; an application-supplied second key raises cost |
-| Extension targeting your application | No | It runs above the page and can read what the page can read |
-| Hostile or replaced first-party code | No | It holds the key by definition |
-| Remote withholding or rolling back data | No | Detected in some cases, not prevented; see [the security model](/security) |
-| Coercion of a key holder | No | Outside what software can reach |
+| Threat                                  | Covered | By what                                                                    |
+| --------------------------------------- | ------- | -------------------------------------------------------------------------- |
+| Storage operator reads your rows        | Yes     | Payload encryption before upload; the remote is a mailbox                  |
+| Remote breach or backup leak            | Yes     | The remote holds ciphertext it cannot decrypt                              |
+| Copied disk or browser profile          | Partly  | Credential custody options; the local replica itself is not yet encrypted  |
+| Bulk storage-scraping extension         | Partly  | Credential custody; an application-supplied second key raises cost         |
+| Extension targeting your application    | No      | It runs above the page and can read what the page can read                 |
+| Hostile or replaced first-party code    | No      | It holds the key by definition                                             |
+| Remote withholding or rolling back data | No      | Detected in some cases, not prevented; see [the security model](/security) |
+| Coercion of a key holder                | No      | Outside what software can reach                                            |
 
 "Partly" is doing real work in that table. Read it as "raises cost", never as "prevents".
 

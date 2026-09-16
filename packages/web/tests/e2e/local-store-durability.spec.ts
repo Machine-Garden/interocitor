@@ -9,11 +9,6 @@ import { expect, test } from "@playwright/test";
 // The resilience behaviour itself is not weakened: the same mechanisms still
 // fire for a genuinely disposable (clean) cache.
 
-const RESILIENT = "/packages/web/dist/storage/resilient-store.js";
-const NAMED = "/packages/web/dist/storage/named-local-store.js";
-const IDB = "/packages/web/dist/storage/indexed-db-local-store.js";
-const RESET = "/packages/web/dist/storage/reset.js";
-
 test.beforeEach(async ({ page }) => {
   await page.goto("/packages/web/tests/e2e/fixtures/harness.html");
 });
@@ -40,12 +35,10 @@ test.describe("unpushed writes block a degrade to memory", () => {
     const dbName = `DegradeGuard-${crypto.randomUUID()}`;
     const result = await page.evaluate(
       async ([name, hangingSource]) => {
-        const { createResilientLocalStore, hasUnpushedLocalWrites } = await import(
-          "/packages/web/dist/storage/resilient-store.js"
-        );
-        const { IndexedDbLocalStore } = await import(
-          "/packages/web/dist/storage/indexed-db-local-store.js"
-        );
+        const { createResilientLocalStore, hasUnpushedLocalWrites } =
+          await import("/packages/web/dist/storage/resilient-store.js");
+        const { IndexedDbLocalStore } =
+          await import("/packages/web/dist/storage/indexed-db-local-store.js");
         const memory = new Map<string, string>();
         const slots = {
           get: (key: string) => memory.get(key) ?? null,
@@ -120,9 +113,8 @@ test.describe("unpushed writes block a degrade to memory", () => {
   test("still degrades a genuinely disposable cache", async ({ page }) => {
     const result = await page.evaluate(
       async ([hangingSource]) => {
-        const { createResilientLocalStore } = await import(
-          "/packages/web/dist/storage/resilient-store.js"
-        );
+        const { createResilientLocalStore } =
+          await import("/packages/web/dist/storage/resilient-store.js");
         const memory = new Map<string, string>();
         const slots = {
           get: (key: string) => memory.get(key) ?? null,
@@ -158,9 +150,8 @@ test.describe("unpushed writes block a degrade to memory", () => {
 
   test("refuses a post-open degrade while the outbox is non-empty", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { createResilientLocalStore } = await import(
-        "/packages/web/dist/storage/resilient-store.js"
-      );
+      const { createResilientLocalStore } =
+        await import("/packages/web/dist/storage/resilient-store.js");
       const { MemoryLocalStore } = await import("/packages/core/dist/storage/memory-store.js");
       const memory = new Map<string, string>();
       const slots = {
@@ -220,12 +211,10 @@ test.describe("unpushed writes block a degrade to memory", () => {
   }) => {
     const dbName = `LegacyOutbox-${crypto.randomUUID()}`;
     const result = await page.evaluate(async (name) => {
-      const { createResilientLocalStore, hasUnpushedLocalWrites } = await import(
-        "/packages/web/dist/storage/resilient-store.js"
-      );
-      const { IndexedDbLocalStore } = await import(
-        "/packages/web/dist/storage/indexed-db-local-store.js"
-      );
+      const { createResilientLocalStore, hasUnpushedLocalWrites } =
+        await import("/packages/web/dist/storage/resilient-store.js");
+      const { IndexedDbLocalStore } =
+        await import("/packages/web/dist/storage/indexed-db-local-store.js");
       // Written entirely outside the wrapper: this is an existing install.
       const legacy = new IndexedDbLocalStore(name);
       await legacy.open();
@@ -261,12 +250,10 @@ test.describe("unpushed writes block a degrade to memory", () => {
 test.describe("unpushed writes block rotation and reset", () => {
   test("refuses to rotate away from a generation holding unpushed writes", async ({ page }) => {
     const result = await page.evaluate(async () => {
-      const { rotateLocalDatabaseName } = await import(
-        "/packages/web/dist/storage/named-local-store.js"
-      );
-      const { setUnpushedLocalWrites } = await import(
-        "/packages/web/dist/storage/resilient-store.js"
-      );
+      const { rotateLocalDatabaseName } =
+        await import("/packages/web/dist/storage/named-local-store.js");
+      const { setUnpushedLocalWrites } =
+        await import("/packages/web/dist/storage/resilient-store.js");
       const memory = new Map<string, string>();
       const slots = {
         get: (key: string) => memory.get(key) ?? null,
@@ -312,12 +299,10 @@ test.describe("unpushed writes block rotation and reset", () => {
   }) => {
     const baseName = `RotateOnDegrade-${crypto.randomUUID()}`;
     const result = await page.evaluate(async (name) => {
-      const { createNamedLocalStore } = await import(
-        "/packages/web/dist/storage/named-local-store.js"
-      );
-      const { IndexedDbLocalStore } = await import(
-        "/packages/web/dist/storage/indexed-db-local-store.js"
-      );
+      const { createNamedLocalStore } =
+        await import("/packages/web/dist/storage/named-local-store.js");
+      const { IndexedDbLocalStore } =
+        await import("/packages/web/dist/storage/indexed-db-local-store.js");
       const memory = new Map<string, string>();
       const slots = {
         get: (key: string) => memory.get(key) ?? null,
@@ -329,12 +314,10 @@ test.describe("unpushed writes block rotation and reset", () => {
         set: (key: string, value: string) => void pointerMemory.set(key, value),
       };
 
-      const { hasUnpushedLocalWrites } = await import(
-        "/packages/web/dist/storage/resilient-store.js"
-      );
-      const { rotateLocalDatabaseName } = await import(
-        "/packages/web/dist/storage/named-local-store.js"
-      );
+      const { hasUnpushedLocalWrites } =
+        await import("/packages/web/dist/storage/resilient-store.js");
+      const { rotateLocalDatabaseName } =
+        await import("/packages/web/dist/storage/named-local-store.js");
 
       const rotations: any[] = [];
       const store = createNamedLocalStore({
@@ -390,15 +373,12 @@ test.describe("unpushed writes block rotation and reset", () => {
   test("refuses to delete a database holding unpushed writes unless forced", async ({ page }) => {
     const dbName = `ResetGuard-${crypto.randomUUID()}`;
     const result = await page.evaluate(async (name) => {
-      const { resetLocalDatabase, resetLocalDatabaseWithDeadline } = await import(
-        "/packages/web/dist/storage/reset.js"
-      );
-      const { setUnpushedLocalWrites, hasUnpushedLocalWrites } = await import(
-        "/packages/web/dist/storage/resilient-store.js"
-      );
-      const { IndexedDbLocalStore } = await import(
-        "/packages/web/dist/storage/indexed-db-local-store.js"
-      );
+      const { resetLocalDatabase, resetLocalDatabaseWithDeadline } =
+        await import("/packages/web/dist/storage/reset.js");
+      const { setUnpushedLocalWrites, hasUnpushedLocalWrites } =
+        await import("/packages/web/dist/storage/resilient-store.js");
+      const { IndexedDbLocalStore } =
+        await import("/packages/web/dist/storage/indexed-db-local-store.js");
       const memory = new Map<string, string>();
       const slots = {
         get: (key: string) => memory.get(key) ?? null,
@@ -453,12 +433,10 @@ test.describe("a format migration carries unpushed writes rather than stranding 
   test("moves the outbox to the new generation and marks it there", async ({ page }) => {
     const baseName = `MigrateOutbox-${crypto.randomUUID()}`;
     const result = await page.evaluate(async (name) => {
-      const { createNamedLocalStore, copyLocalStoreState } = await import(
-        "/packages/web/dist/storage/named-local-store.js"
-      );
-      const { hasUnpushedLocalWrites } = await import(
-        "/packages/web/dist/storage/resilient-store.js"
-      );
+      const { createNamedLocalStore, copyLocalStoreState } =
+        await import("/packages/web/dist/storage/named-local-store.js");
+      const { hasUnpushedLocalWrites } =
+        await import("/packages/web/dist/storage/resilient-store.js");
       const memory = new Map<string, string>();
       const slots = {
         get: (key: string) => memory.get(key) ?? null,

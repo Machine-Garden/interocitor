@@ -36,7 +36,7 @@ What this gives you:
   them without the final mesh key. This holds only for a mesh with a
   non-null `keySource`: with `keySource: null`, `encodeForCloud` writes
   plaintext JSON, and the change-file **body** carries table names, row
-  ids, and values. No remote object *name* ever derives from a table name
+  ids, and values. No remote object _name_ ever derives from a table name
   in either mode.
 - **Confidentiality of durable file contents.** `putFile()` encrypts file
   bytes with the mesh key before adapter upload when the mesh has a non-null `keySource`.

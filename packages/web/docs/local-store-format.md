@@ -34,7 +34,7 @@ the cloud; it has never applied to the device.
 
 - `outbox` holds `ChangeEntry` objects that have been committed locally but not
   yet uploaded (`pushOutbox`, `pushOutboxEntries`, `drainOutbox`).
-- `pendingOps` plus the `meta["pendingBatch"]` header hold the *open* implicit
+- `pendingOps` plus the `meta["pendingBatch"]` header hold the _open_ implicit
   batch (`commitLocalMutation`, `peekPendingBatch`, `promotePendingBatch`).
 
 A `ChangeEntry` is `{ id, ts, device, user?, hlc, ops }`, and each `UpsertOp`
@@ -47,7 +47,7 @@ change entries **encrypted** — `encodeChangePayload` in
 the whole JSON string to `encryptEntry` (AES-256-GCM, random 96-bit IV, envelope
 `{v:1, iv, ct}`) — so ops, tables, row ids and values are all inside the
 ciphertext. Locally they are plain objects. The local profile therefore holds a
-*per-field-timestamped edit history*, including intermediate states and the
+_per-field-timestamped edit history_, including intermediate states and the
 authoring device, that the remote never sees in readable form.
 
 It also holds it for writes the remote will never see at all until they are
@@ -74,7 +74,7 @@ One correction to that claim as originally stated: encryption is conditional.
 `encodeForCloud` (`core/codec.ts`) returns the plaintext JSON unchanged when the
 mesh has no key source (`this.encrypted = this.keySource !== null` in
 `core/sync-engine.ts`). On an **unencrypted** mesh the remote does see table
-names, row ids and values — in the change file *body*, still never in an object
+names, row ids and values — in the change file _body_, still never in an object
 name. The "remote never learns table names" statement is true of encrypted
 meshes, which is the configuration the security model is written for.
 
@@ -86,7 +86,7 @@ format, and the code confirms it.
 `schemaIndexKeyPath(field)` returns:
 
 ```ts
-["_meta.table", `payload.${field}.value`]
+["_meta.table", `payload.${field}.value`];
 ```
 
 An index with this key path is created for **every** field a schema marks
@@ -95,7 +95,7 @@ An index with this key path is created for **every** field a schema marks
 
 IndexedDB stores index keys in the clear, in a separate sorted structure, so
 that it can answer range queries without deserializing records. Encrypting the
-row *value* does nothing to those keys. Concretely: if an app marks `email`
+row _value_ does nothing to those keys. Concretely: if an app marks `email`
 unique, a copy of the profile yields the sorted set of all email addresses, and
 supports "everything between `a` and `b`" queries over them, no matter what the
 row bodies look like.
@@ -127,7 +127,7 @@ vacuum are background processes with no application-visible guarantee, no API to
 force, and no completion signal.
 
 `resetLocalDatabase` (`reset.ts`) issues `indexedDB.deleteDatabase`, which
-unlinks the *logical* database. It guarantees that the app can no longer read
+unlinks the _logical_ database. It guarantees that the app can no longer read
 it. It guarantees nothing about the underlying blocks. (It additionally cannot
 be cancelled once queued, which is why a name that saw a blocked or timed-out
 delete must never be reused.)
@@ -137,7 +137,7 @@ The conclusion is structural, not a matter of implementation care:
 > If a database has ever held plaintext rows, rewriting those rows in place
 > cannot make the plaintext unrecoverable from that database's files.
 
-Therefore a format change that exists to *stop storing plaintext* is only
+Therefore a format change that exists to _stop storing plaintext_ is only
 meaningful in a **new physical database**, freshly created, that never held the
 plaintext. The old generation's remaining bytes are a separate problem to be
 handled by an explicit user-facing reset — not something a migration can quietly
@@ -151,10 +151,10 @@ This is why the seam in Part 2 defaults `requiresFreshGeneration` to `true`.
 
 Two independent identities are now distinguished:
 
-| Identity                | Where it lives                                    | What it means                          |
-| ----------------------- | ------------------------------------------------- | -------------------------------------- |
-| **Physical generation** | the IndexedDB database *name*                     | which set of bytes on disk             |
-| **Store format**        | `meta["interocitor:store:format"]` inside that DB | what those bytes *mean*                |
+| Identity                | Where it lives                                    | What it means              |
+| ----------------------- | ------------------------------------------------- | -------------------------- |
+| **Physical generation** | the IndexedDB database _name_                     | which set of bytes on disk |
+| **Store format**        | `meta["interocitor:store:format"]` inside that DB | what those bytes _mean_    |
 
 Rotation (`rotateLocalDatabaseName` in `named-local-store.ts`, plus
 `local-database-name.ts` for the generated-name predicate) changes the first.
@@ -176,8 +176,7 @@ export interface StoreFormatDescriptor {
   readonly requiresFreshGeneration?: boolean;
 }
 
-export type StoreFormatMigration =
-  (ctx: StoreFormatMigrationContext) => Promise<void>;
+export type StoreFormatMigration = (ctx: StoreFormatMigrationContext) => Promise<void>;
 
 export interface StoreFormatMigrationContext {
   readonly from: string;
@@ -224,11 +223,11 @@ Failures are typed, all extending `StoreFormatError` (which carries a `.code`
 string discriminant, following the existing `UnstableCredentialNamespaceError`
 convention), so a host can branch on them and show a real message:
 
-| Error                                 | `.code`                              | Meaning                                                      |
-| ------------------------------------- | ------------------------------------ | ------------------------------------------------------------ |
-| `UnknownStoreFormatError`             | `UNKNOWN_STORE_FORMAT`               | The DB records a format this build has never heard of (downgrade). |
-| `UnsupportedStoreFormatUpgradeError`  | `UNSUPPORTED_STORE_FORMAT_UPGRADE`   | The desired format declares no path from the recorded one.   |
-| `StoreFormatMigrationFailedError`     | `STORE_FORMAT_MIGRATION_FAILED`      | The migration threw. `cause` carries the original error.     |
+| Error                                | `.code`                            | Meaning                                                            |
+| ------------------------------------ | ---------------------------------- | ------------------------------------------------------------------ |
+| `UnknownStoreFormatError`            | `UNKNOWN_STORE_FORMAT`             | The DB records a format this build has never heard of (downgrade). |
+| `UnsupportedStoreFormatUpgradeError` | `UNSUPPORTED_STORE_FORMAT_UPGRADE` | The desired format declares no path from the recorded one.         |
+| `StoreFormatMigrationFailedError`    | `STORE_FORMAT_MIGRATION_FAILED`    | The migration threw. `cause` carries the original error.           |
 
 In every failure case the source database, its pointer, and its contents are
 left exactly as they were. Refusing to open is always preferable to opening onto
@@ -254,7 +253,7 @@ deletes a generation is an explicit, forced `resetLocalDatabase`.
 
 `copyLocalStoreState` copies, in this order: rows (tombstones included),
 cursors, all non-internal meta, the outbox, then the open pending batch. The
-order is chosen so that a crash leaves the target strictly *behind* the source
+order is chosen so that a crash leaves the target strictly _behind_ the source
 rather than ahead of it.
 
 Two pieces of machinery exist only to make that copy honest, and both are
@@ -265,7 +264,7 @@ required of any store implementation participating in a migration
   Copying meta by allowlist would eventually drop `meshId` or the HLC and
   **silently fork the mesh**, so `copyLocalStoreState` throws rather than guess
   when enumeration is unavailable.
-- `adoptPendingBatch(entry)` — carries the *open* implicit batch across
+- `adoptPendingBatch(entry)` — carries the _open_ implicit batch across
   generations. Promoting it into the outbox instead would publish a batch the
   engine still considers open.
 
@@ -352,7 +351,7 @@ outcome `"refused-unpushed-writes"` without issuing any request.
 Resilience is preserved where it was actually resilience: a store with a clean
 marker still degrades to memory on a stalled open exactly as before, because
 that database genuinely is a disposable cache. What changed is that the code no
-longer *assumes* it is one.
+longer _assumes_ it is one.
 
 Each refusal has an explicit opt-out, because "discard my unsynced work" is a
 legitimate user action — it just has to be a user action, never a recovery

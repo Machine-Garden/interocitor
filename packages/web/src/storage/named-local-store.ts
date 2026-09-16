@@ -6,6 +6,7 @@ import {
   isGeneratedLocalDatabaseName,
   UnstableCredentialNamespaceError,
 } from "./local-database-name.ts";
+import { sharedGlobalState } from "../shared-global-state.ts";
 import {
   createDefaultSlotStore,
   createResilientLocalStore,
@@ -132,8 +133,6 @@ export interface StoreFormatDescriptor {
   readonly requiresFreshGeneration?: boolean;
 }
 
-const registeredFormats = new Map<string, StoreFormatDescriptor>();
-
 /**
  * The identity format. It declares a no-op migration from itself so the
  * decision procedure has one uniform shape: there is no special "current
@@ -148,7 +147,24 @@ const legacyFormat: StoreFormatDescriptor = {
     },
   },
 };
-registeredFormats.set(legacyFormat.id, legacyFormat);
+
+/**
+ * The format registry, realm-wide rather than module-wide.
+ *
+ * An application registers a format once and opens stores wherever it likes. If
+ * a second copy of this package carried its own registry, `open()` through that
+ * copy would refuse a format the application had genuinely registered, with an
+ * {@link UnknownStoreFormatError} naming an id that is right there in
+ * {@link listStoreFormats} of the other copy.
+ *
+ * The built-in seeds the registry from inside the factory so it is installed
+ * exactly once: a second copy loading later must not replace a descriptor whose
+ * migration functions a caller may already be holding.
+ */
+const registeredFormats = sharedGlobalState(
+  "web.store-formats.v1",
+  () => new Map<string, StoreFormatDescriptor>([[legacyFormat.id, legacyFormat]]),
+);
 
 /**
  * Register a store format so `createNamedLocalStore({ storeFormat })` can

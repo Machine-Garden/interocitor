@@ -1,5 +1,6 @@
 // compass: interocitor.mailbox-host.access-control
 
+import { sharedGlobalState } from "./shared-global-state.ts";
 import type { DatabaseAdapter, FileUploadAuthorizationRequest } from "./types.ts";
 
 /**
@@ -49,8 +50,18 @@ interface MeshInfoSource {
  * Requests carry no mesh handle of their own. The runtime registers one here
  * before invoking application policy, so {@link MeshInfo} stays a capability
  * the application reaches for rather than a payload every upload carries.
+ *
+ * Realm-wide rather than module-wide: the registration and the lookup sit on
+ * opposite sides of the library boundary. The runtime attaches the source; the
+ * application's own `authorizeFileUpload` calls {@link meshInfo}. A bundle that
+ * resolved those two imports to different copies of this package would leave
+ * every policy throwing `TypeError` on a request the runtime had registered
+ * correctly.
  */
-const sources = new WeakMap<object, MeshInfoSource>();
+const sources = sharedGlobalState(
+  "workers.mesh-info-sources.v1",
+  () => new WeakMap<object, MeshInfoSource>(),
+);
 
 /**
  * Register the row-store handle backing {@link meshInfo} for one request.

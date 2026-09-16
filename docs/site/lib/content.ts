@@ -7,6 +7,7 @@ import dictionarySource from "../content/dictionary.md";
 import flowsSource from "../content/flows.md";
 import howItWorksSource from "../content/how-it-works.md";
 import integrationsSource from "../content/integrations.md";
+import limitsSource from "../content/limits.md";
 import mailboxSource from "../content/mailbox.md";
 import qaSource from "../content/qa.md";
 import securitySource from "../content/security.md";
@@ -91,6 +92,12 @@ const sources: SourceRecord[] = [
     slug: "trust",
     navLabel: "Trust & key custody",
     source: trustSource,
+    group: "Plan",
+  },
+  {
+    slug: "limits",
+    navLabel: "Limits of security",
+    source: limitsSource,
     group: "Plan",
   },
   {

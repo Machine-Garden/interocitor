@@ -28,6 +28,8 @@ Classify it instead:
 
 A row can retain a file reference and enough metadata to render the interface while offline. The file bytes remain unavailable until transport returns unless the application implements a cache.
 
+Mesh encryption covers the artifacts sent to the remote, not the endpoint's own store: a row's local copy is unencrypted at rest. Factor that into the privacy guarantee you write for each list below.
+
 ## Point a row at a file {#file-ref}
 
 Declare the pointer as a column, and the row becomes the index for content that loads on demand:

@@ -3,6 +3,7 @@
 import {
   WebAuthnBlobStore,
   type WebAuthnBlobStoreOptions,
+  type WebAuthnClearResult,
   type WebAuthnCredentialRef,
   type WebAuthnEnrollOptions,
   type WebAuthnLoadOptions,
@@ -25,11 +26,22 @@ export type WebSecretCustody = "browserStorage" | "webauthnPlatform" | "webauthn
 export interface WebSecretStore {
   readonly custody: WebSecretCustody;
   save(bytes: Uint8Array): Promise<void>;
+  /**
+   * Returns `null` only when the custody mechanism holds nothing (`absent`).
+   * WebAuthn-backed stores throw `CredentialUnavailableError` for a ceremony
+   * that could not be consulted and `CredentialUnreadableError` for bytes that
+   * belong to another namespace.
+   */
   load(): Promise<Uint8Array | null>;
   clear(): Promise<void>;
 }
 
 export interface WebAuthnSecretStore extends WebSecretStore {
+  /**
+   * Overwrite the stored blob and drop local hints, reporting what survived.
+   * The WebAuthn credential itself cannot be deleted by script.
+   */
+  clearWithReport(): Promise<WebAuthnClearResult>;
   listAuthenticators(): WebAuthnCredentialRef[];
   enrollAuthenticator(
     bytes: Uint8Array,
@@ -110,7 +122,11 @@ abstract class WebAuthnSecretStoreBase implements WebAuthnSecretStore {
     return this.store.load(this.loadOptions);
   }
 
-  clear(): Promise<void> {
+  async clear(): Promise<void> {
+    await this.store.clear();
+  }
+
+  clearWithReport(): Promise<WebAuthnClearResult> {
     return this.store.clear();
   }
 

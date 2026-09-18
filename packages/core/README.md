@@ -135,6 +135,12 @@ Deleting a row does not delete its referenced files. Writing the same file
 path replaces the remote object according to adapter semantics; retry transfer
 failures in application code.
 
+A file is reachable only through a row that references it. The remote object
+name is a keyed hash of the application path and the stored header does not
+record that path, so nothing can enumerate files from storage. Keep every file
+referenced by a row: the rows are the index, for reading, for cleanup, and for
+whatever export you write.
+
 ## Compose the runtime
 
 Every engine needs an explicit local store and key source. A remote adapter and

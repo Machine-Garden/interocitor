@@ -157,6 +157,26 @@ timing, and request identity. See the
 [security model](packages/core/docs/security-model.md) for the complete trust
 boundary.
 
+## Import, export, and transforms
+
+There is no export API, no import API, and no migration tool, because there is
+nothing to expose that you do not already hold. Rows are yours through
+`tableNames()` and `query()`. Files are yours through the `FileRef` columns
+those rows carry. Write the loop, shape the output however the destination
+wants it, and put a button on it. Import is the same loop backwards.
+
+That is the stance: transform what you want, how you want, with the whole API
+available and no blessed format in the way. A library-owned exporter would
+only be our guess at your schema, and it would date faster than your
+application does.
+
+Two things are worth knowing before you write that loop. `query()` returns
+live rows, so a dump built from it omits tombstones; read from your own
+`LocalStore` reference if a deleted row has to survive the round trip. And a
+file is discoverable only through a row that references it, because the remote
+object name is a keyed hash of the path and carries no path of its own. Keep
+every file referenced by a row and everything stays reachable.
+
 ## Package map
 
 | Package                | Start here                                                                                                                       |

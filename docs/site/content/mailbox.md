@@ -14,7 +14,7 @@ Confidentiality does not make the service passive. Its owner still controls:
 
 - authorization at each mesh route;
 - storage quotas and request-size limits;
-- retention and compaction scheduling;
+- [retention](/retention) and compaction scheduling;
 - logs and audit evidence;
 - backup and restore;
 - incident response and availability.
@@ -33,6 +33,8 @@ The mailbox is intentionally simple, but it remains part of the product’s secu
 | Custom adapter  | The mailbox must fit an existing platform                | Faithful adapter semantics and an explicit account of missing guarantees. |
 
 No backend is universally best. Choose the failure modes and operational owner the product can support.
+
+How long the backend keeps an untouched mesh, and what a device sees when it does not, is [data retention](/retention).
 
 The [complete storage model](/storage#backends) shows what is local, what is remote, and exactly how WebDAV, direct S3, Google Drive, Cloudflare + R2, and Cloudflare + S3 place the mailbox artifacts. Direct S3 puts the complete mailbox in a bucket. Cloudflare + S3 is a different deployment: D1 retains row history, control state, and durable-file metadata while S3 holds only file bodies.
 

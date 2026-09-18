@@ -56,6 +56,14 @@ Account revocation can stop later remote access but cannot erase a copied key. C
 
 Encryption cannot recreate unavailable data. Local row copies may survive, but shared remote history and durable files need independent backup or another complete copy. Important deployments should test a full restore.
 
+## How long does the mailbox keep a mesh? {#retention}
+
+That is the storage owner's decision, not the protocol's. A deployment may reclaim a mesh that has gone unwritten for a set period; one year is the recommended figure. Reads do not extend it, because every trusted device already holds what a reader is reading.
+
+## Does reclaiming storage delete the data? {#eviction}
+
+No. The mesh identity survives, marked evicted, and the first device to write afterwards republishes its complete copy. Reclamation is a cost control. Deleting for real means revoking the address and rotating the key, so remaining copies cannot rejoin. Read [data retention](/retention).
+
 ## Will row history grow forever? {#history}
 
 A single trusted compactor periodically publishes a complete snapshot and deletes only the exact changes it covers. [Compaction](/compaction) bounds normal catch-up while preserving uncovered changes.

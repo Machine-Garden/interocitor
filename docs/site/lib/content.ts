@@ -10,6 +10,7 @@ import integrationsSource from "../content/integrations.md";
 import limitsSource from "../content/limits.md";
 import mailboxSource from "../content/mailbox.md";
 import qaSource from "../content/qa.md";
+import retentionSource from "../content/retention.md";
 import securitySource from "../content/security.md";
 import storageSource from "../content/storage.md";
 import taintedFilesSource from "../content/tainted-files.md";
@@ -110,6 +111,12 @@ const sources: SourceRecord[] = [
     slug: "mailbox",
     navLabel: "Mailbox operations",
     source: mailboxSource,
+    group: "Plan",
+  },
+  {
+    slug: "retention",
+    navLabel: "Data retention",
+    source: retentionSource,
     group: "Plan",
   },
   {

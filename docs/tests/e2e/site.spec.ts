@@ -329,6 +329,7 @@ test("agent readers get llms.txt and the Markdown behind every page", async ({ r
     "trust",
     "data-boundaries",
     "mailbox",
+    "retention",
     "auth",
     "automation",
     "qa",

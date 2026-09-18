@@ -287,6 +287,30 @@ in a local quarantine for export, review, or deliberate reapplication; they do
 not enter shared history automatically. Do not leave important unsynchronized
 work on a disconnected device as the only copy until that deadline.
 
+### How long does the mailbox keep my data?
+
+The protocol does not decide; the storage owner does. A deployment may reclaim
+a mesh that has gone unwritten for a configured period, measured in writes
+rather than reads, because every trusted device already holds what a reader is
+reading. One year is the recommended figure, and it must exceed
+`retention.maxOfflineDurationMs`. A plain bucket or WebDAV server states its
+policy only in its own documentation; treat an unstated limit as unknown, not
+as unlimited.
+
+### If the mailbox is reclaimed, is the data gone?
+
+Not while a trusted device still holds a copy. The mesh identity survives and
+is marked evicted; the first device to write afterwards republishes its rows
+with their original clocks, and the others catch up. File bodies are the
+exception — no device caches them, so rows return pointing at bytes that a
+sweep may have kept or a lifecycle rule may have expired.
+
+That also means reclamation is not erasure. A deletion that must hold means
+revoking the mesh address and rotating to a new mesh, so remaining copies
+cannot rejoin.
+
+See [data retention](site/content/retention.md).
+
 ### Is remote storage a backup?
 
 Not automatically. If the storage provider loses every copy, Interocitor

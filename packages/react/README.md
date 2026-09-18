@@ -41,8 +41,9 @@ yarn workspace @interocitor/web build
 yarn workspace @interocitor/react build
 ```
 
-The `0.1.0` React package depends on matching monorepo
-workspaces. Build the public repository release with the commands above.
+The React package depends on matching `@interocitor/core` and
+`@interocitor/web` builds from the same repository revision. Build them from
+the public repository with the commands above.
 
 The shell commands above are runnable from the repository root. TypeScript and
 TSX blocks below are partial component fragments; they assume the

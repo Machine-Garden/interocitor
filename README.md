@@ -25,10 +25,10 @@ is not encrypted at rest. See the
 
 ## Status
 
-Interocitor is pre-1.0 software. A minor version may change the public API,
-the local-store format, or the remote artifact layout; each release commit on
-`main` says when it does. Pin exact versions and read the release commit before
-upgrading.
+Interocitor is young software under active development. A release may change
+the public API, the local-store format, or the remote artifact layout; the
+release commit on `main` says when it does. Pin exact versions and read that
+commit before upgrading.
 
 What stands behind it today, and what does not:
 

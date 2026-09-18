@@ -150,8 +150,9 @@ the [protocol-aware backend comparison](../../../docs/how-it-works.html#adapter-
 ### `deleteFile(path)`
 
 - Removes the file. Subsequent `readFile(path)` should fail.
-- Deleting a missing file should be a no‑op (no throw). Core uses this for
-  explicit durable app-file deletion; compaction retains sync change files.
+- Deleting a missing file should be a no‑op (no throw). Core calls it for
+  explicit durable app-file deletion and, after publishing a snapshot, for the
+  exact change files that snapshot covers.
 
 ### Durable app-file methods
 

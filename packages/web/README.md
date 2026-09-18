@@ -21,8 +21,9 @@ yarn workspace @interocitor/core build
 yarn workspace @interocitor/web build
 ```
 
-The `0.1.0` release uses matching monorepo workspaces. Build it
-from the public repository with the commands above. Add the React workspace
+The package depends on a matching `@interocitor/core` build from the same
+repository revision. Build both from the public repository with the commands
+above. Add the React workspace
 build if you want hooks such as `useLiveQuery`, `useRow`, or `useImage`.
 
 The shell commands above are runnable from the repository root. TypeScript

@@ -296,7 +296,7 @@ function meshDeltaStatements(
       .prepare(
         `UPDATE mesh_paths SET
          updated_at = ?3,
-         deleted_at = NULL,
+         deleted_at = CASE WHEN ?10 IS NULL THEN deleted_at ELSE NULL END,
          last_operation_at = COALESCE(?8, last_operation_at),
          last_read_at = COALESCE(?9, last_read_at),
          last_write_at = COALESCE(?10, last_write_at),

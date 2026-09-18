@@ -3,6 +3,7 @@
 /**
  * All recognised Interocitor path types.
  *
+ * - `eviction-record` — `evicted.json` at a remote root (synthesized, never stored)
  * - `manifest-pointer` — `manifest.json` at a remote root (mutable, semantic merge)
  * - `manifest-snapshot` — `manifest-<gen>.json` (immutable, cached forever)
  * - `head` — `changes/head.json` (mutable, HLC-ordered merge)
@@ -12,6 +13,7 @@
  * - `other` — anything not matched above (generic overwrite semantics)
  */
 const PATH_TYPE_VALUES = {
+  EVICTION_RECORD: "eviction-record",
   MANIFEST_POINTER: "manifest-pointer",
   MANIFEST_SNAPSHOT: "manifest-snapshot",
   HEAD: "head",
@@ -45,6 +47,7 @@ export function classifyPath(path: string): PathType {
   const parent = normalized.slice(0, normalized.lastIndexOf("/")) || "/";
   const parentName = parent.slice(parent.lastIndexOf("/") + 1);
 
+  if (name === "evicted.json") return PATH_TYPE.EVICTION_RECORD;
   if (name === "manifest.json") return PATH_TYPE.MANIFEST_POINTER;
   if (/^manifest-\d+\.json$/.test(name)) return PATH_TYPE.MANIFEST_SNAPSHOT;
   if (name === "head.json" && parentName === "changes") return PATH_TYPE.HEAD;
@@ -80,7 +83,11 @@ export function meshRootForPath(
 ): string | null {
   const normalized = path.startsWith("/") ? path : `/${path}`;
   if (normalized === "/") return null;
-  if (pathType === PATH_TYPE.MANIFEST_POINTER || pathType === PATH_TYPE.MANIFEST_SNAPSHOT) {
+  if (
+    pathType === PATH_TYPE.EVICTION_RECORD ||
+    pathType === PATH_TYPE.MANIFEST_POINTER ||
+    pathType === PATH_TYPE.MANIFEST_SNAPSHOT
+  ) {
     return parentPath(normalized);
   }
   if (MESH_CHILD_TYPES.includes(pathType)) {

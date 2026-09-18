@@ -15,8 +15,9 @@ import {
 } from "./ops.ts";
 import { attachMeshInfoSource } from "./mesh-info.ts";
 import { PATH_TYPE, classifyPath, meshRootForPath } from "./paths.ts";
+import type { PathType } from "./paths.ts";
 import { broadcast } from "./relay.ts";
-import { getMaintenanceStatus, runMaintenance } from "./maintenance.ts";
+import { getMaintenanceStatus, readEvictionRecord, runMaintenance } from "./maintenance.ts";
 import type {
   D1Database,
   DatabaseAdapter,
@@ -597,6 +598,30 @@ async function readBytes(request: Request): Promise<Uint8Array | null> {
   }
 }
 
+/**
+ * Serve the synthesized eviction record at `<meshRoot>/evicted.json`.
+ *
+ * The record has no stored object behind it. It is derived from the surviving
+ * `mesh_paths` row on every read, so it cannot go stale, cannot be cached, and
+ * disappears on its own the moment a device writes the mesh back.
+ *
+ * Returns `null` when the path is not an eviction record, so callers fall
+ * through to normal object handling.
+ */
+async function evictionRecordBytes(
+  db: DatabaseAdapter,
+  prefix: string,
+  path: string,
+  pathType: PathType,
+): Promise<Uint8Array | null> {
+  if (pathType !== PATH_TYPE.EVICTION_RECORD) return null;
+  const meshRoot = meshRootForPath(path, pathType);
+  if (!meshRoot) return null;
+  const record = await readEvictionRecord(db, prefix, meshRoot);
+  if (!record) return null;
+  return new TextEncoder().encode(JSON.stringify(record));
+}
+
 async function handleGetFile<Env>(
   db: DatabaseAdapter,
   prefix: string,
@@ -606,6 +631,29 @@ async function handleGetFile<Env>(
   env: Env,
 ): Promise<Response> {
   const pathType = classifyPath(path);
+  const evictionRecord = await evictionRecordBytes(db, prefix, path, pathType);
+  if (evictionRecord) {
+    await emitAudit(runtime, env, {
+      op: "read",
+      address: prefix,
+      path: normalizePath(path),
+      pathType,
+      status: 200,
+      outcome: "ok",
+      bytes: evictionRecord.byteLength,
+      requestId: requestId(request),
+    });
+    return withCors(
+      new Response(evictionRecord as unknown as BodyInit, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": String(evictionRecord.byteLength),
+          "Cache-Control": "no-store",
+        },
+      }),
+    );
+  }
   const result = await opGetFile(db.raw, prefix, path, pathType);
   if (!result.found) {
     await emitAudit(runtime, env, {
@@ -651,6 +699,31 @@ async function handleMetadata<Env>(
   env: Env,
 ): Promise<Response> {
   const pathType = classifyPath(path);
+  const evictionRecord = await evictionRecordBytes(db, prefix, path, pathType);
+  if (evictionRecord) {
+    await emitAudit(runtime, env, {
+      op: "metadata",
+      address: prefix,
+      path: normalizePath(path),
+      pathType,
+      status: 200,
+      outcome: "ok",
+      bytes: evictionRecord.byteLength,
+      requestId: requestId(request),
+    });
+    return jsonResponse(
+      {
+        file: {
+          name: fileNameFromPath(path),
+          path: normalizePath(path),
+          size: evictionRecord.byteLength,
+          modifiedTime: null,
+          etag: null,
+        },
+      },
+      200,
+    );
+  }
   const result = await opGetFile(db.raw, prefix, path, pathType);
   if (!result.found) {
     await emitAudit(runtime, env, {
@@ -702,6 +775,12 @@ async function handleWriteFile<Env>(
   const bytes = await readBytes(request);
   if (!bytes) return jsonResponse({ error: "Invalid request body" }, 400);
   const pathType = classifyPath(path);
+  // The eviction record is synthesized, never stored. Accepting a write here
+  // would create a second source of truth that outlives the eviction it
+  // claims to describe.
+  if (pathType === PATH_TYPE.EVICTION_RECORD) {
+    return jsonResponse({ error: "Eviction record is read-only" }, 405);
+  }
   const limit = fileSizeLimitForPathType(pathType, runtime);
   if (bytes.byteLength > limit) return jsonResponse({ error: "Payload too large", limit }, 413);
   const remoteRoot = meshRootForPath(path, pathType);
@@ -795,6 +874,9 @@ async function handleDelete<Env>(
   env: Env,
   requestIdValue?: string,
 ): Promise<Response> {
+  if (classifyPath(path) === PATH_TYPE.EVICTION_RECORD) {
+    return jsonResponse({ error: "Eviction record is read-only" }, 405);
+  }
   const remoteRoot = meshRootForPath(path);
   const deleted = await opDeletePath(db.raw, prefix, path, remoteRoot);
   await emitAudit(runtime, env, {

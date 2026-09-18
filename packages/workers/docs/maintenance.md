@@ -8,6 +8,11 @@ rows from the D1 `files` and `folders` tables, clears its counters, and marks
 the `mesh_paths` row deleted. It does not delete bodies from the configured
 durable file-body store.
 
+The `mesh_paths` row itself survives. The mesh address stays routable, every
+device can still connect, and the host reports what happened through the
+eviction record described below. Devices that still hold the mesh key refill
+the rows they observed on their next write.
+
 Do not use the Worker path TTL as row-history compaction. The Worker does not
 hold the mesh key and cannot merge encrypted changes into a snapshot. A
 connected server-managed Interocitor writer uses D1's server-recorded
@@ -54,10 +59,48 @@ export default withInterocitor(appWorker, {
 handler, then awaits one all-mesh TTL sweep. `createInterocitorMount(...)` does
 not install a scheduled handler.
 
-`pathTtlHours` is measured from `mesh_paths.last_operation_at`. A positive
-finite number enables deletion. Omitted, invalid, zero, and negative values
-disable it. Choose a value longer than the maximum period in which a remote
-root may legitimately remain idle.
+`pathTtlHours` is measured in writes, not operations. The clock runs from
+`mesh_paths.last_write_at`, or from `created_at` for a mesh that has never
+been written. Reads do not hold a mesh alive: a mesh that is polled every hour
+but never written is idle, because no device has produced a record the host is
+the only holder of. A positive finite number enables deletion. Omitted,
+invalid, zero, and negative values disable it.
+
+The recommended value is `8760`, one year. Whatever you choose must be longer
+than the mesh's `retention.maxOfflineDurationMs`, or a device can return from
+an offline period into a mesh that was evicted while it was away and that it
+is already fenced out of.
+
+A mesh whose only readers never write can therefore expire. If a deployment
+has meshes that are published once and read for years, either disable the TTL
+for that prefix or have the publisher write a heartbeat within the window.
+
+## Read the eviction record
+
+An evicted mesh serves a JSON eviction record at `<remoteRoot>/evicted.json`:
+
+```json
+{
+  "evicted": true,
+  "meshAddress": "main",
+  "remotePath": "/main",
+  "evictedAt": "2026-09-18T03:00:00.000Z",
+  "reason": "idle",
+  "idleSince": "2025-09-17T11:42:05.000Z",
+  "fileBodiesRetained": true
+}
+```
+
+The record is synthesized from the surviving `mesh_paths` row on every read.
+It is never stored as an object, never cached, and never separately cleared,
+so serving it is not a write and does not reset the clock it reports. `reason`
+is `idle` for the TTL sweep and `operator` for any other host-initiated
+reclamation. A mesh that has not been evicted returns `404`; writes and
+deletes to the path return `405`.
+
+The next write to the mesh clears the flag, and the record disappears with it.
+Reads do not clear it, so a device can detect eviction across as many polls as
+it needs before it decides to refill.
 
 ## Expose host-triggered operations
 

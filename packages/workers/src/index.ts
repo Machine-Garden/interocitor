@@ -69,6 +69,8 @@ export type {
   WorkerAuditOutcome,
 } from "./types.ts";
 
+export type { EvictionReason, EvictionRecord } from "./maintenance.ts";
+
 export { applySchema, ensureSchema, SCHEMA_STATEMENTS } from "./schema.ts";
 export { R2FileBodyStore } from "./r2-file-body-store.ts";
 export { AwsS3FileBodyStore, S3FileBodyStore } from "./s3-file-body-store.ts";

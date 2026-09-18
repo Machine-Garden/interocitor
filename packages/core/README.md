@@ -296,6 +296,7 @@ typed errors, use the [Core API reference](docs/api-reference.md).
 - [Remote adapter contract and mailbox layout](docs/adapter-contract.md)
 - [Sync completeness, convergence, and integrity](docs/sync-completeness.md)
 - [Compaction protocol and tuning](docs/compaction.md)
+- [Mesh eviction and refill](docs/decisions/mesh-eviction.md)
 - [Credential-store contract](docs/credential-store.md)
 - [Recovery API reference](docs/recovery-reference.md)
 

@@ -156,3 +156,6 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+
+# Local agent session state
+.claude/

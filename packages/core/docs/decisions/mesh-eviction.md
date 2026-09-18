@@ -134,6 +134,7 @@ mesh is alive — it is the absence of evidence either way.
 | `detectedBy`        | `missing-manifest` or `lineage-change`                          |
 | `attestation`       | The parsed eviction record, or `null` when the host serves none |
 | `previousLineage`   | The lineage this client last observed                           |
+| `lineage`           | The lineage now live in the mailbox                             |
 | `localRowCount`     | Rows this client can contribute                                 |
 | `queuedChangeCount` | Unpublished changes already queued                              |
 | `policy`            | The `evictedMeshPolicy` that will be applied                    |

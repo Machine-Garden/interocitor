@@ -287,6 +287,7 @@ safe. Keep policy labels such as taints on the row as well. See
 | `deviceId`                  | Generated           | Test/host override for the device identity.                                                                                                                                             |
 | `deviceName` / `deviceType` | None                | Plaintext remote device metadata.                                                                                                                                                       |
 | `joinExistingMeshPolicy`    | `'reset-to-remote'` | On a different existing mesh, either clear local state or intentionally merge it.                                                                                                       |
+| `evictedMeshPolicy`         | `'refill'`          | After the host reclaims the mesh, either republish local state immediately or wait for `refillEvictedMesh()`.                                                                           |
 
 ### Joining an existing mesh with local state
 
@@ -297,6 +298,29 @@ The engine emits `join:existing-mesh` before applying the selected policy.
 This policy does not authorize changing the key of an existing local store.
 Pairing into another mesh must use a fresh isolated local store and credential
 namespace, or an application-owned full erase completed before `init()`.
+
+### Returning to an evicted mesh
+
+A host may reclaim the storage a mesh occupies without ending the mesh. The
+address stays valid and the devices still hold the rows, so the mesh is
+restored by the devices republishing rather than by the host restoring
+anything.
+
+`connect()` reports this as `mesh:evicted` when either the manifest is gone
+while local state still names the mesh, or the manifest carries a different
+`lineage` than this device last saw. `lineage` counts how many times the mesh
+has been created from nothing; it is absent on manifests written before it
+existed and reads as `1`.
+
+`refill`, the default, republishes this device's complete local row state with
+each row's original clocks. `manual` completes the connect and republishes
+nothing until the application calls `refillEvictedMesh()`.
+
+Every device must republish, not only the one that recreated the manifest. No
+device holds the whole mesh, so the mesh is restored by the union of what each
+device observed. Republishing is idempotent under last-writer-wins, so it is
+safe to repeat. Durable file bodies are outside refill: a restored row can name
+a file whose bytes are gone.
 
 ### Initialization and diagnostics
 
@@ -401,6 +425,7 @@ inheritance is not intended.
 | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | `connection:status`, `connect:state`, `connect:noop`, `connect:error`, `transport:teardown`                                | Remote-session state and transitions.                                                   |
 | `join:existing-mesh`                                                                                                       | Different existing mesh detected; includes policy and local row/queue counts.           |
+| `mesh:evicted`                                                                                                             | The mesh was reclaimed and reborn; includes how it was detected and the refill policy.  |
 | `sync:start`, `sync:complete`, `sync:error`                                                                                | Pull lifecycle.                                                                         |
 | `flush:start`, `flush:complete`, `flush:error`                                                                             | Primary outbox publication.                                                             |
 | `change`, `delete`                                                                                                         | Applied row events.                                                                     |

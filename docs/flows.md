@@ -106,6 +106,15 @@ rows, outbox, pending writes, cursors, and stale mesh metadata before pulling
 remote data. `merge-with-remote` keeps local rows and queued writes so normal
 CRDT pull/flush can merge them into the joined mesh.
 
+**Evicted-mesh policy:** immediately after the join-existing-mesh comparison,
+the engine checks whether the mesh it just loaded is a new life of the mesh it
+remembers. A missing manifest alongside local mesh metadata, or a manifest
+whose `lineage` differs from the remembered one, emits `mesh:evicted`. Under
+the default `refill` policy the device republishes its complete local row state
+after pull; under `manual` it publishes nothing until `refillEvictedMesh()` is
+called. A device fenced by `retention.maxOfflineDurationMs` contributes nothing
+either way, because its local state was already replaced from the remote.
+
 **Failure semantics:** local-store degradation and connect-stage stalls are
 availability fallbacks, not successful sync. A degraded local store may lose
 session-only writes on reload until they have flushed remotely. An

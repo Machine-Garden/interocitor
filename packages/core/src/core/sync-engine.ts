@@ -33,6 +33,8 @@ import type {
   ReplicaConfig,
   SyncInitialState,
   JoinExistingMeshPolicy,
+  EvictedMeshPolicy,
+  MeshEvictionAttestation,
   LogLevel,
   QueryDescriptor,
   QueryExecutionOptions,
@@ -62,7 +64,13 @@ import { readColumn } from "./crdt.ts";
 // Extracted modules
 import { paths, logAtLevel, normalizeLogLevel, generateId } from "./internals.ts";
 import type { CodecState } from "./codec.ts";
-import { loadOrCreateManifest, upsertDeviceMetadata } from "./manifest.ts";
+import {
+  MESH_LINEAGE_META,
+  loadOrCreateManifest,
+  readJsonIfExists,
+  resolveManifestLineage,
+  upsertDeviceMetadata,
+} from "./manifest.ts";
 import {
   decryptBytes,
   encryptBytes,
@@ -153,6 +161,7 @@ type ResolvedSyncConfig<S extends Record<string, Record<string, unknown>>> = {
   connectStageTimeoutMs: number;
   onConnectStalled?: SyncConfig<S>["onConnectStalled"];
   joinExistingMeshPolicy: JoinExistingMeshPolicy;
+  evictedMeshPolicy: EvictedMeshPolicy;
 };
 
 const DEFAULT_COMPACT_WARNING_THRESHOLD = 50;
@@ -332,6 +341,8 @@ export class Interocitor<
   private batchTimer: ReturnType<typeof setTimeout> | null = null;
   /** True while the local store holds an unpromoted pending batch. */
   private pendingBatch = false;
+  /** True once an eviction was reported under the `manual` policy. */
+  private evictedMeshAwaitingRefill = false;
 
   // Poll / push invalidation management
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -458,6 +469,7 @@ export class Interocitor<
       connectStageTimeoutMs: config.connectStageTimeoutMs ?? DEFAULT_CONNECT_STAGE_TIMEOUT_MS,
       onConnectStalled: config.onConnectStalled,
       joinExistingMeshPolicy: config.joinExistingMeshPolicy ?? "reset-to-remote",
+      evictedMeshPolicy: config.evictedMeshPolicy ?? "refill",
     };
     this.serverId = this.config.serverId;
     this.dbName = this.config.dbName;
@@ -1539,6 +1551,9 @@ export class Interocitor<
       ),
       [LAST_SUCCESSFUL_SYNC_AT_META]: await this.local.getMeta(LAST_SUCCESSFUL_SYNC_AT_META),
       meshId: await this.local.getMeta("meshId"),
+      // The remembered lineage must survive a reset. A device that forgot it
+      // would report the same eviction again on every later connect.
+      [MESH_LINEAGE_META]: await this.local.getMeta(MESH_LINEAGE_META),
     };
   }
 
@@ -1560,6 +1575,144 @@ export class Interocitor<
   private async markSuccessfulRemoteSync(now = Date.now()): Promise<void> {
     await this.local.setMeta(LAST_SUCCESSFUL_SYNC_AT_META, new Date(now).toISOString());
     await this.local.setMeta(OFFLINE_RETENTION_EXPIRED_AT_META, null);
+  }
+
+  /**
+   * What this device last knew about the mesh it belongs to.
+   *
+   * A remembered lineage of `null` means this device has never recorded one,
+   * which is every device that predates the field. Such a device detects
+   * eviction by the missing manifest alone until its first connect fills this
+   * in; it does not report an eviction it has no evidence of.
+   */
+  private async rememberedMeshIdentity(): Promise<{
+    rememberedMeshId: string;
+    rememberedLineage: number | null;
+  }> {
+    const meshId = await this.local.getMeta("meshId");
+    const lineage = await this.local.getMeta(MESH_LINEAGE_META);
+    return {
+      rememberedMeshId: typeof meshId === "string" ? meshId : "",
+      rememberedLineage:
+        typeof lineage === "number" && Number.isInteger(lineage) && lineage > 0 ? lineage : null,
+    };
+  }
+
+  /**
+   * Read the host's eviction record, if it publishes one.
+   *
+   * Most backends — a bucket, a WebDAV share, a NAS — have no code to attest
+   * anything, so this returns null far more often than not. A null result
+   * means the host did not say, never that the mesh survived.
+   */
+  private async readEvictionAttestation(): Promise<MeshEvictionAttestation | null> {
+    const remotePath = this.config.remotePath;
+    const adapter = this.adapter;
+    if (!remotePath || !adapter) return null;
+    const record = await readJsonIfExists<MeshEvictionAttestation>(
+      adapter,
+      `${remotePath}/evicted.json`,
+    );
+    return record && record.evicted === true ? record : null;
+  }
+
+  /**
+   * Decide whether the mesh this device belongs to has been evicted and has
+   * started a new life, and act on the configured policy.
+   *
+   * Two things are authoritative, and both mean the same event. A manifest
+   * that is missing while this device's local store still names the mesh is a
+   * mesh the host no longer holds. A lineage other than the one this device
+   * remembers is a mesh that was already recreated by somebody else. The
+   * second is what reaches every device that did not happen to be the one
+   * that recreated the manifest.
+   *
+   * @returns Whether this device should republish its local state.
+   */
+  private async applyMeshEvictionPolicy(input: {
+    bootstrapped: boolean;
+    rememberedMeshId: string;
+    rememberedLineage: number | null;
+  }): Promise<boolean> {
+    const meshId = this.manifest?.meshId;
+    if (!meshId) return false;
+    const lineage = resolveManifestLineage(this.manifest?.lineage);
+
+    let detectedBy: "missing-manifest" | "lineage-change" | null = null;
+    if (input.rememberedMeshId === meshId) {
+      if (input.bootstrapped) detectedBy = "missing-manifest";
+      else if (input.rememberedLineage !== null && input.rememberedLineage !== lineage) {
+        detectedBy = "lineage-change";
+      }
+    }
+
+    // Remember the live lineage either way, so one eviction is reported once.
+    await this.local.setMeta(MESH_LINEAGE_META, lineage);
+    if (!detectedBy) return false;
+
+    const policy = this.config.evictedMeshPolicy;
+    const localRows = await this.local.getAllRows();
+    const queuedChangeCount = (await this.local.outboxSize()) + (this.pendingBatch ? 1 : 0);
+    const attestation = await this.readEvictionAttestation();
+
+    this.log("warn", "connect() — mesh was evicted and is starting a new life", {
+      dbName: this.dbName,
+      remotePath: this.config.remotePath,
+      meshId,
+      detectedBy,
+      previousLineage: input.rememberedLineage ?? Math.max(1, lineage - 1),
+      lineage,
+      localRowCount: localRows.length,
+      policy,
+    });
+    this.emit({
+      type: "mesh:evicted",
+      dbName: this.dbName,
+      remotePath: this.config.remotePath,
+      deviceId: this.deviceId,
+      meshId,
+      detectedBy,
+      attestation,
+      previousLineage: input.rememberedLineage ?? Math.max(1, lineage - 1),
+      lineage,
+      localRowCount: localRows.length,
+      queuedChangeCount,
+      policy,
+    });
+
+    // A reader holds no writable claim on the mesh and cannot contribute to a
+    // refill. Meshes whose remaining devices are all readers stay evicted.
+    if (this.readerMode) return false;
+    if (policy === "manual") {
+      this.evictedMeshAwaitingRefill = true;
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Republish this device's complete local row state into a mesh that was
+   * evicted, when `evictedMeshPolicy` is `'manual'`.
+   *
+   * Every device must do this, not only the one that recreated the manifest.
+   * No device holds the whole mesh — each holds what it observed — so the mesh
+   * is restored by the union of the contributions, not by any one of them.
+   * Republishing carries each row's original clocks, so it is idempotent under
+   * last-writer-wins and safe to call more than once.
+   */
+  async refillEvictedMesh(): Promise<void> {
+    await this.ensureReady();
+    if (this.readerMode) {
+      throw new Error("InterocitorReader cannot refill an evicted mesh");
+    }
+    this.evictedMeshAwaitingRefill = false;
+    await this.rebuildOutboxFromLocalState();
+    await this.flushQueued(true);
+  }
+
+  /** Whether an eviction was reported and is waiting on `refillEvictedMesh()`. */
+  get awaitingEvictedMeshRefill(): boolean {
+    return this.evictedMeshAwaitingRefill;
   }
 
   private async applyJoinExistingMeshPolicy(bootstrapped: boolean): Promise<void> {
@@ -2409,7 +2562,11 @@ export class Interocitor<
         throw stage("loadExistingManifest", manifestResult.error);
       }
 
+      const readerMeshMemory = await this.rememberedMeshIdentity();
       await this.applyJoinExistingMeshPolicy(false);
+      // A reader cannot refill, but it must still learn that the mesh it is
+      // reading is a different life of the one it read last time.
+      await this.applyMeshEvictionPolicy({ bootstrapped: false, ...readerMeshMemory });
       if ((await this.local.outboxSize()) > 0 || (await this.local.peekPendingBatch()) !== null) {
         throw stage(
           "readerLocalState",
@@ -2453,6 +2610,11 @@ export class Interocitor<
       this.log("debug", "connect() — ensureFolder ok", folder);
     }
 
+    // Capture what this device remembers before anything overwrites it. The
+    // join policy rewrites the remembered mesh ID, and a bootstrap consumes
+    // the remembered lineage, so both must be read ahead of the manifest load.
+    const meshMemory = await this.rememberedMeshIdentity();
+
     this.log("debug", "connect() — loading/creating manifest");
     let bootstrapped = false;
     const manifestResult = await this.runConnectStage("loadOrCreateManifest", () =>
@@ -2495,6 +2657,12 @@ export class Interocitor<
     stageOk("joinExistingMeshPolicy", {
       policy: this.config.joinExistingMeshPolicy,
       meshId: this.manifest?.meshId,
+    });
+
+    const refillEvictedMesh = await this.applyMeshEvictionPolicy({ bootstrapped, ...meshMemory });
+    stageOk("meshEvictionPolicy", {
+      policy: this.config.evictedMeshPolicy,
+      refill: refillEvictedMesh,
     });
 
     // Anchor credentials to the live meshId now that parity is known
@@ -2579,10 +2747,19 @@ export class Interocitor<
         throw stage("pull", pullResult.error);
       }
     }
-    if (bootstrapped) {
+    // A device fenced by the offline rule has already had its local state
+    // replaced from the remote and its queue quarantined. It holds nothing of
+    // its own left to contribute, so it must not republish what it just pulled.
+    // A bootstrap normally republishes local state, which is how an evicted
+    // mesh used to refill itself by accident. Under the `manual` policy that
+    // is exactly what the caller asked not to happen, so it waits instead.
+    const republish = this.evictedMeshAwaitingRefill
+      ? false
+      : bootstrapped || (refillEvictedMesh && !offlineRetentionExpired);
+    if (republish) {
       await this.rebuildOutboxFromLocalState();
     }
-    if (!flushedBeforeSnapshotRestore || bootstrapped) {
+    if (!flushedBeforeSnapshotRestore || republish) {
       const flushResult = await this.runConnectStage("flush", () => this.flushQueued(true));
       if (!flushResult.ok) {
         if (flushResult.error instanceof ConnectStageTimeoutError) return;

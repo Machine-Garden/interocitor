@@ -62,7 +62,7 @@ That is the storage owner's decision, not the protocol's. A deployment may recla
 
 ## Does reclaiming storage delete the data? {#eviction}
 
-No. The mesh identity survives, marked evicted, and the first device to write afterwards republishes its complete copy. Reclamation is a cost control. Deleting for real means revoking the address and rotating the key, so remaining copies cannot rejoin. Read [data retention](/retention).
+No. The mesh identity survives, marked evicted, and every device that reconnects republishes its own copy. It takes all of them, because no single device holds what the others alone observed. Reclamation is a cost control. Deleting for real means revoking the address and rotating the key, so remaining copies cannot rejoin. Read [data retention](/retention).
 
 ## Will row history grow forever? {#history}
 

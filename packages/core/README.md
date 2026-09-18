@@ -225,6 +225,19 @@ When an existing remote mesh has a different identity from local state,
 Select that policy before connecting and back up meaningful local work before
 allowing a reset.
 
+When the mesh has the same identity but the mailbox no longer holds it, that
+is eviction rather than a different mesh. Core emits `mesh:evicted` and
+`evictedMeshPolicy` controls the consequence:
+
+- `refill` is the default and republishes this device's complete local row
+  state with each row's original clocks.
+- `manual` completes the connect and publishes nothing until the application
+  calls `refillEvictedMesh()`.
+
+Every device republishes, not only the one that recreated the manifest. No
+device holds what the others alone observed, so the mesh is restored by the
+union of their contributions. Durable file bodies are outside refill.
+
 Never reopen an existing local store under another mesh key. Use a fresh,
 isolated `dbName` and credential store, or disconnect every instance and fully
 erase the old local state and credential before constructing the replacement

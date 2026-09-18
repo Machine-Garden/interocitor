@@ -369,6 +369,7 @@ class Manifest:
     snapshot_path: str | None
     delta_path: str | None
     retention: dict[str, int] | None = None
+    lineage: int | None = None
 
     def payload_wire(self) -> dict[str, Any]:
         """Manifest body in the same insertion order core hashes with JSON.stringify."""
@@ -391,6 +392,8 @@ class Manifest:
         }
         if self.retention is not None:
             value["retention"] = self.retention
+        if self.lineage is not None:
+            value["lineage"] = self.lineage
         return value
 
     def to_wire(self) -> dict[str, Any]:
@@ -407,6 +410,12 @@ class Manifest:
         server = _mapping(record.get("server"), "Manifest server")
         snapshot_path = record.get("snapshotPath")
         delta_path = record.get("deltaPath")
+        lineage_raw = record.get("lineage")
+        lineage: int | None = None
+        if lineage_raw is not None:
+            lineage = _integer(lineage_raw, "Manifest lineage")
+            if lineage <= 0:
+                raise ValueError("Manifest lineage must be a positive integer")
         retention_raw = record.get("retention")
         retention: dict[str, int] | None = None
         if isinstance(retention_raw, Mapping):
@@ -435,6 +444,7 @@ class Manifest:
             snapshot_path=snapshot_path if isinstance(snapshot_path, str) else None,
             delta_path=delta_path if isinstance(delta_path, str) else None,
             retention=retention,
+            lineage=lineage,
         )
 
 

@@ -21,6 +21,9 @@ import type { CodecState } from "./codec.ts";
 import { MeshEncryptionMismatchError } from "./errors.ts";
 import { resolveRetentionPolicy } from "./retention.ts";
 
+/** Local meta key holding the lineage this device last observed. */
+export const MESH_LINEAGE_META = "meshLineage";
+
 export interface ManifestContext {
   adapter: StorageAdapter;
   remotePath: string;
@@ -47,6 +50,17 @@ export async function readJsonIfExists<T>(
   } catch {
     return null;
   }
+}
+
+/**
+ * Normalise a manifest's lineage counter.
+ *
+ * A manifest written before lineage existed has no counter and is the first
+ * life of its mesh, so it resolves to 1. Anything that is not a positive
+ * integer is treated the same way rather than trusted.
+ */
+export function resolveManifestLineage(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : 1;
 }
 
 function assertServerAuth(manifest: { writtenBy: string }, serverId: string): void {
@@ -76,7 +90,8 @@ export async function writeJson(
 
 async function createBootstrapManifest(
   ctx: ManifestContext,
-  meshId?: string,
+  meshId: string | undefined,
+  lineage: number,
 ): Promise<{ pointer: ManifestPointer; manifest: Manifest }> {
   const p = paths(ctx.remotePath);
   const now = new Date().toISOString();
@@ -101,6 +116,7 @@ async function createBootstrapManifest(
     snapshotPath: null,
     deltaPath: null,
     retention: ctx.retention,
+    lineage,
   };
 
   const manifest: Manifest = {
@@ -168,10 +184,14 @@ export async function loadOrCreateManifest(
     bootstrapped = true;
     ctx.emit({ type: "trace:manifest", op: "bootstrap-create", reason, path: p.manifestPointer });
     const existingMeshId = await local.getMeta("meshId");
-    const bootstrap = await createBootstrapManifest(
-      ctx,
-      typeof existingMeshId === "string" ? existingMeshId : undefined,
-    );
+    const knownMeshId = typeof existingMeshId === "string" ? existingMeshId : undefined;
+    // Bootstrapping a mesh ID this device already knew is not a new mesh. It
+    // is the same mesh starting a new life because the host no longer holds
+    // it, so the lineage advances and every other device learns to republish.
+    const nextLineage = knownMeshId
+      ? resolveManifestLineage(await local.getMeta(MESH_LINEAGE_META)) + 1
+      : 1;
+    const bootstrap = await createBootstrapManifest(ctx, knownMeshId, nextLineage);
     // Skip the read-after-write — we just minted both files in this process,
     // they are exactly what's on disk. No GETs needed.
     pointer = bootstrap.pointer;
@@ -184,7 +204,12 @@ export async function loadOrCreateManifest(
   // Retention was added without invalidating existing version-3 manifests.
   // Resolve it only after validating the persisted hash; the next compaction
   // writes the defaults into the new generation.
-  manifest = { ...manifest, retention: resolveRetentionPolicy(manifest.retention) };
+  // Lineage was added the same way: absent means the first life of the mesh.
+  manifest = {
+    ...manifest,
+    retention: resolveRetentionPolicy(manifest.retention),
+    lineage: resolveManifestLineage(manifest.lineage),
+  };
   if (options.assertLocalMeshId !== false) {
     try {
       await assertExpectedMeshId(local, codecState.manifest, manifest.meshId);

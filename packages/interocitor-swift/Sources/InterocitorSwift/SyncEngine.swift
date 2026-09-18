@@ -79,12 +79,13 @@ private enum ManifestCodingKey: String, CodingKey, CaseIterable {
     case snapshotPath
     case deltaPath
     case retention
+    case lineage
 }
 
 private let coreManifestKeyOrder: [ManifestCodingKey] = [
     .generation, .parentGeneration, .writtenBy, .writtenAt, .version,
     .meshId, .schema, .encrypted, .server, .createdAt, .epoch,
-    .watermarkHlc, .snapshotPath, .deltaPath, .retention, .contentHash,
+    .watermarkHlc, .snapshotPath, .deltaPath, .retention, .lineage, .contentHash,
 ]
 
 private let sortedManifestKeyOrder: [ManifestCodingKey] =
@@ -934,6 +935,9 @@ public actor Interocitor {
         case .retention:
             guard let retention = manifest.retention else { return nil }
             return "{\"compactAfterMs\":\(retention.compactAfterMs),\"maxOfflineDurationMs\":\(retention.maxOfflineDurationMs)}"
+        case .lineage:
+            guard let lineage = manifest.lineage else { return nil }
+            return String(lineage)
         }
     }
 

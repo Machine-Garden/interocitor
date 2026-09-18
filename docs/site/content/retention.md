@@ -51,7 +51,7 @@ When the idle clock runs out the mailbox reclaims the storage. What it does not 
 
 The mesh identity survives. Its address still routes, its record still exists, and it is marked **evicted** rather than removed. A device that connects afterwards is told what happened instead of finding an empty room and quietly assuming it is the first to arrive.
 
-And because every trusted device holds a complete copy, any one of them can put the whole thing back. The first device to write after an eviction republishes its rows, with their original timestamps, and the mesh resumes. Others reconnect, see the new generation, and catch up. Where the devices are still around, an eviction costs one round of re-upload.
+And because every trusted device holds a complete copy of what it has seen, the devices put the mesh back between them. Each one that reconnects learns that the mesh has started a new life, republishes its own rows with their original timestamps, and lets the usual last-writer-wins merge settle the overlaps. It has to be each one: two devices that last synced at different moments hold different sets, so letting only the first to return refill the mesh would quietly lose whatever the others alone still hold. Where the devices are still around, an eviction costs each of them one round of re-upload.
 
 This is the honest shape of the guarantee, and it cuts both ways:
 

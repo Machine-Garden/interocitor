@@ -300,8 +300,10 @@ as unlimited.
 ### If the mailbox is reclaimed, is the data gone?
 
 Not while a trusted device still holds a copy. The mesh identity survives and
-is marked evicted; the first device to write afterwards republishes its rows
-with their original clocks, and the others catch up. File bodies are the
+is marked evicted; every device that reconnects republishes its own rows with
+their original clocks, and last-writer-wins settles the overlaps. It takes all
+of them, because no single device holds what the others alone observed. File
+bodies are the
 exception — no device caches them, so rows return pointing at bytes that a
 sweep may have kept or a lifecycle rule may have expired.
 

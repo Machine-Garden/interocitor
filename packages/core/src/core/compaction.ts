@@ -165,6 +165,7 @@ export async function compact(ctx: CompactContext): Promise<Manifest> {
     snapshotPath,
     deltaPath: null,
     retention: ctx.retention,
+    lineage: manifest.lineage ?? 1,
   };
 
   const nextManifest: Manifest = {

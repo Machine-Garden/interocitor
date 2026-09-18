@@ -330,6 +330,9 @@ public struct Manifest: Codable, Sendable {
     public var snapshotPath: String?
     public var deltaPath: String?
     public var retention: RetentionPolicy? = nil
+    /// Number of times this mesh ID has been recreated from nothing. Absent
+    /// means the first life of the mesh.
+    public var lineage: Int? = nil
 }
 
 // MARK: - Schema / merge policy

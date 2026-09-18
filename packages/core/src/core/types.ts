@@ -537,6 +537,18 @@ export interface Manifest {
 
   /** Finite mesh retention policy. Manifests without this field resolve to safe defaults. */
   retention?: RetentionPolicy;
+
+  /**
+   * How many times this mesh ID has had its manifest created from nothing.
+   *
+   * A mesh starts at lineage 1. A device that bootstraps a manifest for a mesh
+   * ID it already knew is recreating a mesh the host no longer holds, and it
+   * increments the lineage. Any device that sees a lineage other than the one
+   * it remembers has seen the mesh restart underneath it, which is the signal
+   * to republish everything it holds. Manifests without this field resolve
+   * to 1.
+   */
+  lineage?: number;
 }
 
 /**
@@ -843,6 +855,38 @@ export interface SyncInitialState {
  */
 export type JoinExistingMeshPolicy = "reset-to-remote" | "merge-with-remote";
 
+/**
+ * Policy for what a device does when it finds that the mesh it belongs to was
+ * evicted by its host and has started a new life.
+ *
+ * - `'refill'` (default): republish this device's complete local row state, so
+ *   that the union of every device's contribution restores the mesh.
+ * - `'manual'`: emit `mesh:evicted` and wait. Nothing is republished until the
+ *   application calls `refillEvictedMesh()`.
+ *
+ * Refill is not an upload of the whole mesh from one device. No device holds
+ * the whole mesh, only what it observed, so every device must contribute.
+ */
+export type EvictedMeshPolicy = "refill" | "manual";
+
+/**
+ * The host's own statement that a mesh was evicted, read from
+ * `<remotePath>/evicted.json`.
+ *
+ * Hosts that cannot attest serve nothing, and a device then infers eviction
+ * from the mesh state alone. Absence of this record is not evidence that the
+ * mesh is alive.
+ */
+export interface MeshEvictionAttestation {
+  evicted: true;
+  meshAddress?: string;
+  remotePath?: string;
+  evictedAt?: string;
+  reason?: string;
+  idleSince?: string | null;
+  fileBodiesRetained?: boolean;
+}
+
 export type ConnectionStatus = "offline" | "connecting" | "syncing" | "idle";
 
 export interface ConnectionStatusDetails {
@@ -975,6 +1019,19 @@ export interface SyncConfig<
    */
   joinExistingMeshPolicy?: JoinExistingMeshPolicy;
   /**
+   * What this device does when it detects that its mesh was evicted by the
+   * host and is starting a new life.
+   *
+   * Default: `'refill'` — republish the complete local row state with its
+   * original clocks, so this device contributes everything it holds. Repeated
+   * republication is idempotent under last-writer-wins.
+   *
+   * Use `'manual'` to take the decision in the application. The engine emits
+   * `mesh:evicted` and publishes nothing until `refillEvictedMesh()` is
+   * called.
+   */
+  evictedMeshPolicy?: EvictedMeshPolicy;
+  /**
    * Per-stage timeout for cloud work performed during connect(). Each
    * connect stage (authenticate, ensureFolder, manifest, device metadata,
    * pull/rehydrate, first flush) must complete within this period or it
@@ -1101,6 +1158,26 @@ export type SyncEvent =
       remoteEpoch?: number;
       meshId?: string;
       encrypted: boolean;
+    }
+  | {
+      type: "mesh:evicted";
+      dbName: string;
+      remotePath?: string;
+      deviceId: string;
+      meshId: string;
+      /** How the eviction became visible to this device. */
+      detectedBy: "missing-manifest" | "lineage-change";
+      /** The host's own eviction record, or null when the host serves none. */
+      attestation: MeshEvictionAttestation | null;
+      /** The lineage this device last observed. */
+      previousLineage: number;
+      /** The lineage the mesh is living now. */
+      lineage: number;
+      /** Rows this device can contribute to the refill. */
+      localRowCount: number;
+      /** Unpublished changes already queued on this device. */
+      queuedChangeCount: number;
+      policy: EvictedMeshPolicy;
     }
   | {
       type: "join:existing-mesh";

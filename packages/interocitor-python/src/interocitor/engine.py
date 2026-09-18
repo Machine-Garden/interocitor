@@ -637,6 +637,7 @@ class Interocitor:
                 snapshot_path=snapshot_path,
                 delta_path=None,
                 retention=manifest.retention,
+                lineage=manifest.lineage,
             )
             next_manifest.content_hash = _content_hash(next_manifest.payload_wire())
             await self._write_json(paths.manifest_file(next_manifest.generation), next_manifest.to_wire())

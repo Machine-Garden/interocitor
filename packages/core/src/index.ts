@@ -260,5 +260,7 @@ export type {
   ReplicaConfig,
   RetentionPolicy,
   RetentionPolicyInput,
+  EvictedMeshPolicy,
+  MeshEvictionAttestation,
   QuarantinedOfflineChanges,
 } from "./core/types.ts";

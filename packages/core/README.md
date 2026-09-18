@@ -269,6 +269,9 @@ typed errors, use the [Core API reference](docs/api-reference.md).
   application-owned claim, lease, or idempotency rule.
 - Compaction has no cross-device CAS. Use one authorized managed writer or
   otherwise serialize compaction.
+- Nothing compacts automatically unless the mesh was bootstrapped with
+  `serverManaged: true` and its writer is connected. A peer-mode mesh grows
+  until something calls `db.compact()`.
 
 ## Build common capabilities
 

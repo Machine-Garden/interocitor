@@ -1,6 +1,6 @@
 ---
 title: What can you build with Interocitor?
-description: Products the guarantees already carry, the roles Interocitor plays in place of Dexie, TanStack DB, Firebase, or a distributed database, and when to reach for the original.
+description: Products the guarantees already carry, the roles Interocitor plays in place of Dexie, TanStack DB, Firebase, Automerge, or a distributed database, and when to reach for the original.
 kicker: Plan · Applications
 heading: One library that stands in for several tools.
 lede: Interocitor keeps the local API you already know and takes the server out of the trust boundary. That is the whole difference, and it cuts both ways.
@@ -67,6 +67,14 @@ Point it at WebDAV, an S3-compatible bucket, or a NAS, and a mesh behaves much l
 
 Reach for a real database when you need central transactions or plaintext reporting.
 
+## Play the role of Automerge or Yjs {#automerge}
+
+Automerge and Yjs replicate one mutable document: a JSON-like tree or a set of shared types that you change in place, and whose whole history travels with it. They ask you to decide what one document is, and they leave storage, networking, encryption, and key handling to adapters you assemble.
+
+Interocitor replicates rows. You do not mutate a replica; you issue `add`, `patch`, `replace`, and `delete` against a table, and each column merges on its own clock. The document boundary becomes a table with indexes, `where`, and subscriptions. History is compacted into snapshots rather than kept forever. Encryption, storage adapters, pairing, and recovery come with the library.
+
+Reach for Automerge or Yjs when collaborators edit one document, canvas, or text body: there is no rich-text or sequence CRDT here, and a note body is a durable file that replaces whole.
+
 ## Accept the complexity {#complexity}
 
 Interocitor is lower level than any of these, in the way Rust is lower level than a garbage-collected language. You name the key source, which endpoints hold the key, who compacts, which meshes a session opens, and which files carry a seal.
@@ -75,9 +83,10 @@ That is the price of no server code, no plaintext rows on the remote, and determ
 
 ## Decision summary {#summary}
 
-| Play the role of       | How Interocitor plays it                                                                                       | What is different                                                                           | Reach for the original when                          |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Dexie                  | A typed table store over IndexedDB with `where`, `subscribe`, and `useLiveQuery`                               | Narrower queries; rows merge per field; sync and encryption come with it                    | You do not need to sync "own" data                   |
-| TanStack DB            | Reactive collections and live queries feeding React, with sync built in                                        | No server that understands the schema; the remote is a mailbox; scale by splitting meshes   | A trusted backend already owns the data              |
-| Firebase / Firestore   | A multi-device synced store with offline as the default and no backend to write                                | The remote holds ciphertext; access is per mesh; the worker only admits, meters, and audits | The server must read, query, or report on the data   |
-| A distributed database | The core in a server process with a memory or custom local store, over WebDAV, S3-compatible storage, or a NAS | Storage cannot read it; clients merge and compact; no server-side queries                   | You need central transactions or plaintext reporting |
+| Play the role of       | How Interocitor plays it                                                                                       | What is different                                                                                | Reach for the original when                           |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| Dexie                  | A typed table store over IndexedDB with `where`, `subscribe`, and `useLiveQuery`                               | Narrower queries; rows merge per field; sync and encryption come with it                         | You do not need to sync "own" data                    |
+| TanStack DB            | Reactive collections and live queries feeding React, with sync built in                                        | No server that understands the schema; the remote is a mailbox; scale by splitting meshes        | A trusted backend already owns the data               |
+| Firebase / Firestore   | A multi-device synced store with offline as the default and no backend to write                                | The remote holds ciphertext; access is per mesh; the worker only admits, meters, and audits      | The server must read, query, or report on the data    |
+| A distributed database | The core in a server process with a memory or custom local store, over WebDAV, S3-compatible storage, or a NAS | Storage cannot read it; clients merge and compact; no server-side queries                        | You need central transactions or plaintext reporting  |
+| Automerge / Yjs        | Rows and tables instead of one mutable document; each field is the merge unit, each row change is the artifact | No document tree, no in-document history, no text CRDT; queries, indexes, and tombstones instead | Collaborators edit one document, canvas, or text body |

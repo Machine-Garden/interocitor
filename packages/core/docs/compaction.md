@@ -27,6 +27,51 @@ that rejoin the mesh restore the snapshot and its exact receipts first, then
 apply every remaining filename absent from the receipt set. The snapshot
 `watermarkHlc` orders state and acknowledgements; it does not prove coverage.
 
+If you know log-structured merge trees, the shape is familiar. `changes/` is
+the append-only level zero: every write lands as a new immutable segment, and a
+reader has to visit every segment it has not already absorbed. The mainline
+snapshot is the merged level below it. A database runs that merge on a
+background thread inside the server, invisibly. Interocitor cannot: the server
+holds ciphertext it cannot read, so the merge has to run wherever the mesh key
+is, which means on a client. Compaction is that background merge, moved to the
+edge and made an explicit responsibility of whoever operates the mesh.
+
+## Who compacts, and when
+
+Compaction is performed by an Interocitor engine that holds the mesh key. It
+reconstructs the complete row state from its own local store, so nothing that
+cannot decrypt the mesh can do it: not the storage service, not the Cloudflare
+Worker, not the Durable Object relay. A mesh runs in one of two modes, fixed
+when its manifest is first created:
+
+| Mode                            | Who may call `compact()`                                                  | Automatic compaction                                                                        | Default retention behaviour                                                                     |
+| ------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Peer (`serverManaged: false`)   | Any endpoint, one at a time                                               | **None.** Every automatic path skips with reason `peer-mode`, whatever `autoCompact` says.  | `changes/` grows without bound until something calls `compact()`.                               |
+| Managed (`serverManaged: true`) | Only the endpoint whose device id equals `serverId`; everyone else throws | Sampled, delayed, and retention-deadline paths all run, on that one writer, while connected | The writer compacts once the oldest uploaded change is `retention.compactAfterMs` old (7 days). |
+
+Peer mode is the default, and it is what both shipped example applications
+use: they expose a "Compact" button and nothing compacts unless it is pressed.
+If your deployment has no process that calls `compact()`, the change log never
+shrinks, every new or returning device replays the whole tail, and the only
+bound is the storage bill.
+
+Managed mode exists so one always-available, key-holding process can own
+checkpoints. That process is an ordinary TypeScript engine, in a browser tab
+or a Node process, whose `deviceId` is the manifest's `serverId` (the Python
+and Swift packages can call `compact()` manually but have no automatic paths).
+The flag is a protocol rule, not a storage feature, and any adapter supports
+it.
+
+Managed mode cannot be turned on for an existing mesh: the manifest records
+the flag at bootstrap and later clients inherit it, so passing
+`serverManaged: true` against a peer mesh changes nothing. Every endpoint of a
+managed mesh must be configured with the mesh's `serverId`, or its manifest is
+rejected as an unauthorized writer; the writer itself additionally runs with
+that value as its `deviceId`.
+
+Whichever mode you pick, the operational rule is the same: one compactor
+identity, one process holding it.
+
 ## What `compact()` does
 
 1. Acquire the local sync-state lock, promote the completed pending batch, and
@@ -154,9 +199,10 @@ retention deadline.
 
 ### Auto-compaction defaults
 
-The engine ships with `autoCompact: true`. The defaults are tuned for a
-small mesh (1–2 devices) doing light writes. Override them only if you
-have measured the actual mesh size.
+The engine ships with `autoCompact: true`, but the switch only has an effect
+on the managed writer of a managed mesh; on every other endpoint, and on every
+peer-mode endpoint, the automatic paths skip. The defaults assume that one
+writer sees light traffic. Override them only after measuring.
 
 | Config                         | Default             | Meaning                                                                                                              |
 | ------------------------------ | ------------------- | -------------------------------------------------------------------------------------------------------------------- |
@@ -183,11 +229,13 @@ have measured the actual mesh size.
 ### Immediate sampled path
 
 After every flush that processed at least `compactAutoThreshold` ops,
-the engine rolls a die. The chance of running is roughly
+the managed writer rolls a die. The chance of running is roughly
 `numerator / deviceCount`. With the default `numerator = 10` and
-`deviceCount = 1` that means "always roll a 0", so a single‑device mesh
-will compact on every qualifying flush. Bumping `deviceCount` to your
-actual fleet size makes one device per fleet compact on average.
+`deviceCount = 1` that means "always", so the writer compacts on every
+qualifying flush. Because only the writer ever rolls, `compactAutoDeviceCount`
+does not spread work across a fleet; raising it only makes the writer compact
+less often after its own large flushes. Leave it at `1` unless the writer's
+own churn is the problem.
 
 ### Delayed two‑phase path
 
@@ -370,14 +418,62 @@ Rehydrate emits:
 
 ## Tuning checklist
 
-- **Single device.** Defaults are fine.
-- **2–10 devices.** Set `compactAutoDeviceCount` to your real fleet size.
-  This keeps roughly one device compacting per flush on average.
-- **> 10 devices.** Consider `serverManaged: true` and a single worker
-  with `serverId = <worker device id>`. Disable auto‑compaction on
-  clients (`autoCompact: false`).
-- **Read‑heavy app, very few writes.** Manual `compact()` from a cron is
-  fine; the auto paths will rarely fire.
+- **Any mesh with no managed writer.** Nothing compacts automatically. Call
+  `db.compact()` from one place: a maintenance job, a nominated device, or a
+  user action gated by the manual policy above. Alert on the size of
+  `changes/` so you notice when that place stops running.
+- **One long-lived key-holding process is available.** Bootstrap the mesh
+  with `serverManaged: true` and give that process the `serverId`. Leave the
+  auto defaults alone; the retention deadline guarantees a checkpoint at
+  least every `compactAfterMs` even if the churn paths never fire.
+- **Many devices, no server process.** Nominate one device and make its
+  owner responsible, or accept manual compaction. Do not try to spread
+  compaction across peers with `compactAutoDeviceCount`; peers never
+  auto-compact, and concurrent manual calls race the pointer.
+- **Read‑heavy app, very few writes.** A manual `compact()` from a cron is
+  enough in either mode.
 - **Privacy‑sensitive deletes.** Tombstones carry no user payload, but their
   metadata is retained. Do not rely on compaction for hard deletion until a
   contiguous publication protocol is implemented.
+
+## Cloudflare Worker and the Durable Object relay
+
+The Cloudflare backend changes how cheaply a growing change log is served and
+how reliably it is measured. It does not change who compacts or whether
+compaction is needed.
+
+- **Neither the Worker nor the Durable Object compacts.** They never hold the
+  mesh key, so they cannot merge encrypted changes into a snapshot. The
+  Worker stores immutable change objects in D1, serves them, and deletes the
+  exact paths an engine names after publishing a snapshot. See
+  [Catch-up after absence](../../workers/docs/catch-up.md).
+- **The Durable Object relay changes when a client pulls, not what a pull
+  costs.** Its message is a bare "pull now" signal, batched per second and
+  carrying no filenames. Every pull it triggers is an ordinary pull: list all
+  of `changes/`, merge the files absent from the receipt set. A connected
+  client already merges only what arrived since its last pull, whether that
+  pull came from a timer or from the relay, so the relay buys latency and
+  fewer empty polls, not less catch-up work. The listing still grows with the
+  log, a client that was away still replays every unseen file, and a new
+  device still starts from the snapshot plus the whole uncovered tail. In the
+  LSM picture the relay tells readers that level zero gained a segment; it
+  never merges one.
+- **D1 supplies the clock the retention deadline trusts.** The managed
+  writer's `compactAfterMs` check reads each change file's `modifiedTime`
+  from the listing. Cloudflare records that time server-side in D1, so the
+  deadline cannot be skewed by a client clock. WebDAV and S3 also return
+  server times; an adapter that returns none makes the writer compact
+  conservatively.
+- **Post-compaction deletion is authoritative in every colo.** Change files,
+  mainline snapshots, and the listings of both folders bypass the per-colo
+  Cache API and always consult D1, so a rehydrating client cannot be served a
+  deleted snapshot or a stale listing. Immutable manifest generation files
+  remain cacheable.
+- **The Worker path TTL is not compaction.** `pathTtlHours` deletes an
+  entire inactive mesh from D1. Set it longer than the longest legitimate
+  offline period plus your backup window, and keep it separate from
+  `retention.compactAfterMs`. See
+  [Maintenance and system operations](../../workers/docs/maintenance.md).
+- **The shipped Cloudflare example runs in peer mode.** It compacts only
+  when its "Compact" button is pressed. A production deployment behind the
+  Worker still needs either a managed writer or a scheduled caller.

@@ -10,6 +10,8 @@ lede: Interocitor retains published row changes for offline endpoints. A trusted
 
 Each endpoint publishes immutable row-change artifacts so other endpoints can catch up after working offline. Retaining every artifact preserves that history, but the cost of joining or returning grows with it.
 
+The structure is a log-structured merge tree with the merge step moved out of the database. The change log is the append-only level zero, the snapshot is the merged level beneath it, and the background compaction thread a database would run inside the server cannot exist here, because the server holds only ciphertext. The merge runs on a client that holds the key, and it runs only when that client is told to.
+
 **Compaction** creates a new baseline: the complete current row state in one encrypted snapshot, followed by only changes published after that snapshot’s exact coverage was captured.
 
 ```mermaid
@@ -43,6 +45,29 @@ Choose one compaction owner per mesh. A small deployment may nominate one contro
 
 The compactor needs the mesh key because it reconstructs the complete row state before encrypting the new snapshot. The mailbox cannot compact protected rows by itself.
 
+## Choose peer or managed compaction {#modes}
+
+The compactor is always an endpoint that holds the mesh key. The storage service cannot reconstruct row state it cannot read, so no adapter compacts on the mesh’s behalf. A mesh is created in one of two modes and stays in it.
+
+| Mode        | Who compacts                                           | Automatic                                                                                 | If nobody arranges it                                 |
+| ----------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| **Peer**    | Any endpoint that calls `compact()`, one at a time     | Never. The automatic paths skip on every peer endpoint.                                   | The change log grows without bound.                   |
+| **Managed** | Only the nominated writer identity; others are refused | Yes, on that writer: churn-triggered and a finite retention deadline (7 days by default). | The writer checkpoints as long as it stays connected. |
+
+Peer mode is the default and is what the example applications use; they compact only when a button is pressed. Managed mode nominates one always-available key-holding process, which can be a browser, a Node service, or a Python job. The choice is made when the mesh is bootstrapped and cannot be flipped in place.
+
+## Know what Cloudflare changes {#cloudflare}
+
+The Cloudflare Worker and its optional Durable Object relay make a long change log cheaper to serve. They do not shorten it, and they do not compact.
+
+- The Worker never holds the mesh key, so it cannot merge encrypted changes. It stores immutable change objects in D1 and deletes exactly the paths a compactor names after publishing a snapshot.
+- The Durable Object relay pushes a bare “pull now” signal so connected clients pull sooner and poll less. Each pull still lists the whole change log and merges what the client has not seen, so the relay changes latency, not the work per pull or the length of the log. A returning or new device still replays every uncovered change.
+- D1 records each change’s server-side modification time. A managed writer’s retention deadline reads that time, so a client clock cannot postpone compaction.
+- Reads of change files, snapshots, and their listings bypass the per-colo cache, so a deleted snapshot or a stale listing is never served after compaction.
+- The Worker’s path TTL removes an entire inactive mesh. It is a separate policy from compaction and must be longer than any legitimate offline period.
+
+A deployment on Cloudflare therefore still needs a compactor: a managed writer, or a scheduled process that calls `compact()`.
+
 ## Define the maximum offline window {#offline}
 
 Retention requires an explicit promise about how long an endpoint may remain away while holding unpublished work.
@@ -67,8 +92,9 @@ See [the core flows](/flows) or [choose between rows and durable files](/data-bo
 
 ## Decision summary {#summary}
 
-|                    |                                                                     |
-| ------------------ | ------------------------------------------------------------------- |
-| **Purpose**        | Bound catch-up with a complete row snapshot and shorter change log. |
-| **Safety rule**    | One compactor; publish first; delete only exact covered filenames.  |
-| **Offline policy** | Define when old unpublished work is quarantined for review.         |
+|                    |                                                                                                       |
+| ------------------ | ----------------------------------------------------------------------------------------------------- |
+| **Purpose**        | Bound catch-up with a complete row snapshot and shorter change log.                                   |
+| **Safety rule**    | One compactor; publish first; delete only exact covered filenames.                                    |
+| **Who compacts**   | A key-holding endpoint: a managed writer, or a scheduled `compact()` call. Never the storage service. |
+| **Offline policy** | Define when old unpublished work is quarantined for review.                                           |

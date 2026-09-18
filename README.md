@@ -23,6 +23,31 @@ opposite: every key-bearing endpoint is fully trusted, and the local row store
 is not encrypted at rest. See the
 [security model](packages/core/docs/security-model.md).
 
+## Status
+
+Interocitor is pre-1.0 software. A minor version may change the public API,
+the local-store format, or the remote artifact layout; each release commit on
+`main` says when it does. Pin exact versions and read the release commit before
+upgrading.
+
+What stands behind it today, and what does not:
+
+- Merge, clock ordering, compaction, and multi-endpoint sync are covered by
+  fixed-scenario browser suites. There is no randomized or property-based
+  convergence testing yet.
+- The memory, WebDAV, and S3 adapters run through the full browser sync suite.
+  The Cloudflare adapter is exercised by the worker's own tests, one core
+  capability test, and the shipped example applications, but has no
+  browser-through-worker sync suite. The Google Drive adapter has no automated
+  coverage.
+- The cryptography is WebCrypto AES-GCM and ECDSA behind a small wrapper. No
+  independent security audit has been performed.
+- Recovery, pairing, and reset paths are tested against the failures the
+  authors thought of. Nothing here has been hardened by a user base yet.
+
+Treat it as something to try, read, and help mature. Do not treat it as the
+only copy of data you cannot afford to lose.
+
 ## What you can build with it
 
 Interocitor is a small set of guarantees: every trusted device holds a full
@@ -58,12 +83,13 @@ of them is a local store plus some way to move data. Interocitor keeps the
 local API you already know and takes the server out of the trust boundary.
 That is the whole difference, and it cuts both ways.
 
-| Play the role of       | How Interocitor plays it                                                                                       | What is different                                                                           | Reach for the original when                          |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Dexie                  | A typed table store over IndexedDB with `where`, `subscribe`, and `useLiveQuery`                               | Narrower queries; rows merge per field; sync and encryption come with it                    | You do not need to sync "own" data                   |
-| TanStack DB            | Reactive collections and live queries feeding React, with sync built in                                        | No server that understands the schema; the remote is a mailbox; scale by splitting meshes   | A trusted backend already owns the data              |
-| Firebase / Firestore   | A multi-device synced store with offline as the default and no backend to write                                | The remote holds ciphertext; access is per mesh; the worker only admits, meters, and audits | The server must read, query, or report on the data   |
-| A distributed database | The core in a server process with a memory or custom local store, over WebDAV, S3-compatible storage, or a NAS | Storage cannot read it; clients merge and compact; no server-side queries                   | You need central transactions or plaintext reporting |
+| Play the role of       | How Interocitor plays it                                                                                       | What is different                                                                                | Reach for the original when                           |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| Dexie                  | A typed table store over IndexedDB with `where`, `subscribe`, and `useLiveQuery`                               | Narrower queries; rows merge per field; sync and encryption come with it                         | You do not need to sync "own" data                    |
+| TanStack DB            | Reactive collections and live queries feeding React, with sync built in                                        | No server that understands the schema; the remote is a mailbox; scale by splitting meshes        | A trusted backend already owns the data               |
+| Firebase / Firestore   | A multi-device synced store with offline as the default and no backend to write                                | The remote holds ciphertext; access is per mesh; the worker only admits, meters, and audits      | The server must read, query, or report on the data    |
+| A distributed database | The core in a server process with a memory or custom local store, over WebDAV, S3-compatible storage, or a NAS | Storage cannot read it; clients merge and compact; no server-side queries                        | You need central transactions or plaintext reporting  |
+| Automerge / Yjs        | Rows and tables instead of one mutable document; each field is the merge unit, each row change is the artifact | No document tree, no in-document history, no text CRDT; queries, indexes, and tombstones instead | Collaborators edit one document, canvas, or text body |
 
 **As Dexie.** `table`, `where`, `subscribe`, and `useLiveQuery` will feel
 familiar. Queries cover one indexed field with `equals`, ranges, `startsWith`,
@@ -92,6 +118,18 @@ process. Point it at WebDAV, an S3-compatible bucket, or a NAS,
 and a mesh behaves much like a small distributed database whose storage cannot
 read it. Trusted workers and agents join as endpoints and share the same rows
 and files as the browsers.
+
+**As Automerge or Yjs.** Those libraries replicate one mutable document: a
+JSON-like tree or a set of shared types that you change in place and whose
+whole history travels with it. Interocitor replicates rows. You do not mutate
+a replica; you issue `add`, `patch`, `replace`, and `delete` against a table,
+and each column merges on its own clock. The document boundary that Automerge
+asks you to design becomes a table with indexes, `where`, and subscriptions,
+and history is compacted into snapshots instead of kept forever. The trade is
+that there is no rich-text or sequence CRDT: a note body is a durable file
+that replaces whole, not a document that merges character by character.
+Encryption, storage adapters, pairing, and recovery are part of the library
+rather than something to assemble around a document store.
 
 **On complexity.** Interocitor is lower level than any of these, in the way
 Rust is lower level than a garbage-collected language. You name the key

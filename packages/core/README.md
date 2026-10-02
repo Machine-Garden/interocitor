@@ -311,6 +311,7 @@ typed errors, use the [Core API reference](docs/api-reference.md).
 - [Compaction protocol and tuning](docs/compaction.md)
 - [Mesh eviction and refill](docs/decisions/mesh-eviction.md)
 - [Credential-store contract](docs/credential-store.md)
+- [Device key custody](docs/decisions/key-custody.md)
 - [Recovery API reference](docs/recovery-reference.md)
 
 ## Validate the package

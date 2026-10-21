@@ -29,6 +29,10 @@ custody, and mailbox adapter, or when implementing a non-browser integration.
 yarn add @interocitor/core
 ```
 
+Core compresses encrypted payloads with `CompressionStream("deflate-raw")`, so
+it needs a runtime that provides that format: Node.js 20.12 or later, Cloudflare
+Workers, or a current browser.
+
 Adapters are exported as separate package entry points, so applications import
 only the backend they use.
 

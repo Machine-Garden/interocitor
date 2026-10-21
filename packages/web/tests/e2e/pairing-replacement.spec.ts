@@ -758,12 +758,12 @@ test("mixed-key remote reports the exact poisoned change without deleting local 
             entry: { id, ts: Date.now(), device: "wrong_writer", hlc, ops: [] },
           }),
         );
-        return { path: `/MixedKey/changes/${hlc}-${id}.json`, body };
+        return { path: `/MixedKey/changes/${hlc}-${id}.json`, body: Array.from(body) };
       },
       { meshId: setup.meshId, wrongKey: setup.wrongKey },
     );
     remote.files.set(injected.path, {
-      data: new TextEncoder().encode(injected.body),
+      data: Uint8Array.from(injected.body),
       modifiedTime: new Date().toISOString(),
       etag: '"mixed-key"',
     });

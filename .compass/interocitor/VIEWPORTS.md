@@ -121,7 +121,7 @@ graph LR
 ### Seams
 
 - **The crossing.** `encryptEntry(key, plaintext)` / `decryptEntry` in
-  `packages/core/src/crypto/encryption.ts`, producing an `EncryptedEnvelope`.
+  `packages/core/src/crypto/encryption.ts`, producing a binary envelope.
   Every path to the mailbox passes through `codec.ts`, which calls them — no
   adapter encrypts, and no adapter may.
 - **Conceded in the clear.** `Manifest` in `types.ts` is plaintext JSON:

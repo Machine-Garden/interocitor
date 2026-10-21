@@ -23,6 +23,8 @@ A copy of the remote mailbox does not reveal protected payload contents. Modifie
 
 Payload encryption does not hide the transport envelope. The remote can observe object paths, sizes, timing, request identity, mesh activity, device records, and the control metadata needed to locate the current snapshot.
 
+Payloads are compressed before they are encrypted, so an object's size reflects how repetitive its contents are, not only how long they are.
+
 A path such as `medical-report-alex.pdf` reveals information even when the file bytes are encrypted. Use opaque paths when names are sensitive.
 
 If activity timing, device count, or traffic volume must also be hidden, payload encryption is insufficient. That requires a transport designed to conceal traffic patterns.

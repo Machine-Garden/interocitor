@@ -12,17 +12,20 @@
  *  - QR code containing either of the above
  */
 
-import {
-  base64ToBytes as base64ToUint8,
-  bytesToBase64 as uint8ToBase64,
-  base64UrlToBytes,
-  bytesToBase64Url,
-} from "./base64.ts";
+import { base64ToBytes as base64ToUint8, base64UrlToBytes, bytesToBase64Url } from "./base64.ts";
 import { asBufferSource } from "./bytes.ts";
+import { deflateRaw, inflateRaw, MAX_INFLATED_BYTES } from "./compression.ts";
 import { sharedGlobalState } from "../core/shared-global-state.ts";
 
 const IV_LENGTH = 12; // 96-bit IV for AES-GCM
-const ENVELOPE_VERSION = 1;
+/** Binary envelope tag: the ciphertext seals the plaintext as given. */
+const PLAIN_FORMAT = 0x02;
+/** Binary envelope tag: the ciphertext seals the raw-DEFLATE plaintext. */
+const DEFLATE_FORMAT = 0x03;
+/** Tag, IV, and the 16-byte GCM tag: the smallest well-formed envelope. */
+const MIN_ENVELOPE_LENGTH = 1 + IV_LENGTH + 16;
+/** Version of the JSON envelope `{v, iv, ct}`, which is still read but never written. */
+const JSON_ENVELOPE_VERSION = 1;
 
 // ─── Base58 (Bitcoin alphabet) ───────────────────────────────────────
 
@@ -336,103 +339,111 @@ export function keyFromFragment(hash: string): Uint8Array | null {
 }
 
 // ─── Encrypt / Decrypt entries ───────────────────────────────────────
+//
+// An envelope is binary:
+//
+//   byte 0      format tag — 0x02 plaintext as given, 0x03 raw DEFLATE
+//   bytes 1-12  random AES-GCM IV
+//   bytes 13-   AES-GCM ciphertext followed by its 16-byte tag
+//
+// The tag byte is the AES-GCM additional data, so relabelling an envelope
+// fails authentication instead of feeding compressed bytes to a parser or the
+// reverse. Readers also open the JSON envelope `{"v":1,"iv":…,"ct":…}` with
+// base64 fields; its first byte is `{` or JSON whitespace, never a format tag.
 
-export interface EncryptedEnvelope {
-  v: number;
-  iv: string; // base64
-  ct: string; // base64 (includes GCM auth tag)
-}
-
-async function sealEnvelope(key: CryptoKey, plaintext: BufferSource): Promise<EncryptedEnvelope> {
+/**
+ * Seal `plaintext`, compressed when that makes it smaller.
+ *
+ * Change and snapshot JSON roughly halves even at a few hundred bytes, while
+ * already-compressed media does not shrink and is sealed as given.
+ */
+async function sealEnvelope(key: CryptoKey, plaintext: Uint8Array): Promise<Uint8Array> {
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
-  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext);
-  return {
-    v: ENVELOPE_VERSION,
-    iv: uint8ToBase64(iv),
-    ct: uint8ToBase64(new Uint8Array(ciphertext)),
-  };
-}
-
-function parseEnvelope(text: string): EncryptedEnvelope {
-  const envelope: EncryptedEnvelope = JSON.parse(text);
-  if (envelope.v !== ENVELOPE_VERSION) {
-    throw new Error(`Unknown envelope version: ${envelope.v}`);
-  }
+  const compressed =
+    plaintext.byteLength <= MAX_INFLATED_BYTES ? await deflateRaw(plaintext) : null;
+  const shrinks = compressed !== null && compressed.byteLength < plaintext.byteLength;
+  const format = shrinks ? DEFLATE_FORMAT : PLAIN_FORMAT;
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: Uint8Array.of(format) },
+      key,
+      asBufferSource(shrinks ? compressed : plaintext),
+    ),
+  );
+  const envelope = new Uint8Array(1 + IV_LENGTH + ciphertext.byteLength);
+  envelope[0] = format;
+  envelope.set(iv, 1);
+  envelope.set(ciphertext, 1 + IV_LENGTH);
   return envelope;
 }
 
-async function openEnvelope(
-  key: CryptoKey,
-  envelope: EncryptedEnvelope,
-): Promise<Uint8Array<ArrayBuffer>> {
+function isJsonEnvelope(first: number): boolean {
+  // `{` or JSON whitespace (space, tab, line feed, carriage return).
+  return first === 0x7b || first === 0x20 || first === 0x09 || first === 0x0a || first === 0x0d;
+}
+
+async function openJsonEnvelope(key: CryptoKey, bytes: Uint8Array): Promise<Uint8Array> {
+  const envelope = JSON.parse(new TextDecoder().decode(bytes)) as {
+    v?: unknown;
+    iv?: unknown;
+    ct?: unknown;
+  };
+  if (envelope.v !== JSON_ENVELOPE_VERSION) {
+    throw new Error(`Unknown envelope version: ${String(envelope.v)}`);
+  }
+  if (typeof envelope.iv !== "string" || typeof envelope.ct !== "string") {
+    throw new TypeError("Envelope is malformed: iv and ct must be base64 strings");
+  }
   const iv = base64ToUint8(envelope.iv);
   const ct = base64ToUint8(envelope.ct);
-  const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
-  return new Uint8Array(decrypted);
+  return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct));
 }
 
-/** Encrypt a single plaintext string. */
-export async function encryptEntry(key: CryptoKey, plaintext: string): Promise<string> {
-  const envelope = await sealEnvelope(key, new TextEncoder().encode(plaintext));
-  return JSON.stringify(envelope);
-}
-
-/** Decrypt a single encrypted envelope back to plaintext. */
-export async function decryptEntry(key: CryptoKey, envelopeStr: string): Promise<string> {
-  const bytes = await openEnvelope(key, parseEnvelope(envelopeStr));
-  return new TextDecoder().decode(bytes);
-}
-
-/** Encrypt arbitrary binary data using the mesh AES-GCM key. */
-export async function encryptBytes(key: CryptoKey, plaintext: Uint8Array): Promise<Uint8Array> {
-  const envelope = await sealEnvelope(key, asBufferSource(plaintext));
-  return new TextEncoder().encode(JSON.stringify(envelope));
-}
-
-/** Decrypt binary data produced by {@link encryptBytes}. */
-export async function decryptBytes(key: CryptoKey, envelopeBytes: Uint8Array): Promise<Uint8Array> {
-  return openEnvelope(key, parseEnvelope(new TextDecoder().decode(envelopeBytes)));
-}
-
-/**
- * Encrypt multiple plaintext lines independently and join them as NDJSON.
- *
- * Each line gets its own IV and auth tag, so corruption is isolated to the
- * affected entry.
- */
-export async function encryptNdjson(key: CryptoKey, lines: string[]): Promise<string> {
-  const encryptedLines = await Promise.all(lines.map((line) => encryptEntry(key, line)));
-  return encryptedLines.join("\n");
-}
-
-/**
- * Decrypt newline-delimited encrypted entries.
- *
- * Invalid or corrupted lines are returned as `null` instead of throwing so the
- * caller can recover as much of the stream as possible.
- */
-export async function decryptNdjson(
-  key: CryptoKey,
-  content: string,
-): Promise<Array<string | null>> {
-  const lines = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-
-  return Promise.all(
-    lines.map(async (line) => {
-      try {
-        return await decryptEntry(key, line);
-      } catch {
-        return null;
-      }
-    }),
+async function openEnvelope(key: CryptoKey, bytes: Uint8Array): Promise<Uint8Array> {
+  const format = bytes[0];
+  if (format === undefined) throw new Error("Envelope is empty");
+  if (isJsonEnvelope(format)) return openJsonEnvelope(key, bytes);
+  if (format !== PLAIN_FORMAT && format !== DEFLATE_FORMAT) {
+    throw new Error(`Unknown envelope format: 0x${format.toString(16).padStart(2, "0")}`);
+  }
+  if (bytes.byteLength < MIN_ENVELOPE_LENGTH) {
+    throw new Error(`Envelope is truncated: ${bytes.byteLength} bytes`);
+  }
+  const sealed = await crypto.subtle.decrypt(
+    {
+      name: "AES-GCM",
+      iv: asBufferSource(bytes.subarray(1, 1 + IV_LENGTH)),
+      additionalData: Uint8Array.of(format),
+    },
+    key,
+    asBufferSource(bytes.subarray(1 + IV_LENGTH)),
   );
+  const plaintext = new Uint8Array(sealed);
+  return format === DEFLATE_FORMAT ? inflateRaw(plaintext) : plaintext;
 }
 
-/** Quick verification: try decrypting a single line to confirm key is correct. */
-export async function verifyKey(key: CryptoKey, sampleEncrypted: string): Promise<boolean> {
+/** Encrypt a plaintext string into a binary envelope. */
+export async function encryptEntry(key: CryptoKey, plaintext: string): Promise<Uint8Array> {
+  return sealEnvelope(key, new TextEncoder().encode(plaintext));
+}
+
+/** Decrypt an envelope back to its plaintext string. */
+export async function decryptEntry(key: CryptoKey, envelope: Uint8Array): Promise<string> {
+  return new TextDecoder().decode(await openEnvelope(key, envelope));
+}
+
+/** Encrypt arbitrary binary data into a binary envelope under the AES-GCM key. */
+export async function encryptBytes(key: CryptoKey, plaintext: Uint8Array): Promise<Uint8Array> {
+  return sealEnvelope(key, plaintext);
+}
+
+/** Decrypt an envelope produced by {@link encryptBytes} or {@link encryptEntry}. */
+export async function decryptBytes(key: CryptoKey, envelope: Uint8Array): Promise<Uint8Array> {
+  return openEnvelope(key, envelope);
+}
+
+/** Quick verification: try decrypting one envelope to confirm the key is correct. */
+export async function verifyKey(key: CryptoKey, sampleEncrypted: Uint8Array): Promise<boolean> {
   try {
     await decryptEntry(key, sampleEncrypted);
     return true;

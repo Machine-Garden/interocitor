@@ -44,8 +44,8 @@ carries `table`, `rowId`, and `columns: Record<string, ColumnEntry>` where
 This is the sharpest local-only exposure in the system. The remote receives
 change entries **encrypted** — `encodeChangePayload` in
 `packages/core/src/core/codec.ts` serializes `{meshId, kind, entry}` and hands
-the whole JSON string to `encryptEntry` (AES-256-GCM, random 96-bit IV, envelope
-`{v:1, iv, ct}`) — so ops, tables, row ids and values are all inside the
+the whole JSON string to `encryptEntry` (AES-256-GCM, random 96-bit IV, binary envelope
+`format | iv | ciphertext | tag`) — so ops, tables, row ids and values are all inside the
 ciphertext. Locally they are plain objects. The local profile therefore holds a
 _per-field-timestamped edit history_, including intermediate states and the
 authoring device, that the remote never sees in readable form.

@@ -56,7 +56,7 @@ async function flushToAdapter(
       entryId: entry.id,
       hlc: entry.hlc,
     });
-    await adapter.writeFile(p.changeFile(fileName), textEncoder.encode(payload));
+    await adapter.writeFile(p.changeFile(fileName), payload);
 
     if (!lastWrittenHlc || hlcCompareStr(entry.hlc, lastWrittenHlc) > 0) {
       lastWrittenHlc = entry.hlc;

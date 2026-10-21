@@ -23,11 +23,29 @@ See [Shared key scenarios](shared-key-scenarios.md) for the supported
 configurations and what each one means for database-dump exposure and
 credential portability.
 
-Every change file, snapshot, and durable app file is encrypted **before** it leaves the device. The remote sees only an `EncryptedEnvelope` blob:
+Every change file, snapshot, and durable app file is encrypted **before** it leaves the device. The remote sees only a binary envelope:
 
 ```
-version | iv (12 bytes) | ciphertext (incl. AES-GCM tag)
+format (1 byte) | iv (12 bytes) | ciphertext | AES-GCM tag (16 bytes)
 ```
+
+The envelope adds 29 bytes to the payload. Before encrypting, the writer
+compresses the plaintext with raw DEFLATE (RFC 1951) and keeps the compressed
+form only when it is smaller. Format `0x02` seals the plaintext as given;
+format `0x03` seals its DEFLATE form. The format byte is AES-GCM additional
+data, so an attacker cannot relabel one format as the other. Readers refuse
+to inflate a payload past 256 MiB, which no conforming writer produces, so a
+key holder cannot crash other devices with a small payload that expands
+without bound. Already-compressed media stays format `0x02`.
+
+Readers also open the JSON envelope `{"v":1,"iv":"<base64>","ct":"<base64>"}`
+that earlier revisions wrote; its first byte is `{` or JSON whitespace, which
+no binary format byte uses. Compaction rewrites the snapshot and retires the
+change files it covers, so a mesh's rows move to the binary envelope as it
+compacts. Durable files keep the envelope they were written with until they
+are replaced. A device on a revision that predates the binary envelope cannot
+read it, so every device in a mesh must run a revision that does before any
+device writes.
 
 What this gives you:
 
@@ -69,7 +87,11 @@ plaintext on the remote.
   `displayName`, `deviceType`, last-seen and acknowledgement timestamps.
   These metadata files are plaintext, and the device id also appears in the
   file name.
-- **Sizes & timing.** Sync file sizes leak row sizes. Durable file object
+- **Sizes & timing.** Sync file sizes leak row sizes. Because payloads are
+  compressed before encryption, an object's size also reflects how
+  repetitive its contents are; an attacker who can both inject chosen text
+  into a payload and watch its size could in principle learn about the rest
+  of it (the CRIME/BREACH pattern). Durable file object
   sizes leak approximate attachment/image sizes. Write/read timing leaks
   user activity patterns.
 - **Portable key strength.** If a `keySource` uses a portable base58 key,

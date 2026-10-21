@@ -16,6 +16,7 @@ import type {
   LocalStore,
 } from "./types.ts";
 import { encryptEntry, decryptEntry } from "../crypto/encryption.ts";
+import { textDecoder, textEncoder } from "./internals.ts";
 
 export interface CodecState {
   encryptionKey: CryptoKey | null;
@@ -23,13 +24,13 @@ export interface CodecState {
   manifest: Manifest | null;
 }
 
-async function encodeForCloud(state: CodecState, plaintext: string): Promise<string> {
-  if (!state.encrypted || !state.encryptionKey) return plaintext;
+async function encodeForCloud(state: CodecState, plaintext: string): Promise<Uint8Array> {
+  if (!state.encrypted || !state.encryptionKey) return textEncoder.encode(plaintext);
   return encryptEntry(state.encryptionKey, plaintext);
 }
 
-async function decodeFromCloud(state: CodecState, data: string): Promise<string> {
-  if (!state.encrypted || !state.encryptionKey) return data;
+async function decodeFromCloud(state: CodecState, data: Uint8Array): Promise<string> {
+  if (!state.encrypted || !state.encryptionKey) return textDecoder.decode(data);
   try {
     return await decryptEntry(state.encryptionKey, data);
   } catch (err) {
@@ -69,7 +70,10 @@ export async function assertExpectedMeshId(
   await local.setMeta("meshId", meshId);
 }
 
-export async function encodeChangePayload(state: CodecState, entry: ChangeEntry): Promise<string> {
+export async function encodeChangePayload(
+  state: CodecState,
+  entry: ChangeEntry,
+): Promise<Uint8Array> {
   const meshId = state.manifest?.meshId;
   if (!meshId) {
     throw new Error("Cannot encode change payload before manifest is loaded");
@@ -82,7 +86,7 @@ export async function encodeChangePayload(state: CodecState, entry: ChangeEntry)
 export async function decodeChangePayload(
   state: CodecState,
   local: LocalStore,
-  data: string,
+  data: Uint8Array,
   path: string,
 ): Promise<ChangeEntry> {
   const decoded = await decodeFromCloud(state, data);
@@ -104,7 +108,7 @@ export async function decodeChangePayload(
 export async function encodeSnapshotPayload(
   state: CodecState,
   snapshot: Snapshot,
-): Promise<string> {
+): Promise<Uint8Array> {
   const meshId = state.manifest?.meshId;
   if (!meshId) {
     throw new Error("Cannot encode snapshot payload before manifest is loaded");
@@ -117,7 +121,7 @@ export async function encodeSnapshotPayload(
 export async function decodeSnapshotPayload(
   state: CodecState,
   local: LocalStore,
-  data: string,
+  data: Uint8Array,
   path: string,
 ): Promise<Snapshot> {
   const decoded = await decodeFromCloud(state, data);

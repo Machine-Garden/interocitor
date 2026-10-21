@@ -11,20 +11,95 @@
  *  - Base58 passphrase (~43 chars, human-transferable)
  *  - URL fragment (#key=base64url, never hits a server)
  *
- * Wire format (EncryptedEnvelope):
- *  { "v": 1, "iv": "<base64-12-bytes>", "ct": "<base64-ciphertext+tag>" }
+ * Wire format (binary envelope):
+ *  byte 0       format tag: 0x02 seals the plaintext as given,
+ *                           0x03 seals its raw DEFLATE (RFC 1951) form
+ *  bytes 1-12   random AES-GCM IV
+ *  bytes 13-    AES-GCM ciphertext followed by the 16-byte tag
+ *
+ * The tag byte is AES-GCM additional data, so relabelling an envelope fails
+ * authentication. Writers choose 0x03 whenever it is smaller. Readers also
+ * open the legacy JSON form `{"v":1,"iv":"<base64>","ct":"<base64>"}`,
+ * recognised by its first byte (`{` or JSON whitespace).
  */
 
 import Foundation
 import CryptoKit
+import Compression
 
 // MARK: - Constants
 
 private let IV_LENGTH = 12          // 96-bit nonce for AES-GCM
-private let ENVELOPE_VERSION = 1
+private let TAG_LENGTH = 16
+private let PLAIN_FORMAT: UInt8 = 0x02
+private let DEFLATE_FORMAT: UInt8 = 0x03
+private let MIN_ENVELOPE_LENGTH = 1 + IV_LENGTH + TAG_LENGTH
+private let JSON_ENVELOPE_VERSION = 1
+private let JSON_ENVELOPE_FIRST_BYTES: Set<UInt8> = [0x7B, 0x20, 0x09, 0x0A, 0x0D]
+
+/// Largest plaintext a compressed envelope may hold. Writers seal anything
+/// larger uncompressed, so readers refuse to inflate past it and a hostile key
+/// holder cannot exhaust another device's memory.
+public let MAX_INFLATED_BYTES = 256 * 1024 * 1024
+
+// MARK: - Raw DEFLATE (COMPRESSION_ZLIB is RFC 1951 without a zlib header)
+
+private func runCompression(
+    _ input: Data,
+    operation: compression_stream_operation,
+    limit: Int
+) throws -> Data {
+    let stream = UnsafeMutablePointer<compression_stream>.allocate(capacity: 1)
+    defer { stream.deallocate() }
+    guard compression_stream_init(stream, operation, COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else {
+        throw CryptoError.malformedEnvelope
+    }
+    defer { compression_stream_destroy(stream) }
+
+    let bufferSize = 64 * 1024
+    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+    defer { buffer.deallocate() }
+    var output = Data()
+
+    return try input.withUnsafeBytes { (raw: UnsafeRawBufferPointer) -> Data in
+        stream.pointee.src_ptr = raw.bindMemory(to: UInt8.self).baseAddress ?? UnsafePointer(buffer)
+        stream.pointee.src_size = raw.count
+        let flags = Int32(COMPRESSION_STREAM_FINALIZE.rawValue)
+        while true {
+            stream.pointee.dst_ptr = buffer
+            stream.pointee.dst_size = bufferSize
+            let status = compression_stream_process(stream, flags)
+            output.append(buffer, count: bufferSize - stream.pointee.dst_size)
+            if output.count > limit { throw CryptoError.inflatedTooLarge(limit) }
+            switch status {
+            case COMPRESSION_STATUS_OK:
+                // Input exhausted with no output progress means the stream
+                // never reached its final block.
+                if stream.pointee.src_size == 0 && stream.pointee.dst_size == bufferSize {
+                    throw CryptoError.malformedEnvelope
+                }
+            case COMPRESSION_STATUS_END:
+                if stream.pointee.src_size != 0 { throw CryptoError.malformedEnvelope }
+                return output
+            default:
+                throw CryptoError.malformedEnvelope
+            }
+        }
+    }
+}
+
+func deflateRaw(_ data: Data) throws -> Data {
+    try runCompression(data, operation: COMPRESSION_STREAM_ENCODE, limit: Int.max)
+}
+
+func inflateRaw(_ data: Data) throws -> Data {
+    try runCompression(data, operation: COMPRESSION_STREAM_DECODE, limit: MAX_INFLATED_BYTES)
+}
 
 // MARK: - EncryptedEnvelope
 
+/// The legacy JSON envelope (version 1). Readers still open it; writers
+/// produce the binary envelope.
 public struct EncryptedEnvelope: Codable, Sendable {
     public let v: Int       // envelope version
     public let iv: String   // base64-encoded 12-byte nonce
@@ -160,66 +235,98 @@ public func keyFromFragment(_ fragment: String) -> Data? {
 
 // MARK: - Encrypt / Decrypt entries
 
-/// Encrypt a plaintext string to a JSON envelope string.
-/// Each call uses a freshly generated 96-bit random IV.
-public func encryptEntry(_ key: MeshKey, plaintext: String) throws -> String {
-    let data = Data(plaintext.utf8)
+/// Encrypt a plaintext string to a binary envelope.
+/// Each call uses a freshly generated 96-bit random IV. The plaintext is
+/// compressed first whenever that makes it smaller.
+public func encryptEntry(_ key: MeshKey, plaintext: String) throws -> Data {
+    try encryptBytes(key, plaintext: Data(plaintext.utf8))
+}
+
+/// Encrypt bytes to a binary envelope.
+public func encryptBytes(_ key: MeshKey, plaintext data: Data) throws -> Data {
     var ivBytes = [UInt8](repeating: 0, count: IV_LENGTH)
     guard SecRandomCopyBytes(kSecRandomDefault, IV_LENGTH, &ivBytes) == errSecSuccess else {
         throw CryptoError.randomGenerationFailed
     }
     let iv = Data(ivBytes)
-    let nonce = try AES.GCM.Nonce(data: iv)
-    let sealed = try AES.GCM.seal(data, using: key, nonce: nonce)
-    // sealed.ciphertext + sealed.tag is the "ct" field (mirrors TS: ciphertext includes tag)
-    let ct = sealed.ciphertext + sealed.tag
-
-    let envelope = EncryptedEnvelope(
-        v: ENVELOPE_VERSION,
-        iv: iv.base64EncodedString(),
-        ct: ct.base64EncodedString()
+    let compressed = data.count <= MAX_INFLATED_BYTES ? try deflateRaw(data) : nil
+    let format: UInt8
+    let body: Data
+    if let compressed, compressed.count < data.count {
+        format = DEFLATE_FORMAT
+        body = compressed
+    } else {
+        format = PLAIN_FORMAT
+        body = data
+    }
+    let sealed = try AES.GCM.seal(
+        body, using: key, nonce: try AES.GCM.Nonce(data: iv), authenticating: Data([format])
     )
-    return try String(data: JSONEncoder().encode(envelope), encoding: .utf8) ?? "{}"
+    var out = Data(capacity: MIN_ENVELOPE_LENGTH + body.count)
+    out.append(format)
+    out.append(iv)
+    out.append(sealed.ciphertext)
+    out.append(sealed.tag)
+    return out
 }
 
-/// Decrypt a JSON envelope string back to plaintext.
-/// - Throws: `CryptoError.unknownEnvelopeVersion`, `CryptoError.decryptionFailed`, or
-///           `CryptoError.malformedEnvelope` on bad input.
-public func decryptEntry(_ key: MeshKey, envelopeStr: String) throws -> String {
-    guard let data = envelopeStr.data(using: .utf8),
-          let envelope = try? JSONDecoder().decode(EncryptedEnvelope.self, from: data) else {
-        throw CryptoError.malformedEnvelope
-    }
-    guard envelope.v == ENVELOPE_VERSION else {
-        throw CryptoError.unknownEnvelopeVersion(envelope.v)
-    }
-    guard let ivData = Data(base64Encoded: envelope.iv),
-          let ctData = Data(base64Encoded: envelope.ct) else {
-        throw CryptoError.malformedEnvelope
-    }
-
-    let tagSize = 16
-    guard ctData.count >= tagSize else { throw CryptoError.malformedEnvelope }
-    let ciphertext = ctData.dropLast(tagSize)
-    let tag = ctData.suffix(tagSize)
-
-    let nonce = try AES.GCM.Nonce(data: ivData)
-    let sealed = try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
-    let plainData = try AES.GCM.open(sealed, using: key)
+/// Decrypt an envelope back to a plaintext string.
+/// - Throws: `CryptoError.unknownEnvelopeFormat`, `CryptoError.unknownEnvelopeVersion`,
+///           `CryptoError.malformedEnvelope`, or a CryptoKit authentication error.
+public func decryptEntry(_ key: MeshKey, envelope: Data) throws -> String {
+    let plainData = try decryptBytes(key, envelope: envelope)
     guard let plaintext = String(data: plainData, encoding: .utf8) else {
         throw CryptoError.malformedEnvelope
     }
     return plaintext
 }
 
+/// Decrypt an envelope produced by any Interocitor client.
+public func decryptBytes(_ key: MeshKey, envelope data: Data) throws -> Data {
+    let bytes = Data(data) // rebase indices to 0
+    guard let first = bytes.first else { throw CryptoError.malformedEnvelope }
+    if JSON_ENVELOPE_FIRST_BYTES.contains(first) { return try openJsonEnvelope(key, bytes) }
+    guard first == PLAIN_FORMAT || first == DEFLATE_FORMAT else {
+        throw CryptoError.unknownEnvelopeFormat(first)
+    }
+    guard bytes.count >= MIN_ENVELOPE_LENGTH else { throw CryptoError.malformedEnvelope }
+    let sealed = try AES.GCM.SealedBox(
+        nonce: try AES.GCM.Nonce(data: bytes[1..<(1 + IV_LENGTH)]),
+        ciphertext: bytes[(1 + IV_LENGTH)..<(bytes.count - TAG_LENGTH)],
+        tag: bytes.suffix(TAG_LENGTH)
+    )
+    let body = try AES.GCM.open(sealed, using: key, authenticating: Data([first]))
+    return first == DEFLATE_FORMAT ? try inflateRaw(body) : body
+}
+
+private func openJsonEnvelope(_ key: MeshKey, _ data: Data) throws -> Data {
+    guard let envelope = try? JSONDecoder().decode(EncryptedEnvelope.self, from: data) else {
+        throw CryptoError.malformedEnvelope
+    }
+    guard envelope.v == JSON_ENVELOPE_VERSION else {
+        throw CryptoError.unknownEnvelopeVersion(envelope.v)
+    }
+    guard let ivData = Data(base64Encoded: envelope.iv),
+          let ctData = Data(base64Encoded: envelope.ct),
+          ctData.count >= TAG_LENGTH else {
+        throw CryptoError.malformedEnvelope
+    }
+    let sealed = try AES.GCM.SealedBox(
+        nonce: try AES.GCM.Nonce(data: ivData),
+        ciphertext: ctData.dropLast(TAG_LENGTH),
+        tag: ctData.suffix(TAG_LENGTH)
+    )
+    return try AES.GCM.open(sealed, using: key)
+}
+
 /// Try to decrypt; returns nil instead of throwing.
-public func tryDecryptEntry(_ key: MeshKey, envelopeStr: String) -> String? {
-    try? decryptEntry(key, envelopeStr: envelopeStr)
+public func tryDecryptEntry(_ key: MeshKey, envelope: Data) -> String? {
+    try? decryptEntry(key, envelope: envelope)
 }
 
 /// Verify that a key can decrypt a known ciphertext (sanity-check on mesh join).
-public func verifyKey(_ key: MeshKey, sampleEncrypted: String) -> Bool {
-    (try? decryptEntry(key, envelopeStr: sampleEncrypted)) != nil
+public func verifyKey(_ key: MeshKey, sampleEncrypted: Data) -> Bool {
+    (try? decryptEntry(key, envelope: sampleEncrypted)) != nil
 }
 
 // MARK: - Key persistence (Keychain)
@@ -277,6 +384,8 @@ public enum CryptoError: Error, LocalizedError {
     case randomGenerationFailed
     case malformedEnvelope
     case unknownEnvelopeVersion(Int)
+    case unknownEnvelopeFormat(UInt8)
+    case inflatedTooLarge(Int)
     case decryptionFailed
     case keychainError(OSStatus)
 
@@ -287,6 +396,8 @@ public enum CryptoError: Error, LocalizedError {
         case .randomGenerationFailed:         return "Failed to generate random bytes"
         case .malformedEnvelope:              return "Malformed encrypted envelope"
         case .unknownEnvelopeVersion(let v):  return "Unknown envelope version: \(v)"
+        case .unknownEnvelopeFormat(let f):   return String(format: "Unknown envelope format: 0x%02x", f)
+        case .inflatedTooLarge(let limit):    return "Compressed payload inflates past \(limit) bytes"
         case .decryptionFailed:               return "Decryption failed (wrong key or corrupted data)"
         case .keychainError(let s):           return "Keychain error: \(s)"
         }

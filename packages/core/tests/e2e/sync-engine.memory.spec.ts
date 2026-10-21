@@ -1515,7 +1515,7 @@ test.describe("Interocitor protocol (MemoryAdapter)", () => {
       }
 
       const ciphertext = payload[1];
-      const decrypted = JSON.parse(await decryptEntry(key, ciphertext));
+      const decrypted = JSON.parse(await decryptEntry(key, await adapter.readFile(payload[0])));
       return {
         ciphertext,
         meshId,
@@ -1576,7 +1576,7 @@ test.describe("Interocitor protocol (MemoryAdapter)", () => {
       }
 
       const ciphertext = payload[1];
-      const decrypted = JSON.parse(await decryptEntry(key, ciphertext));
+      const decrypted = JSON.parse(await decryptEntry(key, await adapter.readFile(payload[0])));
       return {
         meshId,
         kind: decrypted.kind,
@@ -1647,7 +1647,7 @@ test.describe("Interocitor protocol (MemoryAdapter)", () => {
         path.startsWith("/MeshSnapshotTarget/mainline/snapshot-1-"),
       );
       if (!sourceSnapshot || !targetSnapshot) throw new Error("Snapshot file not found");
-      await adapter.writeFile(targetSnapshot[0], sourceSnapshot[1]);
+      await adapter.writeFile(targetSnapshot[0], await adapter.readFile(sourceSnapshot[0]));
 
       await new Promise<void>((resolve) => {
         const req = indexedDB.deleteDatabase("interocitor");
@@ -1751,7 +1751,7 @@ test.describe("Interocitor protocol (MemoryAdapter)", () => {
       );
       if (!sourceChange) throw new Error("Source change file not found");
       const poisonedPath = sourceChange[0].replace("/MeshSource/", "/MeshTarget/");
-      await adapter.writeFile(poisonedPath, sourceChange[1]);
+      await adapter.writeFile(poisonedPath, await adapter.readFile(sourceChange[0]));
 
       const target = new Interocitor(adapter, {
         batchWindowMs: 0,

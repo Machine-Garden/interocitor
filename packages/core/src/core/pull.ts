@@ -19,7 +19,7 @@ import type {
 import type { HLC } from "./types.ts";
 import { hlcParse, hlcReceive, hlcSerialize } from "./hlc.ts";
 import { applyChangeEntry } from "./crdt.ts";
-import { paths, textDecoder, log } from "./internals.ts";
+import { paths, log } from "./internals.ts";
 import { decodeChangePayload } from "./codec.ts";
 import type { CodecState } from "./codec.ts";
 import { readJsonIfExists } from "./manifest.ts";
@@ -134,7 +134,7 @@ export async function pull(ctx: PullContext): Promise<HLC> {
       prefetch(index + PULL_PREFETCH_WINDOW);
 
       try {
-        const raw = textDecoder.decode(await reads[index]!);
+        const raw = await reads[index]!;
         reads[index] = undefined;
         const entry = await decodeChangePayload(codecState, local, raw, file.path);
 

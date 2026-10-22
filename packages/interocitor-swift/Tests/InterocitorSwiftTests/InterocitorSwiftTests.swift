@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import InterocitorSwift
 
 // MARK: - HLC Tests
@@ -789,13 +790,79 @@ final class CryptoTests: XCTestCase {
 
     // MARK: Encrypt / Decrypt
 
+    func testCompressibleEntryIsSealedAsDeflate() throws {
+        let key = generateMeshKey()
+        let plaintext = String(repeating: #"{"hlc":"001792575254158-0000-device_7f3a9c"},"#, count: 8)
+        let envelope = try encryptEntry(key, plaintext: plaintext)
+        XCTAssertEqual(envelope.first, 0x03)
+        XCTAssertLessThan(envelope.count, plaintext.utf8.count)
+        XCTAssertEqual(try decryptEntry(key, envelope: envelope), plaintext)
+    }
+
+    func testIncompressibleBytesAreSealedAsGiven() throws {
+        let key = generateMeshKey()
+        var bytes = [UInt8](repeating: 0, count: 4096)
+        XCTAssertEqual(SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes), errSecSuccess)
+        let envelope = try encryptBytes(key, plaintext: Data(bytes))
+        XCTAssertEqual(envelope.first, 0x02)
+        XCTAssertEqual(envelope.count, bytes.count + 29)
+        XCTAssertEqual(try decryptBytes(key, envelope: envelope), Data(bytes))
+    }
+
+    func testEmptyEntryRoundTrips() throws {
+        let key = generateMeshKey()
+        XCTAssertEqual(try decryptEntry(key, envelope: encryptEntry(key, plaintext: "")), "")
+    }
+
+    func testDecryptsCoreDeflateEnvelope() throws {
+        // Produced by @interocitor/core's encryptEntry with key bytes 00..1f.
+        let key = try importKeyRaw(Data(0..<32))
+        let envelope = Data(base64Encoded: "A7V1L2xefm4FCuTv+a0ciW2oLciFvQ8bRu3iu/ut/9X4kVceiI3P4eapfZvDQ+5WGmzSGipSg9hdvDg+BLzaKJeoMLsdy1tVYneU4VdwFIzwkLdVUT6tX5hHx8plJ4En+Vh5j3N8bPCmX3/wSuPedRiNoNEIm1E=")!
+        let expected = #"{"kind":"change","hlc":"001792575254158-0000-device_7f3a9c","columns":{"title":{"hlc":"001792575254158-0000-device_7f3a9c"},"done":{"hlc":"001792575254158-0000-device_7f3a9c"}}}"#
+        XCTAssertEqual(try decryptEntry(key, envelope: envelope), expected)
+    }
+
+    func testLegacyJsonEnvelopeStillOpens() throws {
+        let key = generateMeshKey()
+        let nonce = AES.GCM.Nonce()
+        let sealed = try AES.GCM.seal(Data("legacy row".utf8), using: key, nonce: nonce)
+        let envelope = EncryptedEnvelope(
+            v: 1,
+            iv: Data(nonce).base64EncodedString(),
+            ct: (sealed.ciphertext + sealed.tag).base64EncodedString()
+        )
+        let json = try JSONEncoder().encode(envelope)
+        XCTAssertEqual(try decryptEntry(key, envelope: json), "legacy row")
+        XCTAssertEqual(try decryptEntry(key, envelope: Data("\n".utf8) + json), "legacy row")
+    }
+
+    func testEnvelopeFormatIsAuthenticated() throws {
+        let key = generateMeshKey()
+        var deflated = try encryptEntry(key, plaintext: String(repeating: "abcdefgh", count: 32))
+        deflated[deflated.startIndex] = 0x02
+        XCTAssertThrowsError(try decryptEntry(key, envelope: deflated))
+        var plain = try encryptBytes(key, plaintext: Data([1, 2, 3]))
+        plain[plain.startIndex] = 0x03
+        XCTAssertThrowsError(try decryptBytes(key, envelope: plain))
+    }
+
+    func testInflatingPastTheCapIsRefused() throws {
+        let key = generateMeshKey()
+        let bomb = try deflateRaw(Data(count: MAX_INFLATED_BYTES + 1))
+        let nonce = AES.GCM.Nonce()
+        let sealed = try AES.GCM.seal(bomb, using: key, nonce: nonce, authenticating: Data([0x03]))
+        let envelope = Data([0x03]) + Data(nonce) + sealed.ciphertext + sealed.tag
+        XCTAssertThrowsError(try decryptEntry(key, envelope: envelope)) { error in
+            guard case CryptoError.inflatedTooLarge = error else { return XCTFail("\(error)") }
+        }
+    }
+
     func testEncryptDecryptRoundTrip() throws {
         let key = generateMeshKey()
         let plaintext = #"{"id":"chg_1","ops":[]}"#
         let envelope = try encryptEntry(key, plaintext: plaintext)
-        XCTAssertTrue(envelope.hasPrefix("{")) // JSON envelope
-        let decrypted = try decryptEntry(key, envelopeStr: envelope)
-        XCTAssertEqual(decrypted, plaintext)
+        XCTAssertTrue([0x02, 0x03].contains(envelope.first))
+        XCTAssertEqual(try decryptEntry(key, envelope: envelope), plaintext)
     }
 
     func testEncrypt_randomIV_differentCiphertextEachTime() throws {
@@ -809,26 +876,38 @@ final class CryptoTests: XCTestCase {
         let keyA = generateMeshKey()
         let keyB = generateMeshKey()
         let envelope = try encryptEntry(keyA, plaintext: "secret")
-        XCTAssertThrowsError(try decryptEntry(keyB, envelopeStr: envelope))
+        XCTAssertThrowsError(try decryptEntry(keyB, envelope: envelope))
     }
 
-    func testDecrypt_corruptCiphertextThrows() {
+    func testDecrypt_corruptCiphertextThrows() throws {
         let key = generateMeshKey()
-        let corrupt = #"{"v":1,"iv":"AAAA","ct":"BBBB"}"#
-        XCTAssertThrowsError(try decryptEntry(key, envelopeStr: corrupt))
+        var envelope = try encryptEntry(key, plaintext: "secret")
+        envelope[envelope.endIndex - 1] ^= 0x01
+        XCTAssertThrowsError(try decryptEntry(key, envelope: envelope))
+        XCTAssertThrowsError(try decryptEntry(key, envelope: Data(#"{"v":1,"iv":"AAAA","ct":"BBBB"}"#.utf8)))
     }
 
-    func testDecrypt_unknownVersionThrows() {
+    func testDecrypt_unknownFormatsThrowByName() {
         let key = generateMeshKey()
-        let bad = #"{"v":99,"iv":"AAAA","ct":"BBBB"}"#
-        XCTAssertThrowsError(try decryptEntry(key, envelopeStr: bad))
+        XCTAssertThrowsError(try decryptEntry(key, envelope: Data([0x04]) + Data(count: 40))) { error in
+            guard case CryptoError.unknownEnvelopeFormat(0x04) = error else { return XCTFail("\(error)") }
+        }
+        XCTAssertThrowsError(try decryptEntry(key, envelope: Data(#"{"v":2,"iv":"AAAA","ct":"BBBB"}"#.utf8))) { error in
+            guard case CryptoError.unknownEnvelopeVersion(2) = error else { return XCTFail("\(error)") }
+        }
+        XCTAssertThrowsError(try decryptEntry(key, envelope: Data([0x02]) + Data(count: 27))) { error in
+            guard case CryptoError.malformedEnvelope = error else { return XCTFail("\(error)") }
+        }
+        XCTAssertThrowsError(try decryptEntry(key, envelope: Data())) { error in
+            guard case CryptoError.malformedEnvelope = error else { return XCTFail("\(error)") }
+        }
     }
 
     func testTryDecryptEntry_returnsNilOnFailure() throws {
         let keyA = generateMeshKey()
         let keyB = generateMeshKey()
         let envelope = try encryptEntry(keyA, plaintext: "secret")
-        XCTAssertNil(tryDecryptEntry(keyB, envelopeStr: envelope))
+        XCTAssertNil(tryDecryptEntry(keyB, envelope: envelope))
     }
 
     func testVerifyKey_correctKey() throws {
@@ -846,17 +925,11 @@ final class CryptoTests: XCTestCase {
 
     // MARK: Envelope structure
 
-    func testEnvelope_hasVersionIVAndCT() throws {
+    func testEnvelope_hasFormatIVCiphertextAndTag() throws {
         let key = generateMeshKey()
-        let envelope = try encryptEntry(key, plaintext: "hello")
-        let data = envelope.data(using: .utf8)!
-        let parsed = try JSONDecoder().decode(EncryptedEnvelope.self, from: data)
-        XCTAssertEqual(parsed.v, 1)
-        XCTAssertFalse(parsed.iv.isEmpty)
-        XCTAssertFalse(parsed.ct.isEmpty)
-        // IV should decode to 12 bytes
-        let ivBytes = Data(base64Encoded: parsed.iv)!
-        XCTAssertEqual(ivBytes.count, 12)
+        let envelope = try encryptBytes(key, plaintext: Data("hello".utf8))
+        XCTAssertEqual(envelope.first, 0x02) // too short to compress
+        XCTAssertEqual(envelope.count, 1 + 12 + 5 + 16)
     }
 }
 
@@ -907,10 +980,9 @@ final class EncryptedSyncEngineTests: XCTestCase {
         let files = try await shared.listFiles(path: "/EncryptedFingerprintChange/changes")
         let payloadFile = try XCTUnwrap(files.first(where: { $0.name.contains("-chg_") }))
         let ciphertextData = try await shared.readFile(path: payloadFile.path)
-        let ciphertext = try XCTUnwrap(String(data: ciphertextData, encoding: .utf8))
-        XCTAssertFalse(ciphertext.contains("classified"))
+        XCTAssertNil(ciphertextData.range(of: Data("classified".utf8)))
 
-        let decrypted = try decryptEntry(key, envelopeStr: ciphertext)
+        let decrypted = try decryptEntry(key, envelope: ciphertextData)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(decrypted.utf8)) as? [String: Any])
         XCTAssertEqual(object["kind"] as? String, "change")
         XCTAssertEqual(object["meshId"] as? String, meshId)
@@ -934,10 +1006,9 @@ final class EncryptedSyncEngineTests: XCTestCase {
         let files = try await shared.listFiles(path: "/EncryptedFingerprintSnapshot/mainline")
         let payloadFile = try XCTUnwrap(files.first(where: { $0.name.hasPrefix("snapshot-") }))
         let ciphertextData = try await shared.readFile(path: payloadFile.path)
-        let ciphertext = try XCTUnwrap(String(data: ciphertextData, encoding: .utf8))
-        XCTAssertFalse(ciphertext.contains("classified snapshot"))
+        XCTAssertNil(ciphertextData.range(of: Data("classified snapshot".utf8)))
 
-        let decrypted = try decryptEntry(key, envelopeStr: ciphertext)
+        let decrypted = try decryptEntry(key, envelope: ciphertextData)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(decrypted.utf8)) as? [String: Any])
         XCTAssertEqual(object["kind"] as? String, "snapshot")
         XCTAssertEqual(object["meshId"] as? String, meshId)

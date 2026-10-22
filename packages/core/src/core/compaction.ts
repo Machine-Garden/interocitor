@@ -25,7 +25,7 @@ import type {
 } from "./types.ts";
 import type { HLC } from "./types.ts";
 import { hlcSerialize } from "./hlc.ts";
-import { paths, textEncoder, textDecoder, generateId, computeContentHash } from "./internals.ts";
+import { paths, generateId, computeContentHash } from "./internals.ts";
 import { encodeSnapshotPayload, decodeSnapshotPayload } from "./codec.ts";
 import type { CodecState } from "./codec.ts";
 import { writeJson } from "./manifest.ts";
@@ -147,7 +147,7 @@ export async function compact(ctx: CompactContext): Promise<Manifest> {
   };
 
   const snapshotPayload = await encodeSnapshotPayload(codecState, snapshot);
-  await adapter.writeFile(snapshotPath, textEncoder.encode(snapshotPayload));
+  await adapter.writeFile(snapshotPath, snapshotPayload);
 
   const manifestPayload = {
     generation: nextGeneration,
@@ -225,12 +225,7 @@ export async function rehydrate(ctx: RehydrateContext): Promise<HLC> {
 
   const restore = async (path: string): Promise<number> => {
     const data = await ctx.adapter.readFile(path);
-    const snapshot = await decodeSnapshotPayload(
-      ctx.codecState,
-      ctx.local,
-      textDecoder.decode(data),
-      path,
-    );
+    const snapshot = await decodeSnapshotPayload(ctx.codecState, ctx.local, data, path);
 
     let rowCount = 0;
     await ChangeObservationLedger.restoreSnapshot(

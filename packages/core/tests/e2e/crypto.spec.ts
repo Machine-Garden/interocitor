@@ -215,17 +215,13 @@ test.describe("encryptEntry / decryptEntry", () => {
       const plaintext = '{"id":"chg_1","ops":[]}';
       const encrypted = await encryptEntry(key, plaintext);
       const decrypted = await decryptEntry(key, encrypted);
-      return { encrypted, decrypted, isJson: encrypted.startsWith("{") };
+      return { format: encrypted[0], length: encrypted.byteLength, decrypted };
     });
 
     expect(result.decrypted).toBe('{"id":"chg_1","ops":[]}');
-    expect(result.isJson).toBe(true); // envelope is JSON
-
-    // Verify envelope structure
-    const envelope = JSON.parse(result.encrypted);
-    expect(envelope.v).toBe(1);
-    expect(envelope.iv).toBeTruthy();
-    expect(envelope.ct).toBeTruthy();
+    // Binary envelope: format tag, 12-byte IV, ciphertext and 16-byte tag.
+    expect([0x02, 0x03]).toContain(result.format);
+    expect(result.length).toBeGreaterThanOrEqual(29);
   });
 
   test("fails to decrypt with wrong key", async ({ page }) => {
@@ -250,9 +246,11 @@ test.describe("encryptEntry / decryptEntry", () => {
   test("fails on corrupted ciphertext", async ({ page }) => {
     const result = await page.evaluate(async () => {
       const { generateKey } = await import("/packages/core/dist/crypto/keys.js");
-      const { decryptEntry } = await import("/packages/core/dist/crypto/encryption.js");
+      const { encryptEntry, decryptEntry } =
+        await import("/packages/core/dist/crypto/encryption.js");
       const key = await generateKey();
-      const corrupt = JSON.stringify({ v: 1, iv: "AAAA", ct: "BBBB" });
+      const corrupt = await encryptEntry(key, "secret data");
+      corrupt[corrupt.length - 1] ^= 0xff;
       try {
         await decryptEntry(key, corrupt);
         return { threw: false };
@@ -270,7 +268,10 @@ test.describe("encryptEntry / decryptEntry", () => {
       const { decryptEntry } = await import("/packages/core/dist/crypto/encryption.js");
       const key = await generateKey();
       try {
-        await decryptEntry(key, JSON.stringify({ v: 99, iv: "x", ct: "y" }));
+        await decryptEntry(
+          key,
+          new TextEncoder().encode(JSON.stringify({ v: 99, iv: "x", ct: "y" })),
+        );
         return { threw: false };
       } catch (e: any) {
         return { threw: true, message: e.message };
@@ -288,45 +289,10 @@ test.describe("encryptEntry / decryptEntry", () => {
       const key = await generateKey();
       const a = await encryptEntry(key, "same input");
       const b = await encryptEntry(key, "same input");
-      return { different: a !== b };
+      return { different: a.join() !== b.join() };
     });
 
     expect(result.different).toBe(true);
-  });
-});
-
-// ─── NDJSON multi-line encrypt/decrypt ───────────────────────────────
-
-test.describe("encryptNdjson / decryptNdjson", () => {
-  test("encrypts and decrypts multiple lines independently", async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const { generateKey } = await import("/packages/core/dist/crypto/keys.js");
-      const { encryptNdjson, decryptNdjson } =
-        await import("/packages/core/dist/crypto/encryption.js");
-      const key = await generateKey();
-      const lines = ['{"a":1}', '{"b":2}', '{"c":3}'];
-      const encrypted = await encryptNdjson(key, lines);
-      const decrypted = await decryptNdjson(key, encrypted);
-      return { decrypted, lineCount: encrypted.split("\n").filter((l: string) => l.trim()).length };
-    });
-
-    expect(result.decrypted).toEqual(['{"a":1}', '{"b":2}', '{"c":3}']);
-    expect(result.lineCount).toBe(3);
-  });
-
-  test("decryptNdjson returns null for corrupt lines without throwing", async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const { generateKey } = await import("/packages/core/dist/crypto/keys.js");
-      const { encryptEntry, decryptNdjson } =
-        await import("/packages/core/dist/crypto/encryption.js");
-      const key = await generateKey();
-      const good = await encryptEntry(key, "valid");
-      const content = `${good}\n{totally broken}\n${good}`;
-      const decrypted = await decryptNdjson(key, content);
-      return decrypted;
-    });
-
-    expect(result).toEqual(["valid", null, "valid"]);
   });
 });
 

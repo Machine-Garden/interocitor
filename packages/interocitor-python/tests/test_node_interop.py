@@ -162,13 +162,13 @@ const manifest = {
 };
 const state = { encryptionKey: key, encrypted: true, manifest: { meshId } };
 
+// Envelopes are binary; base64 only carries them across this JSON pipe.
+const b64 = (bytes) => Buffer.from(bytes).toString("base64");
 process.stdout.write(JSON.stringify({
-  entryEnvelope: await encryption.encryptEntry(key, "hello from @interocitor/core 🛰️"),
-  bytesEnvelope: new TextDecoder().decode(
-    await encryption.encryptBytes(key, Uint8Array.of(0, 1, 2, 255, 128, 64)),
-  ),
-  changeEnvelope: await codec.encodeChangePayload(state, change.entry),
-  snapshotEnvelope: await codec.encodeSnapshotPayload(state, snapshot.snapshot),
+  entryEnvelope: b64(await encryption.encryptEntry(key, "hello from @interocitor/core 🛰️")),
+  bytesEnvelope: b64(await encryption.encryptBytes(key, Uint8Array.of(0, 1, 2, 255, 128, 64))),
+  changeEnvelope: b64(await codec.encodeChangePayload(state, change.entry)),
+  snapshotEnvelope: b64(await codec.encodeSnapshotPayload(state, snapshot.snapshot)),
   manifest,
 }));
 """
@@ -194,12 +194,13 @@ const local = {
   async getMeta() { return undefined; },
   async setMeta() {},
 };
-const changeEntry = await codec.decodeChangePayload(state, local, input.changeEnvelope, "/changes/python.json");
-const snapshot = await codec.decodeSnapshotPayload(state, local, input.snapshotEnvelope, "/mainline/python.json");
+const bytes = (b64) => Uint8Array.from(Buffer.from(b64, "base64"));
+const changeEntry = await codec.decodeChangePayload(state, local, bytes(input.changeEnvelope), "/changes/python.json");
+const snapshot = await codec.decodeSnapshotPayload(state, local, bytes(input.snapshotEnvelope), "/mainline/python.json");
 
 process.stdout.write(JSON.stringify({
-  entry: await encryption.decryptEntry(key, input.entryEnvelope),
-  bytes: Array.from(await encryption.decryptBytes(key, new TextEncoder().encode(input.bytesEnvelope))),
+  entry: await encryption.decryptEntry(key, bytes(input.entryEnvelope)),
+  bytes: Array.from(await encryption.decryptBytes(key, bytes(input.bytesEnvelope))),
   change: { meshId, kind: "change", entry: changeEntry },
   snapshot: { meshId, kind: "snapshot", snapshot },
 }));
@@ -233,6 +234,18 @@ process.stdout.write(JSON.stringify({
   plaintext: Buffer.from(plaintext).toString("utf8"),
 }));
 """
+
+
+def _b64(envelope: bytes) -> str:
+    """Carry a binary envelope across the JSON pipe to and from Node."""
+
+    return base64.b64encode(envelope).decode("ascii")
+
+
+def _envelope(artifacts: dict[str, object], name: str) -> bytes:
+    value = artifacts[name]
+    assert isinstance(value, str)
+    return base64.b64decode(value)
 
 
 def _compact_json(value: object) -> str:
@@ -297,16 +310,18 @@ class NodeCoreInteropTests(unittest.TestCase):
         artifacts = self._run_node(_NODE_EMIT_ARTIFACTS)
 
         self.assertEqual(
-            decrypt_entry(_RAW_KEY, artifacts["entryEnvelope"]),
+            decrypt_entry(_RAW_KEY, _envelope(artifacts, "entryEnvelope")),
             "hello from @interocitor/core 🛰️",
         )
         self.assertEqual(
-            decrypt_bytes(_RAW_KEY, artifacts["bytesEnvelope"]),
+            decrypt_bytes(_RAW_KEY, _envelope(artifacts, "bytesEnvelope")),
             bytes((0, 1, 2, 255, 128, 64)),
         )
 
-        change_wire = json.loads(decrypt_entry(_RAW_KEY, artifacts["changeEnvelope"]))
-        snapshot_wire = json.loads(decrypt_entry(_RAW_KEY, artifacts["snapshotEnvelope"]))
+        change_envelope = _envelope(artifacts, "changeEnvelope")
+        self.assertEqual(change_envelope[0], 0x03, "core compresses change payloads")
+        change_wire = json.loads(decrypt_entry(_RAW_KEY, change_envelope))
+        snapshot_wire = json.loads(decrypt_entry(_RAW_KEY, _envelope(artifacts, "snapshotEnvelope")))
         manifest_wire = artifacts["manifest"]
 
         change = MeshChangePayload.from_wire(change_wire)
@@ -364,17 +379,19 @@ class NodeCoreInteropTests(unittest.TestCase):
         """Node accepts Python AES-GCM envelopes containing its own wire shapes."""
 
         artifacts = self._run_node(_NODE_EMIT_ARTIFACTS)
-        change = MeshChangePayload.from_wire(json.loads(decrypt_entry(_RAW_KEY, artifacts["changeEnvelope"])))
-        snapshot = MeshSnapshotPayload.from_wire(json.loads(decrypt_entry(_RAW_KEY, artifacts["snapshotEnvelope"])))
+        change = MeshChangePayload.from_wire(json.loads(decrypt_entry(_RAW_KEY, _envelope(artifacts, "changeEnvelope"))))
+        snapshot = MeshSnapshotPayload.from_wire(
+            json.loads(decrypt_entry(_RAW_KEY, _envelope(artifacts, "snapshotEnvelope")))
+        )
 
         change_wire = change.to_wire()
         snapshot_wire = snapshot.to_wire()
         python_payload = {
             "rawKey": base64.b64encode(_RAW_KEY).decode("ascii"),
-            "entryEnvelope": encrypt_entry(_RAW_KEY, "hello from Python 🛰️"),
-            "bytesEnvelope": encrypt_bytes(_RAW_KEY, bytes((255, 0, 128, 1))).decode("utf-8"),
-            "changeEnvelope": encrypt_entry(_RAW_KEY, _compact_json(change_wire)),
-            "snapshotEnvelope": encrypt_entry(_RAW_KEY, _compact_json(snapshot_wire)),
+            "entryEnvelope": _b64(encrypt_entry(_RAW_KEY, "hello from Python 🛰️")),
+            "bytesEnvelope": _b64(encrypt_bytes(_RAW_KEY, bytes((255, 0, 128, 1)))),
+            "changeEnvelope": _b64(encrypt_entry(_RAW_KEY, _compact_json(change_wire))),
+            "snapshotEnvelope": _b64(encrypt_entry(_RAW_KEY, _compact_json(snapshot_wire))),
         }
 
         decrypted = self._run_node(_NODE_VERIFY_PYTHON_ARTIFACTS, python_payload)

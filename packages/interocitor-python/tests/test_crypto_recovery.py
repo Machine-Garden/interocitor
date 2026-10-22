@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import unittest
 
 from interocitor import (
     CloudflareAdapter,
     CryptoProtocolError,
-    EncryptedEnvelope,
     PortablePassphraseKeySource,
     RecoveredMeshCredentials,
     RecoveryError,
@@ -129,9 +127,9 @@ class CryptoCompatibilityTests(unittest.TestCase):
         self.assertEqual(decrypt_bytes(RAW_KEY, produced_bytes), b"python envelope")
         self.assertEqual(decrypt_entry(RAW_KEY, produced_entry), "python entry")
 
-        envelope = EncryptedEnvelope.from_json(produced_bytes)
-        self.assertEqual(envelope.v, 1)
-        self.assertEqual(len(base64.b64decode(envelope.iv)), 12)
+        # Binary envelope: format tag, 12-byte IV, ciphertext, 16-byte tag.
+        self.assertIn(produced_bytes[0], (0x02, 0x03))
+        self.assertEqual(len(produced_bytes), 1 + 12 + len(b"python envelope") + 16)
 
     def test_text_and_json_match_javascript_lone_surrogate_behavior(self) -> None:
         self.assertEqual(json_stringify({"value": "\ud800"}), '{"value":"\\ud800"}')

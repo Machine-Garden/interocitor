@@ -3,10 +3,16 @@
 """Portable mesh-key and encrypted-envelope primitives.
 
 The functions in this module deliberately mirror ``@interocitor/core``'s
-``crypto/encryption.ts`` wire format.  Envelopes are UTF-8 JSON with standard
-base64 fields, not base64url::
+``crypto/encryption.ts`` wire format.  Envelopes are binary::
 
-    {"v":1,"iv":"<12-byte base64>","ct":"<ciphertext-and-tag base64>"}
+    byte 0      format tag: 0x02 plaintext as given, 0x03 raw DEFLATE (RFC 1951)
+    bytes 1-12  random AES-GCM IV
+    bytes 13-   AES-GCM ciphertext followed by its 16-byte tag
+
+The tag byte is the AES-GCM additional data.  Writers choose 0x03 whenever it is
+smaller.  Readers also open the JSON envelope
+``{"v":1,"iv":"<base64>","ct":"<base64>"}``, whose first byte is ``{`` or JSON
+whitespace and never a format tag.
 
 Mesh keys are raw AES key bytes in Python.  ``portable_key_to_bytes`` converts
 the high-entropy Bitcoin-base58 form used by other Interocitor clients.
@@ -18,6 +24,7 @@ import base64
 import json
 import os
 import re
+import zlib
 from dataclasses import dataclass
 from typing import Any, Mapping, TypeAlias
 
@@ -30,7 +37,14 @@ BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 _BASE58_INDEX = {character: index for index, character in enumerate(BASE58_ALPHABET)}
 _AES_KEY_SIZES = frozenset({16, 24, 32})
 _IV_LENGTH = 12
-_ENVELOPE_VERSION = 1
+_PLAIN_FORMAT = 0x02
+_DEFLATE_FORMAT = 0x03
+_MIN_ENVELOPE_LENGTH = 1 + _IV_LENGTH + 16
+_JSON_ENVELOPE_VERSION = 1
+_JSON_ENVELOPE_FIRST_BYTES = frozenset(b"{ \t\n\r")
+# Writers seal anything larger uncompressed, so readers refuse to inflate past
+# it; a hostile key holder cannot exhaust another device's memory.
+MAX_INFLATED_BYTES = 256 * 1024 * 1024
 _ECMASCRIPT_WHITESPACE_RE = re.compile(
     r"[\u0009-\u000D\u0020\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]+"
 )
@@ -90,10 +104,6 @@ def _require_aes_key(key: BytesLike) -> bytes:
     if len(raw) not in _AES_KEY_SIZES:
         raise CryptoProtocolError("AES-GCM keys must be 16, 24, or 32 bytes")
     return raw
-
-
-def _standard_b64encode(value: bytes) -> str:
-    return base64.b64encode(value).decode("ascii")
 
 
 def _standard_b64decode(value: str, *, field: str) -> bytes:
@@ -233,7 +243,7 @@ def generate_portable_key() -> str:
 
 @dataclass(frozen=True)
 class EncryptedEnvelope:
-    """The version-1 JSON envelope shared by all Interocitor clients."""
+    """The JSON envelope ``{"v":1,"iv":…,"ct":…}``, which readers still open."""
 
     v: int
     iv: str
@@ -257,7 +267,7 @@ class EncryptedEnvelope:
         iv = value.get("iv")
         ciphertext = value.get("ct")
         # JavaScript's strict ``!==`` also distinguishes 1 from 1.0 and true.
-        if type(version) is not int or version != _ENVELOPE_VERSION:
+        if type(version) is not int or version != _JSON_ENVELOPE_VERSION:
             raise CryptoProtocolError(f"Unknown envelope version: {version}")
         if not isinstance(iv, str) or not isinstance(ciphertext, str):
             raise CryptoProtocolError("Encrypted envelope fields must be strings")
@@ -305,25 +315,41 @@ def _json_parse(value: str | BytesLike, *, description: str) -> object:
         raise CryptoProtocolError(f"Invalid {description}") from error
 
 
+def _deflate_raw(data: bytes) -> bytes:
+    compressor = zlib.compressobj(6, zlib.DEFLATED, -15)
+    return compressor.compress(data) + compressor.flush()
+
+
+def _inflate_raw(data: bytes) -> bytes:
+    inflater = zlib.decompressobj(-15)
+    try:
+        out = inflater.decompress(data, MAX_INFLATED_BYTES + 1)
+    except zlib.error as error:
+        raise CryptoProtocolError(f"Compressed payload is malformed: {error}") from error
+    if len(out) > MAX_INFLATED_BYTES:
+        raise CryptoProtocolError(f"Compressed payload inflates past {MAX_INFLATED_BYTES} bytes")
+    if not inflater.eof or inflater.unused_data:
+        raise CryptoProtocolError("Compressed payload is malformed")
+    return out
+
+
 def encrypt_bytes(key: BytesLike, plaintext: BytesLike) -> bytes:
-    """Encrypt bytes into core's UTF-8 JSON AES-GCM envelope."""
+    """Encrypt bytes into core's binary AES-GCM envelope.
+
+    The plaintext is compressed first whenever that makes it smaller.
+    """
 
     raw_key = _require_aes_key(key)
     raw_plaintext = _as_bytes(plaintext, name="plaintext")
     iv = os.urandom(_IV_LENGTH)
-    ciphertext = AESGCM(raw_key).encrypt(iv, raw_plaintext, None)
-    envelope = EncryptedEnvelope(
-        v=_ENVELOPE_VERSION,
-        iv=_standard_b64encode(iv),
-        ct=_standard_b64encode(ciphertext),
-    )
-    return envelope.to_json().encode("utf-8")
+    compressed = _deflate_raw(raw_plaintext) if len(raw_plaintext) <= MAX_INFLATED_BYTES else None
+    shrinks = compressed is not None and len(compressed) < len(raw_plaintext)
+    fmt = _DEFLATE_FORMAT if shrinks else _PLAIN_FORMAT
+    body = compressed if shrinks and compressed is not None else raw_plaintext
+    return bytes((fmt,)) + iv + AESGCM(raw_key).encrypt(iv, body, bytes((fmt,)))
 
 
-def decrypt_bytes(key: BytesLike, envelope: str | BytesLike) -> bytes:
-    """Decrypt bytes produced by :func:`encrypt_bytes` or core's equivalent."""
-
-    raw_key = _require_aes_key(key)
+def _open_json_envelope(raw_key: bytes, envelope: bytes) -> bytes:
     parsed = EncryptedEnvelope.from_json(envelope)
     iv = _standard_b64decode(parsed.iv, field="iv")
     ciphertext = _standard_b64decode(parsed.ct, field="ct")
@@ -332,12 +358,30 @@ def decrypt_bytes(key: BytesLike, envelope: str | BytesLike) -> bytes:
     return AESGCM(raw_key).decrypt(iv, ciphertext, None)
 
 
-def encrypt_entry(key: BytesLike, plaintext: str) -> str:
-    """Encrypt a UTF-8 string into a core-compatible JSON envelope string."""
+def decrypt_bytes(key: BytesLike, envelope: str | BytesLike) -> bytes:
+    """Decrypt an envelope produced by :func:`encrypt_bytes` or core's equivalent."""
+
+    raw_key = _require_aes_key(key)
+    data = envelope.encode("utf-8") if isinstance(envelope, str) else _as_bytes(envelope, name="envelope")
+    if not data:
+        raise CryptoProtocolError("Envelope is empty")
+    fmt = data[0]
+    if fmt in _JSON_ENVELOPE_FIRST_BYTES:
+        return _open_json_envelope(raw_key, data)
+    if fmt not in (_PLAIN_FORMAT, _DEFLATE_FORMAT):
+        raise CryptoProtocolError(f"Unknown envelope format: 0x{fmt:02x}")
+    if len(data) < _MIN_ENVELOPE_LENGTH:
+        raise CryptoProtocolError(f"Envelope is truncated: {len(data)} bytes")
+    sealed = AESGCM(raw_key).decrypt(data[1 : 1 + _IV_LENGTH], data[1 + _IV_LENGTH :], bytes((fmt,)))
+    return _inflate_raw(sealed) if fmt == _DEFLATE_FORMAT else sealed
+
+
+def encrypt_entry(key: BytesLike, plaintext: str) -> bytes:
+    """Encrypt a UTF-8 string into a core-compatible binary envelope."""
 
     if not isinstance(plaintext, str):
         raise TypeError("plaintext must be a string")
-    return encrypt_bytes(key, text_encode(plaintext)).decode("utf-8")
+    return encrypt_bytes(key, text_encode(plaintext))
 
 
 def decrypt_entry(key: BytesLike, envelope: str | BytesLike) -> str:

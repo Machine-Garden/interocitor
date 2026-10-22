@@ -807,19 +807,17 @@ public actor Interocitor {
     // Encrypt a plaintext string for cloud storage. No-op when not encrypted.
     private func encodeForCloud(_ plaintext: String) throws -> Data {
         if encrypted, let key = meshKey {
-            let envelope = try encryptEntry(key, plaintext: plaintext)
-            return Data(envelope.utf8)
+            return try encryptEntry(key, plaintext: plaintext)
         }
         return Data(plaintext.utf8)
     }
 
     // Decrypt data from cloud storage. No-op when not encrypted.
     private func decodeFromCloud(_ data: Data) throws -> String {
-        let str = String(data: data, encoding: .utf8) ?? ""
         if encrypted, let key = meshKey {
-            return try decryptEntry(key, envelopeStr: str)
+            return try decryptEntry(key, envelope: data)
         }
-        return str
+        return String(data: data, encoding: .utf8) ?? ""
     }
 
     private func poisonRemote(_ error: Error, path: String? = nil) -> Error {

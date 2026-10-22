@@ -339,12 +339,11 @@ final class SyncEngineWebDAVIntegrationTests: XCTestCase {
 
         for file in changeFiles {
             let raw = try await adapter.readFile(path: file.path)
-            let rawStr = String(data: raw, encoding: .utf8) ?? ""
-            XCTAssertFalse(rawStr.contains(secret),
+            XCTAssertNil(raw.range(of: Data(secret.utf8)),
                 "Plaintext secret must not appear in cloud storage")
-            // But it should look like an encrypted envelope
-            XCTAssertTrue(rawStr.contains("\"v\"") && rawStr.contains("\"iv\"") && rawStr.contains("\"ct\""),
-                "Expected encrypted envelope JSON in cloud file")
+            // But it should be a binary envelope
+            XCTAssertTrue([0x02, 0x03].contains(raw.first) && raw.count >= 29,
+                "Expected binary encrypted envelope in cloud file")
         }
     }
 

@@ -617,7 +617,7 @@ class Interocitor:
             snapshot_path = f"{paths.mainline_folder}/snapshot-{next_epoch}-{self._server_id}.json"
             await self._require_adapter("compact").write_file(
                 snapshot_path,
-                self._encode_snapshot_payload(snapshot).encode("utf-8"),
+                self._encode_snapshot_payload(snapshot),
             )
 
             next_manifest = Manifest(
@@ -1019,9 +1019,9 @@ class Interocitor:
             return
         await self._upsert_device_metadata()
 
-    def _encode_text(self, plaintext: str) -> str:
+    def _encode_text(self, plaintext: str) -> bytes:
         if not self._encrypted:
-            return plaintext
+            return plaintext.encode("utf-8")
         if self._key is None:
             raise InterocitorError("Encrypted mesh has no active key")
         return encrypt_entry(self._key, plaintext)
@@ -1053,7 +1053,7 @@ class Interocitor:
         except Exception as error:
             raise InterocitorError("Decryption failed: file is not decryptable with the active mesh key") from error
 
-    def _encode_change_payload(self, entry: ChangeEntry) -> str:
+    def _encode_change_payload(self, entry: ChangeEntry) -> bytes:
         if self._manifest is None:
             raise InterocitorError("Cannot encode a change before manifest is loaded")
         return self._encode_text(_compact_json(MeshChangePayload(self._manifest.mesh_id, entry).to_wire()))
@@ -1068,7 +1068,7 @@ class Interocitor:
         _validate_change_hlcs(decoded.entry)
         return decoded.entry
 
-    def _encode_snapshot_payload(self, snapshot: Snapshot) -> str:
+    def _encode_snapshot_payload(self, snapshot: Snapshot) -> bytes:
         if self._manifest is None:
             raise InterocitorError("Cannot encode a snapshot before manifest is loaded")
         return self._encode_text(_compact_json(MeshSnapshotPayload(self._manifest.mesh_id, snapshot).to_wire()))
@@ -1167,7 +1167,7 @@ class Interocitor:
         highest = ""
         for entry in entries:
             name = f"{entry.hlc}-{entry.id}.json"
-            await adapter.write_file(paths.change_file(name), self._encode_change_payload(entry).encode("utf-8"))
+            await adapter.write_file(paths.change_file(name), self._encode_change_payload(entry))
             if not highest or hlc_compare_str(entry.hlc, highest) > 0:
                 highest = entry.hlc
         if highest:

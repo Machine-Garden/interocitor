@@ -12,9 +12,14 @@ Turn a payload into an opaque envelope under a given key, and turn it back.
 
 ## Inputs and outputs
 
-In: bytes and a 256-bit symmetric key. Out: an envelope carrying its version, a
+In: bytes and a 256-bit symmetric key. Out: a binary envelope carrying its format, a
 fresh per-entry initialisation vector, and the ciphertext — and, on the way back,
 either the plaintext or a clear failure. Nothing partially decrypts.
+
+The plaintext is compressed with raw DEFLATE before encryption whenever that
+makes it smaller; the format byte records which, and is authenticated as
+additional data. Readers also open the JSON envelope earlier revisions wrote. Inflation stops at a fixed cap, so a compressed envelope
+cannot expand without bound on a reader.
 
 ## Depends on
 
@@ -35,13 +40,15 @@ either the plaintext or a clear failure. Nothing partially decrypts.
 ## Boundary
 
 Does not choose, derive, store, or transport keys, and does not decide what is
-worth encrypting. It also does not hide names, sizes, or timings — that limit is
+worth encrypting. It also does not hide names, sizes, or timings; compression
+makes a payload's size reflect its contents as well as its length — that limit is
 published in the [encryption boundary](../../DOMAIN.md#trust-and-custody), not
 worked around here.
 
 ## Implementation coordinates
 
 - `packages/core/src/crypto/encryption.ts` — the envelope format and per-entry IV
+- `packages/core/src/crypto/compression.ts` — raw DEFLATE and the inflation cap
 - `packages/core/src/crypto/keys.ts` — key generation and the base58 form
 - `packages/interocitor-swift/Sources/InterocitorSwift/Crypto.swift`
 - `packages/interocitor-python/src/interocitor/crypto.py`

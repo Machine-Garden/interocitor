@@ -30,7 +30,7 @@ yarn add @interocitor/core
 ```
 
 Core compresses encrypted payloads with `CompressionStream("deflate-raw")`, so
-it needs a runtime that provides that format: Node.js 20.12 or later, Cloudflare
+it needs a runtime that provides that format: Node.js 20.12 or later (21.2 or later on the 21 line), Cloudflare
 Workers, or a current browser.
 
 Adapters are exported as separate package entry points, so applications import
